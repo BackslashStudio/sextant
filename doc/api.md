@@ -1,6 +1,4 @@
-# sextant — API guide
-
-Everything you need to use sextant.
+# sextant — API guide v0.3
 
 All public symbols live in namespace `sextant`, behind one header:
 
@@ -30,8 +28,7 @@ All public symbols live in namespace `sextant`, behind one header:
 
 ## Two objects
 
-`Figure` is a window (or a file). `Axes` is one plot area inside it. That is the
-whole model.
+`Figure` is a window (or a file). `Axes` is one plot area inside it. That is the whole model.
 
 ```cpp
 auto fig = sextant::Figure::create({.width = 900, .height = 500});
@@ -40,9 +37,7 @@ ax->line(x, y).grid();
 fig->show();
 ```
 
-`Figure::create()` returns a `std::shared_ptr<Figure>` and is the only way to
-make one. **Keep that pointer alive for as long as you want the window open** —
-destroying the `Figure` closes it.
+`Figure::create()` returns a `std::shared_ptr<Figure>` and is the only way to make one. **Keep that pointer alive for as long as you want the window open** — destroying the `Figure` closes it.
 
 Every `Axes` method returns `Axes&`, so calls chain:
 
@@ -55,13 +50,9 @@ fig->axes()
     .grid();
 ```
 
-Note the `->` on the first call and `.` afterwards: `axes()` hands back a smart
-pointer, and everything after that is a reference.
+Note the `->` on the first call and `.` afterwards: `axes()` hands back a smart pointer, and everything after that is a reference.
 
-Data goes in as `std::span<const double>`, so a `std::vector`, a
-`std::array` or a raw pointer-and-length all work, and **nothing is retained by
-reference** — each call copies what it needs and your buffers are yours again
-immediately.
+Data goes in as `std::span<const double>`, so a `std::vector`, a `std::array` or a raw pointer-and-length all work, and **nothing is retained by reference** — each call copies what it needs and your buffers are yours again immediately.
 
 ---
 
@@ -81,11 +72,9 @@ ax->line(t, volts, {.color = sextant::Color::Blue,
                     .label = "channel A"});
 ```
 
-`LineStyle::None` draws no stroke at all, and a series set to it also drops out
-of the legend. Dashing is honored in the window, in PNG and in SVG alike.
+`LineStyle::None` draws no stroke at all, and a series set to it also drops out of the legend. Dashing is honored in the window, in PNG and in SVG alike.
 
-Lines are the type that scales: a million points pans and zooms. There is no
-marker option — use `scatter()` on the same data for a marked series.
+Lines are the type that scales: a million points pans and zooms. There is no marker option — use `scatter()` on the same data for a marked series.
 
 ### scatter
 
@@ -101,12 +90,11 @@ ax->scatter(px, py, {.color = sextant::Color::Orange,
                      .alpha = 0.6f});
 ```
 
-`size` is a diameter in pixels and does not change when you zoom. Markers:
-`Circle`, `Square`, `Triangle`, `Cross`, `Plus`, `Diamond`, `None`.
+`size` is a diameter in pixels and does not change when you zoom. Markers: `Circle`, `Square`, `Triangle`, `Cross`, `Plus`, `Diamond`, `None`.
 
 ### scatter_z
 
-A scatter whose colour carries a third value.
+A scatter whose colour carries a third value z.
 
 ```cpp
 Axes& scatter_z(std::span<const double> x, std::span<const double> y,
@@ -118,9 +106,7 @@ ax->scatter_z(x, y, temperature, {.vmin = -10.0f, .vmax = 40.0f,
                                   .colorbar = true});
 ```
 
-Each point's colour is `z[i]` mapped through `cmap`/`vmin`/`vmax`. There is no
-`label`, because a colorbar rather than a legend swatch is what explains the
-mapping — set `colorbar = true` to get one.
+Each point's colour is `z[i]` mapped through `cmap`/`vmin`/`vmax`. There is no `label`, because a colorbar rather than a legend swatch is what explains the mapping — set `colorbar = true` to get one.
 
 ### bar
 
@@ -135,13 +121,11 @@ ax->bar(months, sales, {.color = sextant::Color::Cyan,
                         .edgecolor = sextant::Color::Black});
 ```
 
-`width` is a fraction of the spacing between bars, so `1.0` makes them touch.
-Negative heights draw downward from zero.
+`width` is a fraction of the spacing between bars, so `1.0` makes them touch. Negative heights draw downward from zero.
 
 ### hist
 
-A histogram is a bar plot whose bars come from binning, so it takes both option
-structs:
+A histogram is a bar plot whose bars come from binning, so it takes both option structs:
 
 ```cpp
 Axes& hist(std::span<const double> data, int bins = 10,
@@ -154,16 +138,11 @@ ax->hist(samples, 40, {.color = sextant::Color::Green},
                       {.density = true});
 ```
 
-`BarOptions` says how the bars are *drawn*; `HistOptions` says what binning
-means (`density`, `cumulative`). Here `width` is read against the **bin** width.
+`BarOptions` says how the bars are *drawn*; `HistOptions` says what binning means (`density`, `cumulative`). Here `width` is read against the **bin** width.
 
-> **One wart worth knowing.** `hist()`'s default argument raises `width` to
-> `1.0` so bins touch. If you pass your own `BarOptions` you get `BarOptions`'
-> own default of `0.8` back — and gapped bins read as a bar chart. Set
-> `.width = 1.0f` yourself whenever you pass bar options to `hist()`.
+**One wart worth knowing.** `hist()`'s default argument raises `width` to `1.0` so bins touch. If you pass your own `BarOptions` you get `BarOptions`' own default of `0.8` back — and gapped bins read as a bar chart. Set `.width = 1.0f` yourself whenever you pass bar options to `hist()`.
 
-`hist()` is also the one place `BarOptions::errorbar` is ignored: a bin height
-is a count sextant derived, not something you measured.
+`hist()` is also the one place `BarOptions::errorbar` is ignored: a bin height is a count sextant derived, not something you measured.
 
 ### heatmap
 
@@ -177,25 +156,18 @@ ax->heatmap(field, rows, cols, {.vmin = 0.0f, .vmax = 1.0f,
                                 .colorbar = true});
 ```
 
-`data` is **row-major**, `rows * cols` floats, indexed `row * cols + col`. The
-image occupies `[0, cols] x [0, rows]` in data space, so a cell's centre sits at
-`(col + 0.5, row + 0.5)`.
+`data` is **row-major**, `rows * cols` floats, indexed `row * cols + col`. The image occupies `[0, cols] x [0, rows]` in data space, so a cell's centre sits at `(col + 0.5, row + 0.5)`.
 
-`origin` decides which end row 0 draws at — `"lower"` (default) puts it at the
-bottom, `"upper"` at the top. The buffer layout does not change either way.
+`origin` decides which end row 0 draws at — `"lower"` (default) puts it at the bottom, `"upper"` at the top. The buffer layout does not change either way.
 
 ---
 
 ## Error bars
 
-An error bar decorates a series you already drew, so it lives in that series'
-options rather than in a call of its own. It is two shapes, either omittable:
+An error bar decorates a series you already drew, so it lives in that series' options rather than in a call of its own. It is two shapes, either omittable:
 
-- a **capped whisker** from `ymin[i]` to `ymax[i]` — **absolute data
-  coordinates**, not offsets, so a range need not be centred on the point.
-  Leave one end empty for a one-sided whisker.
-- a **box** spanning `y[i] ± yvar[i]`, drawn exactly as given (not
-  square-rooted), `boxwidth` pixels across.
+- a **capped whisker** from `ymin[i]` to `ymax[i]` — **absolute data coordinates**, not offsets, so a range need not be centred on the point. Leave one end empty for a one-sided whisker.
+- a **box** spanning `y[i] ± yvar[i]`, drawn exactly as given (not square-rooted), `boxwidth` pixels across.
 
 ```cpp
 ax->line(x, y, {.color = sextant::Color::Blue, .label = "measured",
@@ -214,8 +186,7 @@ ax->scatter(x, y, {.errorbar = {.ymin = ylo, .ymax = yhi, .yvar = sy,
                                 .xmin = xlo, .xmax = xhi, .xvar = sx}});
 ```
 
-**Direction support differs by plot type, and it is enforced rather than
-ignored:**
+**Direction support differs by plot type, and it is enforced rather than ignored:**
 
 | | y whisker / box | x whisker / box |
 |---|---|---|
@@ -223,8 +194,7 @@ ignored:**
 | `scatter`, `scatter_z` | yes | yes, with a 2D box |
 | `hist` | dropped silently | dropped silently |
 
-Every non-empty vector must hold exactly one entry per point, or the call
-throws. Axis limits widen to fit the bars, so nothing gets clipped away.
+Every non-empty vector must hold exactly one entry per point, or the call throws. Axis limits widen to fit the bars, so nothing gets clipped away.
 
 ---
 
@@ -241,16 +211,11 @@ ax->heatmap(field, rows, cols, {
         .contour_labels = true});
 ```
 
-Levels are **z values in your data's own units** — the numbers the colorbar
-shows, not a 0..1 scale. An empty list draws nothing and computes nothing.
-Levels are sorted and de-duplicated for you; a non-finite one throws.
+Levels are **z values in your data's own units** — the numbers the colorbar shows, not a 0..1 scale. An empty list draws nothing and computes nothing. Levels are sorted and de-duplicated for you; a non-finite one throws.
 
-`contour_labels` writes each level onto its own line, rotated to follow it, with
-the line broken to make room. A line too short to break keeps the line and drops
-the label.
+`contour_labels` writes each level onto its own line, rotated to follow it, with the line broken to make room. A line too short to break keeps the line and drops the label.
 
-Lines pass through **cell centres**, so a contour stops half a cell inside the
-image, and a heatmap smaller than 2×2 traces nothing. `origin` is honored.
+Lines pass through **cell centres**, so a contour stops half a cell inside the image, and a heatmap smaller than 2×2 traces nothing. `origin` is honored.
 
 ---
 
@@ -268,14 +233,11 @@ ax->set_title("Run 41", 18.0f)
 fig->suptitle("Experiment 7");     // one title over the whole subplot grid
 ```
 
-"Title" names an axis or the whole axes; "label" is the text under an individual
-tick. `fontsize` is in pixels as drawn.
+"Title" names an axis or the whole axes; "label" is the text under an individual tick. `fontsize` is in pixels as drawn.
 
-Limits are automatic until you set them. `set_xlim`/`set_ylim` pin them; error
-bars and contours are included when they are automatic.
+Limits are automatic until you set them. `set_xlim`/`set_ylim` pin them; error bars and contours are included when they are automatic.
 
-Only series with a non-empty `label` appear in the legend, and it renders
-*beside* the plot rather than over your data.
+Only series with a non-empty `label` appear in the legend, and it renders *beside* the plot rather than over your data.
 
 Explicit ticks:
 
@@ -285,10 +247,7 @@ ax->set_xticks(days, {"Mon", "Tue", "Wed", "Thu", "Fri"});
 ax->set_xticks(days);                // positions only, values as labels
 ```
 
-The positions have to be a named array or vector, not a braced list written in
-place: they arrive as `std::span<const double>`, and `std::span` gains a
-constructor from `std::initializer_list` only in C++26. The labels are a
-`std::vector<std::string>`, so those *can* be written inline.
+The positions have to be a named array or vector, not a braced list written in place: they arrive as `std::span<const double>`, and `std::span` gains a constructor from `std::initializer_list` only in C++26. The labels are a `std::vector<std::string>`, so those *can* be written inline.
 
 `cla()` clears every plot object and resets the limits.
 
@@ -299,8 +258,7 @@ constructor from `std::initializer_list` only in C++26. The labels are a
 
 ## Styling
 
-Colours are plain `{r, g, b, a}` floats in 0..1, with named constants and two
-parsers:
+Colours are plain `{r, g, b, a}` floats in 0..1, with named constants and two parsers:
 
 ```cpp
 sextant::Color::Blue;                        // also Red Green Orange Purple
@@ -310,8 +268,7 @@ sextant::Color::from_name("orange");         // throws on an unknown name
 sextant::Color{0.2f, 0.4f, 0.9f, 0.5f};      // half-transparent blue
 ```
 
-The named constants are matplotlib's tab10 palette, so `Color::Blue` is
-`rgb(31,119,180)` rather than pure blue.
+The named constants are matplotlib's tab10 palette, so `Color::Blue` is `rgb(31,119,180)` rather than pure blue.
 
 Four structs cover the rest, each applied through its own setter:
 
@@ -330,14 +287,9 @@ ax->set_colorbar_style({.fontsize = 12.0f});
 fig->set_suptitle_style({.fontsize = 26.0f, .align = sextant::HAlign::Left});
 ```
 
-`font_path` is an absolute path to a `.ttf`/`.ttc`/`.otf`. Leave it empty for
-the default, which sextant discovers from your system font directories. The
-legend, colorbar and suptitle each have their own `font_path` and do **not**
-inherit the axes one.
+`font_path` is an absolute path to a `.ttf`/`.ttc`/`.otf`. Leave it empty for the default, which sextant discovers from your system font directories. The legend, colorbar and suptitle each have their own `font_path` and do **not** inherit the axes one.
 
-`set_colorbar_style()` only styles a colorbar; one appears because a plot object
-asked for it via `HeatmapOptions::colorbar` or `ScatterZOptions::colorbar`. One
-colorbar is drawn per axes.
+`set_colorbar_style()` only styles a colorbar; one appears because a plot object asked for it via `HeatmapOptions::colorbar` or `ScatterZOptions::colorbar`. One colorbar is drawn per axes.
 
 ---
 
@@ -353,9 +305,7 @@ fig->add_subplot(2, 3, 2)->line(x, b).set_title("B");
 // … index runs 1..rows*cols, row-major, like matplotlib
 ```
 
-The gaps separate *whole subplots*, labels and titles included. The space each
-decoration needs is measured from its own text, so changing a font size moves
-the text and the room made for it together — there is nothing to tune.
+The gaps separate *whole subplots*, labels and titles included. The space each decoration needs is measured from its own text, so changing a font size moves the text and the room made for it together — there is nothing to tune.
 
 `FigureMargins` is the border between the figure edge and the grid:
 
@@ -370,9 +320,7 @@ Mixing `axes()` and `add_subplot()` on one figure is not meaningful — pick one
 
 ## Sizing a figure
 
-`FigureOptions::width`/`height` and `resize()` describe the **plot area** — what
-`savefig()` writes. An open window grows by whatever its menu bar and control
-panel occupy, so the plot lands on the size you asked for.
+`FigureOptions::width`/`height` and `resize()` describe the **plot area** — what `savefig()` writes. An open window grows by whatever its menu bar and control panel occupy, so the plot lands on the size you asked for.
 
 You can also work backwards from the data area you want:
 
@@ -383,9 +331,7 @@ fig->resize_to_frame(400, 300);                          // …and apply it
 fig->resize_to_frame(400, 300, /*slot_index=*/2);        // of subplot 2
 ```
 
-`slot_index` matters because a legend or colorbar is carved out of the cell that
-owns it, so two subplots of one grid can have different frame sizes. The result
-is exact apart from rounding to whole pixels.
+`slot_index` matters because a legend or colorbar is carved out of the cell that owns it, so two subplots of one grid can have different frame sizes. The result is exact apart from rounding to whole pixels.
 
 ---
 
@@ -396,26 +342,18 @@ fig->savefig("plot.png");
 fig->savefig("plot.svg");
 ```
 
-The format comes from the extension; anything else throws. **No window is
-required for either** — both work headless, and SVG needs no OpenGL context at
-all, so it runs on a server with no display.
+The format comes from the extension; anything else throws. **No window is required for either** — both work headless, and SVG needs no OpenGL context at all, so it runs on a server with no display.
 
-- **PNG** is supersampled and box-filtered, so it matches the window exactly.
-  Control it with `FigureOptions::supersample` (default 2, max 4, 1 to disable).
-  Cost is quadratic: 2 means four times the fragments.
-- **SVG** is vector and resolution-independent, so `supersample` does not apply.
-  Text names a font family for the viewer to resolve, matching whatever the
-  window drew.
+- **PNG** is supersampled and box-filtered, so it matches the figure size exactly. Control it with `FigureOptions::supersample` (default 2, max 4, 1 to disable). Cost is quadratic: 2 means four times the fragments.
+- **SVG** is vector and resolution-independent, so `supersample` does not apply. Text names a font family for the viewer to resolve, matching whatever the window draw.
 
-If the figure is already on screen, `savefig()` reuses that window's GL context
-rather than standing up its own, which is most of the cost of a save.
+If the figure window is already opened and resized, `savefig()` will still save the figure with width/height set in `Figure::create`, not the window size, it reuses that window's GL context rather than standing up its own, which is most of the cost of a save.
 
 ---
 
 ## The interactive window
 
-`fig->show()` opens a window with a Dear ImGui control panel. It always runs on
-its own thread.
+`fig->show()` opens a window with a Dear ImGui control panel. It always runs on its own thread.
 
 **Menus**
 
@@ -427,24 +365,13 @@ its own thread.
 | **Edit → Navigate** | Left-drag pans, scroll zooms at the cursor, double-click resets |
 | **Edit → Hints** | Hover a point for its values (on by default) |
 
-**Navigate** always acts on the axes selected in the Controls panel's *Axis*
-combo, whichever subplot the cursor is over. **Hints** work over any subplot
-regardless of that selection, and read out `x`, `y`, plus `z` for `scatter_z`,
-row/column/value for a heatmap, and `±var [min, max]` for a series with error
-bars.
+**Navigate** always acts on the axes selected in the Controls panel's *Axis* combo, whichever subplot the cursor is over. **Hints** work over any subplot regardless of that selection, and read out `x`, `y`, plus `z` for `scatter_z`, row/column/value for a heatmap, and `±var [min, max]` for a series with error bars.
 
-**Controls panel** — edit titles, limits, tick positions and labels, grid,
-legend, colorbar, the suptitle, margins and gaps, and every colour and font
-size, live.
+**Controls panel** — edit titles, limits, tick positions and labels, grid, legend, colorbar, the suptitle, margins and gaps, and every colour and font size, live.
 
-**Data panel** — the current axes' plot objects as editable tables: x/y/z
-columns side by side, heatmap matrices as a 2D grid. You can retype any value,
-insert and delete points, insert and delete matrix rows and columns, and choose
-the numeric notation and precision. Cells are tinted by where their value falls
-in their column's range; the *Shade cells* checkbox turns that off.
+**Data panel** — the current axes' plot objects as editable tables: x/y/z columns side by side, heatmap matrices as a 2D grid. You can retype any value, insert and delete points, insert and delete matrix rows and columns, and choose the numeric notation and precision. Cells are tinted by where their value falls in their column's range; the *Shade cells* checkbox turns that off.
 
-Give each point custom hover text with `hint_labels`, index-aligned with your
-data:
+Give each point custom hover text with `hint_labels`, index-aligned with your data:
 
 ```cpp
 ax->line(x, y, {.hint_labels = {"", "", "Peak", "", "Trough"}});
@@ -461,11 +388,10 @@ sextant::Figure::create({.theme = sextant::PanelTheme::Dark,   // or Light,
 
 ## Live updates and threads
 
-The window renders on its own thread from a snapshot of your data. You keep
-mutating `Axes` from your thread, then publish:
+The window renders on its own thread from a snapshot of your data. You can keep mutating `Axes` from your thread, then publish:
 
 ```cpp
-fig->show(false);                 // false = don't block
+fig->show(false);                 // don't block
 while (running) {
     simulate(step);
     fig->axes()->cla();
@@ -477,18 +403,11 @@ while (running) {
 
 **The rules:**
 
-- `show(true)` — the default — blocks your thread until you press ENTER at the
-  console. The window keeps rendering the whole time and is unaffected when you
-  resume.
+- `show(true)` — the default — blocks your thread until you press ENTER at the console. The window keeps rendering the whole time and is unaffected when you resume.
 - `show(false)` returns immediately.
-- **Call `axes()`, `add_subplot()`, `refresh()`, `savefig()`, `resize()` and
-  `close()` from one thread — the one that owns the `Figure`.** Only
-  `is_open()` is safe to call from anywhere.
-- `refresh()` throws `std::logic_error` before `show()` or after the window has
-  closed.
-- Edits you make in the Data panel survive a `refresh()`. Panel edits to titles
-  and limits are live preview and do not — a `refresh()` republishes what your
-  code says.
+- **Call `axes()`, `add_subplot()`, `refresh()`, `savefig()`, `resize()` and `close()` from one thread — the one that owns the `Figure`.** Only `is_open()` is safe to call from anywhere.
+- `refresh()` throws `std::logic_error` before `show()` or after the window has closed.
+- Edits you make in the Data panel survive a `refresh()`. Panel edits to titles and limits are live preview and do not — a `refresh()` republishes what your code says.
 
 `frame_stats()` reports render timing, cumulative since `show()`:
 
@@ -499,25 +418,20 @@ auto b = fig->frame_stats();
 double ms_per_frame = (b.total_ms - a.total_ms) / (b.frames - a.frames);
 ```
 
-It measures render work and excludes the vsync-blocking buffer swap, so
-`b.frames` over wall time is the rate actually achieved while `total_ms` is what
-scales with your data size. Set `FigureOptions::vsync = false` to measure
-end-to-end cost.
+It measures render work and excludes the vsync-blocking buffer swap, so `b.frames` over wall time is the rate actually achieved while `total_ms` is what scales with your data size. Set `FigureOptions::vsync = false` to measure end-to-end cost.
 
 ---
 
 ## Errors
 
-sextant throws standard exceptions; it never aborts and never writes to stderr
-behind your back.
+sextant throws standard exceptions; it never aborts and never writes to stderr behind your back.
 
 | Thrown | When |
 |---|---|
 | `std::invalid_argument` | mismatched `x`/`y` lengths; an error-bar vector that is not one entry per point; an x error bar on `line()`/`bar()`; non-positive heatmap `rows`/`cols`; heatmap data too small; a non-finite contour level; a bad `add_subplot` index; a non-positive size; an unknown `savefig` extension; a bad colour name or hex |
 | `std::logic_error` | `refresh()` before `show()`, or after the window closed |
 
-Anything that would silently draw a misleading plot is an exception rather than
-a best guess.
+Anything that would silently draw a misleading plot is an exception rather than a best guess.
 
 ---
 
@@ -644,8 +558,7 @@ struct FigureOptions {
     PanelTheme  theme = PanelTheme::Light;   // Dark Light Classic
 };
 
-struct FrameStats { unsigned long long frames; double total_ms,
-                                                       last_ms, max_ms; };
+struct FrameStats { unsigned long long frames; double total_ms, last_ms, max_ms; };
 ```
 
 `Colormap` currently offers `Viridis` only.
@@ -662,21 +575,13 @@ target_link_libraries(my_app PRIVATE sextant::sextant)
 
 See the README for installing and for the Windows DLL-copy step.
 
-`sextant::sextant` is the shared library, and it is self-contained in both
-directions: FreeType, libpng, zlib and GLFW are linked into it, so `sextant.dll`
-depends on nothing but OS DLLs and the MSVC runtime at runtime, and **you do not
-need any of them installed to build against it** either.
+`sextant::sextant` is the shared library, and it is self-contained in both directions: FreeType, libpng, zlib and GLFW are linked into it, so `sextant.dll` depends on nothing but OS DLLs and the MSVC runtime at runtime, and **you do not need any of them installed to build against it** either.
 
-`sextant::sextant_static` links statically instead. A static library cannot
-embed its dependencies, so your project resolves FreeType, libpng and GLFW
-itself — and **if you use vcpkg you must pin the same triplet before your
-`project()` call:**
+`sextant::sextant_static` links statically instead. A static library cannot embed its dependencies, so your project resolves FreeType, libpng and GLFW itself — and **if you use vcpkg you must pin the same triplet before your `project()` call:**
 
 ```cmake
 set(VCPKG_TARGET_TRIPLET "x64-windows-static-md" CACHE STRING "")
 project(my_app CXX)
 ```
 
-vcpkg resolves `find_package` once, at the first `project()`, so a consumer that
-does not pin it silently gets the dynamic triplet's import libraries — which
-links, and defeats the point. The shared library has no such requirement.
+vcpkg resolves `find_package` once, at the first `project()`, so a consumer that does not pin it silently gets the dynamic triplet's import libraries — which links, and defeats the point. The shared library has no such requirement.
