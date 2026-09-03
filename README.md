@@ -135,7 +135,7 @@ third_party/glad/src/glad.c
 ### Build
 
 ```bash
-git clone https://github.com/<your-org>/sextant.git
+git clone https://github.com/BackslashStudio/sextant.git
 cd sextant
 scripts/setup_deps.sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
