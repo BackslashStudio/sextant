@@ -1,69 +1,69 @@
-# Prerequisites
-*.d
+# ── Build outputs ────────────────────────────────────────────────────────────
+cmake-build-*/
+build/
+out/
+install/
+dist/
+client_tests/output/
 
-# Compiled Object files
-*.slo
-*.lo
+# ── Compiled objects / libraries ─────────────────────────────────────────────
 *.o
 *.obj
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Linker files
-*.ilk
-
-# Debugger Files
-*.pdb
-
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
-*.so.*
-
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
 *.a
 *.lib
+*.so
+*.so.*
+*.dll
+*.dylib
+*.pdb
+*.ilk
+*.exp
+*.idb
+*.map
 
-# Executables
-*.exe
-*.out
-*.app
+# ── CLion ────────────────────────────────────────────────────────────────────
+.idea/
 
-# Build directories
-build/
-Build/
-build-*/
+# ── Visual Studio / VS Code (Windows) ────────────────────────────────────────
+.vs/
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.sln
+*.suo
+*.user
+*.ncb
+*.sdf
+*.opensdf
+*.VC.db
+*.VC.opendb
+ipch/
+x64/
+x86/
+Debug/
+Release/
+RelWithDebInfo/
+MinSizeRel/
 
-# CMake generated files
-CMakeFiles/
+# ── CMake generated ───────────────────────────────────────────────────────────
 CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
 cmake_install.cmake
-Makefile
 install_manifest.txt
+CTestTestfile.cmake
+_deps/
+
+# ── OS ───────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db
+
+# ── Misc ─────────────────────────────────────────────────────────────────────
+*.swp
+*.swo
+*~
+.clangd/
 compile_commands.json
 
-# Temporary files
-*.tmp
-*.log
-*.bak
-*.swp
-
-# vcpkg
-vcpkg_installed/
-
-# debug information files
-*.dwo
-
-# test output & cache
-Testing/
-.cache/
