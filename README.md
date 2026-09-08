@@ -8,7 +8,7 @@ window, no notebook, no export step, no separate process.
 
 ```cpp
 fig->axes()->line(t, signal, {.color = sextant::Color::Blue, .label = "x(t)"}).grid();
-fig->show(pause=false);          // window opens, your thread keeps going
+fig->show(false);          // window opens, your thread keeps going
 ```
 
 Aimed at engineers who want to see what a simulation is doing while it runs, or
@@ -22,7 +22,7 @@ to inspect an array during a debugging session, without leaving the C++ ecosyste
 
 ## Why you might want it
 
-- **`show(pause=false)` returns immediately.** The window runs itself on its own thread.
+- **`show(false)` returns immediately.** The window runs itself on its own thread.
   Your program keeps computing, and calls `refresh()` when it has something new
   to show. There is no event loop to hand your `main()` over to.
 - **Designated initializers instead of a parameter soup.** `{.color = ...,
