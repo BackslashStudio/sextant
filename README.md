@@ -78,8 +78,7 @@ int main() {
 That image is the output of exactly the program above.
 
 ## Plot types
-
-| | |
+|||
 |---|---|
 | `line` | Polylines, solid or dashed, any width. Millions of points. |
 | `scatter` | Six marker shapes, per-series colour and size. |
@@ -93,15 +92,9 @@ That image is the output of exactly the program above.
 
 ## Output
 
-- **A live window** — pan, zoom, hover for values, edit the plot, save from the
-  File menu.
-- **PNG** — supersampled and box-filtered, identical to what the window shows.
-- **SVG** — vector, resolution-independent, and written with **no OpenGL context at all**, perfect for a headless server.
-
-```cpp
-fig->savefig("out.png");   // format comes from the extension
-fig->savefig("out.svg");
-```
+- **A live window: `fig->show()`** — pan, zoom, hover for values, edit the plot, save from the File menu.
+- **PNG: `fig->savefig("out.png")`** — supersampled and box-filtered, identical to what the window shows.
+- **SVG: `fig->savefig("out.svg")`** — vector, resolution-independent, and written with **no OpenGL context at all**, perfect for a headless server.
 
 ## Building
 
@@ -120,11 +113,12 @@ built automatically.
 scripts/setup_deps.sh
 ```
 
+On Windows, run that from a `vcvars64` shell.
+
 This populates `third_party/` with Dear ImGui, NanoVG and stb.
 
-GLAD is a one-time manual download. Generate it at
-[glad.dav1d.de](https://glad.dav1d.de/) with **OpenGL 4.1 Core** and
-**GLAD v1** (not glad2), then extract it so you have:
+GLAD is a one-time manual download. Generate it at [glad.dav1d.de](https://glad.dav1d.de/) with **OpenGL 4.1 Core** and
+**GLAD v1** (not glad2), then extract it like:
 
 ```
 third_party/glad/include/glad/glad.h
@@ -132,30 +126,36 @@ third_party/glad/include/KHR/khrplatform.h
 third_party/glad/src/glad.c
 ```
 
+All third-party sources are vendored, run the script if you want to pull them fresh.
+
 ### Build
 
 ```bash
 git clone https://github.com/BackslashStudio/sextant.git
 cd sextant
-scripts/setup_deps.sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
-On Windows, run that from a `vcvars64` shell.
+### Build options
+
+| Option | Default | Discription |
+|---|---|---|
+| `SEXTANT_USE_FREETYPE` | `ON` | FreeType glyph rasterization; `OFF` falls back to stb_truetype |
+| `SEXTANT_USE_LIBPNG` | `ON` | libpng output; `OFF` falls back to stb_image_write |
+| `SEXTANT_FETCH_GLFW` | `ON` | Download and build GLFW; `OFF` uses an installed one |
+| `SEXTANT_BUILD_STATIC` | `ON` | Also build `sextant_static` |
+| `SEXTANT_BUILD_TESTS` | `ON` | Build the test executables |
 
 ### Install
 
-sextant is consumed as an installed package, not added to your build with
-`add_subdirectory`. Install it once:
+sextant is consumed as an installed package, do not add to your build with `add_subdirectory`. Install it once:
 
 ```bash
 cmake --build build --target install_dist
 ```
 
-`install_dist` is a convenience target that installs into **`dist/`** beside the
-source tree, so you can try the library without touching a system directory. It
-gives you:
+`install_dist` is a convenience target that installs into **`dist/`** beside the source tree. It gives you:
 
 ```
 dist/include/sextant/     the public headers
@@ -174,57 +174,31 @@ or skip the target entirely and use CMake's own installer:
 cmake --install build --prefix /usr/local        # or any prefix you like
 ```
 
-### Use it from your project
+### Use it in your project
 
 Tell CMake where you installed it, then ask for the package:
 
 ```cmake
-cmake_minimum_required(VERSION 3.21)
-project(my_app CXX)
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-# Where `install_dist` (or `cmake --install`) put sextant.
-set(sextant_INSTALL_PREFIX "/path/to/sextant/dist" CACHE PATH "sextant prefix")
-list(APPEND CMAKE_PREFIX_PATH "${sextant_INSTALL_PREFIX}")
-
+# Where `install_dist` (or `cmake --install`) output the artifact.
+list(APPEND CMAKE_PREFIX_PATH "/path/to/sextant/dist")
 find_package(sextant CONFIG REQUIRED)
-
-add_executable(my_app main.cpp)
 target_link_libraries(my_app PRIVATE sextant::sextant)
-
-# Windows: put sextant.dll next to the executable so it runs without PATH edits.
-if(WIN32)
-    add_custom_command(TARGET my_app POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                $<TARGET_FILE:sextant::sextant> $<TARGET_FILE_DIR:my_app>)
-endif()
 ```
 
-If you installed to a system prefix that CMake already searches, the
-`CMAKE_PREFIX_PATH` line is unnecessary. You can also pass the prefix on the
-command line instead of hardcoding it:
+or pass the prefix on the command line:
 
 ```bash
 cmake -S . -B build -DCMAKE_PREFIX_PATH=/path/to/sextant/dist
 ```
 
 `sextant::sextant` is the shared library, and `sextant.dll` is the only file you
-need beside your executable: FreeType, libpng, zlib and GLFW are all linked into
+need at runtime: FreeType, libpng, zlib and GLFW are all linked into
 it, so it depends on nothing but OS DLLs and the MSVC runtime.
-`sextant::sextant_static` is also installed if you would rather link statically
+
+#### Alternative: static link
+`sextant::sextant_static` is also provided if you would rather link statically
 — see the [API guide](doc/api.md#linking) for the one vcpkg triplet caveat that
 comes with it.
-
-### Options
-
-| Option | Default | Effect |
-|---|---|---|
-| `SEXTANT_USE_FREETYPE` | `ON` | FreeType glyph rasterization; `OFF` falls back to stb_truetype |
-| `SEXTANT_USE_LIBPNG` | `ON` | libpng output; `OFF` falls back to stb_image_write |
-| `SEXTANT_FETCH_GLFW` | `ON` | Download and build GLFW; `OFF` uses an installed one |
-| `SEXTANT_BUILD_STATIC` | `ON` | Also build `sextant_static` |
-| `SEXTANT_BUILD_TESTS` | `ON` | Build the test executables |
 
 ## Documentation
 
@@ -233,8 +207,7 @@ method, every option struct, the interactive window, threading rules and error
 handling.
 
 ## Dependencies
-
-| | | |
+||||
 |---|---|---|
 | [GLFW](https://www.glfw.org/) 3.4 | zlib/libpng | fetched and statically linked |
 | [Dear ImGui](https://github.com/ocornut/imgui) | MIT | vendored |
@@ -246,20 +219,20 @@ handling.
 | [libpng](http://www.libpng.org/pub/png/libpng.html) | libpng | system; optional |
 | [GLM](https://github.com/g-truc/glm) | MIT | system |
 
-## Not in this version
-
-3D plots, remote rendering, and integration with Qt/GTK/wxWidgets.
-
-**macOS is out of scope**, and not by oversight: AppKit requires window creation
-and event polling on the process main thread, which is incompatible with
-`show()` returning immediately while the window runs on its own thread.
-Supporting it means a second threading model, not a port.
-
 ## License
 
 MIT — see [LICENSE](LICENSE).
 
-sextant bundles and links several third-party components, all permissively
-licensed. Their notices, and the credit FreeType asks for, are in
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Ship that file with any binary
-that embeds sextant.
+sextant bundles and links several third-party components, all permissively licensed. 
+Their notices, and the credit FreeType asks for, are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). 
+Ship that file with any binary that embeds sextant.
+
+## Major plan in next version
+
+3D plots, with hybrid 2D/3D plot support
+
+## Not in scope
+
+remote rendering, integration with Qt/GTK/wxWidgets.
+
+**macOS is not supported currently**, and not by oversight: AppKit requires window creation and event polling on the process main thread, which is incompatible with `show(false)` returning immediately while the window runs on its own thread. Supporting it means a second threading model, not a port.
