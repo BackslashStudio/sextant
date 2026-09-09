@@ -1,6 +1,6 @@
 # sextant
 
-**Plotting for C++ that doesn't get in the way.**
+**Plotting for C++ that never get in the way.**
 
 sextant is a C++20 library for scientific data visualization. It exists so that
 looking at your data is as cheap in C++ as it is in Python: three lines to a
@@ -73,9 +73,7 @@ int main() {
 }
 ```
 
-![A damped sine curve in blue with a dashed red exponential envelope, titled "Damped oscillator", with a legend and grid](doc/images/quickstart.png)
-
-That image is the output of exactly the program above.
+![damped sine curve with envelope](doc/images/quickstart.png)
 
 ## Plot types
 |||
@@ -227,9 +225,9 @@ sextant bundles and links several third-party components, all permissively licen
 Their notices, and the credit FreeType asks for, are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). 
 Ship that file with any binary that embeds sextant.
 
-## Major plan in next version
+## Major plan in the next version
 
-3D plots, with hybrid 2D/3D plot support
+3D plots, with hybrid 2D/3D plot support.
 
 ## Not in scope
 
