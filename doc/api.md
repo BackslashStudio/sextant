@@ -74,7 +74,7 @@ ax->line(t, volts, {.color = sextant::Color::Blue,
 
 `LineStyle::None` draws no stroke at all, and a series set to it also drops out of the legend. Dashing is honored in the window, in PNG and in SVG alike.
 
-Lines are the type that scales: a million points pans and zooms. There is no marker option — use `scatter()` on the same data for a marked series.
+There is no marker option — use `scatter()` on the same data for a marked series.
 
 ### scatter
 
@@ -125,7 +125,7 @@ ax->bar(months, sales, {.color = sextant::Color::Cyan,
 
 ### hist
 
-A histogram is a bar plot whose bars come from binning, so it takes both option structs:
+A histogram is a bar plot whose bars come from binning, so it takes both option:
 
 ```cpp
 Axes& hist(std::span<const double> data, int bins = 10,
@@ -138,11 +138,9 @@ ax->hist(samples, 40, {.color = sextant::Color::Green},
                       {.density = true});
 ```
 
-`BarOptions` says how the bars are *drawn*; `HistOptions` says what binning means (`density`, `cumulative`). Here `width` is read against the **bin** width.
+`BarOptions` says how the bars are *drawn*; `HistOptions` says how to binning (`density`, `cumulative`). Here `width` is read against the **bin** width.
 
 **One wart worth knowing.** `hist()`'s default argument raises `width` to `1.0` so bins touch. If you pass your own `BarOptions` you get `BarOptions`' own default of `0.8` back — and gapped bins read as a bar chart. Set `.width = 1.0f` yourself whenever you pass bar options to `hist()`.
-
-`hist()` is also the one place `BarOptions::errorbar` is ignored: a bin height is a count sextant derived, not something you measured.
 
 ### heatmap
 
@@ -164,7 +162,7 @@ ax->heatmap(field, rows, cols, {.vmin = 0.0f, .vmax = 1.0f,
 
 ## Error bars
 
-An error bar decorates a series you already drew, so it lives in that series' options rather than in a call of its own. It is two shapes, either omittable:
+An error bar decorates a series you already drew, and it it to be passed under series' options in `line`, `scatter`, `sactter_z` and `bar`. It draws two shapes, either omittable:
 
 - a **capped whisker** from `ymin[i]` to `ymax[i]` — **absolute data coordinates**, not offsets, so a range need not be centred on the point. Leave one end empty for a one-sided whisker.
 - a **box** spanning `y[i] ± yvar[i]`, drawn exactly as given (not square-rooted), `boxwidth` pixels across.
@@ -218,8 +216,9 @@ Levels are **z values in your data's own units** — the numbers the colorbar sh
 Lines pass through **cell centres**, so a contour stops half a cell inside the image, and a heatmap smaller than 2×2 traces nothing. `origin` is honored.
 
 ---
+## Styling
 
-## Titles, legends and ticks
+### Titles, legends and ticks/lables
 
 ```cpp
 ax->set_title("Run 41", 18.0f)
@@ -247,22 +246,18 @@ ax->set_xticks(days, {"Mon", "Tue", "Wed", "Thu", "Fri"});
 ax->set_xticks(days);                // positions only, values as labels
 ```
 
-The positions have to be a named array or vector, not a braced list written in place: they arrive as `std::span<const double>`, and `std::span` gains a constructor from `std::initializer_list` only in C++26. The labels are a `std::vector<std::string>`, so those *can* be written inline.
+The positions have to be a named array or vector, not a braced list written in place: they arrive as `std::span<const double>`, and `std::span` gains a constructor from `std::initializer_list` only in C++26. The labels are a `std::vector<std::string>`, so those *can* be written as a braced list.
 
 `cla()` clears every plot object and resets the limits.
 
-> **Ordering gotcha.** `set_title(text, size)` stores its size in the axes
-> style, so a later `set_axes_style()` resets it. Call `set_axes_style()` first.
-
 ---
 
-## Styling
+### Colors
 
 Colours are plain `{r, g, b, a}` floats in 0..1, with named constants and two parsers:
 
 ```cpp
-sextant::Color::Blue;                        // also Red Green Orange Purple
-                                             // Cyan Black White Gray
+sextant::Color::Blue;        // also Red Green Orange Purple Cyan Black White Gray
 sextant::Color::from_hex(0x1f77b4);
 sextant::Color::from_name("orange");         // throws on an unknown name
 sextant::Color{0.2f, 0.4f, 0.9f, 0.5f};      // half-transparent blue
@@ -291,6 +286,8 @@ fig->set_suptitle_style({.fontsize = 26.0f, .align = sextant::HAlign::Left});
 
 `set_colorbar_style()` only styles a colorbar; one appears because a plot object asked for it via `HeatmapOptions::colorbar` or `ScatterZOptions::colorbar`. One colorbar is drawn per axes.
 
+**Ordering gotcha:** `set_axes_style()` overrides many axis data shipped in `AxesStyle` all together, which include size/colour of all kinds of title/label, ticks, axis line, etc. Granular controls is preferred called later, `set_[x|y]title()`, `set_[x|y]ticks`.
+
 ---
 
 ## Subplots
@@ -318,7 +315,7 @@ Mixing `axes()` and `add_subplot()` on one figure is not meaningful — pick one
 
 ---
 
-## Sizing a figure
+## Figure resize
 
 `FigureOptions::width`/`height` and `resize()` describe the **plot area** — what `savefig()` writes. An open window grows by whatever its menu bar and control panel occupy, so the plot lands on the size you asked for.
 
