@@ -7,28 +7,18 @@ namespace sextant {
 // An arrow cap's length over its width: an equilateral head, sqrt(3)/2.
 inline constexpr double kArrowLengthRatio = 0.8660254037844386;
 
-// One whisker, reduced to line segments -- the definition of what a whisker
-// and its caps *are*, shared by the raster path, the SVG writer and a plane's
-// sheet, for marker_shape()'s reason: three consumers agreeing on a
-// definition beats three copies agreeing with each other.
+// One whisker and its caps as line segments, shared by the raster path, the
+// SVG writer and plane sheets.
 //
-// Works in any 2D frame whose axes are the data axes: pixels for the raster
-// and SVG paths, and a plane's own (u, v) for a sheet. `vertical` says which
-// axis the whisker runs along. (cx, cy) is the point, and `lo_end`/`hi_end`
-// are the two ends' coordinates along the whisker -- each equal to the
-// point's own when that side has nothing, which draws neither stem nor cap on
-// that side. Only sign and distance from the point are read, so a frame with
-// a flipped axis (screen y) needs nothing special.
+// Works in any 2D frame aligned with the data axes (pixels, or a plane's
+// (u, v)). `vertical` picks the whisker's axis; (cx, cy) is the point;
+// `lo_end`/`hi_end` are the end coordinates (equal to the point's = nothing on
+// that side). `unit_along`/`unit_across` are frame units per pixel, since
+// `capsize` is in pixels.
 //
-// `unit_along`/`unit_across` are frame units per pixel on the two axes -- 1 in
-// a pixel frame, and different from each other on a plane whose axes have
-// different scales -- since `capsize` is a pixel length.
-//
-// `seg(x0, y0, x1, y1)` receives each segment: the stem once, from end to end,
-// then each present end's cap. A flat cap is one crossbar `capsize` long. An
-// arrow cap is an open chevron with its tip on the end, `capsize` wide and
-// kArrowLengthRatio x `capsize` long, scaled down whole when the stem on that
-// side is shorter than the head, so it never reaches back past the point.
+// `seg(x0, y0, x1, y1)` receives the stem, then each present cap: a flat
+// crossbar `capsize` long, or a chevron `capsize` wide and kArrowLengthRatio x
+// `capsize` long, shrunk if the stem is shorter.
 template <class Seg>
 void whisker_segments(double cx, double cy, double lo_end, double hi_end,
                       bool vertical, double unit_along, double unit_across,

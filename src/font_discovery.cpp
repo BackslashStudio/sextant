@@ -36,12 +36,8 @@ uint32_t read_u32be(const char* p) {
 
 struct RawFontInfo { std::string family, subfamily, path; };
 
-// Pulls a single byte range out of an already-open font file, resizing `out`
-// to however much was actually available. Fonts are read range-by-range
-// rather than slurped whole: the parser below only ever needs the 16-byte
-// header, the table directory, and the 'name' table (a few KB), so reading
-// entire files would mean hundreds of MB of pointless copying across a system
-// font directory (see read_font_names).
+// Reads one byte range of an open font file (fonts are read in ranges, not
+// whole; only the header, directory and 'name' table are needed).
 size_t read_at_most(std::ifstream& f, size_t pos, size_t len, std::vector<char>& out) {
     out.clear();
     if (len == 0) return 0;
@@ -58,11 +54,9 @@ bool read_range(std::ifstream& f, size_t pos, size_t len, std::vector<char>& out
     return read_at_most(f, pos, len, out) == len;
 }
 
-// Reads nameID 1 (family) and 2 (subfamily) out of a TTF/TTC/OTF file's sfnt
-// 'name' table -- just enough of the format to get a CSS-usable family string,
-// since the filename often is not one ("times.ttf" -> "Times New Roman"). No
-// FreeType dependency, so this works with SEXTANT_USE_FREETYPE=OFF too.
-// Returns nullopt if the file does not parse as a recognizable sfnt/ttc.
+// Family (nameID 1) and subfamily (2) from an sfnt 'name' table, since
+// filenames often aren't family names ("times.ttf"). No FreeType needed.
+// nullopt if the file doesn't parse.
 std::optional<RawFontInfo> read_font_names(const fs::path& font_path) {
     std::ifstream f(font_path, std::ios::binary);
     if (!f) return std::nullopt;
@@ -93,8 +87,7 @@ std::optional<RawFontInfo> read_font_names(const fs::path& font_path) {
     }
     if (name_off == 0 || name_len < 6) return std::nullopt;
 
-    // buf holds just the 'name' table, so every offset below — which the sfnt
-    // format already expresses relative to the table start — indexes it directly.
+    // Offsets are relative to the 'name' table start, which is buf[0].
     std::vector<char> buf;
     if (read_at_most(f, name_off, name_len, buf) < 6) return std::nullopt;
 
@@ -102,10 +95,8 @@ std::optional<RawFontInfo> read_font_names(const fs::path& font_path) {
     const uint16_t string_off = read_u16be(buf.data() + 4);
     const size_t records = 6;
 
-    // A few fonts under-report the 'name' table length, leaving the string
-    // storage the records point at past the end of what we just read. Grow the
-    // buffer to cover the furthest record before decoding anything, so this
-    // range-based read resolves exactly the strings a whole-file read would.
+    // Some fonts under-report the table length; grow the buffer to cover the
+    // furthest string record.
     size_t needed = 0;
     for (uint16_t i = 0; i < count; ++i) {
         const size_t rec = records + size_t(i) * 12;
@@ -127,9 +118,7 @@ std::optional<RawFontInfo> read_font_names(const fs::path& font_path) {
 
         if (platform_id == 1) return std::string(s, length); // Macintosh: ~ASCII already
 
-        // Windows (3) / Unicode (0) platforms store UTF-16BE; non-ASCII code
-        // points are rare in font family names, so a lossy ASCII-only
-        // decode is good enough for a display/CSS name.
+        // Windows/Unicode platforms store UTF-16BE; decoded lossily as ASCII.
         std::string out;
         for (size_t i = 0; i + 1 < size_t(length); i += 2) {
             uint16_t cp = read_u16be(s + i);
@@ -206,11 +195,7 @@ std::vector<FontEntry> scan_all() {
     std::sort(raw.begin(), raw.end(),
               [](const RawFontInfo& a, const RawFontInfo& b) { return a.family < b.family; });
 
-    // Multiple style-weight files (e.g. times.ttf/timesbd.ttf/timesbi.ttf/
-    // timesi.ttf) usually share one family name in their own 'name' table —
-    // collapse each family down to a single Font combo entry, preferring
-    // whichever file reports "Regular" so a family selection never silently
-    // lands on a bold/italic weight.
+    // Collapse each family to one entry, preferring the "Regular" file.
     std::vector<FontEntry> found;
     for (size_t i = 0; i < raw.size(); ) {
         size_t j = i;
@@ -233,10 +218,7 @@ const std::vector<FontEntry>& discover_system_fonts() {
 }
 
 const FontEntry* pick_default_font() {
-    // Memoized, because the answer cannot change and this is on hot paths:
-    // layout calls it for every string it measures and the SVG writer for
-    // every text element it emits, and each call would otherwise be a
-    // case-insensitive substring search across ~130 discovered families.
+    // Memoized; called for every measured string and every SVG text element.
     static const FontEntry* cached = [] () -> const FontEntry* {
         const auto& fonts = discover_system_fonts();
         for (const auto& f : fonts) {

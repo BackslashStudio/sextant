@@ -5,75 +5,63 @@ struct GLFWwindow;
 struct NVGcontext;
 
 namespace sextant {
+    struct GLContextOptions {
+        int width = 800;
+        int height = 600;
+        std::string title = "sextant";
+        bool visible = true; // false for headless savefig
+        bool resizable = true;
 
-struct GLContextOptions {
-    int         width     = 800;
-    int         height    = 600;
-    std::string title     = "sextant";
-    bool        visible   = true;  // false for headless savefig
-    bool        resizable = true;
+        // glfwSwapInterval: cap the loop at the display refresh rate.
+        bool vsync = true;
 
-    // glfwSwapInterval: true caps the render loop at the display refresh
-    // rate. Turning it off lets the loop run as fast as it can, which is
-    // what makes end-to-end frame cost measurable — with vsync on, the GPU
-    // half of a frame hides inside the swap wait (see FrameStats).
-    bool        vsync     = true;
+        // GLFW_SCALE_TO_MONITOR: width/height become a physical (DPI-scaled) size.
+        // Off by default so headless exports render exact pixels; only
+        // WindowThread enables it.
+        bool scale_to_monitor = false;
+    };
 
-    // GLFW_SCALE_TO_MONITOR: multiply the requested size by the content scale
-    // of the monitor the window opens on, and let the OS resize the window
-    // when it is dragged to a monitor of a different DPI -- so `width`/`height`
-    // describe a *physical* size rather than a device-pixel count, and a figure
-    // is the same size on a 4K 150% display as on a 1080p 100% one.
-    //
-    // Off by default, and deliberately not keyed off `visible`: a headless
-    // savefig() context must render exactly the pixel count the caller asked
-    // for, and inheriting this would silently scale every exported file by the
-    // primary monitor's DPI. Only WindowThread turns it on.
-    bool        scale_to_monitor = false;
-};
+    // Owns a single GLFWwindow, GLAD function pointers, and NanoVG context.
+    // Must be created and used on the same thread (GLFW requirement).
+    class GLContext {
+    public:
+        explicit GLContext(GLContextOptions opts);
 
-// Owns a single GLFWwindow, GLAD function pointers, and NanoVG context.
-// Must be created and used on the same thread (GLFW requirement).
-class GLContext {
-public:
-    explicit GLContext(GLContextOptions opts);
-    ~GLContext();
+        ~GLContext();
 
-    // Non-copyable, non-movable (GLFW/NVG context is not portable)
-    GLContext(const GLContext&) = delete;
-    GLContext& operator=(const GLContext&) = delete;
+        // Non-copyable, non-movable (GLFW/NVG context is not portable)
+        GLContext(const GLContext&) = delete;
 
-    GLFWwindow*  window()  const { return window_; }
-    NVGcontext*  nvg()     const { return nvg_; }
-    bool         should_close() const;
-    void         poll_events();
-    void         swap_buffers();
-    void         make_current();
+        GLContext& operator=(const GLContext&) = delete;
 
-    int width()  const { return width_; }
-    int height() const { return height_; }
+        GLFWwindow* window() const { return window_; }
+        NVGcontext* nvg() const { return nvg_; }
 
-    // NanoVG frame wrappers, keeping nanovg.h out of callers' include paths.
-    // w/h override this GLContext's own tracked size when rendering into an
-    // offscreen target of a different size; omit (<=0) to use its own.
-    //
-    // pixel_ratio is NanoVG's device-pixel ratio: w/h stay in *logical* pixels
-    // and describe the coordinate space drawing commands use, while the actual
-    // framebuffer is pixel_ratio times larger in each axis (the caller's
-    // glViewport must already say so). NanoVG derives its AA fringe width and
-    // glyph rasterization size from it, so passing the supersample factor here
-    // is what keeps its antialiasing and text sharp in a supersampled target.
-    void begin_nvg_frame(int w = 0, int h = 0, float pixel_ratio = 1.0f) const;
-    void end_nvg_frame()   const;
+        bool should_close() const;
 
-    // Called by the framebuffer resize callback — do not call directly.
-    void on_resize(int w, int h);
+        void poll_events();
 
-private:
-    GLFWwindow* window_ = nullptr;
-    NVGcontext* nvg_     = nullptr;
-    int         width_  = 0;
-    int         height_ = 0;
-};
+        void swap_buffers();
 
+        void make_current();
+
+        int width() const { return width_; }
+        int height() const { return height_; }
+
+        // NanoVG frame wrappers. w/h (logical pixels) override this context's size
+        // for an offscreen target (<= 0: own size). pixel_ratio is the device-pixel
+        // ratio (the supersample factor), which keeps NanoVG's AA and text sharp.
+        void begin_nvg_frame(int w = 0, int h = 0, float pixel_ratio = 1.0f) const;
+
+        void end_nvg_frame() const;
+
+        // Called by the framebuffer resize callback — do not call directly.
+        void on_resize(int w, int h);
+
+    private:
+        GLFWwindow* window_ = nullptr;
+        NVGcontext* nvg_ = nullptr;
+        int width_ = 0;
+        int height_ = 0;
+    };
 } // namespace sextant

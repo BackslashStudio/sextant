@@ -7,30 +7,14 @@
 
 namespace sextant {
 
-// Thread-safe MERGE holder for widget-panel edits -- the reverse-direction
-// counterpart to SnapshotBox. Unlike SnapshotBox's latest-value-wins, edits
-// arrive as many small per-field deltas that must accumulate between drains
-// rather than overwrite each other. The render thread calls update() whenever
-// a widget changes; either thread can then drain.
+// Thread-safe merge holder for widget-panel edits (the reverse of SnapshotBox):
+// per-field deltas accumulate between drains. Draining is destructive, so each
+// edit is applied exactly once.
 //
-// The drain is destructive, so an edit reaches exactly one of the two paths
-// and is applied exactly once. That is fine for everything except plot data:
-// the render-thread path patches the published snapshot only, never the
-// authoritative Axes::Impl, so a later refresh() would throw those edits away.
-// Hence the journal -- load_and_clear_journaled() copies the data ops aside on
-// the way out and the caller thread replays them via take_journal(), likewise
-// destructive so nothing lands twice.
-//
-// Only PlotDataOps are journaled. The rest of AxesEdit is live preview that
-// pan/zoom restages every frame of a drag: journaling it would grow the
-// journal with the duration of a mouse gesture and let a stale panned viewport
-// overwrite an explicit set_xlim(). Plot data has neither problem.
-//
-// The grid's weights are the one exception (v1.0 step 15.3), because an
-// arranged grid is meant to be kept. They avoid both problems: the journal
-// holds only the latest vector, however long the drag, and
-// Figure::set_col_ratios()/set_row_ratios() discard_ratios() on the way in, so
-// an explicit call after a drag wins over it.
+// The render-thread drain only patches the published snapshot, so plot-data
+// ops are also journaled and replayed onto Axes::Impl by the caller thread
+// (take_journal()). Other edits are live preview and are not journaled, except
+// the grid ratios (latest value only).
 class FigureEditBox {
 public:
     void update(int slot_index, const std::function<void(AxesEdit&)>& fn) {
@@ -38,35 +22,28 @@ public:
         fn(slot_edit(slot_index));
     }
 
-    // Same, for a slot holding an Axes3D. A slot is one kind or the other, so
-    // the two lanes never address the same entry.
+    // Same, for an Axes3D slot.
     void update3d(int slot_index, const std::function<void(AxesEdit3D&)>& fn) {
         std::scoped_lock lk(mutex_);
         fn(slot_edit3d(slot_index));
     }
 
-    // Figure-level counterpart, for edits that belong to no single axes
-    // (currently the suptitle). Same merge semantics: last writer wins per
-    // field, accumulating between drains.
+    // Figure-level edits (currently the suptitle).
     void update_figure(const std::function<void(FigureEdits&)>& fn) {
         std::scoped_lock lk(mutex_);
         fn(pending_);
     }
 
-    // Caller-thread drain. Whatever comes back is written straight into the
-    // live Axes::Impl, so it needs no journal entry.
+    // Caller-thread drain; applied straight to Axes::Impl, so no journal.
     std::optional<FigureEdits> load_and_clear() {
         std::scoped_lock lk(mutex_);
         return take_pending();
     }
 
-    // Render-thread drain. Identical, except the data ops are also recorded
-    // for later replay onto Axes::Impl.
+    // Render-thread drain; also journals the data ops for replay.
     std::optional<FigureEdits> load_and_clear_journaled() {
         std::scoped_lock lk(mutex_);
-        // Both lanes, into one journal keyed by slot: a slot is one kind or
-        // the other, so the two can never contribute to the same entry, and a
-        // 3D slot's ops already carry the plane they belong to.
+        // Both lanes into one journal keyed by slot (a slot is one kind only).
         for (const auto& [idx, e] : pending_.per_axes) {
             if (e.plot_ops.empty()) continue;
             auto& dst = journal_slot(idx);
@@ -77,15 +54,14 @@ public:
             auto& dst = journal_slot(idx);
             dst.insert(dst.end(), e.plot_ops.begin(), e.plot_ops.end());
         }
-        // The grid's weights, latest value only (v1.0 step 15.3).
+        // Grid ratios, latest value only.
         if (pending_.col_ratios) journal_.col_ratios = pending_.col_ratios;
         if (pending_.row_ratios) journal_.row_ratios = pending_.row_ratios;
         return take_pending();
     }
 
-    // Figure::set_col_ratios()/set_row_ratios(): an explicit call replaces a
-    // dragged value, so a drag staged or journaled before it must not replay
-    // over it at the next refresh().
+    // An explicit set_col_ratios()/set_row_ratios() overrides any pending or
+    // journaled drag.
     void discard_ratios(bool cols, bool rows) {
         std::scoped_lock lk(mutex_);
         if (cols) { pending_.col_ratios.reset(); journal_.col_ratios.reset(); }
@@ -102,8 +78,7 @@ public:
 
 private:
     std::optional<FigureEdits> take_pending() {
-        // FigureEdits::empty(), not per_axes.empty() — a figure-level edit
-        // (suptitle) carries no per-axes entry at all.
+        // FigureEdits::empty(): a figure-level edit has no per-axes entry.
         if (pending_.empty()) return std::nullopt;
         FigureEdits out = std::move(pending_);
         pending_ = FigureEdits{};

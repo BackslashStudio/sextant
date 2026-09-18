@@ -15,7 +15,6 @@
 #include <iostream>
 
 // 1. Plot gallery — every basic plot type in one subplot grid.
-// all of them at once at a bigger scale than any single-purpose demo needed.
 static void test_axes_gallery() {
     constexpr int N = 200;
     std::vector<double> x(N), y_sin(N), y_cos(N);
@@ -25,11 +24,8 @@ static void test_axes_gallery() {
         y_cos[i] = std::cos(x[i]);
     }
 
-    // A closed path on the Line cell (v1.0 step 18): five points, so the one
-    // segment `loop` adds is the obvious difference between a pentagon and a
-    // letter V lying on its side. Deliberately thick, since what the option
-    // has to get right is the seam -- it is a join like the other four, not
-    // two butt caps meeting.
+    // A closed five-point path (`loop`), drawn thick so the seam's join is
+    // visible.
     constexpr int P = 5;
     std::vector<double> pent_x(P), pent_y(P);
     for (int i = 0; i < P; ++i) {
@@ -83,8 +79,7 @@ static void test_axes_gallery() {
         ppts_y.push_back(0.5 * xv * xv - 1.0 + noise(rng));
     }
 
-    // Scatter_z ring: continuous-value series colored by z, own colorbar,
-    // coexisting with the same A/B classes' legend on this one cell.
+    // Scatter_z ring colored by z with its own colorbar, beside the A/B legend.
     constexpr int M = 80;
     std::vector<double> ring_x(M), ring_y(M), ring_z(M);
     for (int i = 0; i < M; ++i) {
@@ -94,21 +89,17 @@ static void test_axes_gallery() {
         ring_z[i] = t;
     }
 
-    // Error-bar cell (v1.0 step 16): a measured curve whose whisker is
-    // *asymmetric* about its point, with a narrower symmetric box inside it,
-    // over a coarser bar series with arrow caps -- the middle bar one-sided,
-    // since a zero offset draws nothing on that side. The line's box is
-    // deliberately much narrower than its whisker, which is what makes the
-    // two halves distinguishable.
+    // Error bars: an asymmetric whisker with a narrower symmetric box on the
+    // line, and arrow caps on the bars with one side zeroed on the middle bar.
     constexpr int E = 10;
     std::vector<double> err_x(E), err_y(E), err_lo(E), err_hi(E), err_box(E), err_xc(E);
     for (int i = 0; i < E; ++i) {
         err_x[i] = i * 0.7;
         err_y[i] = 4.0 + 2.5 * std::sin(err_x[i]);
-        err_lo[i]  = 0.25 + 0.05 * i;   // offsets from the point,
-        err_hi[i]  = 0.60 + 0.10 * i;   // not absolute coordinates
+        err_lo[i] = 0.25 + 0.05 * i; // offsets from the point,
+        err_hi[i] = 0.60 + 0.10 * i; // not absolute coordinates
         err_box[i] = 0.12 + 0.02 * i;
-        err_xc[i]  = 0.15;
+        err_xc[i] = 0.15;
     }
     const std::vector<double> err_bx = {0.7, 2.8, 4.9};
     const std::vector<double> err_bh = {3.0, 5.5, 2.2};
@@ -116,16 +107,18 @@ static void test_axes_gallery() {
     const std::vector<double> err_bhi = {0.6, 0.9, 0.4};
     const std::vector<double> err_bbx = {0.3, 0.45, 0.2};
 
-    // Scatter_z error bars are exercised on the scatter_z cell below: a 2D
-    // box (x_box wide, y_box tall) with no whisker.
+    // Scatter_z error bars are on the scatter_z cell below (a 2D box, no
+    // whisker).
     std::vector<double> ring_xv(M), ring_yv(M);
     for (int i = 0; i < M; ++i) {
         ring_xv[i] = 0.25;
         ring_yv[i] = 0.4;
     }
 
-    auto fig = sextant::Figure::create({.width = 1800, .height = 1000,
-                                        .title = "Axes gallery", .supersample = 2});
+    auto fig = sextant::Figure::create({
+        .width = 1800, .height = 1000,
+        .title = "Axes gallery", .supersample = 2
+    });
     fig->suptitle("What Axes draws");
 
     fig->add_subplot(3, 4, 1)
@@ -145,32 +138,35 @@ static void test_axes_gallery() {
             .scatter(xb, yb, {.color = sextant::Color::Orange, .marker = sextant::MarkerStyle::Diamond, .name = "B"})
             .set_title("Scatter").legend().grid();
 
-    // Labelled, so the legend keys it. A bar series could always be keyed;
-    // what v1.0 step 11.5 added is the switch that turns a key off without
-    // taking the label with it.
+    // Labelled, so the legend keys it.
     fig->add_subplot(3, 4, 3)
-            ->bar(months, sales, {.color = sextant::Color::Blue, .name = "monthly",
-                                  .edgecolor = sextant::Color::Black})
+            ->bar(months, sales, {
+                      .color = sextant::Color::Blue, .name = "monthly",
+                      .edgecolor = sextant::Color::Black
+                  })
             .set_title("Bar").legend().grid();
 
-    // Error bars, both kinds in one cell: the line's whisker is asymmetric
-    // about its point with a narrow box inside it and a short x whisker, the
-    // bar's is symmetric with arrow caps and one side zeroed on the middle
-    // bar, so a regression in either half shows up here.
+    // Both error-bar kinds in one cell: an asymmetric line whisker with a box
+    // and a short x whisker, and symmetric arrow-capped bars with one side
+    // zeroed.
     fig->add_subplot(4)
             ->line(err_x, err_y,
-                   {.x_cap_lo = err_xc, .y_cap_lo = err_lo, .y_cap_hi = err_hi,
-                    .y_box_lo = err_box},
+                   {
+                       .x_cap_lo = err_xc, .y_cap_lo = err_lo, .y_cap_hi = err_hi,
+                       .y_box_lo = err_box
+                   },
                    {
                        .color = sextant::Color::Blue, .linewidth = 2.0f, .name = "measured",
-                       .errorbar = { .color = sextant::Color::Gray, .capsize = 8.0f }
+                       .errorbar = {.color = sextant::Color::Gray, .capsize = 8.0f}
                    })
             .bar(err_bx, err_bh,
                  {.y_cap_lo = err_blo, .y_cap_hi = err_bhi, .y_box_lo = err_bbx},
                  {
                      .color = sextant::Color::Orange, .alpha = 0.5f, .name = "binned",
-                     .errorbar = { .linewidth = 1.5f, .capsize = 10.0f,
-                                   .capstyle = sextant::CapStyle::Arrow }
+                     .errorbar = {
+                         .linewidth = 1.5f, .capsize = 10.0f,
+                         .capstyle = sextant::CapStyle::Arrow
+                     }
                  })
             .set_title("Error bars").legend().grid();
 
@@ -182,11 +178,8 @@ static void test_axes_gallery() {
             ->hist(cum_data, 25, {.color = sextant::Color::Green, .width = 1.0f}, {.density = true, .cumulative = true})
             .set_title("Histogram (cumulative)").grid();
 
-    // Contours on the gaussian, labelled, so the whole feature is on show in
-    // one cell. White at 1.5px because black at 1px vanishes into viridis's
-    // dark end. Pan and zoom this one: the geometry is traced once and only
-    // re-projected per frame, so it must stay glued to the colours under it.
-    // The colorbar's own name is v1.0 step 11.4.
+    // Labelled contours on the gaussian (white 1.5px; black vanishes into
+    // viridis). Pan/zoom: they must stay glued to the colors. Named colorbar.
     fig->add_subplot(3, 4, 7)
             ->imshow(gauss, R, C, {
                          .cmap = sextant::Colormap::Viridis, .vmin = 0.0f, .vmax = 1.0f,
@@ -221,32 +214,27 @@ static void test_axes_gallery() {
         ax->set_title("Marker shapes").set_xlim(-1, 6).set_ylim(-1, 1);
     }
 
-    // scatter_z: a legend key *and* a colorbar, which is the pair v1.0 step
-    // 11.5 made possible. The key is the series' marker filled white with a
-    // black edge -- a continuous-colour series has no one colour a swatch
-    // could honestly show, so the key says which shape and the bar says what
-    // the colours mean.
+    // scatter_z with both a legend key (white marker, black edge) and a
+    // colorbar.
     fig->add_subplot(3, 4, 11)
             ->scatter(xa, ya, {.color = sextant::Color::Blue, .name = "A"})
             .scatter(xb, yb, {.color = sextant::Color::Orange, .name = "B"})
-            // A true 2D box -- x_box wide and y_box tall, no whisker.
+            // A 2D box: x_box wide, y_box tall, no whisker.
             .scatter_z(ring_x, ring_y, ring_z, {.x_box_lo = ring_xv, .y_box_lo = ring_yv}, {
                            .cmap = sextant::Colormap::Viridis, .size = 14.0f,
                            .vmin = 0.0f, .vmax = static_cast<float>(2.0 * M_PI),
                            .colorbar = true, .name = "phase",
-                           .errorbar = { .linewidth = 0.75f }
+                           .errorbar = {.linewidth = 0.75f}
                        })
             .set_title("scatter_z").legend().grid();
 
-    // Two colour scales on one axes (v1.0 step 11.1). Only the first request
-    // used to reserve space, so the second series was drawn in colours with
-    // nothing explaining them -- and silently, since the bar that *was* drawn
-    // looked like it belonged to whichever series the reader assumed. Each
-    // bar is measured for its own numbers, so the wider-labelled one is the
-    // wider block.
+    // Two colour scales on one axes: each gets its own bar, sized for its own
+    // numbers.
     fig->add_subplot(3, 4, 12)
-            ->imshow(gauss, R, C, {.vmin = 0.0f, .vmax = 1.0f,
-                                   .colorbar = true, .name = "field"})
+            ->imshow(gauss, R, C, {
+                         .vmin = 0.0f, .vmax = 1.0f,
+                         .colorbar = true, .name = "field"
+                     })
             .scatter_z(ring_x, ring_y, ring_z, {
                            .size = 22.0f, .marker = sextant::MarkerStyle::Square,
                            .vmin = 0.0f, .vmax = static_cast<float>(2.0 * M_PI),
@@ -260,23 +248,14 @@ static void test_axes_gallery() {
     printf("Saved: test_axes_gallery.png, test_axes_gallery.svg\n");
 }
 
-// 3D gallery (v1.0 step 11.7) — one figure, one subplot per 3D kind, meant to
-// be understood at a glance rather than to exercise a feature exhaustively.
-// That is the split from `test_translucent3d`, which is the ordering harness
-// and stays: this one is the picture you show someone to say what Axes3D is
-// for, so every cell is a different *kind* and none is a variation on the one
-// above it.
-//
-// It replaces `test_axes3d()`, which had grown into four separate figures —
-// one per feature as each shipped — and so answered "does bar3d work" rather
-// than "what can this draw".
+// 3D gallery — one subplot per 3D kind, as an overview (test_translucent3d is
+// the ordering harness).
 static void test_axes3d_gallery() {
-    // Two grids, both small enough that the SVG painter finishes quickly: a
-    // gallery nobody waits for is a gallery nobody looks at.
+    // Two grids, small enough that the SVG painter finishes quickly.
     constexpr int NU = 9, NV = 7;
     std::vector<double> gu(NU), gv(NV), gauss(NU * NV);
-    for (int i = 0; i < NU; ++i) gu[i] = 400.0 + i * 25.0;   // wavelength, nm
-    for (int j = 0; j < NV; ++j) gv[j] = -1.5 + j * 0.5;     // offset
+    for (int i = 0; i < NU; ++i) gu[i] = 400.0 + i * 25.0; // wavelength, nm
+    for (int j = 0; j < NV; ++j) gv[j] = -1.5 + j * 0.5; // offset
     for (int i = 0; i < NU; ++i)
         for (int j = 0; j < NV; ++j) {
             const double a = (i - NU / 2.0) / 2.2, b = (j - NV / 2.0) / 1.8;
@@ -291,7 +270,7 @@ static void test_axes3d_gallery() {
         for (int j = 0; j < SV; ++j) {
             const double r = std::sqrt(su[i] * su[i] + sv[j] * sv[j]);
             ripple[i * SV + j] = 2.0 * std::exp(-r * 0.5) * std::cos(r * 2.2);
-            dome[i * SV + j]   = 3.0 - 0.3 * r * r;
+            dome[i * SV + j] = 3.0 - 0.3 * r * r;
         }
 
     constexpr int R = 24, C = 24;
@@ -308,11 +287,16 @@ static void test_axes3d_gallery() {
         lx[i] = i * 6.0 / (L - 1);
         ly[i] = 2.0 + 1.4 * std::sin(lx[i] * 1.3);
     }
-    for (int i = 0; i < 20; ++i) { px[i] = i * 6.0 / 19.0; py[i] = 1.0 + 0.5 * std::cos(px[i] * 2.0); }
-    for (int i = 0; i < 6; ++i)  { bx[i] = i + 0.5; bh[i] = 0.6 + 0.25 * i; }
+    for (int i = 0; i < 20; ++i) {
+        px[i] = i * 6.0 / 19.0;
+        py[i] = 1.0 + 0.5 * std::cos(px[i] * 2.0);
+    }
+    for (int i = 0; i < 6; ++i) {
+        bx[i] = i + 0.5;
+        bh[i] = 0.6 + 0.25 * i;
+    }
 
-    // Two clouds for cell 7: a flat one on a helix, and a colormapped one on a
-    // lattice whose fourth dimension is a field sampled at each point.
+    // Cell 7: a flat cloud on a helix and a colormapped one on a lattice.
     constexpr int HN = 40;
     std::vector<double> hx(HN), hy(HN), hz(HN);
     for (int i = 0; i < HN; ++i) {
@@ -326,7 +310,9 @@ static void test_axes3d_gallery() {
         for (int j = 0; j < 4; ++j)
             for (int k = 0; k < 3; ++k) {
                 const double x = -2.4 + i * 1.6, y = -2.4 + j * 1.6, z = -2.0 + k * 2.0;
-                cx3.push_back(x); cy3.push_back(y); cz3.push_back(z);
+                cx3.push_back(x);
+                cy3.push_back(y);
+                cz3.push_back(z);
                 cval.push_back(60.0 * std::exp(-(x * x + y * y + z * z) / 9.0));
             }
 
@@ -338,9 +324,9 @@ static void test_axes3d_gallery() {
         dy.push_back(2.4 * std::cos(t * 0.6));
         dz.push_back(-2.2 + 4.4 * (i % 9) / 8.0);
     }
-    const std::vector<double> sheet_u{ -3.0, 0.0, 3.0 };   // y
-    const std::vector<double> sheet_v{ -3.0, 0.0, 3.0 };   // z
-    const std::vector<double> sheet_h(9, 0.0);             // x = 0
+    const std::vector<double> sheet_u{-3.0, 0.0, 3.0}; // y
+    const std::vector<double> sheet_v{-3.0, 0.0, 3.0}; // z
+    const std::vector<double> sheet_h(9, 0.0); // x = 0
 
     auto fig = sextant::Figure::create({
         .width = 2200, .height = 1000,
@@ -350,132 +336,125 @@ static void test_axes3d_gallery() {
     });
     fig->suptitle("What Axes3D draws");
 
-    // 1 — bar3d. A 2D histogram standing up, which is the shape the kind is
-    // for. Labelled, so the legend keys it (v1.0 step 11.5): every bar of a
-    // grid is the one colour, so a swatch is honest about all of them.
+    // 1 — bar3d: a 2D histogram standing up, keyed in the legend.
     fig->add_subplot3d(2, 4, 1)
-        ->bar3d(sextant::PlaneOrientation::XY, gu, gv, gauss,
-                {.color = sextant::Color::Blue, .name = "counts"})
-        .set_title("bar3d")
-        .set_xtitle("wavelength (nm)").set_ytitle("offset").set_ztitle("counts")
-        .set_view(-55.0, 25.0)
-        .legend();
+            ->bar3d(sextant::PlaneOrientation::XY, gu, gv, gauss,
+                    {.color = sextant::Color::Blue, .name = "counts"})
+            .set_title("bar3d")
+            .set_xtitle("wavelength (nm)").set_ytitle("offset").set_ztitle("counts")
+            .set_view(-55.0, 25.0)
+            .legend();
 
-    // 2 — surface, coloured by its own heights, with the colour scale beside
-    // the frame. The colorbar and its name are step 11.3 and 11.4; before
-    // them a surface's colours had nothing explaining them at all.
+    // 2 — surface colored by height, with a named colorbar.
     fig->add_subplot3d(2, 4, 2)
-        ->surface(sextant::PlaneOrientation::XY, su, sv, ripple,
-                  {.colormap = true, .colorbar = true, .name = "amplitude",
-                   .shading = 0.35f})
-        .set_title("surface")
-        .set_xtitle("x").set_ytitle("y").set_ztitle("z")
-        .set_view(-50.0, 28.0);
+            ->surface(sextant::PlaneOrientation::XY, su, sv, ripple,
+                      {
+                          .colormap = true, .colorbar = true, .name = "amplitude",
+                          .shading = 0.35f
+                      })
+            .set_title("surface")
+            .set_xtitle("x").set_ytitle("y").set_ztitle("z")
+            .set_view(-50.0, 28.0);
 
-    // 3 — the same kind with the other half of its options: one flat colour
-    // and the sample grid drawn as a wireframe, which is what shows the shape
-    // when the colour cannot.
+    // 3 — surface with a flat color and a wireframe.
     fig->add_subplot3d(2, 4, 3)
-        ->surface(sextant::PlaneOrientation::XY, su, sv, dome,
-                  {.color = sextant::Color::Cyan, .shading = 0.5f,
-                   .edges = true, .edge_linewidth = 0.8f})
-        .set_title("surface + wireframe")
-        .set_xtitle("x").set_ytitle("y").set_ztitle("z")
-        .set_view(-40.0, 22.0);
+            ->surface(sextant::PlaneOrientation::XY, su, sv, dome,
+                      {
+                          .color = sextant::Color::Cyan, .shading = 0.5f,
+                          .edges = true, .edge_linewidth = 0.8f
+                      })
+            .set_title("surface + wireframe")
+            .set_xtitle("x").set_ytitle("y").set_ztitle("z")
+            .set_view(-40.0, 22.0);
 
-    // 4 — Plane2D: a 2D slice placed in the scene, carrying a heatmap. Its
-    // colorbar is *hoisted* to the cell, because a bar drawn into the scene
-    // would foreshorten and turn with the camera.
+    // 4 — Plane2D carrying a heatmap; its colorbar is beside the cell.
     {
         auto ax = fig->add_subplot3d(2, 4, 4);
         ax->set_title("Plane2D — slices")
-          .set_xtitle("x").set_ytitle("y").set_ztitle("z")
-          .set_zlim(0.0, 3.0)
-          .set_view(-60.0, 20.0);
+                .set_xtitle("x").set_ytitle("y").set_ztitle("z")
+                .set_zlim(0.0, 3.0)
+                .set_view(-60.0, 20.0);
         ax->plane(sextant::PlaneOrientation::XY, 0.2)
-          ->heatmap(field, R, C, {0.0, 6.0}, {0.0, 6.0},
-                    {.vmin = 0.0f, .vmax = 1.0f, .colorbar = true, .name = "intensity"});
-        // Two more of the same slice, translucent and stacked, so what a
-        // plane *is* reads without a caption.
-        for (double z : {1.4, 2.6})
+                ->heatmap(field, R, C, {0.0, 6.0}, {0.0, 6.0},
+                          {.vmin = 0.0f, .vmax = 1.0f, .colorbar = true, .name = "intensity"});
+        // Two more translucent slices, stacked.
+        for (double z: {1.4, 2.6})
             ax->plane(sextant::PlaneOrientation::XY, z, {.alpha = 0.55f})
-              ->heatmap(field, R, C, {0.0, 6.0}, {0.0, 6.0}, {.vmin = 0.0f, .vmax = 1.0f});
+                    ->heatmap(field, R, C, {0.0, 6.0}, {0.0, 6.0}, {.vmin = 0.0f, .vmax = 1.0f});
     }
 
-    // 5 — and what a plane is *for*: every 2D kind, with the 2D signatures and
-    // the 2D painter order, on a surface floating in the scene. The legend is
-    // hoisted exactly as the colorbar above it is.
+    // 5 — a plane carrying every 2D kind, with a legend.
     {
         auto ax = fig->add_subplot3d(2, 4, 5);
         ax->set_title("Plane2D — the 2D kinds")
-          .set_xtitle("x").set_ytitle("y").set_ztitle("z")
-          .set_view(-62.0, 18.0);
+                .set_xtitle("x").set_ytitle("y").set_ztitle("z")
+                .set_view(-62.0, 18.0);
         auto pl = ax->plane(sextant::PlaneOrientation::XY, 0.0);
         pl->bar(bx, bh, {.color = sextant::Color::Cyan, .alpha = 0.8f, .name = "binned"});
         pl->line(lx, ly, {.color = sextant::Color::Red, .linewidth = 2.5f, .name = "fit"});
-        pl->scatter(px, py, {.color = sextant::Color::Blue, .size = 26.0f,
-                             .marker = sextant::MarkerStyle::Diamond, .name = "samples"});
+        pl->scatter(px, py, {
+                        .color = sextant::Color::Blue, .size = 26.0f,
+                        .marker = sextant::MarkerStyle::Diamond, .name = "samples"
+                    });
         ax->legend();
     }
 
-    // 6 — the kinds together, under a perspective camera, and with **two**
-    // colour scales in one cell (step 11.1: every object that asks for a bar
-    // gets one, where only the first used to). Translucent bars in front of a
-    // sheet is also the case the raster path peels and the vector path splits.
+    // 6 — the kinds together under perspective, two colour scales, and
+    // translucent bars in front of a sheet (peeled in PNG, split in SVG).
     {
         auto ax = fig->add_subplot3d(2, 4, 6);
         ax->set_title("Together, in perspective")
-          .set_xtitle("x").set_ytitle("y").set_ztitle("z")
-          .set_projection(sextant::Projection::Perspective)
-          .set_fov(38.0)
-          .set_view(-48.0, 24.0);
+                .set_xtitle("x").set_ytitle("y").set_ztitle("z")
+                .set_projection(sextant::Projection::Perspective)
+                .set_fov(38.0)
+                .set_view(-48.0, 24.0);
         ax->surface(sextant::PlaneOrientation::XY, su, sv, ripple,
-                    {.colormap = true, .colorbar = true, .name = "sheet",
-                     .alpha = 0.85f, .shading = 0.35f});
+                    {
+                        .colormap = true, .colorbar = true, .name = "sheet",
+                        .alpha = 0.85f, .shading = 0.35f
+                    });
         ax->plane(sextant::PlaneOrientation::YZ, 0.0, {.alpha = 0.7f})
-          ->heatmap(field, R, C, {-3.0, 3.0}, {-2.0, 3.0},
-                    {.vmin = 0.0f, .vmax = 1.0f, .colorbar = true, .name = "slice"});
+                ->heatmap(field, R, C, {-3.0, 3.0}, {-2.0, 3.0},
+                          {.vmin = 0.0f, .vmax = 1.0f, .colorbar = true, .name = "slice"});
         ax->legend();
     }
 
-
-    // 7 — scatter3d, both colourings in one cell so the two key forms sit
-    // side by side in the legend (v1.0 step 12): a flat series is a swatch of
-    // its own colour, and a colormapped one is the same marker filled white
-    // with a black edge, because a continuous-colour series has no one colour
-    // a swatch could honestly show. The bar beside it carries those colours.
+    // 7 — scatter3d with both key forms side by side: a flat swatch, and a
+    // colormapped marker in white with a black edge.
     {
         auto ax = fig->add_subplot3d(2, 4, 7);
         ax->set_title("scatter3d")
-          .set_xtitle("x").set_ytitle("y").set_ztitle("z")
-          .set_view(-52.0, 22.0);
+                .set_xtitle("x").set_ytitle("y").set_ztitle("z")
+                .set_view(-52.0, 22.0);
         ax->scatter3d(hx, hy, hz,
-                      {.color = sextant::Color::Orange, .size = 26.0f,
-                       .marker = sextant::MarkerStyle::Diamond, .name = "measured"});
+                      {
+                          .color = sextant::Color::Orange, .size = 26.0f,
+                          .marker = sextant::MarkerStyle::Diamond, .name = "measured"
+                      });
         ax->scatter3d(cx3, cy3, cz3, cval,
-                      {.size = 30.0f, .marker = sextant::MarkerStyle::Circle,
-                       .colorbar = true, .name = "energy"});
+                      {
+                          .size = 30.0f, .marker = sextant::MarkerStyle::Circle,
+                          .colorbar = true, .name = "energy"
+                      });
         ax->legend();
     }
 
-    // 8 — the cue and the order at once: a cloud threaded through a
-    // translucent sheet, under perspective, with `depthshade` on. Distance
-    // darkens a marker exactly as a normal shades a surface cell, and the
-    // markers on the far side of the sheet are drawn behind it in both
-    // outputs -- the raster path by the depth buffer and the SVG by
-    // point_vs_polygon().
+    // 8 — a cloud through a translucent sheet under perspective with
+    // `depthshade`; far-side markers are behind the sheet in both outputs.
     {
         auto ax = fig->add_subplot3d(2, 4, 8);
         ax->set_title("depth shading, through a sheet")
-          .set_xtitle("x").set_ytitle("y").set_ztitle("z")
-          .set_projection(sextant::Projection::Perspective)
-          .set_fov(40.0)
-          .set_view(-58.0, 18.0);
+                .set_xtitle("x").set_ytitle("y").set_ztitle("z")
+                .set_projection(sextant::Projection::Perspective)
+                .set_fov(40.0)
+                .set_view(-58.0, 18.0);
         ax->surface(sextant::PlaneOrientation::YZ, sheet_u, sheet_v, sheet_h,
                     {.color = sextant::Color::Cyan, .alpha = 0.45f, .shading = 0.3f});
         ax->scatter3d(dx, dy, dz,
-                      {.color = sextant::Color::Purple, .size = 22.0f,
-                       .depthshade = 0.7f, .name = "cloud"});
+                      {
+                          .color = sextant::Color::Purple, .size = 22.0f,
+                          .depthshade = 0.7f, .name = "cloud"
+                      });
         ax->legend();
     }
 
@@ -486,57 +465,28 @@ static void test_axes3d_gallery() {
 }
 
 // -------------------------------------------------------------------------
-// Translucency across every pair of 3D kinds (v1.0 step 8)
+// Translucency across every pair of 3D kinds
 // -------------------------------------------------------------------------
-// Six cells, one per pair a scene can hold: plane x plane, bar x bar,
-// surface x surface, and each kind against each of the other two. Every cell
-// is built so the two objects **genuinely interleave** -- they cross, or
-// alternate in depth, rather than one clearing the other -- because a pair
-// that is separated in depth has a right whole-object order and would pass on
-// a renderer that has none.
-//
-// What the suite is for is the *orbit*, not the still. Depth peeling composites
-// each pixel in the order that pixel's own ray meets the geometry, so:
-//
-//   - Nothing may pop. Turn slowly through a full circle and past both poles.
-//     A pair whose order flips as a whole -- a sheet that suddenly paints over
-//     bars it was behind a degree ago -- is the whole-object heuristic showing,
-//     and is exactly what this step removes. Peeling has no whole-object order
-//     to flip.
-//   - **Both sides of every crossing must be right at once.** In cells 1, 3
-//     and 5 the two objects cross; near the crossing line the colour must
-//     change over as the near object changes, along the line itself and not at
-//     the edge of one object's silhouette.
-//   - The colour must not depend on which object was added first. Nothing here
-//     is drawn in a fixed sequence any more; if a cell looks like it is, say so.
-//   - Grazing elevation is the case the step exists for. Take each cell to an
-//     elevation near zero, where depth is decided by (x, y) alone and two
-//     objects over the same footprint have exactly coincident depth ranges.
-//     That is where a whole-object order has no answer at all.
-//
-// Compare against `SEXTANT_PEEL_LAYERS=0`, which restores the old whole-object
-// order in the same binary. Every cell here should visibly change; one that
-// does not is a cell whose objects were separated in depth after all, and is
-// not testing what it is here to test.
-//
-// **The SVG is saved deliberately, and it is wrong.** It is byte-identical
-// under both settings, because the vector path has no depth test and still
-// paints whole objects in a sorted order — so this figure is also the clearest
-// statement of what step 8 does *not* fix, and of why §10's divergence is now
-// one-sided rather than gone. Open both files side by side.
+// Six cells, one per pair of kinds, each built so the two objects genuinely
+// interleave in depth. Orbit slowly, including past both poles and near zero
+// elevation:
+//   - nothing may pop (no whole-object order flips);
+//   - both sides of every crossing (cells 1, 3, 5) must be right;
+//   - colors must not depend on insertion order.
+// Compare with SEXTANT_PEEL_LAYERS=0 (whole-object order): every cell should
+// change. The SVG is saved too and is expected to be wrong in places (the
+// vector path has no depth test).
 // -------------------------------------------------------------------------
-// line3d (v1.0 step 13). Four cells, each chosen for one thing that can only
-// be judged by looking at it.
+// line3d gallery: four cells, each judged by eye.
 static void test_line3d_gallery() {
-    auto fig = sextant::Figure::create({ .width = 1500, .height = 820,
-                                         .title = "sextant — line3d" });
+    auto fig = sextant::Figure::create({
+        .width = 1500, .height = 820,
+        .title = "sextant — line3d"
+    });
     fig->suptitle("line3d — a path in the scene");
 
-    // ---- A spiral climbing in z, coloured by its own parameter. The long
-    // smooth ramp is what shows that a segment interpolates the *value* and
-    // looks the colour up: every colour along it is one the bar beside it
-    // carries, where an RGB chord between distant entries would run through
-    // browns that appear nowhere on the scale.
+    // ---- A spiral colored by its parameter: every color along it must be on
+    // the colorbar (values are interpolated, not RGB).
     std::vector<double> sx, sy, sz, st;
     for (int i = 0; i <= 320; ++i) {
         const double t = i / 320.0;
@@ -546,21 +496,18 @@ static void test_line3d_gallery() {
         sy.push_back(r * std::sin(a));
         sz.push_back(-1.0 + 2.0 * t);
         st.push_back(t * 100.0);
-    }
-    {
+    } {
         auto ax = fig->add_subplot3d(2, 2, 1);
         ax->set_title("a coloured trajectory")
-          .set_xtitle("x").set_ytitle("y").set_ztitle("z")
-          .set_view(-58.0, 22.0);
+                .set_xtitle("x").set_ytitle("y").set_ztitle("z")
+                .set_view(-58.0, 22.0);
         ax->line3d(sx, sy, sz, st,
                    {.linewidth = 3.0f, .colorbar = true, .name = "time"});
         ax->legend();
     }
 
-    // ---- `loop`, and the miter. A five-pointed star closed by the option
-    // rather than by a repeated point, drawn thick enough that an unmitered
-    // join would show a wedge of background at every one of its ten corners --
-    // five of them reflex, which is where a miter has the most to do.
+    // ---- `loop` and the miter: a thick five-pointed star; unmitered joins
+    // would show wedges at its ten corners.
     {
         std::vector<double> px, py, pz;
         for (int k = 0; k < 10; ++k) {
@@ -572,60 +519,58 @@ static void test_line3d_gallery() {
         }
         auto ax = fig->add_subplot3d(2, 2, 2);
         ax->set_title("loop, and the mitered bends")
-          .set_xtitle("x").set_ytitle("y").set_ztitle("z")
-          .set_view(-20.0, 62.0);
+                .set_xtitle("x").set_ytitle("y").set_ztitle("z")
+                .set_view(-20.0, 62.0);
         ax->line3d(px, py, pz,
-                   {.color = sextant::Color::Purple, .linewidth = 9.0f,
-                    .loop = true, .name = "closed"});
+                   {
+                       .color = sextant::Color::Purple, .linewidth = 9.0f,
+                       .loop = true, .name = "closed"
+                   });
         ax->legend();
     }
 
-    // ---- **§4's fork, in one picture.** A zigzag receding from the camera
-    // under perspective, with a scatter3d on the same points. The path's near
-    // stretches are visibly thicker than its far ones because a line's width
-    // is a length *in the scene*; every marker is the same size at every
-    // depth because a marker is a symbol. Two rules, one camera, side by side.
-    // Two bars of identical width at opposite ends of the box's depth, with
-    // markers of identical size on both. Laid out as a *comparison* rather
-    // than as a scene: a single receding path makes the claim too, but the
-    // camera has to be nearly edge-on for the depth spread to be large, and
-    // edge-on is exactly where the zigzag collapses and nothing is legible.
-    // Two bars put the near and far widths side by side at the same instant,
-    // which is the only way the difference can be read off rather than
-    // believed.
+    // ---- Scene-space width vs pixel-size markers: two paths of equal width at
+    // opposite ends of the box's depth, with equal-size markers on both. Under
+    // perspective the near path is thicker; the markers match.
     {
-        const std::vector<double> ny{ -0.7, 0.7 }, fy{ -0.7, 0.7 };
-        const std::vector<double> nx{ 0.8, 0.8 },  fx{ -0.8, -0.8 };
-        const std::vector<double> nz{ 0.3, 0.3 },  fz{ -0.3, -0.3 };
+        const std::vector<double> ny{-0.7, 0.7}, fy{-0.7, 0.7};
+        const std::vector<double> nx{0.8, 0.8}, fx{-0.8, -0.8};
+        const std::vector<double> nz{0.3, 0.3}, fz{-0.3, -0.3};
         auto ax = fig->add_subplot3d(2, 2, 3);
         ax->set_title("a width in the scene, a marker in pixels")
-          .set_xtitle("x").set_ytitle("y").set_ztitle("z")
-          .set_projection(sextant::Projection::Perspective)
-          .set_fov(38.0)
-          .set_view(-22.0, 16.0);
+                .set_xtitle("x").set_ytitle("y").set_ztitle("z")
+                .set_projection(sextant::Projection::Perspective)
+                .set_fov(38.0)
+                .set_view(-22.0, 16.0);
         ax->line3d(nx, ny, nz,
-                   {.color = sextant::Color::Blue, .linewidth = 9.0f,
-                    .name = "near path"});
+                   {
+                       .color = sextant::Color::Blue, .linewidth = 9.0f,
+                       .name = "near path"
+                   });
         ax->line3d(fx, fy, fz,
-                   {.color = sextant::Color::Blue, .linewidth = 9.0f,
-                    .show_legend = false});
+                   {
+                       .color = sextant::Color::Blue, .linewidth = 9.0f,
+                       .show_legend = false
+                   });
         ax->scatter3d(nx, ny, nz,
-                      {.color = sextant::Color::Orange, .size = 18.0f,
-                       .marker = sextant::MarkerStyle::Square,
-                       .name = "markers, both depths"});
+                      {
+                          .color = sextant::Color::Orange, .size = 18.0f,
+                          .marker = sextant::MarkerStyle::Square,
+                          .name = "markers, both depths"
+                      });
         ax->scatter3d(fx, fy, fz,
-                      {.color = sextant::Color::Orange, .size = 18.0f,
-                       .marker = sextant::MarkerStyle::Square,
-                       .show_legend = false});
+                      {
+                          .color = sextant::Color::Orange, .size = 18.0f,
+                          .marker = sextant::MarkerStyle::Square,
+                          .show_legend = false
+                      });
         ax->legend();
     }
 
-    // ---- Depth shading, and the order. A path woven through a translucent
-    // sheet: the stretches behind it are drawn behind it in both outputs --
-    // the raster path by the depth buffer, the SVG by stroke_vs_polygon() --
-    // and `depthshade` darkens the far end of the run.
+    // ---- A path woven through a translucent sheet, with `depthshade`: the
+    // stretches behind it stay behind it in both outputs.
     {
-        std::vector<double> wu{ -1.0, 0.0, 1.0 }, wv{ -1.0, 0.0, 1.0 };
+        std::vector<double> wu{-1.0, 0.0, 1.0}, wv{-1.0, 0.0, 1.0};
         std::vector<double> wh(9, 0.0);
         std::vector<double> wx, wy, wz;
         for (int i = 0; i <= 24; ++i) {
@@ -636,15 +581,17 @@ static void test_line3d_gallery() {
         }
         auto ax = fig->add_subplot3d(2, 2, 4);
         ax->set_title("through a sheet, with depth shading")
-          .set_xtitle("x").set_ytitle("y").set_ztitle("z")
-          .set_projection(sextant::Projection::Perspective)
-          .set_fov(44.0)
-          .set_view(-54.0, 18.0);
+                .set_xtitle("x").set_ytitle("y").set_ztitle("z")
+                .set_projection(sextant::Projection::Perspective)
+                .set_fov(44.0)
+                .set_view(-54.0, 18.0);
         ax->surface(sextant::PlaneOrientation::XY, wu, wv, wh,
                     {.color = sextant::Color::Cyan, .alpha = 0.4f, .shading = 0.25f});
         ax->line3d(wx, wy, wz,
-                   {.color = sextant::Color::Red, .linewidth = 6.0f,
-                    .depthshade = 0.75f, .name = "woven"});
+                   {
+                       .color = sextant::Color::Red, .linewidth = 6.0f,
+                       .depthshade = 0.75f, .name = "woven"
+                   });
         ax->legend();
     }
 
@@ -655,66 +602,67 @@ static void test_line3d_gallery() {
 }
 
 // -------------------------------------------------------------------------
-// 3D error bars (v1.0 step 17). What to look for, cell by cell:
+// 3D error bars. What to look for:
 //
-//   1. Whiskers and caps on a cloud: asymmetric flat z caps, one-sided arrow x
-//      caps. Orbit it -- every cap and its whisker turn together to face you,
-//      and an x whisker seen end-on disappears.
-//   2. Blocks. Left: box data on y and z, so x is `boxwidth` wide. Right: box
-//      data on all three axes, so `boxwidth` plays no part. Both translucent by
-//      default, with edges at edge_alpha over faces at box_alpha, so the
-//      marker inside stays visible.
-//   3. A path with caps and blocks under perspective: the near bars are
-//      bigger as a whole than the far ones -- cap, block and width together --
-//      because every pixel length is a length in the scene.
-//   4. A colormapped cloud: unset error-bar colour is black, and depthshade
-//      darkens the far bars with their markers.
+//   1. A cloud with asymmetric flat z caps and one-sided arrow x caps. Orbit:
+//      caps turn with their whisker; an end-on x whisker disappears.
+//   2. Blocks: box data on y and z (x is `boxwidth`), and on all three axes.
+//      Translucent, so the marker inside shows.
+//   3. A path with caps and blocks under perspective: near bars are larger as
+//      a whole.
+//   4. A colormapped cloud: error bars default to black and darken with depth.
 static void test_errorbar3d_gallery() {
-    auto fig = sextant::Figure::create({ .width = 1500, .height = 860,
-                                         .title = "sextant — 3D error bars" });
+    auto fig = sextant::Figure::create({
+        .width = 1500, .height = 860,
+        .title = "sextant — 3D error bars"
+    });
     fig->suptitle("3D error bars — whiskers, caps and blocks");
 
-    const std::vector<double> x{ -0.8, -0.3, 0.2, 0.7 };
-    const std::vector<double> y{ 0.6, -0.4, 0.3, -0.7 };
-    const std::vector<double> z{ -0.5, 0.2, 0.6, -0.1 };
-
-    {
-        const std::vector<double> zlo{ 0.2, 0.35, 0.15, 0.3 }, zhi{ 0.4, 0.15, 0.3, 0.25 };
-        const std::vector<double> xhi{ 0.3, 0.0, 0.25, 0.2 };
+    const std::vector<double> x{-0.8, -0.3, 0.2, 0.7};
+    const std::vector<double> y{0.6, -0.4, 0.3, -0.7};
+    const std::vector<double> z{-0.5, 0.2, 0.6, -0.1}; {
+        const std::vector<double> zlo{0.2, 0.35, 0.15, 0.3}, zhi{0.4, 0.15, 0.3, 0.25};
+        const std::vector<double> xhi{0.3, 0.0, 0.25, 0.2};
         auto ax = fig->add_subplot3d(2, 2, 1);
         ax->set_title("caps: flat on z, arrow one-sided on x")
-          .set_xtitle("x").set_ytitle("y").set_ztitle("z")
-          .set_view(-58.0, 22.0);
-        ax->scatter3d(x, y, z, { .z_cap_lo = zlo, .z_cap_hi = zhi },
-                      {.color = sextant::Color::Blue, .size = 12.0f, .name = "flat z",
-                       .errorbar = {.linewidth = 2.0f, .capsize = 12.0f}});
+                .set_xtitle("x").set_ytitle("y").set_ztitle("z")
+                .set_view(-58.0, 22.0);
+        ax->scatter3d(x, y, z, {.z_cap_lo = zlo, .z_cap_hi = zhi},
+                      {
+                          .color = sextant::Color::Blue, .size = 12.0f, .name = "flat z",
+                          .errorbar = {.linewidth = 2.0f, .capsize = 12.0f}
+                      });
         std::vector<double> x2 = x;
-        for (double& v : x2) v -= 0.1;
-        ax->scatter3d(x2, z, y, { .x_cap_hi = xhi },
-                      {.color = sextant::Color::Orange, .size = 12.0f, .name = "arrow x",
-                       .errorbar = {.linewidth = 2.0f, .capsize = 12.0f,
-                                    .capstyle = sextant::CapStyle::Arrow}});
+        for (double& v: x2) v -= 0.1;
+        ax->scatter3d(x2, z, y, {.x_cap_hi = xhi},
+                      {
+                          .color = sextant::Color::Orange, .size = 12.0f, .name = "arrow x",
+                          .errorbar = {
+                              .linewidth = 2.0f, .capsize = 12.0f,
+                              .capstyle = sextant::CapStyle::Arrow
+                          }
+                      });
         ax->legend();
-    }
-
-    {
-        const std::vector<double> ly{ -0.6, 0.6 }, lz{ 0.0, 0.0 };
-        const std::vector<double> left_x{ -0.5, -0.5 }, right_x{ 0.5, 0.5 };
-        const std::vector<double> b2{ 0.25, 0.35 }, b3{ 0.2, 0.3 };
+    } {
+        const std::vector<double> ly{-0.6, 0.6}, lz{0.0, 0.0};
+        const std::vector<double> left_x{-0.5, -0.5}, right_x{0.5, 0.5};
+        const std::vector<double> b2{0.25, 0.35}, b3{0.2, 0.3};
         auto ax = fig->add_subplot3d(2, 2, 2);
         ax->set_title("blocks: boxwidth on x (left), data on all three (right)")
-          .set_xtitle("x").set_ytitle("y").set_ztitle("z")
-          .set_view(-40.0, 25.0);
-        ax->scatter3d(left_x, ly, lz, { .y_box_lo = b2, .z_box_lo = b3 },
-                      {.color = sextant::Color::Green, .size = 14.0f, .name = "y, z data",
-                       .errorbar = {.boxwidth = 30.0f}});
-        ax->scatter3d(right_x, ly, lz, { .x_box_lo = b3, .y_box_lo = b2, .z_box_hi = b3 },
-                      {.color = sextant::Color::Red, .size = 14.0f, .name = "x, y, z data",
-                       .errorbar = {.boxwidth = 30.0f}});
+                .set_xtitle("x").set_ytitle("y").set_ztitle("z")
+                .set_view(-40.0, 25.0);
+        ax->scatter3d(left_x, ly, lz, {.y_box_lo = b2, .z_box_lo = b3},
+                      {
+                          .color = sextant::Color::Green, .size = 14.0f, .name = "y, z data",
+                          .errorbar = {.boxwidth = 30.0f}
+                      });
+        ax->scatter3d(right_x, ly, lz, {.x_box_lo = b3, .y_box_lo = b2, .z_box_hi = b3},
+                      {
+                          .color = sextant::Color::Red, .size = 14.0f, .name = "x, y, z data",
+                          .errorbar = {.boxwidth = 30.0f}
+                      });
         ax->legend();
-    }
-
-    {
+    } {
         std::vector<double> px, py, pz, zc, yb;
         for (int i = 0; i < 9; ++i) {
             const double t = i / 8.0;
@@ -726,17 +674,17 @@ static void test_errorbar3d_gallery() {
         }
         auto ax = fig->add_subplot3d(2, 2, 3);
         ax->set_title("a path under perspective: near bars bigger as a whole")
-          .set_xtitle("x").set_ytitle("y").set_ztitle("z")
-          .set_projection(sextant::Projection::Perspective)
-          .set_fov(46.0)
-          .set_view(-12.0, 18.0);
-        ax->line3d(px, py, pz, { .y_box_lo = yb, .z_cap_lo = zc },
-                   {.color = sextant::Color::Purple, .linewidth = 3.0f, .name = "path",
-                    .errorbar = {.linewidth = 2.0f, .capsize = 14.0f, .boxwidth = 14.0f}});
+                .set_xtitle("x").set_ytitle("y").set_ztitle("z")
+                .set_projection(sextant::Projection::Perspective)
+                .set_fov(46.0)
+                .set_view(-12.0, 18.0);
+        ax->line3d(px, py, pz, {.y_box_lo = yb, .z_cap_lo = zc},
+                   {
+                       .color = sextant::Color::Purple, .linewidth = 3.0f, .name = "path",
+                       .errorbar = {.linewidth = 2.0f, .capsize = 14.0f, .boxwidth = 14.0f}
+                   });
         ax->legend();
-    }
-
-    {
+    } {
         std::vector<double> cx, cy, cz, cv, e;
         for (int i = 0; i < 16; ++i) {
             const double a = i * 0.785398;
@@ -748,11 +696,13 @@ static void test_errorbar3d_gallery() {
         }
         auto ax = fig->add_subplot3d(2, 2, 4);
         ax->set_title("colormapped: black bars, depth-shaded")
-          .set_xtitle("x").set_ytitle("y").set_ztitle("z")
-          .set_view(-50.0, 20.0);
-        ax->scatter3d(cx, cy, cz, cv, { .x_cap_lo = e, .y_cap_lo = e, .z_cap_lo = e },
-                      {.size = 12.0f, .depthshade = 0.7f, .colorbar = true, .name = "value",
-                       .errorbar = {.capsize = 8.0f}});
+                .set_xtitle("x").set_ytitle("y").set_ztitle("z")
+                .set_view(-50.0, 20.0);
+        ax->scatter3d(cx, cy, cz, cv, {.x_cap_lo = e, .y_cap_lo = e, .z_cap_lo = e},
+                      {
+                          .size = 12.0f, .depthshade = 0.7f, .colorbar = true, .name = "value",
+                          .errorbar = {.capsize = 8.0f}
+                      });
         ax->legend();
     }
 
@@ -763,40 +713,24 @@ static void test_errorbar3d_gallery() {
 }
 
 // -------------------------------------------------------------------------
-// surface_tri (v1.0 step 14). Four cells, each chosen for one thing that can
-// only be judged by looking at it.
+// surface_tri gallery. What to look for:
 //
-// What to look for, cell by cell:
-//
-//   1. **The colour does not jump at an edge; the light does.** That is the
-//      whole of step 14's colour rule in one picture -- a value is measured at
-//      a vertex and interpolates across the triangle, while the shade encodes
-//      the geometry, which really is faceted. Scattered samples, so the mesh
-//      is what a scan actually is and no grid could have held it.
-//   2. The same claim with the facets made large enough to count. If the
-//      colour ever stepped at a facet boundary, or the light ever graded
-//      across one, it would be unmissable here.
-//   3. A Mobius strip, which is the one surface that **cannot** be wound
-//      consistently. Every triangle is lit by |n.l| and nothing is ever
-//      backface-culled, so it reads as a continuous ribbon; under max(0, n.l)
-//      half of it would be black. The wireframe is on, so every interior edge
-//      is drawn twice -- which costs a duplicate line and buys no boundary
-//      special case anywhere.
-//   4. Translucency and self-occlusion, which is where a mesh is harder than
-//      a grid surface: a grid's cells are separated by axis-aligned planes and
-//      a mesh's faces are not, so the sorted fallback is a heuristic and depth
-//      peeling is what answers it exactly. Compare the PNG against the SVG,
-//      and the PNG against SEXTANT_PEEL_LAYERS=1.
+//   1. Color doesn't jump at an edge; the light does (scattered samples).
+//   2. The same with large facets: no color steps at facet boundaries.
+//   3. A Mobius strip (no consistent winding): it reads as a continuous
+//      ribbon because shading is two-sided. Wireframe on.
+//   4. Translucency and self-occlusion: compare the PNG with the SVG, and with
+//      SEXTANT_PEEL_LAYERS=1.
 static void test_surface_tri_gallery() {
-    auto fig = sextant::Figure::create({ .width = 1500, .height = 820,
-                                         .title = "sextant — surface_tri" });
+    auto fig = sextant::Figure::create({
+        .width = 1500, .height = 820,
+        .title = "sextant — surface_tri"
+    });
     fig->suptitle("surface_tri — a sheet on a triangulated mesh");
 
     constexpr double kPi = 3.14159265358979;
 
-    // ---- 1. A scan: scattered samples of a smooth field, triangulated at
-    // ingest by the `orient` overload. Nothing here is on a grid, which is the
-    // case `surface` cannot take at all without the caller resampling first.
+    // ---- 1. Scattered samples of a smooth field, triangulated at ingest.
     {
         std::vector<double> x, y, z, c;
         unsigned seed = 7u;
@@ -809,19 +743,20 @@ static void test_surface_tri_gallery() {
             const double v = -1.0 + 2.0 * rnd();
             const double r = std::sqrt(u * u + v * v);
             const double h = 0.85 * std::exp(-1.8 * r * r) * std::cos(5.5 * r);
-            x.push_back(u); y.push_back(v); z.push_back(h); c.push_back(h);
+            x.push_back(u);
+            y.push_back(v);
+            z.push_back(h);
+            c.push_back(h);
         }
         auto ax = fig->add_subplot3d(2, 2, 1);
         ax->set_title("a scan, triangulated at ingest")
-          .set_xtitle("x").set_ytitle("y").set_ztitle("z")
-          .set_view(-58.0, 26.0);
+                .set_xtitle("x").set_ytitle("y").set_ztitle("z")
+                .set_view(-58.0, 26.0);
         ax->surface_tri(x, y, z, sextant::PlaneOrientation::XY, c,
                         {.colorbar = true, .name = "height", .shading = 0.35f});
     }
 
-    // ---- 2. The same rule with the facets big enough to count: a coarse dome
-    // whose colour ramps along x + y, diagonally across the triangulation, so
-    // the ramp and the facet edges are nowhere parallel.
+    // ---- 2. A coarse dome with a color ramp diagonal to the triangulation.
     {
         constexpr int N = 5;
         std::vector<double> x, y, z, c;
@@ -838,19 +773,22 @@ static void test_surface_tri_gallery() {
         for (std::uint32_t i = 0; i + 1 < N; ++i)
             for (std::uint32_t j = 0; j + 1 < N; ++j) {
                 const std::uint32_t a = i * N + j;
-                tri.push_back(a);         tri.push_back(a + N); tri.push_back(a + N + 1);
-                tri.push_back(a); tri.push_back(a + N + 1);     tri.push_back(a + 1);
+                tri.push_back(a);
+                tri.push_back(a + N);
+                tri.push_back(a + N + 1);
+                tri.push_back(a);
+                tri.push_back(a + N + 1);
+                tri.push_back(a + 1);
             }
         auto ax = fig->add_subplot3d(2, 2, 2);
         ax->set_title("colour per vertex, light per face")
-          .set_xtitle("x").set_ytitle("y").set_ztitle("z")
-          .set_view(-40.0, 30.0);
+                .set_xtitle("x").set_ytitle("y").set_ztitle("z")
+                .set_view(-40.0, 30.0);
         ax->surface_tri(x, y, z, tri, c,
                         {.colorbar = true, .name = "x + y", .shading = 0.85f});
     }
 
-    // ---- 3. A Mobius strip: the surface that has no consistent winding, so
-    // there is no orientation for max(0, n.l) to be right about. Wireframe on.
+    // ---- 3. A Mobius strip. Wireframe on.
     {
         constexpr int M = 44;
         std::vector<double> x, y, z;
@@ -867,41 +805,40 @@ static void test_surface_tri_gallery() {
         }
         for (std::uint32_t k = 0; k < M; ++k) {
             const std::uint32_t a = k * 2, b = a + 1;
-            // The closing rung joins the *flipped* first one, which is what
-            // makes this a Mobius strip rather than a cylinder -- and is
-            // exactly why no winding of these faces can be consistent.
+            // The closing rung joins the flipped first one (Mobius, not a
+            // cylinder).
             const std::uint32_t nk = (k + 1) % M;
             const bool wrap = (k + 1 == M);
             const std::uint32_t c = wrap ? nk * 2 + 1 : nk * 2;
-            const std::uint32_t d = wrap ? nk * 2     : nk * 2 + 1;
-            tri.push_back(a); tri.push_back(b); tri.push_back(d);
-            tri.push_back(a); tri.push_back(d); tri.push_back(c);
+            const std::uint32_t d = wrap ? nk * 2 : nk * 2 + 1;
+            tri.push_back(a);
+            tri.push_back(b);
+            tri.push_back(d);
+            tri.push_back(a);
+            tri.push_back(d);
+            tri.push_back(c);
         }
         auto ax = fig->add_subplot3d(2, 2, 3);
         ax->set_title("no consistent winding, and the wireframe")
-          .set_xtitle("x").set_ytitle("y").set_ztitle("z")
-          .set_view(-36.0, 34.0);
+                .set_xtitle("x").set_ytitle("y").set_ztitle("z")
+                .set_view(-36.0, 34.0);
         ax->surface_tri(x, y, z, tri,
-                        {.color = sextant::Color::Orange, .name = "Mobius",
-                         .shading = 0.75f, .edges = true,
-                         .edge_alpha = 0.7f, .edge_linewidth = 1.0f});
+                        {
+                            .color = sextant::Color::Orange, .name = "Mobius",
+                            .shading = 0.75f, .edges = true,
+                            .edge_alpha = 0.7f, .edge_linewidth = 1.0f
+                        });
         ax->legend();
     }
 
     // ---- 4. Translucent, folded over itself, and crossing an opaque sheet.
-    // The mesh occludes *itself* where the fold passes in front, which is the
-    // case a whole-object order cannot express at all.
     {
         constexpr int NU = 72, NV = 8;
         std::vector<double> x, y, z, c;
         std::vector<std::uint32_t> tri;
         for (int i = 0; i < NU; ++i)
             for (int j = 0; j < NV; ++j) {
-                // A helical ramp: two full turns, so the sheet passes
-                // over itself twice in the same picture. A closed tube
-                // would occlude itself just as much and read as a solid;
-                // this is the shape where the overlap is visible as an
-                // overlap.
+                // A two-turn helical ramp, so the self-overlap is visible.
                 const double t = 4.0 * kPi * i / (NU - 1);
                 const double rad = 0.22 + 0.78 * j / (NV - 1);
                 x.push_back(rad * std::cos(t));
@@ -912,24 +849,32 @@ static void test_surface_tri_gallery() {
         for (std::uint32_t i = 0; i + 1 < NU; ++i)
             for (std::uint32_t j = 0; j + 1 < NV; ++j) {
                 const std::uint32_t a = i * NV + j;
-                tri.push_back(a);      tri.push_back(a + NV); tri.push_back(a + NV + 1);
-                tri.push_back(a); tri.push_back(a + NV + 1);  tri.push_back(a + 1);
+                tri.push_back(a);
+                tri.push_back(a + NV);
+                tri.push_back(a + NV + 1);
+                tri.push_back(a);
+                tri.push_back(a + NV + 1);
+                tri.push_back(a + 1);
             }
-        const std::vector<double> su{ -1.0, 0.0, 1.0 }, sv{ -1.0, 0.0, 1.0 };
+        const std::vector<double> su{-1.0, 0.0, 1.0}, sv{-1.0, 0.0, 1.0};
         const std::vector<double> sh(9, 0.0);
 
         auto ax = fig->add_subplot3d(2, 2, 4);
         ax->set_title("translucent, and occluding itself")
-          .set_xtitle("x").set_ytitle("y").set_ztitle("z")
-          .set_projection(sextant::Projection::Perspective)
-          .set_fov(42.0)
-          .set_view(-52.0, 20.0);
+                .set_xtitle("x").set_ytitle("y").set_ztitle("z")
+                .set_projection(sextant::Projection::Perspective)
+                .set_fov(42.0)
+                .set_view(-52.0, 20.0);
         ax->surface(sextant::PlaneOrientation::XY, su, sv, sh,
-                    {.color = sextant::Color::Cyan, .name = "sheet",
-                     .shading = 0.2f});
+                    {
+                        .color = sextant::Color::Cyan, .name = "sheet",
+                        .shading = 0.2f
+                    });
         ax->surface_tri(x, y, z, tri, c,
-                        {.colorbar = true, .name = "angle", .alpha = 0.55f,
-                         .shading = 0.4f});
+                        {
+                            .colorbar = true, .name = "angle", .alpha = 0.55f,
+                            .shading = 0.4f
+                        });
         ax->legend();
     }
 
@@ -950,15 +895,11 @@ static void test_translucent3d() {
             const double y = gy[static_cast<std::size_t>(j)];
             const double r = std::hypot(x, y);
             ripple[static_cast<std::size_t>(i * NV + j)] = 1.6 * std::exp(-r / 2.0) * std::cos(r * 1.7);
-            // A saddle, so the two sheets in cell 3 cross along two lines
-            // rather than touching at a point -- one crossing is easy to
-            // mistake for a silhouette edge, two are not.
+            // A saddle, so the sheets in cell 3 cross along two lines.
             bowl[static_cast<std::size_t>(i * NV + j)] = 0.22 * (x * x - y * y);
         }
 
-    // A field for the planes to carry, so a plane is a picture and not a wash:
-    // where two translucent planes cross, the *contents* have to change over
-    // too, and a flat tint would hide that.
+    // A field for the planes, so crossing contents visibly change over.
     constexpr int NX = 40, NY = 40;
     auto slice_at = [&](double z) {
         std::vector<float> m(static_cast<std::size_t>(NY) * NX);
@@ -967,7 +908,7 @@ static void test_translucent3d() {
                 const double x = -3.0 + 6.0 * c / (NX - 1);
                 const double y = -3.0 + 6.0 * r / (NY - 1);
                 m[static_cast<std::size_t>(r) * NX + c] =
-                    static_cast<float>(std::sin(x + z) * std::cos(y - z));
+                        static_cast<float>(std::sin(x + z) * std::cos(y - z));
             }
         return m;
     };
@@ -978,29 +919,24 @@ static void test_translucent3d() {
     });
     tr->suptitle("Translucent blending, every pair of kinds");
 
-    const sextant::Range ext{ -3.0, 3.0 };
+    const sextant::Range ext{-3.0, 3.0};
 
-    // Viridis is the only colormap there is, so the two planes in a cell are
-    // told apart by *where on the ramp* they sit rather than by which ramp:
-    // one is squeezed into the cool end and one into the warm end, and both
-    // still vary, so a crossing shows a change of hue and not just of value.
-    const sextant::HeatmapOptions kCool{ .vmin = -1.2f, .vmax = 5.0f };
-    const sextant::HeatmapOptions kWarm{ .vmin = -5.0f, .vmax = 1.2f };
+    // The two planes use different ends of viridis, so crossings show a hue
+    // change.
+    const sextant::HeatmapOptions kCool{.vmin = -1.2f, .vmax = 5.0f};
+    const sextant::HeatmapOptions kWarm{.vmin = -5.0f, .vmax = 1.2f};
 
-    // 1. Plane x plane. Two slices at right angles, so they cross along a line
-    //    that runs through the middle of both -- step 7b's own case, and the
-    //    one peeling subsumes rather than sits beside.
+    // 1. Plane x plane: two slices crossing at right angles.
     auto c1 = tr->add_subplot3d(2, 3, 1);
     c1->set_title("Plane x plane (crossing)")
             .set_xtitle("x").set_ytitle("y").set_ztitle("z");
-    c1->plane(sextant::PlaneOrientation::XY, 0.0, { .alpha = 0.6f })
+    c1->plane(sextant::PlaneOrientation::XY, 0.0, {.alpha = 0.6f})
             ->heatmap(slice_at(0.0), NY, NX, ext, ext, kCool);
-    c1->plane(sextant::PlaneOrientation::YZ, 0.0, { .alpha = 0.6f })
+    c1->plane(sextant::PlaneOrientation::YZ, 0.0, {.alpha = 0.6f})
             ->heatmap(slice_at(1.5), NY, NX, ext, ext, kWarm);
 
-    // 2. Bar x bar. The same footprint offset by half a cell, so along any
-    //    horizontal ray the two grids' bars alternate. No whole-object order
-    //    can interleave two lists.
+    // 2. Bar x bar: the same footprint offset by half a cell, so bars
+    // alternate along any horizontal ray.
     std::vector<double> gx2(NU), gy2(NV);
     for (int i = 0; i < NU; ++i) gx2[static_cast<std::size_t>(i)] = gx[static_cast<std::size_t>(i)] + 0.25;
     for (int j = 0; j < NV; ++j) gy2[static_cast<std::size_t>(j)] = gy[static_cast<std::size_t>(j)] + 0.25;
@@ -1008,69 +944,67 @@ static void test_translucent3d() {
     c2->set_title("Bar x bar (interleaved)")
             .set_xtitle("x").set_ytitle("y").set_ztitle("z");
     c2->bar3d(sextant::PlaneOrientation::XY, gx, gy, ripple,
-              { .color = sextant::Color::Orange, .alpha = 0.5f,
-                .width = 0.45f, .depth = 0.45f, .bottom = -1.5 });
+              {
+                  .color = sextant::Color::Orange, .alpha = 0.5f,
+                  .width = 0.45f, .depth = 0.45f, .bottom = -1.5
+              });
     c2->bar3d(sextant::PlaneOrientation::XY, gx2, gy2, bowl,
-              { .color = sextant::Color::Blue, .alpha = 0.5f,
-                .width = 0.45f, .depth = 0.45f, .bottom = -1.5 });
+              {
+                  .color = sextant::Color::Blue, .alpha = 0.5f,
+                  .width = 0.45f, .depth = 0.45f, .bottom = -1.5
+              });
 
-    // 3. Surface x surface. A ripple and a saddle over the same footprint;
-    //    they cross along two curves, and which is in front changes across
-    //    both of them.
+    // 3. Surface x surface: a ripple and a saddle crossing along two curves.
     auto c3 = tr->add_subplot3d(2, 3, 3);
     c3->set_title("Surface x surface (two crossings)")
             .set_xtitle("x").set_ytitle("y").set_ztitle("z");
     c3->surface(sextant::PlaneOrientation::XY, gx, gy, ripple,
-                { .color = sextant::Color::from_hex(0xff5533), .alpha = 0.55f });
+                {.color = sextant::Color::from_hex(0xff5533), .alpha = 0.55f});
     c3->surface(sextant::PlaneOrientation::XY, gx, gy, bowl,
-                { .color = sextant::Color::from_hex(0x3388ff), .alpha = 0.55f });
+                {.color = sextant::Color::from_hex(0x3388ff), .alpha = 0.55f});
 
-    // 4. Plane x bar. A vertical cut *through* the grid rather than beside it,
-    //    so half of every row of bars is in front of the plane and half behind.
-    //    This is the configuration §10 names as the SVG's standing flaw, which
-    //    the PNG now resolves per fragment.
+    // 4. Plane x bar: a vertical cut through the grid.
     auto c4 = tr->add_subplot3d(2, 3, 4);
     c4->set_title("Plane x bar (a cut through the grid)")
             .set_xtitle("x").set_ytitle("y").set_ztitle("z");
     c4->bar3d(sextant::PlaneOrientation::XY, gx, gy, ripple,
-              { .color = sextant::Color::Green, .alpha = 0.5f,
-                .width = 0.8f, .depth = 0.8f, .bottom = -1.5 });
-    c4->plane(sextant::PlaneOrientation::YZ, 0.0, { .alpha = 0.6f })
+              {
+                  .color = sextant::Color::Green, .alpha = 0.5f,
+                  .width = 0.8f, .depth = 0.8f, .bottom = -1.5
+              });
+    c4->plane(sextant::PlaneOrientation::YZ, 0.0, {.alpha = 0.6f})
             ->heatmap(slice_at(0.6), NY, NX, ext, ext, kWarm);
 
-    // 5. Plane x surface. The plane is horizontal and sits at a height the
-    //    sheet passes through, so the sheet is above it in the middle and
-    //    below it at the rim -- a crossing curve, not a silhouette.
+    // 5. Plane x surface: the sheet is above the plane in the middle and below
+    // it at the rim.
     auto c5 = tr->add_subplot3d(2, 3, 5);
     c5->set_title("Plane x surface (crossing)")
             .set_xtitle("x").set_ytitle("y").set_ztitle("z");
     c5->surface(sextant::PlaneOrientation::XY, gx, gy, ripple,
-                { .colormap = true, .cmap = sextant::Colormap::Viridis, .alpha = 0.6f });
-    c5->plane(sextant::PlaneOrientation::XY, 0.35, { .alpha = 0.6f })
+                {.colormap = true, .cmap = sextant::Colormap::Viridis, .alpha = 0.6f});
+    c5->plane(sextant::PlaneOrientation::XY, 0.35, {.alpha = 0.6f})
             ->heatmap(slice_at(0.35), NY, NX, ext, ext, kWarm);
 
-    // 6. Bar x surface. test_surface3d's fourth cell with the separation taken
-    //    out: there the sheet clears every bar tip by 2.5 box units, so a
-    //    whole-object order is exact at elevation 25 and only fails near 0.
-    //    Here the sheet is half the bars' own height, so it runs *inside*
-    //    every bar -- above the grid's floor and below each bar's top, at
-    //    every sample. There is no camera at which a whole-object order works.
+    // 6. Bar x surface: the sheet at half the bars' height, inside every bar,
+    // so no whole-object order works from any camera.
     std::vector<double> midway(NU * NV);
     for (std::size_t k = 0; k < midway.size(); ++k) midway[k] = -1.5 + 0.5 * ripple[k];
     auto c6 = tr->add_subplot3d(2, 3, 6);
     c6->set_title("Bar x surface (sheet inside the bars)")
             .set_xtitle("x").set_ytitle("y").set_ztitle("z");
     c6->bar3d(sextant::PlaneOrientation::XY, gx, gy, ripple,
-              { .color = sextant::Color::Orange, .alpha = 0.5f,
-                .width = 0.7f, .depth = 0.7f, .bottom = -1.5 });
+              {
+                  .color = sextant::Color::Orange, .alpha = 0.5f,
+                  .width = 0.7f, .depth = 0.7f, .bottom = -1.5
+              });
     c6->surface(sextant::PlaneOrientation::XY, gx, gy, midway,
-                { .colormap = true, .cmap = sextant::Colormap::Viridis, .alpha = 0.55f });
+                {.colormap = true, .cmap = sextant::Colormap::Viridis, .alpha = 0.55f});
 
     tr->savefig("test_translucent3d.png");
     tr->savefig("test_translucent3d.svg");
     printf("Saved: test_translucent3d.png/.svg\n");
     printf("Orbit each cell, especially to elevation ~0. Re-run with\n"
-           "SEXTANT_PEEL_LAYERS=0 to see the whole-object order it replaces.\n");
+        "SEXTANT_PEEL_LAYERS=0 to see the whole-object order it replaces.\n");
 
     tr->show();
 }
@@ -1101,9 +1035,7 @@ static void test_savefig() {
     fig->add_subplot(1, 3, 2)
             ->bar(months, sales, {.color = sextant::Color::Cyan, .edgecolor = sextant::Color::Black})
             .set_title("Bar").set_xtitle("month").set_ytitle("units").grid();
-    // The same contours as the gallery cell, reached through the headless
-    // path: the trace, the projection and the label placement all have to work
-    // with no window and no GL context of their own.
+    // The gallery's contours through the headless path (no window, no GL).
     fig->add_subplot(1, 3, 3)
             ->imshow(gauss, R, C, {
                          .cmap = sextant::Colormap::Viridis, .vmin = 0.0f, .vmax = 1.0f, .colorbar = true,
@@ -1161,8 +1093,8 @@ static void test_refresh_before_show() {
            threw ? "true" : "false");
 }
 
-// 5. Live refresh — mutate Axes from the main thread while the background
-// render thread is running, exercising the pattern that used to race.
+// 5. Live refresh — mutate Axes from the main thread while the render thread
+// runs.
 static void test_live_refresh() {
     constexpr int N = 100;
     std::vector<double> x(N);
@@ -1210,9 +1142,7 @@ static void test_suptitle_layout() {
     ax2->line(x, y, {.color = sextant::Color::Red});
     ax3->line(x, y, {.color = sextant::Color::Green});
     ax4->line(x, y, {.color = sextant::Color::Purple});
-    // Deliberately no titles/xtitles/ytitles anywhere: the layout should
-    // reserve nothing for them, which is what the fixed margins could only
-    // approximate and only when tight_layout was asked for.
+    // No titles anywhere: the layout should reserve nothing for them.
 
     fig->savefig("test_suptitle_tight.png");
     // Fig->show();
@@ -1241,10 +1171,8 @@ static void test_widget_panel() {
     fig->show(true); // panel edits apply live via the window thread's own per-frame drain
 }
 
-// 12. Frame-driven resize -- the window grows so that the *plot frame* becomes
-// a requested size, with the menu bar and Cosmetic column added on top of the
-// derived figure size. Interactive; the headless half is asserted in
-// sextant_layout_test.
+// 12. Frame-driven resize: the window grows so the plot frame gets the
+// requested size. Interactive; the headless half is in sextant_layout_test.
 static void test_frame_resize() {
     constexpr int N = 120;
     std::vector<double> x(N), y(N);
@@ -1279,8 +1207,7 @@ static void test_frame_resize() {
     std::cin.get();
 }
 
-// Subplot spans (post-step-10.5) -- one 3x3 grid, four subplots that cover
-// more than one cell and two that do not, one of those 3D:
+// Subplot spans: one 3x3 grid with four spans and two single cells (one 3D):
 //
 //     +-------+-------+-------+
 //     |       |   2   |  3 3D |
@@ -1290,18 +1217,15 @@ static void test_frame_resize() {
 //     |         {7,9}         |
 //     +-------+-------+-------+
 //
-// Gaps are non-zero on purpose, so a span visibly takes in the gaps it covers.
-// The layout itself is asserted headlessly (sextant_layout_test,
-// test_subplot_spans); what to check here is what only a window shows:
-//   * each span's frame lines up with the frames beside and above it
-//     ({1,4}'s bottom with {5,6}'s, {7,9}'s left and right with the columns');
-//   * clicking a span anywhere, including on a gap *inside* it, selects it and
-//     outlines the whole span; a gap between two separate subplots selects
-//     nothing;
-//   * the menu's subplot combo lists spans by their first cell (Axis 1, 5, 7);
-//   * Navigate pans/zooms a span, and orbits cell 3, only while selected;
-//   * hover hints over every span, and the heatmap's colorbar beside {5,6};
-//   * File > Resize to plot frame with a span selected sizes *that* frame;
+// Non-zero gaps, so spans visibly include them. Check (layout itself is
+// tested in sextant_layout_test):
+//   * span frames line up with their neighbours;
+//   * clicking anywhere in a span (including inner gaps) selects and outlines
+//     it; a gap between subplots selects nothing;
+//   * the subplot combo lists spans by first cell (Axis 1, 5, 7);
+//   * Navigate works on a span, and orbits cell 3, only while selected;
+//   * hover hints everywhere, and the heatmap's colorbar beside {5,6};
+//   * File > Resize to plot frame sizes the selected span's frame;
 //   * the saved PNG/SVG match the window.
 static void test_subplot_spans() {
     constexpr int N = 240;
@@ -1316,7 +1240,10 @@ static void test_subplot_spans() {
     std::mt19937 rng(7);
     std::normal_distribution<double> nd(0.0, 1.0);
     std::vector<double> sx(150), sy(150);
-    for (std::size_t i = 0; i < sx.size(); ++i) { sx[i] = nd(rng); sy[i] = 0.6 * sx[i] + 0.5 * nd(rng); }
+    for (std::size_t i = 0; i < sx.size(); ++i) {
+        sx[i] = nd(rng);
+        sy[i] = 0.6 * sx[i] + 0.5 * nd(rng);
+    }
 
     constexpr int R = 30, C = 90;
     std::vector<float> field(R * C);
@@ -1333,21 +1260,25 @@ static void test_subplot_spans() {
         for (int j = 0; j < SV; ++j)
             sz[static_cast<std::size_t>(i) * SV + j] = std::exp(-(su[i] * su[i] + sv[j] * sv[j]) / 4.0);
 
-    auto fig = sextant::Figure::create({.width = 1200, .height = 820, .title = "Subplot spans",
-                                        .subplot_col_gap = 18.0f, .subplot_row_gap = 14.0f});
+    auto fig = sextant::Figure::create({
+        .width = 1200, .height = 820, .title = "Subplot spans",
+        .subplot_col_gap = 18.0f, .subplot_row_gap = 14.0f
+    });
     fig->suptitle("Subplot spans on one 3x3 grid");
 
     // The first call fixes the grid; every later one is shape-less.
     fig->add_subplot(3, 3, {1, 4})
-       ->line(t, s1, {.color = sextant::Color::Blue, .linewidth = 2.0f, .name = "damped", .show_legend = false})
-        .line(t, s2, {.color = sextant::Color::Red, .linestyle = sextant::LineStyle::Dashed,
-                      .name = "slow"})
-        .set_title("{1, 4}: two rows tall").set_xtitle("t").set_ytitle("signal")
-        .legend().grid();
+            ->line(t, s1, {.color = sextant::Color::Blue, .linewidth = 2.0f, .name = "damped", .show_legend = false})
+            .line(t, s2, {
+                      .color = sextant::Color::Red, .linestyle = sextant::LineStyle::Dashed,
+                      .name = "slow"
+                  })
+            .set_title("{1, 4}: two rows tall").set_xtitle("t").set_ytitle("signal")
+            .legend().grid();
 
     fig->add_subplot(2)
-       ->scatter(sx, sy, {.color = sextant::Color::Green, .name = "something", .alpha = 0.6f})
-        .set_title("cell 2").set_xtitle("x").set_ytitle("y");
+            ->scatter(sx, sy, {.color = sextant::Color::Green, .name = "something", .alpha = 0.6f})
+            .set_title("cell 2").set_xtitle("x").set_ytitle("y");
 
     auto a3 = fig->add_subplot3d(3);
     a3->set_title("cell 3 (3D)").set_xtitle("x").set_ytitle("y").set_ztitle("z");
@@ -1355,26 +1286,27 @@ static void test_subplot_spans() {
                 {.colormap = true, .cmap = sextant::Colormap::Viridis, .colorbar = true, .name = "test..."});
 
     fig->add_subplot({5, 6})
-       ->heatmap(field, R, C, sextant::Range{0.0, 90.0}, sextant::Range{0.0, 30.0},
-                 {.cmap = sextant::Colormap::Viridis, .colorbar = true})
-        .set_title("{5, 6}: two columns wide").set_xtitle("column").set_ytitle("row");
+            ->heatmap(field, R, C, sextant::Range{0.0, 90.0}, sextant::Range{0.0, 30.0},
+                      {.cmap = sextant::Colormap::Viridis, .colorbar = true})
+            .set_title("{5, 6}: two columns wide").set_xtitle("column").set_ytitle("row");
 
     fig->add_subplot({7, 9})
-       ->line(t, drift, {.color = sextant::Color::Orange, .linewidth = 1.5f, .name = "drift"})
-        .set_title("{7, 9}: the whole bottom row").set_xtitle("t").set_ytitle("level")
-        .legend().grid();
+            ->line(t, drift, {.color = sextant::Color::Orange, .linewidth = 1.5f, .name = "drift"})
+            .set_title("{7, 9}: the whole bottom row").set_xtitle("t").set_ytitle("level")
+            .legend().grid();
 
-    // The rules, for the console: each of these throws, and the message is
-    // what a caller would see.
+    // Each of these throws; print the messages.
     auto expect_throw = [](const char* what, auto&& fn) {
-        try { fn(); printf("[spans] %-26s did NOT throw\n", what); }
-        catch (const std::invalid_argument& e) { printf("[spans] %-26s -> %s\n", what, e.what()); }
+        try {
+            fn();
+            printf("[spans] %-26s did NOT throw\n", what);
+        } catch (const std::invalid_argument& e) { printf("[spans] %-26s -> %s\n", what, e.what()); }
     };
-    expect_throw("add_subplot(5)",          [&]{ fig->add_subplot(5); });
-    expect_throw("add_subplot({8, 9})",     [&]{ fig->add_subplot({8, 9}); });
-    expect_throw("add_subplot3d({5, 6})",   [&]{ fig->add_subplot3d({5, 6}); });
-    expect_throw("add_subplot(2, 2, 1)",    [&]{ fig->add_subplot(2, 2, 1); });
-    expect_throw("add_subplot({3, 4})",     [&]{ fig->add_subplot({3, 4}); });
+    expect_throw("add_subplot(5)", [&] { fig->add_subplot(5); });
+    expect_throw("add_subplot({8, 9})", [&] { fig->add_subplot({8, 9}); });
+    expect_throw("add_subplot3d({5, 6})", [&] { fig->add_subplot3d({5, 6}); });
+    expect_throw("add_subplot(2, 2, 1)", [&] { fig->add_subplot(2, 2, 1); });
+    expect_throw("add_subplot({3, 4})", [&] { fig->add_subplot({3, 4}); });
 
     fig->savefig("test_subplot_spans.png");
     fig->savefig("test_subplot_spans.svg");
@@ -1403,8 +1335,7 @@ static void test_theming() {
                 .set_title("Sales");
         return fig;
     };
-    // Held in named variables, not passed as temporaries: each window stays
-    // open for as long as its Figure is alive, so all three coexist.
+    // Named variables so all three windows stay open together.
     auto dark = make_fig(sextant::PanelTheme::Dark, "Theming: Dark");
     auto light = make_fig(sextant::PanelTheme::Light, "Theming: Light");
     auto classic = make_fig(sextant::PanelTheme::Classic, "Theming: Classic");
@@ -1413,9 +1344,8 @@ static void test_theming() {
     classic->show(true);
 }
 
-// 9. Mouse hint -- hover tooltip over a 1x4 grid (line with custom labels and
-// error bars, scatter_z, heatmap, custom-hint scatter). Interactive-only; the
-// checklist is in spec_test.md.
+// 9. Mouse hint -- hover tooltips over a grid of kinds. Interactive; checklist
+// in the test docs.
 static void test_mouse_hint() {
     constexpr int N = 60;
     std::vector<double> x(N), y(N);
@@ -1446,8 +1376,7 @@ static void test_mouse_hint() {
         for (int c = 0; c < COLS; ++c)
             img[r * COLS + c] = static_cast<float>(r * COLS + c) / static_cast<float>(ROWS * COLS);
 
-    // Dedicated custom-hint subplot: every point has its own name, unlike
-    // the Line subplot above where only two of sixty points are labeled.
+    // Every point here has its own label (only two do on the line above).
     const std::vector<double> store_x = {1, 2, 3, 4, 5, 6, 7, 8};
     const std::vector<double> store_y = {4, 7, 2, 9, 5, 3, 8, 6};
     const std::vector<std::string> store_hints = {
@@ -1455,23 +1384,18 @@ static void test_mouse_hint() {
         "Store E", "Store F", "Store G", "Store H",
     };
 
-    // The Line cell also carries error bars, so its hover text exercises both
-    // halves alongside a custom hint label -- all three have to coexist on one
-    // tooltip.
+    // The line also has error bars, so its tooltip combines both with a
+    // custom label.
     std::vector<double> hint_lo(N), hint_hi(N), hint_box(N);
     for (int i = 0; i < N; ++i) {
         const auto j = static_cast<std::size_t>(i);
-        hint_lo[j]  = 0.05 + 0.002 * i;
-        hint_hi[j]  = 0.15 + 0.004 * i;
+        hint_lo[j] = 0.05 + 0.002 * i;
+        hint_hi[j] = 0.15 + 0.004 * i;
         hint_box[j] = 0.04;
     }
 
-    // A 3D cell for the fifth column: a bar3d grid with a plane cutting
-    // through it. What is worth pointing at here is the *order* -- over the
-    // half of the plane in front of the bars the tooltip must report the
-    // plane's heatmap cell, and over the bars in front of it the bar, with the
-    // switch happening exactly where the picture's own occlusion does
-    // (v1.0 step 6c).
+    // 3D cell: a plane cutting through a bar grid. The tooltip must switch
+    // between plane cell and bar exactly where the picture's occlusion does.
     constexpr int BU = 6, BV = 6;
     std::vector<double> bx(BU), by(BV), bh(BU * BV);
     std::vector<std::string> bar_hints(BU * BV);
@@ -1482,8 +1406,7 @@ static void test_mouse_hint() {
             const double a = (i - BU / 2.0) / 1.6, b = (j - BV / 2.0) / 1.6;
             bh[i * BV + j] = 5.0 * std::exp(-(a * a + b * b));
         }
-    // Only a few labelled, as the sine line above is: a tooltip that always
-    // carries a second line says nothing about whether the index is right.
+    // Only a few labelled, to check the index.
     bar_hints[static_cast<std::size_t>(BU / 2 * BV + BV / 2)] = "Peak bar";
     bar_hints[0] = "Corner bar";
 
@@ -1503,18 +1426,14 @@ static void test_mouse_hint() {
     fig->add_subplot(1, 5, 2)
             ->scatter_z(zx, zy, zz, {.size = 30.0f, .colorbar = true})
             .set_title("Scatter Z");
-    // A real extent rather than imshow()'s indices: x runs 100..400 nm and y
-    // runs -2..2, so the axis labels bear no resemblance to the row/column
-    // numbers the hint reports. That divergence is the check -- the hint has
-    // to name the cell under the cursor, not the cell the raw data
-    // coordinate would have indexed.
+    // A real extent (x 100..400, y -2..2), so the hint must name the cell
+    // under the cursor, not the raw index.
     fig->add_subplot(1, 5, 3)
             ->heatmap(img, ROWS, COLS, {100.0, 400.0}, {-2.0, 2.0}, {.colorbar = true})
             .set_title("Heatmap (x 100..400, y -2..2)");
     fig->add_subplot(1, 5, 4)
             ->scatter(store_x, store_y, {.color = sextant::Color::Orange, .size = 24.0f, .hint_labels = store_hints})
-            .set_title("Custom hint").set_xlim(0, 9).set_ylim(0, 10);
-    {
+            .set_title("Custom hint").set_xlim(0, 9).set_ylim(0, 10); {
         auto ax3 = fig->add_subplot3d(1, 5, 5);
         ax3->bar3d(sextant::PlaneOrientation::XY, bx, by, bh,
                    {
@@ -1524,16 +1443,14 @@ static void test_mouse_hint() {
                    })
                 .set_title("bar3d + a plane through it")
                 .set_xtitle("u").set_ytitle("v").set_ztitle("height");
-        // Vertical, so it stands among the bars rather than over or under all
-        // of them -- which is what makes the near/far switch visible.
+        // Vertical, standing among the bars (near/far switch visible).
         ax3->plane(sextant::PlaneOrientation::YZ, 3.5, {.alpha = 0.85f})
                 ->heatmap(sheet, PR, PC, {0.0, 7.0}, {0.0, 5.5});
     }
     fig->show(true);
 }
 
-// 10. Data panel -- editable tables for the current axes' plot objects.
-// Interactive-only; the checklist is in spec_test.md.
+// 10. Data panel -- editable tables. Interactive; checklist in the test docs.
 static void test_data_panel() {
     constexpr int N = 400; // enough rows to make clipper virtualization visible
     std::vector<double> x(N), y(N);
@@ -1556,9 +1473,8 @@ static void test_data_panel() {
     std::normal_distribution<double> norm(0.0, 1.0);
     for (auto& s: samples) s = norm(rng);
 
-    // Sparse samples drawn on the SAME axes as the sine line, so one axes
-    // carries two plot objects of different kinds — both sit at plot_index 0
-    // in their own per-kind vector, so only PlotKind tells their edits apart.
+    // Samples on the same axes as the sine line: both are plot_index 0 in their
+    // own kind, so PlotKind distinguishes their edits.
     constexpr int NP = 12;
     std::vector<double> px(NP), py(NP);
     for (int i = 0; i < NP; ++i) {
@@ -1588,9 +1504,8 @@ static void test_data_panel() {
             .set_title("Heatmap 8x6");
     fig->show(false);
 
-    // Wider than one ImGui table can hold, so the grid must fall back to
-    // column paging. `fig` above is deliberately still alive, so both Data
-    // panels are on screen at once.
+    // Wider than one table: exercises column paging. Both Data panels are open
+    // at once.
     constexpr int WROWS = 12, WCOLS = 600;
     std::vector<float> wide(WROWS * WCOLS);
     for (int r = 0; r < WROWS; ++r)
@@ -1601,21 +1516,17 @@ static void test_data_panel() {
     fig2->axes()->imshow(wide, WROWS, WCOLS, {.colorbar = true}).set_title("Heatmap 12x600");
     fig2->show(false);
 
-    // The third table shape (v1.0 step 6c): a bar3d grid, whose row and column
-    // headers are the grid's own u and v rather than indices, and which is the
-    // one plot object addressed at a 3D *axes* rather than at a plane. This
-    // one carries a base per bar, so the heights/bases selector is live -- a
-    // plot standing on the single Bar3DOptions::bottom does not offer it. A
-    // plane beside it, so both addresses are on screen in one tab bar.
+    // A bar3d grid (u/v headers, addressed at the axes, with per-bar bases so
+    // the heights/bases selector is live) beside a plane.
     constexpr int BU = 7, BV = 5;
     std::vector<double> bx(BU), by(BV), bh(BU * BV), bb(BU * BV);
-    for (int i = 0; i < BU; ++i) bx[i] = 400.0 + i * 25.0;   // wavelength, nm
+    for (int i = 0; i < BU; ++i) bx[i] = 400.0 + i * 25.0; // wavelength, nm
     for (int j = 0; j < BV; ++j) by[j] = -1.0 + j * 0.5;
     for (int i = 0; i < BU; ++i)
         for (int j = 0; j < BV; ++j) {
             const double a = (i - BU / 2.0) / 2.0, b = (j - BV / 2.0) / 1.6;
             bh[i * BV + j] = 12.0 * std::exp(-(a * a + b * b));
-            bb[i * BV + j] = 0.5 * i;   // a staircase, so the bases are visibly per bar
+            bb[i * BV + j] = 0.5 * i; // a staircase, so the bases are visibly per bar
         }
 
     constexpr int PR = 6, PC = 8;
@@ -1638,10 +1549,8 @@ static void test_data_panel() {
     fig3->show(true);
 }
 
-// Every cosmetic option, rendered twice: once all-default and once with each
-// field set to a distinctly non-default value. The gallery's byte-identity
-// check cannot see these, since the defaults reproduce the old hardcoded look
-// exactly, so this is what proves they reach both outputs. Headless.
+// Every cosmetic option rendered all-default and all-non-default, to show each
+// reaches both outputs. Headless.
 static void test_style_options() {
     constexpr int N = 60;
     std::vector<double> x(N), y(N);
@@ -1656,9 +1565,7 @@ static void test_style_options() {
             heat[r * C + c] = static_cast<float>(r + c) / static_cast<float>(R + C - 2);
 
     auto render = [&](bool styled, const std::string& stem) {
-        // Supersample=1 so the raster output is not box-filtered — keeps any
-        // manual inspection of these unambiguous, the same reasoning as the
-        // exact-equivalence check.
+        // Supersample=1, so the raster output isn't box-filtered.
         auto fig = sextant::Figure::create({
             .width = 900, .height = 500,
             .title = "Style options", .supersample = 1
@@ -1683,8 +1590,8 @@ static void test_style_options() {
             sup.offset_y = 4.0f;
             fig->set_suptitle_style(sup);
 
-            // Note this also carries the three title font sizes: set_axes_style
-            // replaces the whole struct, so it must (documented in style.h).
+            // Also carries the title font sizes (set_axes_style replaces the
+            // whole struct).
             sextant::AxesStyle as;
             as.spine_color = {0.9f, 0.1f, 0.1f, 1.0f};
             as.spine_linewidth = 3.0f;
@@ -1728,8 +1635,7 @@ static void test_style_options() {
     printf("Saved: test_style_{default,custom}.{png,svg}\n");
 }
 
-// Axis position in 2D (v1.0 step 19): the four placements, the origin
-// components, and the spine flags that make the crosshair look reachable.
+// Axis position in 2D: placements, origin components and spine flags.
 static void test_axis_position() {
     constexpr int N = 200;
     std::vector<double> x(N), y(N);
@@ -1737,62 +1643,61 @@ static void test_axis_position() {
         x[i] = -4.0 + 8.0 * i / (N - 1);
         y[i] = std::sin(x[i]) * std::exp(-std::abs(x[i]) / 5.0);
     }
-    // Data well away from zero, for the cell that pins the origin anyway.
+    // Data away from zero, for the cell that pins the origin.
     std::vector<double> fx(N), fy(N);
     for (int i = 0; i < N; ++i) {
         fx[i] = 5.0 + 5.0 * i / (N - 1);
         fy[i] = 20.0 + 6.0 * std::sin(fx[i] * 1.5);
     }
 
-    auto fig = sextant::Figure::create({.width = 1200, .height = 800,
-                                        .title = "Axis position (2D)",
-                                        .subplot_col_gap = 26.0f, .subplot_row_gap = 20.0f});
+    auto fig = sextant::Figure::create({
+        .width = 1200, .height = 800,
+        .title = "Axis position (2D)",
+        .subplot_col_gap = 26.0f, .subplot_row_gap = 20.0f
+    });
     fig->suptitle("AxesStyle: axis position and spines");
 
-    // 1 — the default, untouched, as the reference to compare against.
+    // 1 — the default, as reference.
     fig->add_subplot(2, 2, 1)
-       ->line(x, y, {.color = sextant::Color::Blue, .linewidth = 2.0f})
-        .set_title("default (Auto = bottom/left)").set_xtitle("x").set_ytitle("y").grid();
+            ->line(x, y, {.color = sextant::Color::Blue, .linewidth = 2.0f})
+            .set_title("default (Auto = bottom/left)").set_xtitle("x").set_ytitle("y").grid();
 
-    // 2 — High on both: the bands move to the top and right, ticks and
-    // numbers flip with them, and the titles stay where they were.
+    // 2 — High on both: bands, ticks and numbers flip; titles stay.
     {
         sextant::AxesStyle st;
         st.xaxis_y = sextant::AxisPosition::High;
         st.yaxis_x = sextant::AxisPosition::High;
         fig->add_subplot(2)
-           ->line(x, y, {.color = sextant::Color::Red, .linewidth = 2.0f})
-            .set_axes_style(st)
-            .set_title("High / High -- bands swap sides")
-            .set_xtitle("x").set_ytitle("y").grid();
+                ->line(x, y, {.color = sextant::Color::Red, .linewidth = 2.0f})
+                .set_axes_style(st)
+                .set_title("High / High -- bands swap sides")
+                .set_xtitle("x").set_ytitle("y").grid();
     }
 
-    // 3 — the crosshair: both axes through zero, every spine off. This is
-    // the look the spine flags exist for.
+    // 3 — the crosshair: both axes through zero, every spine off.
     {
         sextant::AxesStyle st;
         st.origin_x = 0.0;
         st.origin_y = 0.0;
         st.spine_bottom = st.spine_left = st.spine_top = st.spine_right = false;
         fig->add_subplot(3)
-           ->line(x, y, {.color = sextant::Color::Purple, .linewidth = 2.0f})
-            .set_axes_style(st)
-            .set_title("origin (0,0), no box")
-            .set_xtitle("x").set_ytitle("y");
+                ->line(x, y, {.color = sextant::Color::Purple, .linewidth = 2.0f})
+                .set_axes_style(st)
+                .set_title("origin (0,0), no box")
+                .set_xtitle("x").set_ytitle("y");
     }
 
-    // 4 — the same pin over data that never comes near zero: the limits have
-    // to widen to show it, which is the rule worth seeing on screen.
+    // 4 — the same pin over data far from zero: the limits widen to show it.
     {
         sextant::AxesStyle st;
         st.origin_x = 0.0;
         st.origin_y = 0.0;
         st.spine_top = st.spine_right = false;
         fig->add_subplot(4)
-           ->line(fx, fy, {.color = sextant::Color::Orange, .linewidth = 2.0f})
-            .set_axes_style(st)
-            .set_title("origin (0,0) with data at x 5..10")
-            .set_xtitle("x").set_ytitle("y").grid();
+                ->line(fx, fy, {.color = sextant::Color::Orange, .linewidth = 2.0f})
+                .set_axes_style(st)
+                .set_title("origin (0,0) with data at x 5..10")
+                .set_xtitle("x").set_ytitle("y").grid();
     }
 
     fig->savefig("test_axis_position.png");
@@ -1803,9 +1708,8 @@ static void test_axis_position() {
 }
 
 // -------------------------------------------------------------------------
-// Axis position in 3D (v1.0 step 20). The same four questions the 2D gallery
-// asks, plus the one that only exists here: an Auto edge turns with the
-// camera and a Low/High one does not, which is visible only by orbiting.
+// Axis position in 3D. As in 2D, plus: an Auto edge turns with the camera and
+// a Low/High one doesn't (orbit to see).
 static void test_axis_position3d() {
     constexpr int HN = 120;
     std::vector<double> hx(HN), hy(HN), hz(HN);
@@ -1815,8 +1719,7 @@ static void test_axis_position3d() {
         hy[i] = 2.2 * std::sin(t);
         hz[i] = -2.5 + 5.0 * i / (HN - 1);
     }
-    // A cloud that never comes near the origin, for the cell whose pin has to
-    // pull the box out to reach it.
+    // A cloud far from the origin, for the cell whose pin widens the box.
     std::vector<double> fx, fy, fz;
     for (int i = 0; i < 60; ++i) {
         const double t = i * 0.5;
@@ -1825,66 +1728,62 @@ static void test_axis_position3d() {
         fz.push_back(5.0 + 2.0 * std::sin(t * 0.7));
     }
 
-    auto fig = sextant::Figure::create({.width = 1280, .height = 860,
-                                        .title = "Axis position (3D)",
-                                        .subplot_col_gap = 24.0f, .subplot_row_gap = 20.0f});
+    auto fig = sextant::Figure::create({
+        .width = 1280, .height = 860,
+        .title = "Axis position (3D)",
+        .subplot_col_gap = 24.0f, .subplot_row_gap = 20.0f
+    });
     fig->suptitle("AxesStyle: axis position on the 3D box");
 
-    // 1 — untouched, as the reference. Every axis on its camera-chosen
-    // silhouette edge, which is what the box has always done.
+    // 1 — the reference: every axis on its silhouette edge.
     fig->add_subplot3d(2, 2, 1)
-        ->line3d(hx, hy, hz, {.color = sextant::Color::Blue, .linewidth = 2.0f})
-        .set_title("default (Auto = camera's edge)")
-        .set_xtitle("x").set_ytitle("y").set_ztitle("z")
-        .set_view(-55.0, 22.0);
+            ->line3d(hx, hy, hz, {.color = sextant::Color::Blue, .linewidth = 2.0f})
+            .set_title("default (Auto = camera's edge)")
+            .set_xtitle("x").set_ytitle("y").set_ztitle("z")
+            .set_view(-55.0, 22.0);
 
-    // 2 — the crosshair: all three components pinned to the middle of the
-    // data, so the three axes meet inside the box. The panes, the grid and
-    // the pane edges do not move, which is deliberate -- the pale outline
-    // stays as the thing that says where the box is.
+    // 2 — the crosshair: all three components at the data's middle. Panes,
+    // grid and pane edges don't move.
     {
         sextant::AxesStyle st;
         st.origin_x = 0.0;
         st.origin_y = 0.0;
         st.origin_z = 0.0;
         fig->add_subplot3d(2, 2, 2)
-            ->line3d(hx, hy, hz, {.color = sextant::Color::Purple, .linewidth = 2.0f})
-            .set_axes_style(st)
-            .set_title("origin (0,0,0) -- a crosshair in the box")
-            .set_xtitle("x").set_ytitle("y").set_ztitle("z")
-            .set_view(-55.0, 22.0);
+                ->line3d(hx, hy, hz, {.color = sextant::Color::Purple, .linewidth = 2.0f})
+                .set_axes_style(st)
+                .set_title("origin (0,0,0) -- a crosshair in the box")
+                .set_xtitle("x").set_ytitle("y").set_ztitle("z")
+                .set_view(-55.0, 22.0);
     }
 
-    // 3 — one component only, and the placements absolute rather than
-    // automatic. origin_z drops the x and y axes to z = 0 and leaves the z
-    // axis on the box; High pins it to a corner that will not migrate when
-    // this cell is orbited, which is the thing to check by dragging it.
+    // 3 — origin_z only: the x and y axes drop to z = 0; the z axis is pinned
+    // High (orbit to check it doesn't migrate).
     {
         sextant::AxesStyle st;
         st.origin_z = 0.0;
-        st.zaxis_x  = sextant::AxisPosition::High;
-        st.zaxis_y  = sextant::AxisPosition::High;
+        st.zaxis_x = sextant::AxisPosition::High;
+        st.zaxis_y = sextant::AxisPosition::High;
         fig->add_subplot3d(2, 2, 3)
-            ->line3d(hx, hy, hz, {.color = sextant::Color::Green, .linewidth = 2.0f})
-            .set_axes_style(st)
-            .set_title("origin_z only; z axis pinned High/High")
-            .set_xtitle("x").set_ytitle("y").set_ztitle("z")
-            .set_view(-55.0, 22.0);
+                ->line3d(hx, hy, hz, {.color = sextant::Color::Green, .linewidth = 2.0f})
+                .set_axes_style(st)
+                .set_title("origin_z only; z axis pinned High/High")
+                .set_xtitle("x").set_ytitle("y").set_ztitle("z")
+                .set_view(-55.0, 22.0);
     }
 
-    // 4 — the pin over data that never comes near it: the limits widen to
-    // reach zero, the same rule the 2D gallery's fourth cell shows.
+    // 4 — the pin over data far from it: the limits widen to reach zero.
     {
         sextant::AxesStyle st;
         st.origin_x = 0.0;
         st.origin_y = 0.0;
         st.origin_z = 0.0;
         fig->add_subplot3d(2, 2, 4)
-            ->scatter3d(fx, fy, fz, {.color = sextant::Color::Orange, .size = 6.0f})
-            .set_axes_style(st)
-            .set_title("origin (0,0,0) with data around (6,7,5)")
-            .set_xtitle("x").set_ytitle("y").set_ztitle("z")
-            .set_view(-55.0, 22.0);
+                ->scatter3d(fx, fy, fz, {.color = sextant::Color::Orange, .size = 6.0f})
+                .set_axes_style(st)
+                .set_title("origin (0,0,0) with data around (6,7,5)")
+                .set_xtitle("x").set_ytitle("y").set_ztitle("z")
+                .set_view(-55.0, 22.0);
     }
 
     fig->savefig("test_axis_position3d.png");

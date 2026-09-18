@@ -1,6 +1,4 @@
-// sextant_layout_test -- the entry point, and nothing else. Every check lives
-// in a subject .cpp beside this one; layout_test.h declares them and holds the
-// builders more than one subject needs.
+// sextant_layout_test entry point; the checks live in the subject .cpp files.
 #include "layout_test.h"
 
 #include <cstdio>
@@ -8,9 +6,7 @@
 int main() {
     using namespace lt;
 
-    // Unbuffered on purpose: this suite can fail by crashing, and a buffered
-    // stdout discards every line up to the crash -- which is precisely the
-    // output that says where it happened.
+    // Unbuffered, so output up to a crash isn't lost.
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::printf("=== sextant_layout_test ===\n\n");
 
@@ -104,8 +100,7 @@ int main() {
     test_perspective_near_clipping();
     test_annotation_invariance();
 
-    // bar3d.cpp / surface3d.cpp / plane2d.cpp -- the geometry each kind
-    // reduces to, before anything renders it.
+    // bar3d.cpp / surface3d.cpp / plane2d.cpp -- geometry before rendering
     test_bar3d_clip_matrix();
     test_bar3d_ingest();
     test_bar3d_faces();
@@ -136,8 +131,7 @@ int main() {
     test_plane2d_kinds();
     test_plane2d_legend_and_contours();
 
-    // plane2d_panel.cpp / bar3d.cpp / surface3d.cpp -- an object as an address
-    // the panels and the hover hint can name.
+    // plane2d_panel.cpp / bar3d.cpp / surface3d.cpp -- object addressing
     test_plane2d_edit_journal();
     test_plane2d_data_tables();
     test_plane2d_hints();

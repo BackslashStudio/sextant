@@ -1,256 +1,230 @@
-// Phase 0 -- text measurement against fontstash itself.
-//
-// Part of sextant_layout_test; see layout_test.h.
+// Text measurement against fontstash itself. Part of sextant_layout_test; see
+// layout_test.h.
 #include "layout_test.h"
 
 namespace lt {
+    // text_metrics.cpp must reproduce fontstash's advance arithmetic exactly: every
+    // string is measured both ways and must agree to the last bit (a tolerance
+    // would hide quantization mistakes). Compared at devicePxRatio = 1.
 
-// Phase 0 -- text metrics. src/text_metrics.cpp claims to reproduce
-// fontstash's advance arithmetic exactly, so that the space layout reserves
-// for a label is the space NanoVG actually draws into. Every string is
-// measured both ways and the two must agree to the last representable bit,
-// not within a tolerance: a tolerance would hide precisely the quantization
-// mistakes this exists to catch. The comparison runs at devicePxRatio = 1,
-// where NanoVG's own quantization happens at the logical size.
+    const std::vector<std::string>& sample_strings() {
+        // Tick labels, titles and legend entries, plus adversarial cases: a lone
+        // glyph, repeated glyphs (rounding accumulates), a kerned pair, non-ASCII.
+        static const std::vector<std::string> s = {
+            "0", "-1", "0.5", "1.0", "-0.25", "12345", "1e+08", "-1.5e-08",
+            "100000", "0.000001", "2.5", "-273.15",
+            "x", "Time (s)", "Amplitude", "sin(x)", "A Title With Spaces",
+            "AV", "AVATAR", "WWWWWWWWWW", "iiiiiiiiii", "....", "|",
+            "\xC2\xB5m", // "µm"
+            "\xE2\x88\x92" "1.0", // U+2212 MINUS SIGN, then "1.0"
+            "\xF0\x9F\x93\x88", // U+1F4C8, a codepoint the font will lack
+        };
+        return s;
+    }
 
-const std::vector<std::string>& sample_strings() {
-    // Every kind of text layout has to reserve room for: tick labels (the
-    // widest of which sets the left inset), axis/figure titles, and legend
-    // entries. Plus a few adversarial ones — a lone glyph, a string of
-    // identical glyphs where a per-glyph rounding error accumulates
-    // fastest, a pair that is kerned in most serif faces, and non-ASCII.
-    static const std::vector<std::string> s = {
-        "0", "-1", "0.5", "1.0", "-0.25", "12345", "1e+08", "-1.5e-08",
-        "100000", "0.000001", "2.5", "-273.15",
-        "x", "Time (s)", "Amplitude", "sin(x)", "A Title With Spaces",
-        "AV", "AVATAR", "WWWWWWWWWW", "iiiiiiiiii", "....", "|",
-        "\xC2\xB5m",              // "µm"
-        "\xE2\x88\x92" "1.0",     // U+2212 MINUS SIGN, then "1.0"
-        "\xF0\x9F\x93\x88",       // U+1F4C8, a codepoint the font will lack
-    };
-    return s;
-}
+    // The library's default sizes, the panel's extremes, and fractional sizes that
+    // fontstash's 0.1 px quantization changes.
+    const std::vector<float>& sample_sizes() {
+        static const std::vector<float> s = {
+            1.0f, 2.0f, 5.0f, 8.0f, 10.0f, 11.0f, 12.0f, 16.5f, 18.0f, 21.0f,
+            24.0f, 28.0f, 30.0f, 40.0f, 64.0f, 96.0f,
+            10.04f, 11.06f, 13.999f, 17.25f,
+        };
+        return s;
+    }
 
-// Font sizes worth checking: the library's own defaults (label 11, legend/
-// colorbar 10, xtitle/ytitle 16.5, title 18, suptitle 21), the extremes the
-// Cosmetic panel allows a user to drag to, and a couple of sizes with a
-// fractional part that does not survive fontstash's 0.1 px quantization.
-const std::vector<float>& sample_sizes() {
-    static const std::vector<float> s = {
-        1.0f, 2.0f, 5.0f, 8.0f, 10.0f, 11.0f, 12.0f, 16.5f, 18.0f, 21.0f,
-        24.0f, 28.0f, 30.0f, 40.0f, 64.0f, 96.0f,
-        10.04f, 11.06f, 13.999f, 17.25f,
-    };
-    return s;
-}
+    // One font's comparison. `nvg_font` must exist in vg; `path` is what
+    // text_width() gets ("" = default).
+    void compare_font(NVGcontext* vg, int nvg_font, const std::string& path,
+                      const char* label) {
+        std::printf("[%s]\n", label);
 
-// One font's worth of comparison. `nvg_font` must already be created in vg;
-// `path` is what text_width() is asked for ("" = the default font).
-void compare_font(NVGcontext* vg, int nvg_font, const std::string& path,
-                  const char* label) {
-    std::printf("[%s]\n", label);
+        check(sextant::text_metrics_font_loaded(path),
+              std::string(label) + ": real glyph metrics in use (not the fallback estimate)");
 
-    check(sextant::text_metrics_font_loaded(path),
-          std::string(label) + ": real glyph metrics in use (not the fallback estimate)");
+        int worst_count = 0;
+        float worst_delta = 0.0f;
+        std::string worst_case;
 
-    int worst_count = 0;
-    float worst_delta = 0.0f;
-    std::string worst_case;
+        // Split by size (see the assertion below).
+        float worst_overhang_small = 0.0f, worst_overhang_large = 0.0f;
+        std::string worst_overhang_case;
 
-    // Split by size on purpose — see the assertion below.
-    float worst_overhang_small = 0.0f, worst_overhang_large = 0.0f;
-    std::string worst_overhang_case;
+        for (float size: sample_sizes()) {
+            nvgFontFaceId(vg, nvg_font);
+            nvgFontSize(vg, size);
+            nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_BASELINE);
 
-    for (float size : sample_sizes()) {
-        nvgFontFaceId(vg, nvg_font);
-        nvgFontSize(vg, size);
-        nvgTextAlign(vg, NVG_ALIGN_LEFT | NVG_ALIGN_BASELINE);
+            for (const auto& s: sample_strings()) {
+                // nvgTextBounds' return value is the advance (what text_width()
+                // computes); bounds[2]-bounds[0] is the ink extent.
+                const float nvg_adv = nvgTextBounds(vg, 0.0f, 0.0f, s.c_str(), nullptr, nullptr);
+                const float own_adv = sextant::text_width(path, size, s);
+                const float delta = std::fabs(nvg_adv - own_adv);
 
-        for (const auto& s : sample_strings()) {
-            // nvgTextBounds' *return value* is the advance — the same pen
-            // movement text_width() computes. bounds[2]-bounds[0] is the ink
-            // extent instead, which is a different quantity (see below).
-            const float nvg_adv  = nvgTextBounds(vg, 0.0f, 0.0f, s.c_str(), nullptr, nullptr);
-            const float own_adv  = sextant::text_width(path, size, s);
-            const float delta    = std::fabs(nvg_adv - own_adv);
-
-            if (delta != 0.0f) {
-                ++worst_count;
-                if (delta > worst_delta) {
-                    worst_delta = delta;
-                    char buf[256];
-                    std::snprintf(buf, sizeof(buf), "\"%s\" @ %.3g px: nvg %.4f vs own %.4f",
-                                  s.c_str(), static_cast<double>(size),
-                                  static_cast<double>(nvg_adv), static_cast<double>(own_adv));
-                    worst_case = buf;
+                if (delta != 0.0f) {
+                    ++worst_count;
+                    if (delta > worst_delta) {
+                        worst_delta = delta;
+                        char buf[256];
+                        std::snprintf(buf, sizeof(buf), "\"%s\" @ %.3g px: nvg %.4f vs own %.4f",
+                                      s.c_str(), static_cast<double>(size),
+                                      static_cast<double>(nvg_adv), static_cast<double>(own_adv));
+                        worst_case = buf;
+                    }
                 }
-            }
 
-            // Reserving the advance has to actually contain the glyphs, so
-            // track how far the ink extent runs past it. It legitimately runs
-            // past by up to ~2 px at any size: NanoVG's quads inset the atlas
-            // rect by one pixel per side out of the 2 px padding fontstash
-            // adds around each glyph bitmap. Below ~8 px the gap grows
-            // further, because rounding every pen step to a whole pixel makes
-            // glyphs overlap outright, so the bound is only asserted where
-            // layout actually operates.
-            if (size >= 8.0f) {
-                float bounds[4] = {0, 0, 0, 0};
-                nvgTextBounds(vg, 0.0f, 0.0f, s.c_str(), nullptr, bounds);
-                const float overhang = (bounds[2] - bounds[0]) - own_adv;
-                float& worst = (size >= 32.0f) ? worst_overhang_large : worst_overhang_small;
-                if (overhang > worst) {
-                    worst = overhang;
-                    char buf[256];
-                    std::snprintf(buf, sizeof(buf), "\"%s\" @ %.3g px", s.c_str(),
-                                  static_cast<double>(size));
-                    worst_overhang_case = buf;
+                // Track how far the ink runs past the advance: up to ~2 px from
+                // NanoVG's quad inset. Below ~8 px glyphs overlap, so the bound is
+                // only asserted at layout sizes.
+                if (size >= 8.0f) {
+                    float bounds[4] = {0, 0, 0, 0};
+                    nvgTextBounds(vg, 0.0f, 0.0f, s.c_str(), nullptr, bounds);
+                    const float overhang = (bounds[2] - bounds[0]) - own_adv;
+                    float& worst = (size >= 32.0f) ? worst_overhang_large : worst_overhang_small;
+                    if (overhang > worst) {
+                        worst = overhang;
+                        char buf[256];
+                        std::snprintf(buf, sizeof(buf), "\"%s\" @ %.3g px", s.c_str(),
+                                      static_cast<double>(size));
+                        worst_overhang_case = buf;
+                    }
                 }
             }
         }
+
+        const int total = static_cast<int>(sample_sizes().size() * sample_strings().size());
+        check(worst_count == 0,
+              std::string(label) + ": " + std::to_string(worst_count) + "/" +
+              std::to_string(total) + " advances differ (worst: " +
+              (worst_case.empty() ? "none" : worst_case) + ")");
+        std::printf("  %d string x size combinations, %d mismatched\n", total, worst_count);
+
+        // The overhang is a constant ~3 px at both size ranges (padding, not glyph
+        // overhang, which would scale with size).
+        check(worst_overhang_small <= 3.0f && worst_overhang_large <= 3.0f,
+              std::string(label) + ": ink overhang past the advance — 8-30 px: " +
+              std::to_string(worst_overhang_small) + ", >=32 px: " +
+              std::to_string(worst_overhang_large) + " (worst on " +
+              (worst_overhang_case.empty() ? "none" : worst_overhang_case) + ")");
+        std::printf("  ink overhang past advance: %.3f px at 8-30, %.3f px at >=32\n",
+                    static_cast<double>(worst_overhang_small),
+                    static_cast<double>(worst_overhang_large));
+
+        // font_vmetrics() must reproduce nvgTextMetrics().
+        for (float size: sample_sizes()) {
+            nvgFontFaceId(vg, nvg_font);
+            nvgFontSize(vg, size);
+            float asc = 0.0f, desc = 0.0f, lineh = 0.0f;
+            nvgTextMetrics(vg, &asc, &desc, &lineh);
+
+            const auto vm = sextant::font_vmetrics(path, size);
+            char buf[192];
+            std::snprintf(buf, sizeof(buf),
+                          "%s: vmetrics @ %.3g px — nvg(%.4f,%.4f,%.4f) own(%.4f,%.4f,%.4f)",
+                          label, static_cast<double>(size),
+                          static_cast<double>(asc), static_cast<double>(desc), static_cast<double>(lineh),
+                          static_cast<double>(vm.ascent), static_cast<double>(vm.descent),
+                          static_cast<double>(vm.line_height));
+            check(asc == vm.ascent && desc == vm.descent && lineh == vm.line_height, buf);
+        }
     }
 
-    const int total = static_cast<int>(sample_sizes().size() * sample_strings().size());
-    check(worst_count == 0,
-          std::string(label) + ": " + std::to_string(worst_count) + "/" +
-          std::to_string(total) + " advances differ (worst: " +
-          (worst_case.empty() ? "none" : worst_case) + ")");
-    std::printf("  %d string x size combinations, %d mismatched\n", total, worst_count);
-
-    // The bound is a constant ~3 px, and asserting it at both size ranges is
-    // what says so: NanoVG's padding is a fixed number of pixels, whereas
-    // genuine glyph overhang past the advance would scale with the font
-    // size. If the large-size figure ever climbs above the small-size one,
-    // this stopped being bookkeeping and became real clipping risk.
-    check(worst_overhang_small <= 3.0f && worst_overhang_large <= 3.0f,
-          std::string(label) + ": ink overhang past the advance — 8-30 px: " +
-          std::to_string(worst_overhang_small) + ", >=32 px: " +
-          std::to_string(worst_overhang_large) + " (worst on " +
-          (worst_overhang_case.empty() ? "none" : worst_overhang_case) + ")");
-    std::printf("  ink overhang past advance: %.3f px at 8-30, %.3f px at >=32\n",
-                static_cast<double>(worst_overhang_small),
-                static_cast<double>(worst_overhang_large));
-
-    // Vertical metrics: font_vmetrics() must reproduce nvgTextMetrics(),
-    // which is what every stacked inset will be measured in.
-    for (float size : sample_sizes()) {
-        nvgFontFaceId(vg, nvg_font);
-        nvgFontSize(vg, size);
-        float asc = 0.0f, desc = 0.0f, lineh = 0.0f;
-        nvgTextMetrics(vg, &asc, &desc, &lineh);
-
-        const auto vm = sextant::font_vmetrics(path, size);
-        char buf[192];
-        std::snprintf(buf, sizeof(buf),
-                      "%s: vmetrics @ %.3g px — nvg(%.4f,%.4f,%.4f) own(%.4f,%.4f,%.4f)",
-                      label, static_cast<double>(size),
-                      static_cast<double>(asc), static_cast<double>(desc), static_cast<double>(lineh),
-                      static_cast<double>(vm.ascent), static_cast<double>(vm.descent),
-                      static_cast<double>(vm.line_height));
-        check(asc == vm.ascent && desc == vm.descent && lineh == vm.line_height, buf);
-    }
-}
-
-void test_text_metrics() {
-    // Headless: no window is shown, but a GL context still has to exist for
-    // NanoVG to be created at all.
-    sextant::GLContext ctx({.width = 400, .height = 300,
-                            .title = "layout_test", .visible = false});
-    NVGcontext* vg = ctx.nvg();
-    if (!vg) {
-        std::printf("FATAL: no NanoVG context\n");
-        ++g_failures;
-        return;
-    }
-
-    const sextant::FontEntry* def = sextant::pick_default_font();
-    if (!def) {
-        std::printf("FATAL: no system font discovered — nothing to compare\n");
-        ++g_failures;
-        return;
-    }
-    std::printf("default font: %s (%s)\n\n", def->name.c_str(), def->path.c_str());
-
-    // "" is the path the whole library uses to mean "the default font", and
-    // is what almost every AxesStyle carries — so it is the case that
-    // matters. Passing the resolved path explicitly must give the same
-    // answer, which the second block checks along with a *different* face.
-    const int font_default = nvgCreateFont(vg, "default", def->path.c_str());
-    check(font_default != -1, "default font loaded into NanoVG");
-    if (font_default != -1) compare_font(vg, font_default, "", "default font (\"\")");
-
-    // A second, explicitly-named face — the font_path branch of
-    // AxesStyle/LegendOptions/SuptitleOptions, which resolves a different
-    // file rather than falling through to pick_default_font().
-    const auto& fonts = sextant::discover_system_fonts();
-    const sextant::FontEntry* other = nullptr;
-    for (const auto& f : fonts)
-        if (f.path != def->path) { other = &f; break; }
-
-    if (other) {
-        const int font_other = nvgCreateFont(vg, other->path.c_str(), other->path.c_str());
-        check(font_other != -1, "second font loaded into NanoVG");
-        if (font_other != -1)
-            compare_font(vg, font_other, other->path, other->name.c_str());
-    } else {
-        std::printf("(only one font on this system — explicit-path case skipped)\n");
-    }
-}
-
-// A font path that cannot be loaded must not take the layout down with it —
-// it falls back to a per-character estimate. Nothing in the repo produces
-// such a path today, but AxesStyle::font_path is public and arbitrary.
-void test_missing_font_fallback() {
-    std::printf("\n[missing font]\n");
-    const std::string bogus = "D:/this/font/does/not/exist.ttf";
-
-    check(!sextant::text_metrics_font_loaded(bogus), "bogus path reports no glyph metrics");
-
-    const float w1 = sextant::text_width(bogus, 12.0f, "12345");
-    const float w2 = sextant::text_width(bogus, 12.0f, "1234567890");
-    check(w1 > 0.0f, "fallback width is positive");
-    check(w2 > w1,   "fallback width grows with the string");
-    check(sextant::text_width(bogus, 12.0f, "") == 0.0f, "empty string measures 0");
-
-    const auto vm = sextant::font_vmetrics(bogus, 12.0f);
-    check(vm.line_height > 0.0f && vm.ascent > 0.0f && vm.descent < 0.0f,
-          "fallback vmetrics are sane");
-    std::printf("  fallback: \"12345\" @ 12 px = %.2f px, line height %.2f\n",
-                static_cast<double>(w1), static_cast<double>(vm.line_height));
-}
-
-// Layout runs on the render thread and, inside savefig(), on whatever thread
-// the caller happens to be on — so the caches behind text_width() are shared
-// across threads by design. This hammers them concurrently and requires every
-// answer to match the single-threaded one.
-void test_concurrent_measurement() {
-    std::printf("\n[concurrency]\n");
-
-    std::vector<float> expected;
-    for (const auto& s : sample_strings())
-        for (float size : sample_sizes())
-            expected.push_back(sextant::text_width("", size, s));
-
-    std::atomic<int> mismatches{0};
-    std::vector<std::thread> threads;
-    for (int t = 0; t < 8; ++t) {
-        threads.emplace_back([&] {
-            for (int rep = 0; rep < 20; ++rep) {
-                std::size_t i = 0;
-                for (const auto& s : sample_strings())
-                    for (float size : sample_sizes())
-                        if (sextant::text_width("", size, s) != expected[i++])
-                            ++mismatches;
-            }
+    void test_text_metrics() {
+        // Headless, but NanoVG still needs a GL context.
+        sextant::GLContext ctx({
+            .width = 400, .height = 300,
+            .title = "layout_test", .visible = false
         });
+        NVGcontext* vg = ctx.nvg();
+        if (!vg) {
+            std::printf("FATAL: no NanoVG context\n");
+            ++g_failures;
+            return;
+        }
+
+        const sextant::FontEntry* def = sextant::pick_default_font();
+        if (!def) {
+            std::printf("FATAL: no system font discovered — nothing to compare\n");
+            ++g_failures;
+            return;
+        }
+        std::printf("default font: %s (%s)\n\n", def->name.c_str(), def->path.c_str());
+
+        // "" (the default font) must match the resolved path passed explicitly;
+        // a different face is checked too.
+        const int font_default = nvgCreateFont(vg, "default", def->path.c_str());
+        check(font_default != -1, "default font loaded into NanoVG");
+        if (font_default != -1) compare_font(vg, font_default, "", "default font (\"\")");
+
+        // A second, explicitly named face (the font_path branch).
+        const auto& fonts = sextant::discover_system_fonts();
+        const sextant::FontEntry* other = nullptr;
+        for (const auto& f: fonts)
+            if (f.path != def->path) {
+                other = &f;
+                break;
+            }
+
+        if (other) {
+            const int font_other = nvgCreateFont(vg, other->path.c_str(), other->path.c_str());
+            check(font_other != -1, "second font loaded into NanoVG");
+            if (font_other != -1)
+                compare_font(vg, font_other, other->path, other->name.c_str());
+        } else {
+            std::printf("(only one font on this system — explicit-path case skipped)\n");
+        }
     }
-    for (auto& th : threads) th.join();
 
-    check(mismatches.load() == 0,
-          "8 threads x 20 passes agree with the single-threaded widths (" +
-          std::to_string(mismatches.load()) + " mismatches)");
-    std::printf("  %zu widths x 8 threads x 20 passes, %d mismatches\n",
-                expected.size(), mismatches.load());
-}
+    // An unloadable font path falls back to a per-character estimate.
+    void test_missing_font_fallback() {
+        std::printf("\n[missing font]\n");
+        const std::string bogus = "D:/this/font/does/not/exist.ttf";
 
-}  // namespace lt
+        check(!sextant::text_metrics_font_loaded(bogus), "bogus path reports no glyph metrics");
+
+        const float w1 = sextant::text_width(bogus, 12.0f, "12345");
+        const float w2 = sextant::text_width(bogus, 12.0f, "1234567890");
+        check(w1 > 0.0f, "fallback width is positive");
+        check(w2 > w1, "fallback width grows with the string");
+        check(sextant::text_width(bogus, 12.0f, "") == 0.0f, "empty string measures 0");
+
+        const auto vm = sextant::font_vmetrics(bogus, 12.0f);
+        check(vm.line_height > 0.0f && vm.ascent > 0.0f && vm.descent < 0.0f,
+              "fallback vmetrics are sane");
+        std::printf("  fallback: \"12345\" @ 12 px = %.2f px, line height %.2f\n",
+                    static_cast<double>(w1), static_cast<double>(vm.line_height));
+    }
+
+    // The caches are shared across threads (render thread and savefig() callers):
+    // hammer them concurrently and compare with single-threaded answers.
+    void test_concurrent_measurement() {
+        std::printf("\n[concurrency]\n");
+
+        std::vector<float> expected;
+        for (const auto& s: sample_strings())
+            for (float size: sample_sizes())
+                expected.push_back(sextant::text_width("", size, s));
+
+        std::atomic<int> mismatches{0};
+        std::vector<std::thread> threads;
+        for (int t = 0; t < 8; ++t) {
+            threads.emplace_back([&] {
+                for (int rep = 0; rep < 20; ++rep) {
+                    std::size_t i = 0;
+                    for (const auto& s: sample_strings())
+                        for (float size: sample_sizes())
+                            if (sextant::text_width("", size, s) != expected[i++])
+                                ++mismatches;
+                }
+            });
+        }
+        for (auto& th: threads) th.join();
+
+        check(mismatches.load() == 0,
+              "8 threads x 20 passes agree with the single-threaded widths (" +
+              std::to_string(mismatches.load()) + " mismatches)");
+        std::printf("  %zu widths x 8 threads x 20 passes, %d mismatches\n",
+                    expected.size(), mismatches.load());
+    }
+} // namespace lt

@@ -31,8 +31,8 @@ curl -fsSL -o "%THIRD_PARTY%\nanovg\nanovg.c"          "%BASE%/nanovg.c"        
 curl -fsSL -o "%THIRD_PARTY%\nanovg\nanovg_gl.h"       "%BASE%/nanovg_gl.h"       || goto :error
 curl -fsSL -o "%THIRD_PARTY%\nanovg\nanovg_gl_utils.h" "%BASE%/nanovg_gl_utils.h" || goto :error
 curl -fsSL -o "%THIRD_PARTY%\nanovg\fontstash.h"       "%BASE%/fontstash.h"       || goto :error
-:: Download stb headers nanovg uses directly into its directory.
-:: This avoids relying on symlinks, which break on Windows (core.symlinks=false).
+:: Download the stb headers nanovg needs into its directory (no symlinks: they
+:: break on Windows).
 curl -fsSL -o "%THIRD_PARTY%\nanovg\stb_image.h"    "https://raw.githubusercontent.com/nothings/stb/master/stb_image.h"    || goto :error
 curl -fsSL -o "%THIRD_PARTY%\nanovg\stb_truetype.h" "https://raw.githubusercontent.com/nothings/stb/master/stb_truetype.h" || goto :error
 echo     nanovg OK
@@ -42,8 +42,7 @@ echo     nanovg OK
 :: ---------------------------------------------------------------------------
 echo =^> Fetching Dear ImGui (v1.92.8-docking)...
 if not exist "%THIRD_PARTY%\imgui\backends" mkdir "%THIRD_PARTY%\imgui\backends"
-:: Docking branch, not mainline — the widget panel uses DockSpaceOverViewport
-:: + DockBuilder for a live-draggable plot/controls split (see spec_widgets.md).
+:: The docking branch: the widget panel needs DockSpaceOverViewport/DockBuilder.
 set "IMGUI_BASE=https://raw.githubusercontent.com/ocornut/imgui/v1.92.8-docking"
 for %%f in (imgui.h imgui.cpp imgui_draw.cpp imgui_widgets.cpp imgui_tables.cpp imgui_demo.cpp imgui_internal.h imstb_rectpack.h imstb_textedit.h imstb_truetype.h imconfig.h) do (
     curl -fsSL -o "%THIRD_PARTY%\imgui\%%f" "%IMGUI_BASE%/%%f" || goto :error
@@ -58,10 +57,7 @@ echo     imgui OK
 :: ---------------------------------------------------------------------------
 echo =^> Fetching Dear ImGui font assets (Roboto-Medium, panel theming)...
 if not exist "%THIRD_PARTY%\imgui\misc\fonts" mkdir "%THIRD_PARTY%\imgui\misc\fonts"
-:: Roboto-Medium.ttf is Google's Roboto font (Apache License 2.0), bundled
-:: inside the imgui repo for its own examples/tools (imgui itself is MIT --
-:: see imgui's top-level LICENSE.txt). No separate README.txt exists at this
-:: path in the docking-branch tag.
+:: Roboto-Medium.ttf (Apache 2.0) ships inside the imgui repo (imgui is MIT).
 curl -fsSL -o "%THIRD_PARTY%\imgui\misc\fonts\Roboto-Medium.ttf" "%IMGUI_BASE%/misc/fonts/Roboto-Medium.ttf" || goto :error
 curl -fsSL -o "%THIRD_PARTY%\imgui\misc\fonts\binary_to_compressed_c.cpp" "%IMGUI_BASE%/misc/fonts/binary_to_compressed_c.cpp" || goto :error
 echo     Roboto-Medium.ttf OK

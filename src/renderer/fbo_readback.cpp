@@ -55,12 +55,8 @@ std::vector<uint8_t> FboReadback::read_pixels() const {
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
     glReadPixels(0, 0, rw, rh, GL_RGBA, GL_UNSIGNED_BYTE, src.data());
 
-    // Box-filter the supersampled readback down to the final image size —
-    // the CPU counterpart of PlotFbo::resolve()'s fragment shader, and
-    // deliberately the same filter so a savefig() PNG matches what the
-    // window shows. Done on the CPU here because savefig is a one-shot
-    // operation whose result has to reach host memory regardless, so a GPU
-    // pass would only add a second render target for no saving.
+    // Box-filter down on the CPU, the same filter as PlotFbo::resolve(), so the
+    // PNG matches the window.
     std::vector<uint8_t> buf(static_cast<std::size_t>(width_) * 4
                              * static_cast<std::size_t>(height_));
     if (supersample_ == 1) {

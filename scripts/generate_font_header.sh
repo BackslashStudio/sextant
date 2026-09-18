@@ -1,15 +1,9 @@
 #!/usr/bin/env bash
 # generate_font_header.sh — embed a .ttf as a compressed C header
 #
-# Regenerates a header in the same style as src/widgets/panel_font.h: builds
-# imgui's vendored binary_to_compressed_c tool and runs it (-u32 encoding)
-# against a TTF, then wraps the result in a namespace with this project's
-# `k_<symbol>_compressed_*` naming convention.
-#
-# Neither sextant's plot/axes font (loaded from system font paths at
-# runtime, see spec_build.md's Fonts section) nor its build normally needs
-# this — it's only for embedding a new font asset the way panel_font.h
-# embeds Roboto-Medium.ttf for the ImGui control panel.
+# Builds imgui's binary_to_compressed_c tool, runs it (-u32) on a TTF and wraps
+# the output in a namespace with `k_<symbol>_compressed_*` names, like
+# src/widgets/panel_font.h. Only needed to embed a new font asset.
 #
 # Usage:
 #   scripts/generate_font_header.sh <input.ttf> <symbol_name> <output_header.h> [namespace]

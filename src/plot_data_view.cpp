@@ -6,15 +6,12 @@ namespace sextant {
 
 namespace {
 
-// "line 0" / "heatmap 2". Used whenever the plot object has no user name.
-// Note hist() produces a BarPlot (there is no separate histogram struct), so
-// histograms surface here as "bar N" — same as Axes::bar().
+// "line 0" / "heatmap 2", for objects without a name. hist() output is a "bar".
 std::string synth_label(const char* kind_name, int index) {
     return std::string(kind_name) + " " + std::to_string(index);
 }
 
-// Only some kinds route through here; heatmap, scatter_z, bar3d and surface
-// tabs always take the synthesized name, even when the object has a `name`.
+// Heatmap, scatter_z, bar3d and surface tabs always use the synthesized name.
 std::string pick_label(const std::string& user_label, const char* kind_name, int index) {
     return user_label.empty() ? synth_label(kind_name, index) : user_label;
 }
@@ -99,9 +96,7 @@ std::string plane_group_label(const PlaneSnapshot& p, int index) {
 std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot3D& snap) {
     std::vector<PlotDataTable> out;
 
-    // The axes' own objects first. `plane_index` stays -1: a bar3d grid is on
-    // the axes, not on a plane, and that is exactly what routes its edits.
-    // The tab name is always the synthesized one (see pick_label()).
+    // The axes' own objects first (plane_index -1).
     for (std::size_t i = 0; i < snap.bars3d.size(); ++i) {
         PlotDataTable t;
         t.kind = PlotKind::Bar3D;
@@ -111,9 +106,7 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot3D& snap
         out.push_back(std::move(t));
     }
 
-    // Then the surfaces, in RenderSnapshot3D's own member order. Also on the
-    // axes, also plane -1, and also the grid table shape -- which is the whole
-    // of what 7d had to add here, because 6c built that shape generally.
+    // Surfaces: grid table shape, plane -1.
     for (std::size_t i = 0; i < snap.surfaces.size(); ++i) {
         PlotDataTable t;
         t.kind = PlotKind::Surface;
@@ -123,11 +116,7 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot3D& snap
         out.push_back(std::move(t));
     }
 
-    // Then the clouds -- the plain vector shape, and the only 3D kind that
-    // takes it: three coordinate columns indexed alike, plus the fourth
-    // dimension when the series has one. A flat cloud shows three columns
-    // rather than an empty fourth, because a column of nothing is not the
-    // same statement as no column.
+    // Clouds: x/y/z columns, plus colors when present.
     for (std::size_t i = 0; i < snap.scatter3d.size(); ++i) {
         const auto& sp = snap.scatter3d[i];
         PlotDataTable t;
@@ -142,11 +131,7 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot3D& snap
         out.push_back(std::move(t));
     }
 
-    // Then the paths, which take the cloud's shape exactly and for the same
-    // reason: a path's data *is* a cloud's, three independent coordinates and
-    // an optional fourth, and what differs is only that the points are joined.
-    // So the table is the points, one row each -- not the segments, which have
-    // no values of their own and would report a pair of row numbers.
+    // Paths: one row per point, as clouds.
     for (std::size_t i = 0; i < snap.lines3d.size(); ++i) {
         const auto& lp = snap.lines3d[i];
         PlotDataTable t;
@@ -161,12 +146,7 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot3D& snap
         out.push_back(std::move(t));
     }
 
-    // Then the meshes, which take the cloud's and the path's table shape for
-    // the third time: a mesh's vertices are three independent coordinates and
-    // an optional fourth, and what differs is only which of them are joined.
-    // So the rows are vertices -- not faces, which have no values of their own
-    // and would report three row numbers. The topology rides along in `mesh`,
-    // read-only.
+    // Meshes: one row per vertex, as clouds; topology rides along in `mesh`.
     for (std::size_t i = 0; i < snap.surface_tri.size(); ++i) {
         const auto& sm = snap.surface_tri[i];
         PlotDataTable t;
@@ -185,9 +165,7 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot3D& snap
 
     for (std::size_t i = 0; i < snap.planes.size(); ++i) {
         const PlaneSnapshot& p = snap.planes[i];
-        // The 2D overload verbatim -- a plane's sheet *is* a RenderSnapshot,
-        // which is the whole point of §6's arrangement. Only the address is
-        // added on top.
+        // A plane's sheet is a RenderSnapshot; reuse the 2D overload.
         std::vector<PlotDataTable> sheet = collect_plot_data_tables(p.sheet);
         const std::string group = plane_group_label(p, static_cast<int>(i));
         for (PlotDataTable& t : sheet) {

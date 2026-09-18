@@ -8,9 +8,8 @@ namespace sextant::colormaps {
 // Generated from matplotlib colormap data.
 
 // clang-format off
-// Only the first 204 of 256 entries are real matplotlib viridis samples;
-// the remaining tail is filled in below via linear interpolation to the
-// standard viridis endpoint (253,231,37) rather than left blank.
+// Only the first 204 entries are real viridis samples; the tail is
+// interpolated below to the endpoint (253,231,37).
 static constexpr uint8_t k_viridis_head[204][4] = {
     {68,1,84,255},{68,2,86,255},{69,4,87,255},{69,5,89,255},{70,7,90,255},
     {70,8,92,255},{70,10,93,255},{70,11,94,255},{71,13,96,255},{71,14,97,255},

@@ -40,23 +40,13 @@ static std::string xml_escape(const std::string& s) {
     return out;
 }
 
-// SVG names a font-family for the viewer to resolve locally. AxesStyle::
-// font_path is a file path, not a family name, so it is looked up against
-// discover_system_fonts() (which reads the real family name out of each font's
-// own 'name' table, e.g. "times.ttf" -> "Times New Roman") to get a CSS-usable
-// name -- the same list the Cosmetic panel's Font combo populates from, so an
-// explicit selection round-trips. Falls back to the filename stem for a path
-// that was not auto-detected. An unset path resolves to pick_default_font(),
-// the same font the live NanoVG renderer defaults to, so headless SVG output
-// never silently diverges from what is on screen. The legend, colorbar and
-// suptitle route through here too, via their own font_path fields.
+// CSS font-family for a font_path: the real family name from
+// discover_system_fonts() (same list as the Font combo), else the filename
+// stem. "" resolves to pick_default_font(), matching the on-screen renderer.
 static std::string svg_font_family_for(const std::string& font_path) {
     static const char* kDefaultFamily = "sans-serif,Arial,Helvetica";
     if (!font_path.empty()) {
-        // Path comparison (not string equality) since discover_system_fonts()
-        // paths use the platform's native separators, which may not match a
-        // path set by hand (e.g. "C:/Windows/Fonts/arial.ttf" vs the
-        // "C:\Windows\Fonts\arial.ttf" the scan produced on Windows).
+        // Compare as paths: separators may differ from a hand-written path.
         const std::filesystem::path wanted(font_path);
         for (const auto& f : discover_system_fonts()) {
             if (std::filesystem::path(f.path) == wanted)
@@ -83,16 +73,13 @@ static std::string rgb(const Color& c) {
     return buf;
 }
 
-// Emits ` stroke-dasharray="..."` when the style calls for one, and nothing at
-// all otherwise. The run lengths come from the shared table in
-// src/line_dash.h, so this cannot drift from what the window and PNG draw.
+// ` stroke-dasharray="..."` for a dashed style (from line_dash.h), else nothing.
 static std::string dash_attr(LineStyle ls) {
     const std::string da = svg_dasharray(ls);
     return da.empty() ? std::string{} : " stroke-dasharray=\"" + da + "\"";
 }
 
-// Standard base64 (RFC 4648), used to embed heatmap PNGs as data: URIs —
-// SVG has no native raster-image primitive of its own.
+// Standard base64 (RFC 4648), for heatmap PNG data: URIs.
 static std::string base64_encode(std::span<const uint8_t> data) {
     static constexpr char table[] =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -132,9 +119,7 @@ static std::string base64_encode(std::span<const uint8_t> data) {
 static void emit_grid(std::ostringstream& o, const SvgAxesData& d) {
     if (!d.grid_enabled) return;
     const auto& g = d.grid_opts;
-    // LineStyle::None means "no stroke" for a data line; a grid line is a
-    // line, so it means the same thing here rather than silently drawing
-    // solid, which is what both writers used to do.
+    // LineStyle::None draws no grid line, as for data lines.
     if (g.linestyle == LineStyle::None) return;
     o << "  <g stroke=\"" << rgb(g.color) << "\" stroke-opacity=\"" << g.color.a
       << "\" stroke-width=\"" << g.linewidth << "\"";
@@ -156,12 +141,8 @@ static void emit_lines(std::ostringstream& o, const SvgAxesData& d) {
     for (const auto& lp : d.lines) {
         if (lp.x.empty() || lp.opts.linestyle == LineStyle::None) continue;
 
-        // A closed path is a <polygon>, not a <polyline> with its first point
-        // written again: the element is what closes it, so the seam gets a
-        // join rather than two butt caps crossing, and SVG's own default
-        // stroke-miterlimit is 4 -- the same clamp the stroke shader applies.
-        // `fill="none"` keeps it a path; a polygon's fill is the one thing
-        // that would otherwise differ from the raster picture.
+        // A closed path is a <polygon> (fill="none") so the seam gets a join;
+        // SVG's default miterlimit 4 matches the stroke shader.
         const char* tag = lp.opts.loop && lp.x.size() >= 2 ? "polygon" : "polyline";
         o << "  <" << tag << " fill=\"none\" stroke=\"" << rgb(lp.opts.color)
           << "\" stroke-opacity=\"" << lp.opts.alpha
@@ -174,14 +155,9 @@ static void emit_lines(std::ostringstream& o, const SvgAxesData& d) {
     }
 }
 
-// Error bars for all four kinds that carry them: a whisker and its caps as
-// <line> elements, whisker_segments() being the definition the raster path
-// draws too, plus a box as one <rect>.
-//
-// Geometry agrees with the raster path because the two agree on the
-// definitions rather than on the code: `capsize` and `boxwidth` are total
-// lengths in pixels, and `linewidth` is a stroke width here where
-// push_px_segment() has to offset by half of it.
+// Error bars for all four kinds: whisker and caps as <line>s from
+// whisker_segments() (shared with the raster path), plus a box <rect>.
+// capsize/boxwidth are total pixel lengths; linewidth is the stroke width.
 static void emit_whisker(std::ostringstream& o, float cx, float cy,
                          float lo, float hi, bool vertical,
                          const ErrorBarOptions& style, const std::string& stroke)
@@ -246,27 +222,20 @@ static void emit_error_bars_for(std::ostringstream& o, const SvgAxesData& d,
 static void emit_error_bars(std::ostringstream& o, const SvgAxesData& d) {
     for (const auto& lp : d.lines)
         emit_error_bars_for(o, d, lp.x, lp.y, lp.err, lp.opts.errorbar, lp.opts.color);
-    // Heights, not the zero baseline: an error bar measures the bar's tip.
+    // Error bars hang off the tip (heights), not the baseline.
     for (const auto& bp : d.bars)
         emit_error_bars_for(o, d, bp.centers, bp.heights, bp.err,
                             bp.opts.errorbar, bp.opts.edgecolor);
     for (const auto& sp : d.scatters)
         emit_error_bars_for(o, d, sp.x, sp.y, sp.err, sp.opts.errorbar, sp.opts.color);
-    // Scatter_z has no single color of its own, so black rather than a
-    // per-point colormap value the bar cannot have — same rule as the raster.
+    // scatter_z has no single color, so black (as in the raster path).
     for (const auto& sp : d.scatter_z)
         emit_error_bars_for(o, d, sp.x, sp.y, sp.err, sp.opts.errorbar, Color::Black);
 }
 
-// The shapes come from marker_shape(), so a marker in the picture, a marker in
-// this file's legend and a marker in the window's legend are one definition.
-// Each form still emits the SVG element it *is* -- a disc is a <circle> and a
-// square a <rect>, not four polygon points -- which is both smaller output and
-// why routing this through the shared shape changed no byte of any existing
-// file.
-// `stroke` empty means no outline, which is every data marker and every legend
-// key but scatter_z's. A Strokes form has no interior, so an outlined one is
-// drawn *in* the stroke colour rather than filled and then outlined.
+// Markers from marker_shape() (shared with both legends), emitted as their
+// natural element (<circle>, <rect>, ...). Empty `stroke` = no outline; an
+// outlined Strokes form is drawn in the stroke color.
 static void emit_scatter_marker(std::ostringstream& o,
                                 float cx, float cy, float r,
                                 const std::string& fill, float alpha,
@@ -317,10 +286,8 @@ static void emit_scatter(std::ostringstream& o, const SvgAxesData& d) {
     }
 }
 
-// Continuous-color scatter: each point gets its own fill, computed the same
-// way as draw_scatter_z's CPU colormap-LUT lookup (data_renderer.cpp) — no
-// colorbar box here, only the SVG-writer-side pre-existing limitation (see
-// SvgAxesData's comment); the per-point colors themselves need no image.
+// Continuous-color scatter: per-point fill via the same colormap LUT as the
+// raster path.
 static void emit_scatter_z(std::ostringstream& o, const SvgAxesData& d) {
     for (const auto& sp : d.scatter_z) {
         if (sp.x.empty()) continue;
@@ -340,12 +307,8 @@ static void emit_scatter_z(std::ostringstream& o, const SvgAxesData& d) {
     }
 }
 
-// Heatmap: the same CPU colormap-LUT conversion DataRenderer::draw_heatmap
-// does, PNG-encoded and embedded as a base64 data: URI <image>, since SVG has
-// no native raster primitive. PNG rows are top-down and hp.data's row 0 is the
-// image's top row only for origin="upper", so the same flip draw_heatmap
-// applies before its texture upload is replicated here -- plus, for a
-// reversed range, the mirroring the GL quad gets from its own corners.
+// Heatmap as a base64 PNG <image>, via the same colormap LUT and origin flip
+// as DataRenderer::draw_heatmap, plus mirroring for reversed ranges.
 static void emit_heatmap(std::ostringstream& o, const SvgAxesData& d) {
     for (const auto& hp : d.heatmaps) {
         if (hp.rows <= 0 || hp.cols <= 0) continue;
@@ -361,11 +324,8 @@ static void emit_heatmap(std::ostringstream& o, const SvgAxesData& d) {
             std::memcpy(&rgba[static_cast<std::size_t>(i) * 4], &lut[idx * 4], 4);
         }
 
-        // An <image> is placed by a positive-extent box, so unlike the GL
-        // quad it cannot express a reversed range by folding its own corners
-        // -- the mirroring has to happen in the pixels instead. Vertically
-        // that composes with the origin flip (a reversed yrange cancels it);
-        // horizontally it is a column reversal the upright case never needs.
+        // An <image> can't have a reversed box, so reversed ranges are
+        // mirrored in the pixels (a reversed yrange cancels the origin flip).
         const bool mirror_x = (hp.xrange.hi < hp.xrange.lo);
         const bool flip_y   = (hp.opts.origin == "lower") != (hp.yrange.hi < hp.yrange.lo);
 
@@ -386,19 +346,14 @@ static void emit_heatmap(std::ostringstream& o, const SvgAxesData& d) {
         const auto png_bytes = write_png_to_memory(hp.cols, hp.rows, png_src);
         const std::string b64 = base64_encode(png_bytes);
 
-        // Same quad the GL texture upload maps its own quad to (see
-        // DataRenderer::draw_heatmap's `verts`): the plot's own xrange x
-        // yrange in data space, mapped through the same CoordTransform.
+        // The plot's xrange x yrange, through the same CoordTransform as GL.
         const float x0 = d.layout.tr.to_px(hp.xrange.lo), x1 = d.layout.tr.to_px(hp.xrange.hi);
         const float y0 = d.layout.tr.to_py(hp.yrange.lo), y1 = d.layout.tr.to_py(hp.yrange.hi);
         const float ix = std::min(x0, x1), iw = std::abs(x1 - x0);
         const float iy = std::min(y0, y1), ih = std::abs(y1 - y0);
 
-        // DataRenderer::draw_heatmap filters its texture with GL_NEAREST,
-        // while an SVG <image> defaults to smooth bilinear upscaling, which
-        // looks blurry for a small heatmap blown up. The `style` fallback
-        // chain is the standard cross-renderer trick: each consumer keeps the
-        // last declaration whose value it understands and ignores the rest.
+        // Nearest-neighbour scaling to match GL_NEAREST; the style fallback
+        // chain lets each renderer pick the value it understands.
         o << "    <image x=\"" << ix << "\" y=\"" << iy
           << "\" width=\"" << iw << "\" height=\"" << ih
           << "\" preserveAspectRatio=\"none\""
@@ -435,22 +390,16 @@ static void emit_bars(std::ostringstream& o, const SvgAxesData& d) {
     }
 }
 
-// Contour lines over a heatmap, from the same trace_contours()/plan_contours()
-// the window path runs -- this writer derives no contour geometry of its own.
-// There is no ContourCache here: an export traces once and exits.
-//
-// Emitted into a clipped group of its own *after* the data group, matching
-// where render_frame() calls draw_contours(): above every plot, below the
-// border and grid.
+// Contours via the shared trace_contours()/plan_contours() (no cache: one
+// trace per export). Emitted in their own clipped group after the data, below
+// border and grid, as in render_frame().
 static bool has_contours(const SvgAxesData& d) {
     for (const auto& hp : d.heatmaps)
         if (!hp.opts.contours.empty() && hp.rows > 0 && hp.cols > 0) return true;
     return false;
 }
 
-// One planned contour set. Split out when planes gained contours: a plane's
-// arrive already planned in `d.contours3d`, and the geometry is pixel-space
-// either way, so the emission is one function rather than two.
+// Emit one planned contour set (2D heatmaps and planes alike).
 static void emit_contour_draw(std::ostringstream& o, const SvgAxesData& d,
                               const ContourDraw& cd, const Color& color,
                               float linewidth, float fontsize) {
@@ -469,9 +418,8 @@ static void emit_contour_draw(std::ostringstream& o, const SvgAxesData& d,
         }
 
         if (cd.labels.empty()) return;
-        // The rotation is applied about the anchor via transform, and the
-        // baseline offset inside it, so the text is vertically centred on the
-        // line exactly as NVG_ALIGN_MIDDLE centres it in the window.
+        // Rotate about the anchor, with the baseline offset inside, so text is
+        // vertically centred like NVG_ALIGN_MIDDLE.
         const float base = middle_baseline_offset(d.axes_style.font_path,
                                                   fontsize);
         for (const auto& lb : cd.labels) {
@@ -496,16 +444,13 @@ static void emit_contours(std::ostringstream& o, const SvgAxesData& d) {
     }
 }
 
-// A 3D axes' plane contours, already planned by plan_plane_contours() in
-// figure_export.cpp -- this writer projects nothing, here as everywhere.
+// A 3D axes' plane contours, pre-planned in figure_export.cpp.
 static void emit_contours3d(std::ostringstream& o, const SvgAxesData& d) {
     for (const auto& p : d.contours3d)
         emit_contour_draw(o, d, p.draw, p.color, p.linewidth, p.fontsize);
 }
 
-// The frame outline, one <path> of up to four visible edges since v1.0 step
-// 19 (it was a <rect>, which cannot express three of them). One stroke group,
-// so a full box is still a single element.
+// The frame outline: one <path> of up to four visible edges.
 static void emit_spines(std::ostringstream& o, const SvgAxesData& d) {
     const AxesStyle& st = d.axes_style;
     const PlotRect&  r  = d.layout.frame;
@@ -543,9 +488,7 @@ static void emit_ticks_and_labels(std::ostringstream& o, const SvgAxesData& d) {
 
     o << "  <g stroke=\"" << rgb(d.axes_style.tick_color) << "\" stroke-opacity=\""
       << d.axes_style.tick_color.a << "\" stroke-width=\"" << d.axes_style.tick_linewidth << "\">\n";
-    // Along the axis lines, wherever the layout put them (v1.0 step 19); the
-    // direction is the layout's too, so this path cannot disagree with
-    // NanoVG's about which side of a High axis the marks fall on.
+    // Along the axis lines, in the layout's direction (matches NanoVG).
     const float xa = d.layout.xaxis_y;
     const float ya = d.layout.yaxis_x;
     for (const auto& t : d.layout.xticks) {
@@ -562,11 +505,8 @@ static void emit_ticks_and_labels(std::ostringstream& o, const SvgAxesData& d) {
 
     o << "  <g font-family=\"" << svg_font_family(d.axes_style) << "\" font-size=\"" << fsz
       << "\" fill=\"" << rgb(d.axes_style.label_color) << "\">\n";
-    // NanoVG hangs the x labels from their top edge and centres the y labels
-    // on the tick; SVG wants a baseline for both. The offsets come from the
-    // font's own metrics rather than the "ascent == font size" and 0.35 *
-    // font size approximations used here before, which put the two outputs a
-    // couple of pixels apart vertically at every tick.
+    // Baseline offsets from the font's metrics, matching NanoVG's top-hung x
+    // labels and centred y labels.
     const float x_base = d.layout.xlabel_top + top_baseline_offset(d.axes_style.font_path, fsz);
     const float y_base = middle_baseline_offset(d.axes_style.font_path, fsz);
     for (const auto& t : d.layout.xticks) {
@@ -584,10 +524,7 @@ static void emit_ticks_and_labels(std::ostringstream& o, const SvgAxesData& d) {
     o << "  </g>\n";
 }
 
-// Anchors come from the layout; only the centre-to-baseline conversion is
-// this writer's own. The three offsets that used to live here (-20, +42, -45
-// px) were a transcription of NanoVG's, and the pair had to be edited
-// together.
+// Anchors come from the layout; only the centre-to-baseline conversion is here.
 static void emit_titles(std::ostringstream& o, const SvgAxesData& d) {
     const std::string& fp = d.axes_style.font_path;
 
@@ -611,10 +548,8 @@ static void emit_titles(std::ostringstream& o, const SvgAxesData& d) {
         const float fsz = d.axes_style.ytitle_fontsize;
         const float cx = d.layout.ytitle_x;
         const float cy = d.layout.ytitle_y;
-        // The baseline shift is applied in the *rotated* frame, exactly as
-        // NanoVG applies its own after nvgRotate: under rotate(-90) a local +y
-        // maps to a global +x, so writing it into the y attribute rather than
-        // into cx is what makes the two agree.
+        // Baseline shift in the rotated frame (as NanoVG does after
+        // nvgRotate): under rotate(-90) local +y is global +x.
         o << "  <text x=\"0\" y=\"" << middle_baseline_offset(fp, fsz) << "\""
           << " text-anchor=\"middle\" font-family=\"" << svg_font_family(d.axes_style) << "\""
           << " font-size=\"" << fsz << "\" fill=\"" << rgb(d.axes_style.ytitle_color) << "\""
@@ -624,9 +559,7 @@ static void emit_titles(std::ostringstream& o, const SvgAxesData& d) {
     }
 }
 
-// The entry list and the box are the layout's, not this writer's — see
-// collect_legend_entries() in figure_layout.h, which replaced a near-copy of
-// this file's own collector.
+// Entries and box come from the layout (collect_legend_entries()).
 static void emit_legend(std::ostringstream& o, const SvgAxesData& d, std::size_t idx) {
     if (!d.layout.has_legend()) return;
 
@@ -652,10 +585,8 @@ static void emit_legend(std::ostringstream& o, const SvgAxesData& d, std::size_t
         const std::string fill = rgb(e.color);
 
         if (e.kind == LegendKind::Line && e.swept) {
-            // The colormap swept along the swatch. Stops sampled from the map,
-            // for the reason a path's own segments are (step 13.2b): a
-            // two-stop gradient is the RGB chord, and a key drawn in colours
-            // the bar beside it does not contain is worse than no key.
+            // Colormap swept along the swatch, with stops sampled from the map
+            // (a two-stop gradient would leave the colormap).
             constexpr int kStops = 9;
             const std::string gid = "legendGrad" + std::to_string(idx) + "_"
                                   + std::to_string(i);
@@ -682,9 +613,8 @@ static void emit_legend(std::ostringstream& o, const SvgAxesData& d, std::size_t
               << "\" stroke=\"" << fill << "\" stroke-width=\"2\""
               << dash_attr(e.style) << "/>\n";
         } else if (e.kind == LegendKind::Marker) {
-            // The same emitter the data markers go through, so a key and the
-            // points it keys cannot come out as different shapes.
-            // Alpha 0 on the edge means none, which is every kind but scatter_z.
+            // Same emitter as the data markers. Alpha 0 edge = none (all but
+            // scatter_z).
             emit_scatter_marker(o, (sx0 + sx1) * 0.5f, cy, 4.5f, fill, 1.0f, e.marker,
                                 e.edge.a > 0.0f ? rgb(e.edge) : std::string());
         } else {
@@ -702,13 +632,9 @@ static void emit_legend(std::ostringstream& o, const SvgAxesData& d, std::size_t
     }
 }
 
-// Gradient bar + border + vmin/vmax labels, one per entry of cell.colorbars.
-// The <linearGradient>s themselves are emitted by emit_defs(), since SVG
-// gradients must be defined once and referenced by id; this only draws the
-// rects that reference them, matching NvgRenderer::draw_colorbar's layout.
-//
-// The id carries both indices (axes, then bar within it). It used to be the
-// axes index alone, which was unique only while a cell could hold one bar.
+// Gradient bar, border and vmin/vmax labels per colorbar, matching
+// NvgRenderer::draw_colorbar. Gradients are defined in emit_defs(); ids carry
+// the axes and bar index.
 static void emit_colorbar(std::ostringstream& o, const SvgAxesData& d, std::size_t idx) {
     if (!d.layout.has_colorbar()) return;
 
@@ -722,9 +648,7 @@ static void emit_colorbar(std::ostringstream& o, const SvgAxesData& d, std::size
           << "\" stroke-opacity=\"" << cb.border_color.a << "\""
           << " stroke-width=\"" << cb.border_linewidth << "\"/>\n";
 
-        // Both anchors are the layout's, vertically centred on the line; the
-        // baseline shift was a literal 3.5 px here once, i.e. right only for
-        // the default 10 px font.
+        // Anchors from the layout, centred on the line.
         const auto& cbx  = d.layout.colorbars[b];
         const float base = middle_baseline_offset(cb.font_path, cb.fontsize);
         const char* anchor = cbx.num_align == HAlign::Left  ? "start"
@@ -743,11 +667,8 @@ static void emit_colorbar(std::ostringstream& o, const SvgAxesData& d, std::size
         o << "    <text x=\"" << cbx.vmin_x << "\" y=\"" << cbx.vmin_y + base
           << "\" text-anchor=\"" << anchor << "\">" << xml_escape(buf) << "</text>\n";
 
-        // The bar's name: level beyond a horizontal bar, rotated along the
-        // outer side of a vertical one. There the baseline shift goes in the
-        // *rotated* frame for the reason the y-axis title's does: under
-        // rotate(-90) a local +y maps to a global +x, so writing it into y
-        // rather than into the anchor is what makes this agree with NanoVG.
+        // The bar's name: beyond a horizontal bar, rotated along a vertical
+        // one (baseline shift in the rotated frame, as for the y title).
         if (!cbx.name.empty() && cbx.horizontal) {
             o << "    <text x=\"" << cbx.name_x << "\" y=\"" << cbx.name_y + base
               << "\" text-anchor=\"middle\">" << xml_escape(cbx.name) << "</text>\n";
@@ -774,19 +695,9 @@ static void emit_defs(std::ostringstream& o, const std::vector<SvgAxesData>& axe
           << "</clipPath>\n";
 
         if (!d.layout.has_colorbar()) continue;
-        // Vertical gradient: SVG y increases downward, same as pixel space
-        // here, so offset 0% (top) = vmax and 100% (bottom) = vmin, matching
-        // draw_colorbar's NanoVG image. All 256 LUT entries become stops, for
-        // exact fidelity with the raster path's gradient curve -- viridis is
-        // not perceptually linear between its endpoints.
-        //
-        // One per bar rather than one per colormap: two bars sharing a cmap
-        // would share a gradient, but de-duplicating them would make the id a
-        // function of the colormap rather than of the bar, and every emitter
-        // would then have to agree on that mapping. NanoVG's image cache does
-        // dedupe, because there the key is the colormap already.
-        //
-        // A horizontal bar runs left to right, offset 0% = vmin.
+        // Vertical: offset 0% (top) = vmax. All 256 LUT entries become stops
+        // for fidelity. One gradient per bar (not deduplicated per colormap).
+        // Horizontal: left to right, 0% = vmin.
         for (std::size_t b = 0; b < d.layout.colorbars.size(); ++b) {
             const bool     horiz = d.layout.colorbars[b].horizontal;
             const uint8_t* lut = colormaps::get(d.layout.colorbars[b].cmap);
@@ -805,16 +716,10 @@ static void emit_defs(std::ostringstream& o, const std::vector<SvgAxesData>& axe
     o << "</defs>\n";
 }
 
-// One axes' worth of markup. The clip id is per-axes so multiple axes in one
-// SVG do not collide.
-//
-// Emission order is painter's order and mirrors render_frame()'s three
-// passes: background, data, then border followed by grid and ticks. The grid
-// is emitted *after* the data group so it draws on top, as it does in the
-// window and in PNG.
-// One group of Box3DPlan polylines. `close` distinguishes a pane (a filled
-// polygon) from a grid line or axis edge (an open polyline), matching the
-// same split in NvgRenderer's stroke_group().
+// One axes' markup, in render_frame()'s order: background, data, border, then
+// grid and ticks over the data. Clip ids are per axes.
+// One group of Box3DPlan polylines: `close` = filled pane, else an open line
+// (as NvgRenderer's stroke_group()).
 static void emit_polys(std::ostringstream& o, const std::vector<Box3DPlan::Poly>& polys,
                        const std::string& fill, const Color* stroke, float stroke_w, bool close) {
     for (const auto& p : polys) {
@@ -836,9 +741,7 @@ static void emit_box3d_labels(std::ostringstream& o,
                               const std::vector<Box3DPlan::Label>& labels) {
     for (const auto& l : labels) {
         if (l.text.empty()) continue;
-        // Centred on the anchor in both outputs -- plan_box3d() pushes the
-        // anchor far enough out that no other alignment is needed, and one
-        // alignment is one fewer thing the two paths can disagree about.
+        // Centred on the anchor in both outputs.
         o << "  <text x=\"" << l.x
           << "\" y=\"" << l.y + middle_baseline_offset(l.font_path, l.fontsize)
           << "\" text-anchor=\"middle\" font-family=\"" << svg_font_family_for(l.font_path)
@@ -848,16 +751,9 @@ static void emit_box3d_labels(std::ostringstream& o,
     }
 }
 
-// One layer of one plane, in whichever of the four forms plan_planes3d()
-// reduced it to. Nothing here projects anything: the plan arrives in pixels,
-// which is what keeps the vector and raster paths from disagreeing about where
-// a plane's contents are.
-//
-// The affine <image> is the orthographic heatmap and is exact: an orthographic
-// projection maps a rectangle to a parallelogram, which is precisely what
-// matrix(...) can express. The unit square is the image's own coordinate
-// system, so `width`/`height` are 1 and the whole placement -- position,
-// scale, shear and the y flip -- is in the six numbers.
+// One layer of one plane, from plan_planes3d(), already in pixels. The affine
+// <image> (orthographic heatmap) is exact: its unit square is mapped by
+// matrix(...) alone.
 static void emit_plane3d(std::ostringstream& o, const PlanePlanItem& p) {
     if (!p.warning.empty())
         o << "  <!-- sextant: " << xml_escape(p.warning) << " -->\n";
@@ -872,8 +768,7 @@ static void emit_plane3d(std::ostringstream& o, const PlanePlanItem& p) {
           <<                           p.matrix[2] << ' ' << p.matrix[3] << ' '
           <<                           p.matrix[4] << ' ' << p.matrix[5] << ")\"";
         if (p.alpha < 1.0f) o << " opacity=\"" << p.alpha << "\"";
-        // Same nearest-neighbour intent as the 2D <image>: each consumer keeps
-        // the last declaration whose value it understands.
+        // Nearest-neighbour, as for the 2D <image>.
         o << " style=\"image-rendering: optimizeSpeed;"
           <<        " image-rendering: -moz-crisp-edges;"
           <<        " image-rendering: -webkit-optimize-contrast;"
@@ -886,18 +781,13 @@ static void emit_plane3d(std::ostringstream& o, const PlanePlanItem& p) {
     const bool any = !p.polys.empty() || !p.strokes.empty() || !p.marks.empty();
     if (!any) return;
 
-    // The whole-plane opacity goes on the group, so a per-primitive alpha
-    // still means the plot object's own -- the two multiply, as they do in the
-    // raster path where one is baked into the vertex colour and the other is
-    // the pass the plane is drawn in.
+    // Whole-plane opacity on the group; it multiplies per-primitive alpha.
     o << "  <g";
     if (p.alpha < 1.0f) o << " opacity=\"" << p.alpha << "\"";
     o << ">\n";
 
-    // Polygons: the per-cell perspective heatmap and the plane's own filled
-    // areas both. Each carries a stroke of its own fill, which for the cells
-    // closes the hairline of background an antialiasing renderer leaves along
-    // every shared edge, and for a bar body is invisible.
+    // Polygons (perspective heatmap cells, filled areas), each stroked in its
+    // own fill to hide antialiasing seams.
     for (const auto& poly : p.polys) {
         if (poly.xy.size() < 6) continue;
         const std::string fill = rgb(poly.fill);
@@ -913,10 +803,8 @@ static void emit_plane3d(std::ostringstream& o, const PlanePlanItem& p) {
         o << "/>\n";
     }
 
-    // Strokes: one <polyline> per segment with its own width, which is §4's
-    // SVG concession spent per *segment* rather than per line -- finer than
-    // the concession allows, and the reason a line on a plane thins with
-    // distance under perspective as the raster ribbon does.
+    // Strokes: one <polyline> per segment with its own width, so lines thin
+    // with distance under perspective.
     for (const auto& st : p.strokes) {
         if (st.xy.size() < 4 || st.width <= 0.0f) continue;
         o << "    <polyline fill=\"none\" points=\"";
@@ -928,8 +816,7 @@ static void emit_plane3d(std::ostringstream& o, const PlanePlanItem& p) {
           << "\" stroke-width=\"" << st.width << "\"/>\n";
     }
 
-    // Markers: the same shapes emit_scatter_marker() draws on a 2D axes, at
-    // the same pixel size, because a marker does not scale with distance.
+    // Markers: same shapes and pixel size as on a 2D axes.
     for (const auto& m : p.marks)
         emit_scatter_marker(o, m.x, m.y, m.size * 0.5f, rgb(m.color), m.color.a,
                             m.marker);
@@ -937,9 +824,8 @@ static void emit_plane3d(std::ostringstream& o, const PlanePlanItem& p) {
     o << "  </g>\n";
 }
 
-// The 3D counterpart of emit_one_axes()'s body: panes and grid clipped to the
-// frame (matching NvgRenderer's scissor), then the frame and its annotation
-// unclipped, since those deliberately sit in the frame's own margin.
+// 3D cell: panes and grid clipped to the frame, then the frame and annotation
+// unclipped (they sit in the margin).
 static void emit_box3d(std::ostringstream& o, const SvgAxesData& d, std::size_t idx) {
     const Box3DPlan& plan = *d.box3d;
 
@@ -951,40 +837,9 @@ static void emit_box3d(std::ostringstream& o, const SvgAxesData& d, std::size_t 
     emit_polys(o, plan.grid, "none", &d.box3d_grid_opts.color,
                d.box3d_grid_opts.linewidth, false);
 
-    // The scene, inside the same clip and on top of the panes -- which is
-    // where the raster path draws it too, since the panes are the box's *back*
-    // walls and nothing in the scene can be behind them. Already sorted back
-    // to front by plan_bars3d(), so emitting in order is the painter's
-    // algorithm; SVG has no depth buffer to do it the other way.
-    //
-    // The two plans are merged rather than concatenated: both are ordered far
-    // to near by the *same* object distance (see eye_coord()), so one pass with
-    // a plane pointer interleaves whole objects correctly while leaving each
-    // bar plot's own exact face order untouched.
-    //
-    // **Known flaw, recorded rather than fixed -- see memory/spec_3d.md §10.**
-    // The granularity here is the whole *object*, and that is not fine enough
-    // for a plane that lies among a bar grid rather than clear of it: the plane
-    // is emitted entirely before or entirely after every bar, so a cut through
-    // the middle of a grid paints over the near half that should occlude it.
-    // For a plane that genuinely *intersects* a solid there is no whole-object
-    // answer at all, and the same goes for two planes at right angles. The
-    // raster path is unaffected -- it has a depth buffer and resolves this per
-    // fragment -- so this is the one place PNG and SVG knowingly disagree about
-    // something both can express. Fixing it needs geometry splitting, not a
-    // better key; §10 records the two candidate mechanisms and why the general
-    // one belongs with surfaces (plan item 2) rather than here.
-    // **Step 9 answers the flaw above, and the paragraphs before this one are
-    // the record of what it replaced.** `scene3d` is one emission order across
-    // all three plans, produced by Newell's algorithm in the plan layer -- the
-    // pairwise tests and, where they all fail, a split of one polygon along
-    // the other's plane. Whole-object granularity is gone: a plane that lies
-    // among a bar grid is now emitted in pieces, each on its own side of the
-    // bars it cuts through.
-    //
-    // The split happens there rather than here for the reason this writer
-    // takes plans at all: a piece has to be re-projected, and this writer
-    // never sees a camera.
+    // The scene, over the panes, in `scene3d` order: Newell's algorithm from
+    // the plan layer, with polygons split where no order exists. Splits are
+    // done there because pieces must be re-projected.
     auto emit_ring = [&](const std::vector<float>& xy, bool filled,
                          const Color& fill, const Color& stroke, float stroke_width) {
         if (xy.size() < (filled ? 6u : 4u)) return;
@@ -1015,9 +870,8 @@ static void emit_box3d(std::ostringstream& o, const SvgAxesData& d, std::size_t 
             case ScenePaint::Kind::Bar: {
                 if (s.index >= d.bars3d.size()) break;
                 const Bar3DPolygon& p = d.bars3d[s.index];
-                // A filled face is a closed ring; a bare box edge, which only
-                // a translucent bar emits, is an open two-point line and is
-                // never split -- see prepare_paint_poly().
+                 // Filled face = closed ring; a translucent bar's bare edge is
+                 // an open line and never split.
                 emit_ring(s.xy.empty() ? p.xy : s.xy, p.filled,
                           p.fill, p.stroke, p.stroke_width);
                 break;
@@ -1025,10 +879,7 @@ static void emit_box3d(std::ostringstream& o, const SvgAxesData& d, std::size_t 
             case ScenePaint::Kind::Surface: {
                 if (s.index >= d.surfaces3d.size()) break;
                 const Surface3DPolygon& p = d.surfaces3d[s.index];
-                // `p.filled`, as the bar case has it. A wireframe edge carries
-                // no fill colour, so forcing `true` here painted every one of
-                // them -- and every piece the painter cut one into -- as a
-                // polygon filled with a default-constructed (black) Color.
+                 // Use `p.filled`: wireframe edges have no fill color.
                 emit_ring(s.xy.empty() ? p.xy : s.xy, p.filled,
                           p.fill, p.stroke, p.stroke_width);
                 break;
@@ -1037,25 +888,15 @@ static void emit_box3d(std::ostringstream& o, const SvgAxesData& d, std::size_t 
                 if (s.index >= d.meshes3d.size()) break;
                 const SurfaceTriPolygon& p = d.meshes3d[s.index];
                 const std::vector<float>& ring = s.xy.empty() ? p.xy : s.xy;
-                // A wireframe edge, or a mesh with no colour scale: the
-                // ordinary ring the bar and grid-surface cases emit, with
-                // `p.filled` rather than a literal true -- post-step-10.1's
-                // finding, where forcing it painted every wire edge as a
-                // black polygon.
+                 // Wireframe edge or flat mesh: the ordinary ring, `p.filled`.
                 if (!p.filled || !p.colormapped || (p.gx == 0.0f && p.gy == 0.0f)) {
                     emit_ring(ring, p.filled, p.fill, p.stroke, p.stroke_width);
                     break;
                 }
                 if (ring.size() < 6) break;
 
-                // **The gradient axis is re-derived from the ring actually
-                // being drawn**, which for a split piece is the piece's own.
-                // The field is defined over the whole of the triangle's
-                // plane, so a piece needs no sub-range recovery of the kind a
-                // cut Line3DSegment needs -- but it does need this, or every
-                // cut triangle would carry its parent's full ramp compressed
-                // into a fragment of itself, which looks entirely plausible
-                // and is wrong at every cut.
+                 // Re-derive the gradient axis from the ring being drawn, so
+                 // split pieces get the right part of the ramp.
                 float tmin = std::numeric_limits<float>::max();
                 float tmax = -std::numeric_limits<float>::max();
                 for (std::size_t i = 0; i + 1 < ring.size(); i += 2) {
@@ -1063,13 +904,12 @@ static void emit_box3d(std::ostringstream& o, const SvgAxesData& d, std::size_t 
                     tmin = std::min(tmin, t);
                     tmax = std::max(tmax, t);
                 }
-                // A ring with no extent along the axis has no ramp to paint.
+                 // No extent along the axis: nothing to ramp.
                 if (!(tmax > tmin)) {
                     emit_ring(ring, true, p.fill, p.stroke, p.stroke_width);
                     break;
                 }
-                // Any point on the axis will do as the origin, since only the
-                // component along it is read; the ring's first vertex is one.
+                 // Any point on the axis works as origin; use the first vertex.
                 const float ox = ring[0], oy = ring[1];
                 const float t0 = ox * p.gx + oy * p.gy;
                 const float x1 = ox + p.gx * (tmin - t0);
@@ -1077,12 +917,8 @@ static void emit_box3d(std::ostringstream& o, const SvgAxesData& d, std::size_t 
                 const float x2 = ox + p.gx * (tmax - t0);
                 const float y2 = oy + p.gy * (tmax - t0);
 
-                // Stops sampled from the colormap, never a two-stop ramp
-                // between two colours: the straight RGB line between two
-                // distant entries leaves the map, which is the picture the
-                // raster path rejects by looking up per fragment. Nine stops,
-                // the count step 13.3 settled for a line, and the same reason
-                // holds for a triangle.
+                 // Nine stops sampled from the colormap (a two-stop ramp would
+                 // leave the map).
                 constexpr int kStops = 9;
                 const std::string gid = "meshGrad" + std::to_string(idx) + "_"
                                       + std::to_string(clip_seq++);
@@ -1095,17 +931,13 @@ static void emit_box3d(std::ostringstream& o, const SvgAxesData& d, std::size_t 
                     const float f = static_cast<float>(k) / (kStops - 1);
                     const float sx = x1 + (x2 - x1) * f;
                     const float sy = y1 + (y2 - y1) * f;
-                    // The value at that pixel, through the projective form --
-                    // exact along the axis under both cameras, since under an
-                    // orthographic one the denominator is constant. See
-                    // SurfaceTriPolygon.
+                     // Value at that pixel via the projective form (exact along
+                     // the axis under both cameras). See SurfaceTriPolygon.
                     const float num = p.na + p.nx * sx + p.ny * sy;
                     const float den = p.wa + p.wx * sx + p.wy * sy;
                     const float t = den != 0.0f ? num / den : 0.0f;
                     const int e = static_cast<int>(std::clamp(t, 0.0f, 1.0f) * 255.0f);
-                    // Looked up, then shaded -- the shader's order, and the
-                    // only one in which the light and the colormap mean what
-                    // they mean.
+                     // Look up, then shade (the shader's order).
                     const Color c{ lut[e * 4]     / 255.0f * p.shade,
                                    lut[e * 4 + 1] / 255.0f * p.shade,
                                    lut[e * 4 + 2] / 255.0f * p.shade, 1.0f };
@@ -1132,8 +964,7 @@ static void emit_box3d(std::ostringstream& o, const SvgAxesData& d, std::size_t 
                     emit_ring(xy, true, p.color, p.color, 0.0f);
                     break;
                 }
-                // A butt-ended <line>, as a 2D whisker is: a block's edges
-                // meet at its corners, and a round cap would bulge past them.
+                 // Butt-ended, so block edges don't bulge past the corners.
                 if (xy.size() < 4 || !(p.width > 0.0f)) break;
                 o << "  <line x1=\"" << xy[0] << "\" y1=\"" << xy[1]
                   << "\" x2=\"" << xy[2] << "\" y2=\"" << xy[3]
@@ -1145,10 +976,7 @@ static void emit_box3d(std::ostringstream& o, const SvgAxesData& d, std::size_t 
             case ScenePaint::Kind::Scatter: {
                 if (s.index >= d.markers3d.size()) break;
                 const Scatter3DMarker& m = d.markers3d[s.index];
-                // Through the same emit_scatter_marker() a 2D series and both
-                // legends use, so a marker in the scene, a marker in the key
-                // beside it and a marker in the window are one shape. `s.xy`
-                // is always empty here: a symbol has no ring to cut.
+                 // Same emitter as 2D and the legends. `s.xy` is empty here.
                 emit_scatter_marker(o, m.cx, m.cy, m.radius, rgb(m.color),
                                     m.color.a, m.marker);
                 break;
@@ -1157,12 +985,8 @@ static void emit_box3d(std::ostringstream& o, const SvgAxesData& d, std::size_t 
                 if (s.index >= d.lines3d.size()) break;
                 const Line3DSegment& g = d.lines3d[s.index];
                 if (g.width <= 0.0f) break;
-                // A split piece is a sub-range of the segment, and its colours
-                // have to be the sub-range of the ramp -- not the whole one
-                // compressed into a fragment, which looks entirely plausible
-                // and is wrong at every cut. `s.xy` is the piece's own two
-                // pixels; where it falls along the parent is what says which
-                // part of the ramp it carries.
+                 // A split piece carries its sub-range of the parent's ramp,
+                 // found from where `s.xy` falls along the parent.
                 float ax = g.x0, ay = g.y0, bx = g.x1, by = g.y1;
                 float t0 = 0.0f, t1 = 1.0f;
                 if (s.xy.size() >= 4) {
@@ -1185,14 +1009,8 @@ static void emit_box3d(std::ostringstream& o, const SvgAxesData& d, std::size_t 
 
                 std::string paint;
                 if (g.colormapped && g.v0 != g.v1) {
-                    // **Stops sampled from the colormap, not a two-stop ramp
-                    // between the ends.** A two-stop gradient is the straight
-                    // RGB chord, which between two distant entries leaves the
-                    // colormap entirely -- the same picture the raster path
-                    // rejects by looking up per fragment. Eight intervals is
-                    // where a viridis ramp stops being distinguishable from
-                    // the shader's continuous lookup at any width a line is
-                    // drawn at.
+                     // Stops sampled from the colormap (eight intervals), not a
+                     // two-stop RGB chord.
                     constexpr int kStops = 9;
                     const std::string gid = "lineGrad" + std::to_string(idx) + "_"
                                           + std::to_string(clip_seq++);
@@ -1203,16 +1021,11 @@ static void emit_box3d(std::ostringstream& o, const SvgAxesData& d, std::size_t 
                     const uint8_t* lut = colormaps::get(g.cmap);
                     for (int k = 0; k < kStops; ++k) {
                         const float f = static_cast<float>(k) / (kStops - 1);
-                        // Where this stop is along the *parent* segment, which
-                        // is what both the value and the depth cue are defined
-                        // against. For an unsplit segment t0..t1 is 0..1 and
-                        // this is just f.
+                         // Position along the parent segment (f when unsplit).
                         const float t = lerp(t0, t1, f);
                         const int e = static_cast<int>(
                             std::clamp(lerp(g.v0, g.v1, t), 0.0f, 1.0f) * 255.0f);
-                        // Looked up, then darkened -- the shader's order, and
-                        // the only one in which the cue and the colormap mean
-                        // what they mean.
+                         // Look up, then darken (the shader's order).
                         const float sh = lerp(g.k0, g.k1, t);
                         const Color c{ lut[e * 4]     / 255.0f * sh,
                                        lut[e * 4 + 1] / 255.0f * sh,
@@ -1231,20 +1044,14 @@ static void emit_box3d(std::ostringstream& o, const SvgAxesData& d, std::size_t 
                   << "\" x2=\"" << bx << "\" y2=\"" << by << "\" stroke=\""
                   << (paint.empty() ? rgb(flat) : paint) << "\"";
                 if (flat.a < 1.0f) o << " stroke-opacity=\"" << flat.a << "\"";
-                // Round, which is what joins a path at every bend: a cap of
-                // exactly the half width fills the wedge two segments leave
-                // between them. See Line3DSegment on what it costs at the two
-                // open ends.
+                 // Round caps fill the wedge at bends. See Line3DSegment.
                 o << " stroke-width=\"" << g.width
                   << "\" stroke-linecap=\"round\"/>\n";
                 break;
             }
             case ScenePaint::Kind::Plane: {
-                // Every layer of one plane, in the 2D painter order the plan
-                // put them in. A piece of a split plane is drawn through a
-                // clip rather than cut: an <image> cannot be cut, and the four
-                // forms a plane can take are all coplanar with each other, so
-                // one outline serves all of them.
+                 // All layers of one plane in 2D painter order. Split pieces
+                 // are clipped rather than cut (an <image> can't be cut).
                 std::string clip;
                 if (!s.xy.empty() && s.xy.size() >= 6) {
                     clip = "sceneClip" + std::to_string(idx) + "_"
@@ -1267,15 +1074,13 @@ static void emit_box3d(std::ostringstream& o, const SvgAxesData& d, std::size_t 
             }
         }
     }
-    // A plane whose quad degenerated -- edge-on to the camera, or clipped away
-    // by a perspective near plane -- never reaches the order, and dropping its
-    // contents on that account would be a regression rather than a fix.
+    // A plane whose quad degenerated (edge-on or near-clipped) is not in the
+    // order, but its contents are still emitted.
     for (std::size_t i = 0; i < d.planes3d.size(); ++i)
         if (!plane_done[i]) emit_plane3d(o, d.planes3d[i]);
     o << "  </g>\n";
 
-    // A plane's contours, over the scene and under the box's own furniture --
-    // the slot the 2D ones occupy, and where render_frame() draws them.
+    // Plane contours: over the scene, under the box furniture.
     if (!d.contours3d.empty()) {
         o << "  <g clip-path=\"url(#plotArea" << idx << ")\">\n";
         emit_contours3d(o, d);
@@ -1293,12 +1098,9 @@ static void emit_box3d(std::ostringstream& o, const SvgAxesData& d, std::size_t 
 static void emit_one_axes(std::ostringstream& o, const SvgAxesData& d, std::size_t idx) {
     if (d.box3d) {
         emit_box3d(o, d, idx);
-        // The axes title is the one piece of text a 3D cell positions the
-        // same way a 2D one does, so it comes out of the shared path; the
-        // three axis titles are on the box and are in the plan.
+        // The axes title uses the shared 2D path; axis titles are in the plan.
         emit_titles(o, d);
-        // Hoisted decoration: the same emitters, the same boxes
-        // compute_figure_layout() carved, the same styling, in the 2D order.
+        // Legend and colorbar, as in 2D.
         emit_legend(o, d, idx);
         emit_colorbar(o, d, idx);
         return;
@@ -1317,8 +1119,7 @@ static void emit_one_axes(std::ostringstream& o, const SvgAxesData& d, std::size
     emit_scatter_z(o, d);
     o << "  </g>\n";
 
-    // Its own clipped group, so contours land above every plot and
-    // below the border/grid — the slot render_frame() draws them in.
+    // Contours in their own clipped group: above plots, below border/grid.
     if (has_contours(d)) {
         o << "  <g clip-path=\"url(#plotArea" << idx << ")\">\n";
         emit_contours(o, d);
@@ -1328,8 +1129,7 @@ static void emit_one_axes(std::ostringstream& o, const SvgAxesData& d, std::size
     emit_spines(o, d);
     emit_grid(o, d);
     emit_ticks_and_labels(o, d);
-    // After the grid, matching NanoVG's order: an interior axis line belongs
-    // over the grid rules it crosses, not under them.
+    // After the grid, as in NanoVG: an interior axis line goes over the grid.
     emit_interior_axes(o, d);
     emit_titles(o, d);
     emit_legend(o, d, idx);
@@ -1353,10 +1153,7 @@ void write_svg(std::string_view path, const SvgFigureData& fd) {
     if (!fd.suptitle.empty()) {
         const auto& so  = fd.suptitle_opts;
         const float fsz = so.fontsize;
-        // Band centre, then the middle-of-line -> SVG-baseline correction
-        // (NanoVG uses ALIGN_MIDDLE; SVG's y is the baseline). The band
-        // centre used to be a literal 18.f here — a third, disguised copy
-        // of the 36 px reserved band.
+        // Band centre, then middle-of-line -> SVG baseline correction.
         const float band = suptitle_band_height(fd.suptitle, so);
         const float cy   = suptitle_center_y(band, so);
         const char* anchor = so.align == HAlign::Left  ? "start"

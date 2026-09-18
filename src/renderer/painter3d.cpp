@@ -7,29 +7,20 @@
 namespace sextant {
 namespace {
 
-// A length in box units below which two points are the same point. The box is
-// the unit-ish cube every scene is mapped into (see spec_3d.md §2), so this is
-// an absolute tolerance rather than a relative one on purpose: every scene
-// arrives at the same scale here, which is the whole reason the chain
-// normalizes before the camera sees anything.
+// Box-unit distance below which two points coincide. Absolute, since every
+// scene is normalized to the unit-ish box.
 constexpr double kEps = 1e-9;
 
-// How far off a plane a vertex may be and still count as *on* it. Larger than
-// kEps because it is compared against a dot product of box-space coordinates
-// rather than against a coordinate, and because the alternative to being
-// generous here is splitting a polygon into a sliver and its complement.
+// How far off a plane a vertex may be and still count as on it (generous, to
+// avoid sliver splits).
 constexpr double kPlaneEps = 1e-7;
 
 double signed_dist(Vec3 p, Vec3 p0, Vec3 n) { return dot(p - p0, n); }
 
 Vec3 mix(Vec3 a, Vec3 b, double t) { return a + (b - a) * t; }
 
-// The ring's area, from the same summed cross terms `ring_plane()` builds its
-// normal out of -- the magnitude that formula throws away is twice the area of
-// the polygon, planar or not.
-//
-// It exists to answer one question: did a cut actually cut anything. See the
-// split site below.
+// Ring area from the same summed cross terms as ring_plane(); used to check
+// whether a cut actually divided anything.
 double ring_area(const std::vector<Vec3>& ring) {
     if (ring.size() < 3) return 0.0;
     Vec3 sum{ 0.0, 0.0, 0.0 };
@@ -48,10 +39,7 @@ double ring_area(const std::vector<Vec3>& ring) {
 
 bool ring_plane(const std::vector<Vec3>& ring, Vec3& p0, Vec3& n) {
     if (ring.size() < 3) return false;
-    // Newell's normal: the summed cross terms over every edge. Stable where a
-    // single cross product of two adjacent edges is not, which matters because
-    // a surface cell at a fold and a bar face seen edge-on both produce very
-    // nearly collinear neighbours.
+    // Newell's normal (summed cross terms): stable for nearly collinear edges.
     Vec3 sum{ 0.0, 0.0, 0.0 };
     Vec3 c{ 0.0, 0.0, 0.0 };
     const std::size_t m = ring.size();
@@ -68,20 +56,10 @@ bool ring_plane(const std::vector<Vec3>& ring, Vec3& p0, Vec3& n) {
     n = sum * (1.0 / len);
     p0 = c * (1.0 / static_cast<double>(m));
 
-    // **And the ring has to actually lie on it.** Newell's normal is defined
-    // for any closed ring, planar or not, and for a warped one it comes back a
-    // plausible-looking average that contains none of the vertices. Every test
-    // below then asks "which side of this plane is that on" about a plane that
-    // is not a surface of anything, gets an answer that is true of neither
-    // half of the polygon, and the pair never resolves -- so the algorithm
-    // splits it, and splits the pieces, and does not stop. Three cells of
-    // `test_translucent3d` were wrong for exactly this reason, and the
-    // symptom at the top was 1,225 splits out of 145 polygons.
-    //
-    // So a polygon that is not planar is refused a plane. It can still be
-    // *ordered* -- it just cannot be a blade, exactly like the two-point bar
-    // edge. The tolerance is relative to the ring's own size because box
-    // coordinates are order 1 and a cell of a fine grid is not.
+    // The ring must actually lie on that plane: a warped ring gets an average
+    // plane containing none of its vertices, and splitting against it never
+    // terminates. Non-planar rings can be ordered but not used as blades.
+    // Tolerance is relative to the ring's size.
     double extent = 0.0, dev = 0.0;
     for (const Vec3& v : ring) {
         extent = std::max(extent, length(v - p0));
@@ -96,9 +74,7 @@ void split_ring_by_plane(const std::vector<Vec3>& ring, Vec3 p0, Vec3 n,
     front.clear();
     back.clear();
     const std::size_t m = ring.size();
-    // A two-point ring is a stroke, and cutting one is cutting a line: each
-    // side keeps its endpoint and the crossing. Not the loop below, which
-    // walks a closed ring and would visit the one edge twice.
+    // A two-point ring is a stroke: cut it as a segment.
     if (m == 2) {
         const double da = signed_dist(ring[0], p0, n);
         const double db = signed_dist(ring[1], p0, n);
@@ -110,8 +86,7 @@ void split_ring_by_plane(const std::vector<Vec3>& ring, Vec3 p0, Vec3 n,
             *a = std::vector<Vec3>{ring[0], x};
             *b = std::vector<Vec3>{x, ring[1]};
         } else {
-            // Not straddling. Whichever side it is on gets all of it, the
-            // polygon case's convention.
+            // Not straddling: all of it goes to its side.
             if (da >= -kPlaneEps && db >= -kPlaneEps) front = ring;
             if (da <=  kPlaneEps && db <=  kPlaneEps) back  = ring;
         }
@@ -128,10 +103,8 @@ void split_ring_by_plane(const std::vector<Vec3>& ring, Vec3 p0, Vec3 n,
             const bool ina = da >= -kPlaneEps;
             const bool inb = db >= -kPlaneEps;
             if (ina) out.push_back(a);
-            // Only a genuine sign change makes a crossing point. A vertex
-            // sitting on the plane is already in `out` from the branch above,
-            // and emitting it twice would leave a zero-length edge that the
-            // area test below then has to reason about.
+            // Only a real sign change makes a crossing (on-plane vertices are
+            // already in `out`).
             if (ina != inb && std::fabs(da - db) > kEps)
                 out.push_back(mix(a, b, da / (da - db)));
         }
@@ -147,24 +120,10 @@ void prepare_paint_poly(PaintPoly& p, const Projector3D& proj) {
     p.dmax = -std::numeric_limits<float>::max();
     p.bb[0] = p.bb[1] = std::numeric_limits<float>::max();
     p.bb[2] = p.bb[3] = -std::numeric_limits<float>::max();
-    // Two points is a legal ring here: a *stroke*, the bare box edge a
-    // translucent bar emits and one edge of a surface's wireframe. It has no
-    // plane, so it can never be the blade -- but it is ordered against every
-    // polygon like any other primitive, and cut by one where it passes
-    // through it.
-    //
-    // It used to be carried by its depth extent alone, which was harmless
-    // while the only strokes were a translucent bar's own edges and stopped
-    // being so once a surface's wireframe could run straight through an
-    // opaque bar: the depth sort draws a face whose far corner is deeper than
-    // the line *before* the line, and the line then shows through the face.
-    //
-    // One point is a legal ring too: a scatter3d marker (v1.0 step 12.5). It
-    // is a symbol rather than geometry -- it has no plane and no extent in the
-    // scene -- so it is never a blade and never a victim, and what it covers
-    // on screen is a disc of `radius` pixels about where the point landed.
-    // Behind a perspective eye it is simply not drawn, which is what the empty
-    // `px` says.
+    // Two points = a stroke (bar edge, wireframe edge): no plane, never a blade,
+    // but ordered and cut like any primitive. One point = a scatter3d marker:
+    // never a blade or victim; its screen footprint is a disc of `radius`
+    // pixels. Behind a perspective eye it isn't drawn (empty `px`).
     if (p.ring.size() == 1) {
         if (!proj.in_front(p.ring[0])) return;
         const Px3 q = proj.project_box(p.ring[0]);
@@ -203,17 +162,14 @@ void prepare_paint_poly(PaintPoly& p, const Projector3D& proj) {
 namespace {
 
 bool bb_disjoint(const PaintPoly& a, const PaintPoly& b) {
-    // A shared edge is not an overlap. Half a pixel of slack, because two
-    // polygons that merely touch on screen have nothing to resolve and
-    // resolving them anyway is how a scene acquires splits it does not need.
+    // Half a pixel of slack: polygons that merely touch have nothing to resolve.
     constexpr float kSlack = 0.5f;
     return a.bb[2] < b.bb[0] + kSlack || b.bb[2] < a.bb[0] + kSlack
         || a.bb[3] < b.bb[1] + kSlack || b.bb[3] < a.bb[1] + kSlack;
 }
 
-// True when every vertex of `poly` lies on the far side of the plane through
-// `p0` with normal `n`, where `n` has already been turned to face the eye. The
-// question Newell's third and fourth tests both ask, from opposite ends.
+// True when all of `poly` is on the far side of the plane (p0, n), with `n`
+// facing the eye (Newell's tests 3 and 4).
 bool wholly_behind(const std::vector<Vec3>& ring, Vec3 p0, Vec3 n) {
     for (const Vec3& v : ring)
         if (signed_dist(v, p0, n) > kPlaneEps) return false;
@@ -226,36 +182,15 @@ bool wholly_in_front(const std::vector<Vec3>& ring, Vec3 p0, Vec3 n) {
     return true;
 }
 
-// Separating-axis test on two projected rings. Both are convex, so a single
-// axis on which their shadows do not meet proves they do not overlap; the
-// candidate axes are the edge normals of both.
-//
-// Returns true when the projections *do* overlap, which is the last of
-// Newell's tests to fail and the one that commits the pair to a split.
+// Separating-axis test on two convex projected rings; true when they overlap
+// (the last test before a split).
 bool projections_overlap(const std::vector<float>& a, const std::vector<float>& b) {
-    // A shared edge is not an overlap, and this is how much of one is allowed
-    // to be. It is a *tolerance*, not a derived quantity, and it is squeezed
-    // from both sides by two scenes that must both come out right:
+    // Tolerance for shared edges, tuned between two tests: below ~0.10 a lone
+    // smooth sheet starts splitting; at 0.25 real overlaps are missed.
+    // test_scene3d_svg_order() defends both bounds.
     //
-    //  - Too small and geometry that merely passes near itself starts
-    //    conflicting. A smooth 50x50 sheet on its own occludes itself nowhere
-    //    and must never split; it picks up cuts at 0.10 and below.
-    //  - Too large and a genuine overlap narrower than the slack is called
-    //    disjoint, the pair is never ordered, and the emission is wrong there.
-    //    The gallery's sixth cell has two such pairs at 0.25, overlapping by
-    //    about a fifth of a pixel each.
-    //
-    // 0.15 is the window between them, and both bounds are defended by tests:
-    // `test_scene3d_svg_order()`'s lone-sheet control for the lower one, and
-    // its four interleaving cells -- judged pixel by pixel against a ray cast,
-    // at zero tolerance -- for the upper.
-    //
-    // A stroke (two points, four floats) takes part against a polygon: the
-    // separating axes are then the polygon's edge normals and the line's own,
-    // which is still complete for a segment against a convex polygon. Two
-    // strokes never do. Their axes would need the lines' own directions as
-    // well, and there is nothing to gain -- two crossing lines have no area
-    // to occlude with, and neither could be cut by the other.
+    // A stroke against a polygon uses the polygon's and the line's normals;
+    // two strokes are never compared (nothing to occlude or cut).
     constexpr float kSlack = 0.15f;
     auto axes_separate = [&](const std::vector<float>& src,
                              const std::vector<float>& other) {
@@ -286,27 +221,11 @@ bool projections_overlap(const std::vector<float>& a, const std::vector<float>& 
     return !axes_separate(a, b) && !axes_separate(b, a);
 }
 
-// Where a marker is, relative to a polygon: +1 in front of it, -1 behind it,
-// 2 when the two do not overlap on screen after all. Unlike every test above
-// it there is no third answer -- a point cannot pass *through* a polygon --
-// which is what makes this the one rung of the ladder that can never end in a
-// split (v1.0 step 12.5).
-//
-// It is also the cheapest and the most exact: a marker is a symbol drawn at
-// one projected pixel, so "is it in front" is decided by comparing its own
-// depth with the polygon's depth along that one ray. No separating axis, no
-// clipping, no tolerance beyond the plane epsilon.
-//
-// **What it approximates, deliberately, is the disc and not the point.** The
-// marker is drawn whole at a size in pixels, so a polygon crossing its
-// footprint puts the whole symbol on one side of itself -- and which side can
-// change as the camera turns. Clipping a symbol to geometry is not
-// better-defined, and the raster path does exactly the same thing for nothing
-// (one depth for the whole sprite), so the two outputs agree about it.
+// A marker vs a polygon: +1 in front, -1 behind, 2 = no screen overlap. Never
+// needs a split. Compares depths along the marker's pixel ray; the whole
+// symbol goes on one side, as in the raster path.
 int point_vs_polygon(const PaintPoly& pt, const PaintPoly& poly, const Projector3D& proj) {
-    // Inside the polygon's *projection*, by the same winding-aware half-plane
-    // walk stroke_vs_polygon() clips with -- a convex ring, so a point outside
-    // any edge is outside.
+    // Inside the polygon's projection (convex half-plane walk).
     const std::vector<float>& q = poly.px;
     const std::size_t m = q.size() / 2;
     if (m < 3) return 2;
@@ -325,36 +244,20 @@ int point_vs_polygon(const PaintPoly& pt, const PaintPoly& poly, const Projector
         if (nx * (px - q[i * 2]) + ny * (py - q[i * 2 + 1]) < 0.0f) return 2;
     }
 
-    // Inside. Which side of the polygon's own plane the point is on then
-    // settles it, with the normal turned to face the eye so that positive is
-    // "toward the camera" -- the convention tests 3 and 4 use.
+    // Inside: the side of the polygon's plane (normal facing the eye) decides.
     Vec3 p0, n;
     if (!ring_plane(poly.ring, p0, n)) return 2;
     if (!proj.faces_camera(p0, n)) n = n * -1.0;
     const double d = signed_dist(pt.ring[0], p0, n);
-    // A marker lying *on* a surface is drawn after it, which is what puts a
-    // point plotted on a sheet on top of the sheet rather than inside it --
-    // the same rule stroke_vs_polygon() applies to a wireframe edge.
+    // A marker on a surface is drawn after it.
     return d >= -kPlaneEps ? +1 : -1;
 }
 
-// Where a stroke is, relative to a polygon it overlaps on screen: +1 in front
-// of it, -1 behind it, 0 passing *through* it inside the overlap -- the one
-// case only a cut can order -- and 2 when the two do not overlap after all.
-//
-// Newell's tests 3 and 4 each need one of the pair to have a plane, and a line
-// has none, so against a line only one direction of the ladder exists. That
-// leaves every line that straddles a polygon's *infinite* plane unresolved --
-// a bar's edge beside the next bar's face, which never touches it -- and
-// every one of them was cut for nothing. This is the missing rung, and it is
-// exact rather than conservative: the line crosses the plane at one point X,
-// so over any stretch of the line that does not contain X it is on one side.
-// The stretch that matters is the part of its projection inside the polygon's
-// projection. Clip for it; if X projects outside, the pair has an order.
-//
-// A line lying *on* the plane counts as in front, so it is drawn after the
-// polygon it lies on -- the raster path's polygon offset, and the reason a
-// wireframe edge is not buried under the neighbouring cell.
+// A stroke vs a polygon it overlaps on screen: +1 in front, -1 behind, 0 =
+// passes through inside the overlap (needs a cut), 2 = no overlap. Exact: the
+// line crosses the plane at one point X, so clip the line to the polygon's
+// projection and check whether X falls inside. A line on the plane counts as
+// in front (so wireframes draw over their cells).
 int stroke_vs_polygon(const PaintPoly& line, const PaintPoly& poly, const Projector3D& proj) {
     Vec3 p0, n;
     if (!ring_plane(poly.ring, p0, n)) return 0;
@@ -365,10 +268,8 @@ int stroke_vs_polygon(const PaintPoly& line, const PaintPoly& poly, const Projec
     if (da >= -kPlaneEps && db >= -kPlaneEps) return +1;
     if (da <=  kPlaneEps && db <=  kPlaneEps) return -1;
 
-    // The crossing, in pixels, as a parameter along the projected line.
-    // `px` runs ring[0] -> ring[1] even when a near plane clipped one end off,
-    // since the clip keeps the direction; a crossing behind that plane is not
-    // on the drawn line at all, and is left to the cut.
+    // The crossing as a parameter along the projected line (a crossing behind a
+    // near-clipped end is left to the cut).
     const Vec3 x = mix(a, b, da / (da - db));
     Px3 xa, xb;
     if (!proj.project_segment(x, x, xa, xb)) return 0;
@@ -378,7 +279,7 @@ int stroke_vs_polygon(const PaintPoly& line, const PaintPoly& poly, const Projec
     if (len2 < 1e-12f) return 0;
     const float sx = ((xa.x - lx) * dx + (xa.y - ly) * dy) / len2;
 
-    // Cyrus-Beck: the parameter interval of the line inside the polygon.
+    // Cyrus-Beck: the line's parameter interval inside the polygon.
     const std::vector<float>& q = poly.px;
     const std::size_t m = q.size() / 2;
     float area = 0.0f;
@@ -418,72 +319,28 @@ std::vector<PaintPoly> paint_order(std::vector<PaintPoly> polys,
                                    std::size_t max_splits) {
     PaintOrderStats st;
     st.input = polys.size();
-    // The bound exists so that a scene nobody anticipated produces a slightly
-    // wrong picture instead of an export that never returns. Chosen against
-    // the largest thing this library draws -- a 200x200 surface is 39,601
-    // cells -- so that a scene of that size still gets a few dozen tests per
-    // polygon before the run gives up.
-    // Sized against the scenes this library actually draws rather than
-    // guessed. `test_translucent3d`'s bar-grid-plus-surface cell -- 1,014
-    // translucent bar faces and 288 surface triangles -- settles at ~894,000
-    // tests and 2,015 splits, and it was silently *bailing* at the 400,000
-    // this used to be, which is how a cell nobody had measured came out wrong.
-    // Five million leaves that scene a factor of five of headroom and still
-    // bounds the pathological case at a few seconds.
+    // Work bound (tests + splits), so an unanticipated scene gives a slightly
+    // wrong picture rather than a hung export. 5M leaves ~5x headroom over the
+    // heaviest test scene.
     if (max_work == 0) max_work = 20000000;
-    // A separate cap on splits, because they are the expensive unit: each one
-    // grows the list, re-sorts its tail and re-emits a payload. Proportional
-    // to the input rather than absolute -- a scene of a thousand polygons may
-    // legitimately need more cuts than a scene of ten.
-    //
-    // **It is the bound that actually binds**, and the default is not generous
-    // for every scene: `test_translucent3d`'s sixth cell -- a sheet threaded
-    // through 144 translucent bars, so it runs *inside* every one of them --
-    // reaches it at 10,481 cuts having used only 1.0M of its 20M test budget.
-    // That is why it is a caller-settable option (SvgExportOptions::max_splits)
-    // rather than a constant: the scene that needs more is the caller's, and
-    // the report names the number it stopped at so the new one can be chosen
-    // against a real figure.
+    // Split bound, proportional to the input. This is the one that binds in
+    // practice, hence SvgExportOptions::max_splits.
     if (max_splits == 0) max_splits = 8 * polys.size() + 64;
 
-    // Drop what cannot be drawn: degenerate rings, and anything a perspective
-    // near plane clipped away to nothing.
+    // Drop degenerate rings and anything clipped away by the near plane.
     std::vector<PaintPoly> list;
     list.reserve(polys.size());
     for (PaintPoly& p : polys) {
         prepare_paint_poly(p, proj);
-        // Two floats is a marker: one projected point, which is the whole of
-        // what a symbol has. Four was the floor while every primitive here
-        // had at least two corners.
+        // Two floats is a marker (one projected point).
         if (p.px.size() >= 2) list.push_back(std::move(p));
     }
 
-    // Newell's first step, and the only sort in the algorithm: farthest first,
-    // by the polygon's own farthest point. It is a *starting guess* rather than
-    // an answer -- everything below exists because it is sometimes wrong.
-    //
-    // Stable, and that is load-bearing: within one object the sort must not
-    // rearrange anything, because the object's own order is already exact and
-    // this key is not. Ties therefore keep the order the caller merged them
-    // in, which is each object's own sequence.
-    // **A permutation is sorted here, not the polygons.** A `PaintPoly` carries
-    // three vectors and costs about a hundred bytes to move, and a comparison
-    // sort moves every element O(log n) times. That is affordable once; the
-    // split path below re-sorts the whole tail *per split*, which on the
-    // gallery's densest cell is two thousand times over three thousand
-    // polygons. Sorting an eight-byte key per polygon and applying the
-    // permutation once afterwards costs two moves per element instead.
-    //
-    // The order is *identical* rather than merely equivalent, which is the
-    // only reason this is allowed to be a performance change: the permutation
-    // starts in list order, so breaking ties on the index is precisely what
-    // `stable_sort` guaranteed. It also makes the comparator a strict total
-    // order, so plain `sort` -- which allocates no merge buffer -- suffices.
-    // The key travels *with* the index rather than being fetched through it.
-    // An index-only sort still reads `list[i].dmax` on every comparison, which
-    // is a random access into a few hundred kilobytes of polygon and gives
-    // back most of what sorting indices saved; eight bytes of (depth, index)
-    // laid out contiguously is what the comparisons actually want.
+    // Newell's first step: sort farthest first by each polygon's farthest
+    // point. Stable, since ties keep each object's own (exact) order.
+    // Sorts (depth, index) keys and applies the permutation once, which is far
+    // cheaper than moving polygons (the split path re-sorts per split). Ties
+    // break on index, so the result equals a stable_sort.
     struct DepthKey { float dmax; std::uint32_t idx; };
     std::vector<DepthKey>  keys;
     std::vector<PaintPoly> perm_buf;
@@ -496,10 +353,7 @@ std::vector<PaintPoly> paint_order(std::vector<PaintPoly> polys,
         std::sort(keys.begin(), keys.end(), [](const DepthKey& a, const DepthKey& b) {
             return a.dmax != b.dmax ? a.dmax > b.dmax : a.idx < b.idx;
         });
-        // Every element of the range is moved out exactly once, so each slot
-        // is already empty when the second pass moves the new occupant in and
-        // nothing is freed on the way. Both scratch buffers are reused across
-        // the thousands of calls the split path makes.
+        // Each slot is emptied before being refilled; scratch buffers are reused.
         perm_buf.clear();
         perm_buf.reserve(m);
         for (std::size_t i = 0; i < m; ++i)
@@ -512,27 +366,12 @@ std::vector<PaintPoly> paint_order(std::vector<PaintPoly> polys,
     std::vector<PaintPoly> out;
     out.reserve(list.size());
 
-    // Which entries have already been moved to the front once. A polygon that
-    // conflicts after having been promoted is in a cycle, and a cycle is what
-    // splitting exists for.
+    // Entries already promoted once; a second conflict means a cycle (split).
     std::vector<char> promoted(list.size(), 0);
 
-    // An upper bound on `dmax` over each suffix of the list, which is what
-    // makes Newell's early stop sound once promotions have disturbed the sort.
-    //
-    // The stop wants "no polygon after this one reaches P's nearest point",
-    // and the depth sort is what normally proves it. A promotion lifts one
-    // polygon out of the tail and puts it at the head, so after the second one
-    // the tail is no longer sorted and the stop starts skipping pairs that
-    // really do overlap -- invisible in a small scene, and it left 25 pixels
-    // of `test_translucent3d`'s plane-and-surface cell on the wrong side of
-    // the plane. Scanning the whole tail instead is correct and far too slow:
-    // the two-bar-grid cell did not finish an export in ninety seconds.
-    //
-    // This is the third answer. It is only ever an over-estimate -- a
-    // promotion *removes* an element from the tail, which can only lower the
-    // true maximum -- so stopping on it is always safe, and it stays tight
-    // enough to keep the scan short.
+    // Upper bound on `dmax` over each suffix, which keeps Newell's early stop
+    // sound after promotions unsort the tail. Only ever an over-estimate, so
+    // stopping on it is safe.
     std::vector<float> smax(list.size(), 0.0f);
     auto rebuild_smax = [&](std::size_t from) {
         smax.resize(list.size());
@@ -543,26 +382,11 @@ std::vector<PaintPoly> paint_order(std::vector<PaintPoly> polys,
     rebuild_smax(0);
 
     // ---- The screen-space bucket grid ------------------------------------
-    //
-    // Nearly every pair the scan looks at dies at the bounding-box test, and
-    // finding them is the whole cost: the tail is scanned per emission, so the
-    // work is quadratic in a scene where everything overlaps in depth.
-    // `test_translucent3d`'s sheet-through-a-bar-grid cell reached sixteen
-    // million tests and its work bound. A uniform grid over the plot rect
-    // never generates those pairs at all -- only polygons sharing a cell with
-    // the head can possibly overlap it.
-    //
-    // Keyed on `PaintPoly::id` and not on list positions, because a promotion
-    // rotates a span of the list and a split re-sorts its tail; `pos_of` is the
-    // one place that mapping is maintained, and it is updated at exactly those
-    // two sites.
-    //
-    // **The grid is append-only, and that is what keeps it cheap.** A split
-    // makes two pieces inside the parent's box, so the parent's entries stay a
-    // valid superset for the piece that keeps its id and only the new piece
-    // needs inserting. Nothing is ever removed for being wrong -- entries are
-    // dropped lazily, while a bucket is being read, once their polygon is
-    // behind `head` and therefore emitted for good.
+    // Only polygons sharing a grid cell with the head can overlap it, which
+    // avoids the quadratic scan. Keyed on PaintPoly::id (positions change on
+    // promotion and split; `pos_of` maps id -> position). Append-only: a
+    // split's first piece keeps the parent's id and entries, only the second
+    // is inserted; stale entries are dropped lazily once behind `head`.
     for (std::size_t i = 0; i < list.size(); ++i)
         list[i].id = static_cast<std::uint32_t>(i);
     std::vector<std::size_t> pos_of(list.size());
@@ -575,9 +399,7 @@ std::vector<PaintPoly> paint_order(std::vector<PaintPoly> polys,
         gx0 = std::min(gx0, p.bb[0]); gy0 = std::min(gy0, p.bb[1]);
         gx1 = std::max(gx1, p.bb[2]); gy1 = std::max(gy1, p.bb[3]);
     }
-    // About two polygons per cell if they were spread evenly, capped so a
-    // scene of a few polygons does not allocate a grid, and so a huge one does
-    // not spend more on cells than on tests.
+    // About two polygons per cell, capped at both ends.
     const int grid = std::clamp(
         static_cast<int>(std::lround(std::sqrt(static_cast<double>(list.size()) / 2.0))),
         1, 96);
@@ -585,10 +407,8 @@ std::vector<PaintPoly> paint_order(std::vector<PaintPoly> polys,
     const float chh = std::max(1e-3f, (gy1 - gy0) / static_cast<float>(grid));
     std::vector<std::vector<std::uint32_t>> cells(
         static_cast<std::size_t>(grid) * static_cast<std::size_t>(grid));
-    // A polygon covering more cells than this is not worth bucketing -- a
-    // plane's quad spans the whole box face and would fill the grid on its
-    // own. Those go in one list that every query reads, which is right
-    // because a query against one of them has to look at everything anyway.
+    // Polygons covering more cells than this (e.g. a plane's quad) go in one
+    // list every query reads.
     constexpr int kMaxCells = 48;
     std::vector<std::uint32_t> broad;
 
@@ -612,9 +432,7 @@ std::vector<PaintPoly> paint_order(std::vector<PaintPoly> polys,
     std::size_t work = 0;
     std::vector<Vec3> piece_front, piece_back;
 
-    // Candidate gathering. `seen` de-duplicates a polygon that shares several
-    // cells with the head, stamped by a generation counter so it costs no
-    // clearing.
+    // Candidate gathering; `seen` is stamped by generation, so it needs no clear.
     std::vector<std::uint32_t> seen(next_id, 0);
     std::uint32_t gen = 0;
     std::vector<std::size_t> cand;
@@ -626,10 +444,8 @@ std::vector<PaintPoly> paint_order(std::vector<PaintPoly> polys,
             for (std::size_t k = 0; k < bucket.size();) {
                 const std::uint32_t id = bucket[k];
                 const std::size_t pos = pos_of[id];
-                // Strictly *behind* head, never equal to it: a polygon sitting
-                // at the head has not been emitted and can be pushed back down
-                // by the next promotion, and dropping it here would make it
-                // invisible to every later query.
+                // Strictly behind head: the polygon at head may still be pushed
+                // back by a promotion.
                 if (pos < head) {
                     bucket[k] = bucket.back();
                     bucket.pop_back();
@@ -648,9 +464,7 @@ std::vector<PaintPoly> paint_order(std::vector<PaintPoly> polys,
             for (int i = i0; i <= i1; ++i)
                 take(cells[static_cast<std::size_t>(j) * grid + i]);
         take(broad);
-        // Position order, so the run is deterministic and one export is the
-        // same file as the last -- and so the depth bound below can still stop
-        // the scan, since it is non-increasing in position.
+        // Position order: deterministic, and lets the depth bound stop the scan.
         std::sort(out.begin(), out.end());
     };
 
@@ -662,21 +476,8 @@ std::vector<PaintPoly> paint_order(std::vector<PaintPoly> polys,
             const PaintPoly& P = list[head];
             const PaintPoly& Q = list[q];
 
-            // Test 1: the depth extents do not overlap, so the pair is settled
-            // whichever way round it is.
-            //
-            // **`continue`, not `break`, and that distinction cost 25 pixels.**
-            // Newell's first step sorts by farthest point precisely so that
-            // this test can stop the scan: once Q's farthest point is nearer
-            // than P's nearest, every later Q is too. But a *promotion* lifts
-            // one polygon out of the tail and puts it at the head, and the
-            // second promotion therefore leaves a polygon sitting in the tail
-            // out of order with everything after it. The sorted invariant the
-            // early stop rests on is gone by then, and stopping skips pairs
-            // that genuinely overlap -- which is invisible in a small scene
-            // and produced exactly the residue this test was catching in a
-            // dense one. Scanning the whole tail costs one float comparison
-            // per rejected pair and is unconditionally right.
+            // Test 1: depth extents don't overlap. `continue`, not `break`:
+            // promotions break the sorted order the early stop would rely on.
             if (smax[q] <= P.dmin) break;
             if (Q.dmax <= P.dmin) continue;
 
@@ -686,9 +487,8 @@ std::vector<PaintPoly> paint_order(std::vector<PaintPoly> polys,
             // Test 2: screen bounding boxes are disjoint.
             if (bb_disjoint(P, Q)) continue;
 
-            // Tests 3 and 4, each asked with the other's plane turned to face
-            // the eye: P entirely behind Q's plane, or Q entirely in front of
-            // P's. Either settles the pair without touching the projections.
+            // Tests 3 and 4: P behind Q's plane, or Q in front of P's (planes
+            // facing the eye).
             Vec3 qp0, qn;
             if (ring_plane(Q.ring, qp0, qn)) {
                 if (!proj.faces_camera(qp0, qn)) qn = qn * -1.0;
@@ -701,17 +501,9 @@ std::vector<PaintPoly> paint_order(std::vector<PaintPoly> polys,
                 if (wholly_in_front(Q.ring, pp0, pn)) continue;
             }
 
-            // Test 5a, for a marker: exact, and *before* the separating-axis
-            // test, which a one-point projection cannot take part in -- it has
-            // no edges to raise an axis from, so projections_overlap() would
-            // call every marker disjoint from everything and leave the depth
-            // sort to answer alone. See point_vs_polygon().
-            //
-            // Two markers, or a marker and a stroke, fall through to `continue`
-            // and keep the sort's answer, which for a pair of points is not an
-            // approximation: a marker's dmin and dmax are one number, so
-            // sorting on it *is* ordering them, and two flat symbols cannot
-            // interpenetrate to make that wrong.
+            // Test 5a, markers: exact, and before the separating-axis test (a
+            // one-point projection has no edges). Marker-marker and
+            // marker-stroke pairs keep the sort's answer, which is exact.
             const bool marker_pair = P.ring.size() == 1 || Q.ring.size() == 1;
             {
                 const bool p_pt = P.ring.size() == 1, q_pt = Q.ring.size() == 1;
@@ -726,26 +518,16 @@ std::vector<PaintPoly> paint_order(std::vector<PaintPoly> polys,
                     } else {
                         continue;
                     }
-                    // The marker is in front of the polygon that is currently
-                    // ahead of it, so the pair really is out of order and the
-                    // promotion below is the whole resolution: nothing here
-                    // can ever be cut.
+                    // The marker is in front: promotion alone resolves it.
                 }
             }
 
-            // Test 5: the projections themselves. Everything above is a cheap
-            // rejection; this is the one that decides.
-            //
-            // Skipped for a marker, which has already been decided exactly
-            // above: a one-point projection raises no separating axis, so this
-            // would call it disjoint and undo the answer.
+            // Test 5: the projections themselves (skipped for markers,
+            // already decided above).
             if (!marker_pair && !projections_overlap(P.px, Q.px)) continue;
 
-            // Test 6, for a stroke against a polygon only: the exact answer
-            // tests 3 and 4 cannot give when one of the pair has no plane.
-            // See stroke_vs_polygon(). P may go first if P is a line behind
-            // Q, or Q is a line in front of P; anything else falls through to
-            // the promotion, and a line through the polygon on to the cut.
+            // Test 6: a stroke against a polygon (see stroke_vs_polygon()).
+            // Otherwise promote, or cut a line passing through.
             if (!marker_pair) {
                 const bool p_line = P.ring.size() == 2, q_line = Q.ring.size() == 2;
                 if (p_line != q_line) {
@@ -756,29 +538,21 @@ std::vector<PaintPoly> paint_order(std::vector<PaintPoly> polys,
                 }
             }
 
-            // The pair is genuinely unresolved. First time: assume the sort
-            // simply had them the wrong way round and try Q as the back-most.
+            // Unresolved. First time: assume the sort was wrong and promote Q.
             if (!promoted[q]) {
                 promoted[q] = 1;
                 const std::size_t j = q;
                 if (j > head) {
-                    // `promoted` is indexed by *position*, so it has to move
-                    // with the list. Rotating one without the other leaves
-                    // every mark attached to the wrong polygon, and the
-                    // consequence is not a wrong picture but a hang: the pair
-                    // that conflicts keeps finding itself unmarked, promotes
-                    // each other in turn and never reaches the split that
-                    // would settle it.
+                    // `promoted` is indexed by position and must rotate with
+                    // the list, or conflicting pairs promote each other forever.
                     std::rotate(list.begin() + static_cast<std::ptrdiff_t>(head),
                                 list.begin() + static_cast<std::ptrdiff_t>(j),
                                 list.begin() + static_cast<std::ptrdiff_t>(j) + 1);
                     std::rotate(promoted.begin() + static_cast<std::ptrdiff_t>(head),
                                 promoted.begin() + static_cast<std::ptrdiff_t>(j),
                                 promoted.begin() + static_cast<std::ptrdiff_t>(j) + 1);
-                    // The rotated span now holds a permutation of what used to
-                    // start at `head`, so the bound that was true there is
-                    // true of all of it. Flattening it keeps `smax` an
-                    // over-estimate, which is all the stop needs.
+                    // Flatten the bound over the rotated span (still an
+                    // over-estimate).
                     std::fill(smax.begin() + static_cast<std::ptrdiff_t>(head),
                               smax.begin() + static_cast<std::ptrdiff_t>(j) + 1,
                               smax[head]);
@@ -788,31 +562,13 @@ std::vector<PaintPoly> paint_order(std::vector<PaintPoly> polys,
                 break;
             }
 
-            // Q has been to the front already, so P and Q are in a cycle and
-            // no ordering of them as whole polygons is right. Cut P by Q's
-            // plane: the two pieces lie on opposite sides of it, so each is
-            // separable from Q by test 3, and the relation becomes an order.
+            // Q was already promoted: a cycle. Cut one by the other's plane so
+            // each piece is separable by test 3.
             ++st.cycles;
 
-            // **Which of the two to cut is free, and is chosen on cost.**
-            // Newell cuts P by Q's plane; cutting Q by P's plane resolves the
-            // pair just as completely, because either way each piece ends up
-            // wholly on one side of the other's plane and test 3 or 4 then
-            // separates it. So the choice is a cost decision, and the costs
-            // are wildly unequal: a piece re-emits its payload, and a plane's
-            // payload is a whole raster image while a bar face's is nine
-            // numbers. Cutting the plane where the bar would do multiplies a
-            // heatmap by the number of pieces.
-            // **The preference is about cost, and it has to stay a
-            // preference.** Cutting the cheap one first is right; refusing
-            // ever to cut the expensive one is not. A polygon can only be cut
-            // by a plane it actually straddles, so when the preferred victim
-            // does not straddle the other's plane -- which happens inside a
-            // cycle of three, where the pair that conflicts is not the pair
-            // that crosses -- the only way to resolve the pair is to cut the
-            // other one instead. Refusing left 25 pixels of
-            // `test_translucent3d`'s plane-and-surface cell on the wrong side
-            // of the plane, by up to 0.27 box units.
+            // Either cut resolves the pair; prefer the cheaper victim (a plane's
+            // payload is a whole image). But it stays a preference: if the
+            // preferred victim doesn't straddle, cut the other one.
             const bool cut_q = (P.kind == PaintPoly::Kind::Plane
                                 && Q.kind != PaintPoly::Kind::Plane);
             std::size_t victim = q;
@@ -825,16 +581,8 @@ std::vector<PaintPoly> paint_order(std::vector<PaintPoly> polys,
                 if (!ring_plane(list[blade].ring, sp0, sn)) continue;
                 const std::vector<Vec3>& vring = list[victim].ring;
                 const bool stroke = vring.size() == 2;
-                // **Only a flat polygon or a line may be cut.** Clipping
-                // assumes the victim lies on one plane; a warped ring -- which
-                // is what ring_plane() refuses -- that has three corners on the
-                // blade comes back as *itself* on one side and a copy of those
-                // three corners on the other, and both pieces have area. That
-                // is not a cut, it is a duplication, and it repeats on every
-                // pass: a surface's closed wireframe ring did exactly this
-                // until every export that had one ran to its split bound. The
-                // plan no longer emits such rings; this makes the next one a
-                // pair left unresolved rather than a loop.
+                // Only flat polygons or lines may be cut; a warped ring would
+                // be duplicated rather than cut, forever.
                 if (!stroke) {
                     Vec3 vp0, vn;
                     if (!ring_plane(vring, vp0, vn)) continue;
@@ -842,33 +590,11 @@ std::vector<PaintPoly> paint_order(std::vector<PaintPoly> polys,
                 split_ring_by_plane(vring, sp0, sn, piece_front, piece_back);
                 const std::size_t min_pts = stroke ? 2 : 3;
                 if (piece_front.size() < min_pts || piece_back.size() < min_pts) continue;
-                // **A cut that does not divide anything is not a cut**, and
-                // counting one as a cut is how this loop used to fail to
-                // terminate. `split_ring_by_plane()` counts a vertex within
-                // kPlaneEps of the blade as being on *both* sides, which is
-                // right -- it is what stops a polygon that merely touches the
-                // plane from being shaved -- but it means a victim whose edge
-                // lies *on* the blade comes back as itself plus a three-point
-                // ring of zero area. The vertex count cannot tell that from a
-                // real cut.
-                //
-                // It is not a corner case. Splitting a surface produces pieces
-                // that are coplanar with their parent, so a bar face already
-                // cut by one surface triangle has an edge lying exactly on the
-                // plane of every piece of that triangle -- and each of them in
-                // turn "cuts" it into itself and a null. The gallery's sixth
-                // cell reached 44,850 splits that way, 44,653 of them on a
-                // single bar face, of which 2,801 out of 2,803 pieces had zero
-                // area: the face was genuinely halved once and then shaved
-                // 2,800 times without changing.
-                //
-                // Relative to the victim rather than absolute, because a cell
-                // of a fine grid is small in box units and a fixed floor would
-                // refuse to cut it at all. A piece a millionth of its parent
-                // is far below a pixel at any figure size this library draws.
-                //
-                // A stroke is held to the same rule in the one measure a line
-                // has: its length.
+                // A cut must divide the victim: vertices within kPlaneEps count
+                // on both sides, so an edge lying on the blade yields a
+                // zero-area piece. Treating that as a cut loops forever on
+                // coplanar split pieces. Relative to the victim's size (strokes:
+                // length).
                 constexpr double kMinPieceFrac = 1e-6;
                 auto measure = [stroke](const std::vector<Vec3>& r) {
                     return stroke ? length(r[1] - r[0]) : ring_area(r);
@@ -878,13 +604,8 @@ std::vector<PaintPoly> paint_order(std::vector<PaintPoly> polys,
                 cut = true;
             }
             if (!cut) {
-                // Neither straddles the other -- or straddles it only by a
-                // sliver -- so there is nothing to cut and no order to find:
-                // the two are coplanar, touching, or crossing over a region
-                // too small to be a pixel, and either sequence draws the same
-                // picture. Counted rather than passed over in silence -- a
-                // scene that reaches this often is a scene this algorithm is
-                // not answering.
+                // Nothing to cut (coplanar, touching, or sub-pixel crossing);
+                // either order draws the same. Counted.
                 ++st.unresolved;
                 promoted[q] = 0;
                 continue;
@@ -898,9 +619,8 @@ std::vector<PaintPoly> paint_order(std::vector<PaintPoly> polys,
             a.ring = piece_front;
             b.ring = piece_back;
             a.split = b.split = true;
-            // `a` keeps the parent's name, so the parent's bucket entries go on
-            // covering it -- they describe a box that contains it. `b` is new
-            // and has to be put in the grid itself.
+            // `a` keeps the parent's id (its grid entries still cover it); `b`
+            // is new and inserted.
             b.id = next_id++;
             prepare_paint_poly(a, proj);
             prepare_paint_poly(b, proj);
@@ -911,32 +631,14 @@ std::vector<PaintPoly> paint_order(std::vector<PaintPoly> polys,
             list.insert(list.begin() + static_cast<std::ptrdiff_t>(victim) + 1,
                         std::move(b));
             promoted.insert(promoted.begin() + static_cast<std::ptrdiff_t>(victim) + 1, 0);
-            // The two pieces are somewhere else in the depth order now, and
-            // every promotion mark was made about a list that no longer
-            // exists.
-            //
-            // **This sort is the cost of the whole algorithm, and it is not
-            // optional.** Newell needs no particular order to be *correct* --
-            // every pair is still tested, and each of the five tests settles a
-            // pair whichever way round it is -- so dropping it looks free, and
-            // on the gallery's densest figure it takes an export from 125 s to
-            // 27 s. It also puts one or two pixels of two different cells out
-            // of order: without the depth order to work from, the splits fall
-            // in a different sequence and produce slivers thin enough for the
-            // quarter-pixel slack in the projection-overlap test to call two
-            // polygons disjoint when they are not. Speed bought with pixels is
-            // not a trade this step is allowed to make.
-            //
-            // So it stays, and a permutation is what it costs instead: this
-            // sorts indices and moves each polygon exactly twice, rather than
-            // moving a hundred-byte object O(n log n) times per split. Same
-            // order, same splits, same file -- see sort_by_depth().
+            // Re-sort the tail and clear promotion marks. Required: skipping it
+            // is faster but changes split order and leaves pixel errors. Done
+            // via the index permutation (see sort_by_depth()).
             sort_by_depth(head);
             std::fill(promoted.begin() + static_cast<std::ptrdiff_t>(head),
                       promoted.end(), 0);
-            // The tail is sorted again, so the suffix bound can be exact again
-            // -- and every position in it has moved, so the grid's one map
-            // from name to position has to be rebuilt over the same range.
+            // The tail is sorted again: reset the suffix bound and rebuild
+            // `pos_of` over the range.
             rebuild_smax(head);
             for (std::size_t i = head; i < list.size(); ++i) pos_of[list[i].id] = i;
             restart = true;
@@ -951,8 +653,7 @@ std::vector<PaintPoly> paint_order(std::vector<PaintPoly> polys,
         ++head;
     }
 
-    // Whatever is left when the work bound ran out comes out in depth order,
-    // which is exactly what the whole-object path would have produced.
+    // Whatever is left after the work bound comes out in depth order.
     for (; head < list.size(); ++head) out.push_back(std::move(list[head]));
 
     st.output = out.size();
@@ -965,12 +666,8 @@ std::vector<PaintPoly> paint_order(std::vector<PaintPoly> polys,
 // -------------------------------------------------------------------------
 namespace {
 
-// The order this step replaces, reachable in the same binary through
-// SEXTANT_NEWELL=0 -- whole objects interleaved by their own distance from the
-// eye, exactly as the SVG writer merged the three plans before step 9. It
-// exists to be measured and asserted *against*: a check that only ever runs
-// against the algorithm it is testing cannot tell a correct painter from a
-// lenient oracle, and the same goes for a timing.
+// The whole-object order Newell replaced (SEXTANT_NEWELL=0), kept as a
+// baseline to measure and test against.
 std::vector<ScenePaint> whole_object_order(const std::vector<Bar3DPolygon>& bars,
                                            const std::vector<Surface3DPolygon>& surfaces,
                                            const std::vector<PlanePlanItem>& planes,
@@ -988,11 +685,7 @@ std::vector<ScenePaint> whole_object_order(const std::vector<Bar3DPolygon>& bars
 
     std::vector<ScenePaint> out;
     std::size_t np = 0, ns = 0, nm = 0, nl = 0, nt = 0, ne = 0;
-    // Markers merge here as a fourth stream rather than being appended after
-    // the scene: they arrive already sorted far to near, and a cloud emitted
-    // wholesale at the end would draw every point over the geometry in front
-    // of it -- which is precisely the failure this control path exists to be
-    // measured against, so it must not have a new one of its own.
+    // Markers merge as a stream (already far to near), not appended at the end.
     auto flush_before = [&](float depth) {
         for (;;) {
             const bool p = np < plane_ids.size() && plane_depth[np] > depth;
@@ -1000,8 +693,7 @@ std::vector<ScenePaint> whole_object_order(const std::vector<Bar3DPolygon>& bars
             const bool m = nm < markers.size() && markers[nm].depth > depth;
             const bool g = nl < segments.size() && segments[nl].depth > depth;
             const bool t = nt < meshes.size() && meshes[nt].plot_depth > depth;
-            // Error-bar pieces merge per piece, as markers and segments do:
-            // the plan arrives far to near.
+            // Error-bar pieces merge per piece (already far to near).
             const bool e = ne < errbars.size() && errbars[ne].depth > depth;
             if (!p && !s && !m && !g && !t && !e) break;
             const float pd = p ? plane_depth[np] : -std::numeric_limits<float>::max();
@@ -1061,12 +753,8 @@ std::vector<ScenePaint> plan_scene3d(const Projector3D& proj,
     std::vector<PaintPoly> soup;
     soup.reserve(bars.size() + surfaces.size() + 8);
 
-    // `rank` is the polygon's own position in its plan, which *is* its
-    // object's exact internal order -- the plans are built back to front and
-    // this is the only thing that reads them that way. Two polygons of one
-    // object are never compared, so what rank does is keep them from being
-    // rearranged: the initial sort is stable and a promotion never jumps a
-    // lower-ranked sibling.
+    // `rank` is the polygon's position in its plan (the object's exact order);
+    // it keeps siblings from being rearranged by the stable sort.
     for (std::size_t i = 0; i < bars.size(); ++i) {
         if (bars[i].box.size() < 2) continue;
         PaintPoly p;
@@ -1079,7 +767,7 @@ std::vector<ScenePaint> plan_scene3d(const Projector3D& proj,
         soup.push_back(std::move(p));
     }
     for (std::size_t i = 0; i < surfaces.size(); ++i) {
-        // Two points is a wireframe edge -- the bar loop's rule above.
+        // Two points is a wireframe edge.
         if (surfaces[i].box.size() < 2) continue;
         PaintPoly p;
         p.ring    = surfaces[i].box;
@@ -1091,14 +779,8 @@ std::vector<ScenePaint> plan_scene3d(const Projector3D& proj,
         soup.push_back(std::move(p));
     }
 
-    // A mesh face, on a grid cell's terms exactly: a triangle is a ring with a
-    // plane, so it is an ordinary blade and an ordinary victim, and a two-point
-    // ring is one of its wireframe edges, which `ring_plane()` refuses and
-    // `stroke_vs_polygon()` orders. Nothing new is needed here -- which is what
-    // PaintPoly::rank's note predicted, since plain Newell already runs over
-    // every polygon and Surface3DPolygon had nothing grid-specific in it. A mesh
-    // is not a new cost class either: a 50x50 `surface` already feeds the
-    // painter 5000 triangles.
+    // A mesh face: an ordinary blade and victim; two-point rings are its
+    // wireframe edges.
     for (std::size_t i = 0; i < meshes.size(); ++i) {
         if (meshes[i].box.size() < 2) continue;
         PaintPoly p;
@@ -1111,9 +793,7 @@ std::vector<ScenePaint> plan_scene3d(const Projector3D& proj,
         soup.push_back(std::move(p));
     }
 
-    // One marker, one point. `rank` is its position in the plan, which is
-    // already the exact far-to-near order among markers, so the stable sort
-    // keeps a cloud internally right without ever comparing two of its points.
+    // One point per marker; `rank` keeps a cloud's exact order.
     for (std::size_t i = 0; i < markers.size(); ++i) {
         PaintPoly p;
         p.ring    = { markers[i].box };
@@ -1126,12 +806,7 @@ std::vector<ScenePaint> plan_scene3d(const Projector3D& proj,
         soup.push_back(std::move(p));
     }
 
-    // One segment, two points -- a stroke, which ring_plane() refuses, so it is
-    // ordered by stroke_vs_polygon() and can never be a blade. That is the
-    // whole reason a path is emitted as strokes rather than as the ribbon
-    // quads the raster path draws: a quad has a plane, and a path can
-    // contribute thousands of thin ones for other geometry to be cut along.
-    // See Line3DSegment.
+    // One two-point stroke per segment (never a blade). See Line3DSegment.
     for (std::size_t i = 0; i < segments.size(); ++i) {
         PaintPoly p;
         p.ring    = { segments[i].a, segments[i].b };
@@ -1143,10 +818,8 @@ std::vector<ScenePaint> plan_scene3d(const Projector3D& proj,
         soup.push_back(std::move(p));
     }
 
-    // Error bars (v1.0 step 17): a whisker, a cap arm or a block edge is a
-    // two-point stroke, ordered like a path's segment and never a blade; a
-    // block face is a four-point ring, an ordinary blade and victim like a
-    // translucent bar's face.
+    // Error bars: whiskers, caps and block edges are strokes; block faces are
+    // ordinary four-point rings.
     for (std::size_t i = 0; i < errbars.size(); ++i) {
         if (errbars[i].box.size() < 2) continue;
         PaintPoly p;
@@ -1159,11 +832,8 @@ std::vector<ScenePaint> plan_scene3d(const Projector3D& proj,
         soup.push_back(std::move(p));
     }
 
-    // One polygon per *plane*, not per item: since 7a a plane is one flat quad
-    // and its four forms are layers of one coplanar picture, so they share a
-    // position in the scene and are emitted together. The plan is sorted by
-    // plane distance, so the first item of each plane fixes the order the
-    // planes were built in, which is what the emission below walks.
+    // One polygon per plane (its forms are coplanar layers). The plan is sorted
+    // by plane distance; each plane's first item fixes the order.
     std::vector<std::size_t> plane_ids;
     for (const PlanePlanItem& it : planes) {
         if (std::find(plane_ids.begin(), plane_ids.end(), it.plane) != plane_ids.end())
@@ -1196,11 +866,8 @@ std::vector<ScenePaint> plan_scene3d(const Projector3D& proj,
             case PaintPoly::Kind::ErrorBar: s.kind = ScenePaint::Kind::ErrorBar; break;
         }
         s.index = p.source;
-        // Only a piece carries pixels. An untouched polygon is emitted as the
-        // plan built it, which is what keeps a scene with nothing to split
-        // byte-identical to the file the whole-object path produced -- when
-        // the order agrees, which for a scene with nothing interleaving it
-        // does.
+        // Only split pieces carry pixels; unsplit polygons are emitted as
+        // planned (so unsplit scenes match the whole-object output).
         if (p.split) s.xy = p.px;
         out.push_back(std::move(s));
     }

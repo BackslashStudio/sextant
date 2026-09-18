@@ -23,12 +23,9 @@ std::string fmt_point(double x, double y) {
     return buf;
 }
 
-// "y=2.5" becomes "y=2.5 box ±0.3 cap +0.6/-0.5": each part as the offsets
-// it was given, "±v" when the two sides agree and "+hi/-lo" when they do not.
-// A part is dropped when the series does not carry it or it is zero on both
-// sides at this point. Written per value rather than appended to the end of
-// the line, so an x uncertainty sits next to x and a y one next to y. An ASCII
-// minus, since U+2212 is outside the hover font's range.
+// "y=2.5" becomes "y=2.5 box ±0.3 cap +0.6/-0.5": "±v" when both sides agree,
+// "+hi/-lo" otherwise; parts that are absent or zero are dropped. Placed beside
+// each coordinate. ASCII minus (U+2212 isn't in the hover font).
 void fmt_offsets(char* buf, std::size_t size, int& n, const char* part,
                  bool has, ErrOffsets e) {
     if (!has || !e.any() || n < 0 || static_cast<std::size_t>(n) >= size) return;
@@ -61,9 +58,7 @@ std::string fmt_point_err(double x, double y, const ErrorBarData& err, std::size
     return fmt_err_pair("x", x, "y", y, err, i);
 }
 
-// No no-error fast path here, unlike fmt_point_err: with nothing to report
-// fmt_value emits exactly "x=%.4g" / "height=%.4g", so this reproduces the
-// old fmt_bar() text character for character and that function is gone.
+// No fast path needed: without error data this prints plain "x=%.4g".
 std::string fmt_bar_err(double x, double h, const ErrorBarData& err, std::size_t i) {
     return fmt_err_pair("x", x, "height", h, err, i);
 }
@@ -74,8 +69,7 @@ std::string fmt_z(double x, double y, double z) {
     return buf;
 }
 
-// Z is the colormapped value, which carries no error bar of its own — only
-// the position does, so it is appended plain.
+// z is the colormapped value and carries no error bar.
 std::string fmt_z_err(double x, double y, double z,
                       const ErrorBarData& err, std::size_t i) {
     if (err.empty()) return fmt_z(x, y, z);
@@ -90,15 +84,8 @@ std::string fmt_heatmap(int row, int col, float value) {
     return buf;
 }
 
-// "x=400, y=1.5, height=3.42". The two grid axes are named by the letters the
-// orientation maps them to, because a bar's u and v *are* two of x/y/z -- so
-// the tooltip reads in the same vocabulary as the axis titles beside it, and a
-// reader can find the bar in the Data panel, whose grid headers carry those
-// same two coordinates.
-//
-// The grid indices are deliberately absent, which is where this differs from
-// the heatmap above: a heatmap cell has no coordinates of its own to report,
-// and a bar has two real ones.
+// "x=400, y=1.5, height=3.42", with u/v named by the axes they map to (as in
+// the Data panel headers). No grid indices.
 std::string fmt_bar3d(const Bar3DPlot& b, std::size_t k) {
     static const char* kAxis[3] = { "x", "y", "z" };
     const Axis3Map m = axis_map(b.orient);
@@ -111,9 +98,7 @@ std::string fmt_bar3d(const Bar3DPlot& b, std::size_t k) {
                           kAxis[m.u], i < b.u.size() ? b.u[i] : 0.0,
                           kAxis[m.v], j < b.v.size() ? b.v[j] : 0.0,
                           b.height_at(k));
-    // The base only when there is one worth reporting: bars standing on zero
-    // are the common case, and a ", base=0" on every one of them is noise
-    // that makes the two numbers that matter harder to find.
+    // Report the base only when non-zero.
     const double base = b.bottom_at(k);
     if (base != 0.0)
         std::snprintf(buf + n, sizeof(buf) - static_cast<std::size_t>(n),
@@ -121,10 +106,7 @@ std::string fmt_bar3d(const Bar3DPlot& b, std::size_t k) {
     return buf;
 }
 
-// A surface's sample, in the same shape. The third coordinate is `z=` rather
-// than `height=` because a surface has no base to measure a height from: a bar
-// stands somewhere and rises, a sheet simply passes through a point, and
-// calling that a height would invite the reader to look for the bottom of it.
+// A surface sample; `z=` rather than `height=` (a sheet has no base).
 std::string fmt_surface(const SurfacePlot& s, std::size_t sample) {
     static const char* kAxis[3] = { "x", "y", "z" };
     const Axis3Map m = axis_map(s.orient);
@@ -140,15 +122,8 @@ std::string fmt_surface(const SurfacePlot& s, std::size_t sample) {
     return buf;
 }
 
-// A *vertex* of a mesh. Three independent coordinates and no Axis3Map -- a
-// mesh stands on no pair of axes, exactly as a cloud and a path do not -- and a
-// fourth line when the mesh has a `colors` vector, since that value is the one
-// thing about the vertex the picture encodes as colour.
-//
-// A vertex and not a face, on §7b's terms with three for four: a face has three
-// samples and no identity of its own, so what is reported is the nearest of the
-// three -- which is also the index a caller's `hint_labels` entry is written
-// against. line3d's vertex rule, arrived at from the other direction.
+// A mesh vertex (the nearest of the face's three), plus the `colors` value
+// when the mesh has one.
 std::string fmt_surface_tri(const SurfaceTriPlot& s, std::size_t i) {
     char buf[200];
     const Vec3 p = s.vertex(i);
@@ -160,14 +135,8 @@ std::string fmt_surface_tri(const SurfaceTriPlot& s, std::size_t i) {
     return buf;
 }
 
-// A marker of a cloud. Three independent coordinates and no Axis3Map, since a
-// scatter3d has no orientation to map through -- and a fourth line when the
-// series has a `colors` vector, because that value is the one thing about the
-// point the picture encodes as colour and so is the one the reader cannot read
-// off the position.
-// "x=1 box ±0.2, y=2, z=3 cap +0.5/-0.1": a point's position with each axis's
-// error offsets beside its own coordinate -- fmt_value()'s form, in three
-// directions (v1.0 step 17). The colour line, when there is one, follows it.
+// A cloud marker: "x=1 box ±0.2, y=2, z=3 cap +0.5/-0.1", plus the `colors`
+// value when the series has one.
 std::string fmt_xyz_err(double x, double y, double z, const ErrorBar3DData& err,
                         std::size_t i, bool colormapped, double c) {
     const double v[3] = { x, y, z };
@@ -201,13 +170,7 @@ std::string fmt_scatter3d(const Scatter3DPlot& s, std::size_t i) {
     return buf;
 }
 
-// A *vertex* of a path, and a cloud's format exactly -- because what it names
-// is the same thing: one of the points the caller gave. A path is hovered at
-// its vertices rather than along its segments for that reason. The stretch
-// between two of them is drawn, but no value was measured there, so a tooltip
-// over it could only report a position the reader can already see, and the
-// `hint_labels` a caller wrote are per point and would have nothing to attach
-// to.
+// A path vertex, in the cloud's format. Paths are hovered at vertices only.
 std::string fmt_line3d(const Line3DPlot& l, std::size_t i) {
     char buf[200];
     const double x = i < l.x.size() ? l.x[i] : 0.0;
@@ -228,10 +191,7 @@ std::string fmt_line3d(const Line3DPlot& l, std::size_t i) {
 const AxesLayout* find_hint_cell(const std::vector<AxesLayout>& layout,
                                   float cursor_x, float cursor_y) {
     for (const auto& al : layout) {
-        // A 3D cell's `tr` is left default -- there are no 2D limits to put
-        // in it -- so its rect comes from the projector, which was fitted to
-        // that very frame. Same rectangle either way, from whichever of the
-        // two actually knows it.
+        // A 3D cell's `tr` is default; its rect comes from the projector.
         const float x = al.proj3d ? al.proj3d->frame().x : al.tr.px;
         const float y = al.proj3d ? al.proj3d->frame().y : al.tr.py;
         const float w = al.proj3d ? al.proj3d->frame().w : al.tr.pw;
@@ -246,19 +206,10 @@ const AxesLayout* find_hint_cell(const std::vector<AxesLayout>& layout,
 std::optional<HintResult> find_hint(const RenderSnapshot& snap, const HintProjector& tr,
                                     float cursor_x, float cursor_y,
                                     HintIndexCache* index) {
-    // Runs on every frame the cursor is over the plot, so it is written in two
-    // phases. Phase 1 finds the nearest point and does *no* string work --
-    // formatting a candidate that is then discarded costs one allocation per
-    // point examined, which at 200k points dominated everything else. Phase 2
-    // formats the winner alone.
-    //
-    // Candidates come from a data-space bucket grid (hint_index.h) rather than
-    // a scan of every point: the box below is the hit radius mapped back into
-    // data space, and only points in the overlapping cells are transformed.
-    // Without an index PointGrid falls back to a linear scan applying the same
-    // box test inline.
-    // A surface the cursor names no point on -- a plane seen edge-on -- has
-    // no candidate box and so nothing on it to find.
+    // Runs every hovered frame, in two phases: find the nearest point without
+    // any string work, then format only the winner. Candidates come from the
+    // data-space bucket grid (hint_index.h). A surface with no candidate box
+    // (a plane seen edge-on) has nothing to find.
     double x_lo = 0.0, x_hi = 0.0, y_lo = 0.0, y_hi = 0.0;
     if (!tr.data_box(cursor_x, cursor_y, kHintHitRadiusPx, x_lo, x_hi, y_lo, y_hi))
         return std::nullopt;
@@ -268,8 +219,7 @@ std::optional<HintResult> find_hint(const RenderSnapshot& snap, const HintProjec
     std::size_t best_obj  = 0, best_i = 0;
     float       best_px   = 0.0f, best_py = 0.0f;
 
-    // The candidate set is only conservative — the true (circular, pixel-space)
-    // test is here, and is what makes the indexed and unindexed paths agree.
+    // The exact pixel-space circle test; candidates were only conservative.
     auto consider = [&](float px, float py,
                         int kind, std::size_t obj, std::size_t i) {
         const float dx = px - cursor_x, dy = py - cursor_y;
@@ -281,9 +231,7 @@ std::optional<HintResult> find_hint(const RenderSnapshot& snap, const HintProjec
         }
     };
 
-    // The no-index fallback is a shared *const* pass-through grid rather than
-    // a dummy cache object: nothing mutates it, so no thread-visible state is
-    // introduced by taking this branch.
+    // Without an index, use a shared const pass-through grid.
     static const PointGrid kScan{};
 
     auto sweep = [&](PlotKind kind, std::size_t o, int kind_id,
@@ -291,8 +239,7 @@ std::optional<HintResult> find_hint(const RenderSnapshot& snap, const HintProjec
         const PointGrid& g = index ? index->grid(kind, o, xs, ys) : kScan;
         g.for_each_in(xs, ys, x_lo, x_hi, y_lo, y_hi,
                       [&](std::size_t i) {
-                          // A point behind a perspective eye projects to the
-                          // wrong side of the picture; it is not a candidate.
+                          // Behind a perspective eye: not a candidate.
                           const HintProjector::Pt p = tr.at(xs[i], ys[i]);
                           if (p.in_front) consider(p.x, p.y, kind_id, o, i);
                       });
@@ -339,15 +286,9 @@ std::optional<HintResult> find_hint(const RenderSnapshot& snap, const HintProjec
         return HintResult{ std::move(text), best_px, best_py };
     }
 
-    // Heatmap fallback: cursor inside one of a heatmap's cells. The test runs
-    // in *cell index* space, not data space — col_at()/row_at() map the
-    // cursor through the plot's own extent, so a reversed or offset range
-    // needs no special case here and the bounds stay the plain [0,cols) x
-    // [0,rows). Storage (RenderSnapshot::heatmaps[i].data) is always
-    // row-major with row 0 first, regardless of origin — only the GPU texture
-    // upload is vertically flipped for origin=="lower" (see
-    // DataRenderer::draw_heatmap in data_renderer.cpp). To find the storage
-    // row actually displayed at a given data-y, reverse that same flip here.
+    // Heatmap fallback: the cell under the cursor, in cell-index space via
+    // col_at()/row_at(). Storage is row 0 first regardless of origin, so undo
+    // the origin=="lower" flip to find the displayed row.
     double dx = 0.0, dy = 0.0;
     if (!tr.at_pixel(cursor_x, cursor_y, dx, dy)) return std::nullopt;
     for (const auto& hp : snap.heatmaps) {
@@ -371,24 +312,16 @@ std::optional<HintResult> find_hint(const RenderSnapshot& snap, const HintProjec
 std::optional<HintResult> find_hint3d(const RenderSnapshot3D& snap, const Projector3D& proj,
                                       float cursor_x, float cursor_y,
                                       HintIndexCache* index) {
-    // Nearest surface first, by the depth of the cursor's own ray hit -- not
-    // by the object's distance as a whole, which is a different question the
-    // moment a plane is tilted or a bar is tall. A surface the ray misses
-    // (a plane seen edge-on, a bar beside the cursor, anything behind the
-    // eye) drops out here rather than inside find_hint().
-    //
-    // Three kinds share one list, because "which of these is drawn in front of
-    // the cursor" is one question. `what` says which vector `object` indexes;
-    // `element` is the flat bar index, the nearest sample of a surface cell, or
-    // unused for a plane.
+    // Nearest surface first, by the depth of the cursor ray's own hit; misses
+    // drop out here. `what` says which vector `object` indexes; `element` is
+    // the bar index or nearest surface sample (unused for planes).
     enum class What { Plane, Bar, Surface, Mesh, Marker, Vertex };
     struct Candidate { What what; std::size_t object, element; float depth; };
     std::vector<Candidate> hits;
 
     for (std::size_t i = 0; i < snap.planes.size(); ++i) {
         const PlaneSnapshot& pl = snap.planes[i];
-        // Not drawn, not hinted: a tooltip about something invisible is a
-        // tooltip about nothing the reader can see.
+        // Hidden planes aren't hinted.
         if (!plane_drawn(pl)) continue;
         double u = 0.0, v = 0.0;
         float  depth = 0.0f;
@@ -397,12 +330,7 @@ std::optional<HintResult> find_hint3d(const RenderSnapshot3D& snap, const Projec
         hits.push_back({ What::Plane, i, 0, depth });
     }
 
-    // Every bar, tested individually. There is no spatial index here, unlike
-    // the point search find_hint() runs: the slab test is a couple of dozen
-    // flops and nothing is projected until it hits, so a grid large enough for
-    // this to matter is already too large to render. The narrowing that would
-    // apply, if it ever does, is a DDA over the grid's own u and v lines
-    // rather than a bucket grid, since the bars *are* a grid.
+    // Every bar, tested individually (cheap slab tests; no index).
     for (std::size_t o = 0; o < snap.bars3d.size(); ++o) {
         const Bar3DPlot& b = snap.bars3d[o];
         for (std::size_t k = 0; k < b.count(); ++k) {
@@ -412,11 +340,7 @@ std::optional<HintResult> find_hint3d(const RenderSnapshot3D& snap, const Projec
         }
     }
 
-    // Every cell of every surface, on the same argument -- two triangle tests
-    // per cell, nothing projected until one hits. A surface is more cells than
-    // a bar grid is bars, so this is where the DDA narrowing above would earn
-    // its keep first; it is still a few thousand flops on a grid dense enough
-    // to be worth drawing.
+    // Every surface cell (two triangle tests each).
     for (std::size_t o = 0; o < snap.surfaces.size(); ++o) {
         const SurfacePlot& s = snap.surfaces[o];
         if (s.heights.size() < s.count()) continue;
@@ -428,12 +352,7 @@ std::optional<HintResult> find_hint3d(const RenderSnapshot3D& snap, const Projec
         }
     }
 
-    // Every face of every mesh, on the grid surface's terms exactly: one
-    // triangle test per face through the same tri_ray_t(), nothing projected
-    // until one hits. A mesh is the kind most likely to make this the hot loop
-    // -- it has no grid structure to narrow by at all, so the DDA over u and v
-    // lines that would rescue a big surface has no counterpart here. A BVH is
-    // the narrowing that would apply, if it ever does.
+    // Every mesh face (one triangle test each; no acceleration structure).
     for (std::size_t o = 0; o < snap.surface_tri.size(); ++o) {
         const SurfaceTriPlot& s = snap.surface_tri[o];
         for (std::size_t f = 0; f < s.face_count(); ++f) {
@@ -444,19 +363,9 @@ std::optional<HintResult> find_hint3d(const RenderSnapshot3D& snap, const Projec
         }
     }
 
-    // Every marker of every cloud, and the one kind here that is *not* a ray
-    // cast: a marker is a symbol drawn at a pixel with a pixel size, so what
-    // the cursor is over is a screen-space question and casting a ray at a
-    // thing with no surface would have nothing to intersect. What it
-    // contributes to the list is the point's own depth, which is what the
-    // billboard gave the depth buffer -- so a marker competes with the
-    // geometry on the same terms the picture resolved them on, and one behind
-    // an opaque bar loses to it here exactly as it is hidden there.
-    //
-    // The radius is the marker's own half-extent, floored at the hit radius a
-    // 2D point search uses: a 4 px marker would otherwise be almost
-    // unhoverable, and the floor is what makes a small symbol a target rather
-    // than a test of aim.
+    // Every cloud marker, tested in screen space (markers have no surface) at
+    // the point's depth, so occlusion matches the picture. Radius: the
+    // marker's half size, at least kHintHitRadiusPx.
     for (std::size_t o = 0; o < snap.scatter3d.size(); ++o) {
         const Scatter3DPlot& s = snap.scatter3d[o];
         if (s.opts.marker == MarkerStyle::None) continue;
@@ -472,17 +381,8 @@ std::optional<HintResult> find_hint3d(const RenderSnapshot3D& snap, const Projec
         }
     }
 
-    // Every vertex of every path, on the marker's terms rather than the ray
-    // cast's: a vertex has no surface either, and what the cursor is over is
-    // again a screen-space question. The hit radius is the ribbon's *drawn*
-    // half width where that is the larger -- a thick path should be hoverable
-    // over the ink it actually puts on the screen -- floored at the same
-    // kHintHitRadiusPx a thin one would otherwise be unhoverable below.
-    //
-    // Measured at the box centre, which is where `linewidth` is defined
-    // (line3d_half_width()), rather than per vertex: the alternative makes a
-    // path's near end a larger target than its far end, which is true of the
-    // ink and is not a property a reader can aim by.
+    // Every path vertex, in screen space. Radius: the drawn half width at the
+    // box centre, at least kHintHitRadiusPx.
     for (std::size_t o = 0; o < snap.lines3d.size(); ++o) {
         const Line3DPlot& l = snap.lines3d[o];
         if (l.opts.linewidth <= 0.0f) continue;
@@ -501,12 +401,8 @@ std::optional<HintResult> find_hint3d(const RenderSnapshot3D& snap, const Projec
     std::stable_sort(hits.begin(), hits.end(),
                      [](const Candidate& a, const Candidate& b) { return a.depth < b.depth; });
 
-    // First answer wins, which is what makes the tooltip agree with the
-    // picture: the nearest thing is the one drawn over the others there.
-    // A bar or a surface answers by being *hit* -- both are geometry rather
-    // than a sheet with points on it, so there is nothing further to search
-    // and nothing behind them to fall through to. Only a plane can decline,
-    // by having nothing near the cursor.
+    // First answer wins (nearest = drawn on top). Bars and surfaces answer by
+    // being hit; a plane may decline if nothing is near the cursor.
     for (const Candidate& c : hits) {
         if (c.what == What::Bar) {
             const Bar3DPlot& b = snap.bars3d[c.object];

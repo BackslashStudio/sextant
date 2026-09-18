@@ -12,17 +12,9 @@
 
 namespace sextant {
 
-// One scalar the Data panel changed, addressed by (kind, index-within-that-
-// kind's-vector, column, element) since plot objects carry no identity of
-// their own. Column is 0 = x/centers, 1 = y/heights, 2 = z, and is unused for
-// Heatmap, whose `element` is the row-major index row*cols + col.
-//
-// A 3D slot holds its plot objects on planes rather than on the axes, so the
-// address gained one field in step 6b: `plane_index` says which plane the
-// (kind, plot_index) pair indexes into, and -1 means the axes itself -- the
-// only form a 2D slot ever produces. It is last and defaulted in every op
-// below, so every existing positional construction keeps meaning what it
-// meant, and an op recorded before this existed replays unchanged.
+// One scalar edited in the Data panel, addressed by (plane, kind, index,
+// column, element). Column: 0 = x/centers, 1 = y/heights, 2 = z; unused for
+// Heatmap, whose `element` is row*cols + col. `plane_index` -1 = the axes itself.
 struct PlotCellEdit {
     PlotKind    kind;
     int         plot_index;
@@ -32,48 +24,22 @@ struct PlotCellEdit {
     int         plane_index = -1;
 };
 
-// A structural change to one plot object's parallel data arrays: insert a new
-// point at `row`, or remove the point there. Every array of that plot moves in
-// lockstep (x/y, x/y/z, centers/heights, plus the index-aligned hint_labels
-// and error-bar vectors) so they can never desynchronize.
-//
-// Heatmaps are not addressable here -- a matrix has no "point" to insert
-// without also choosing row-vs-column and re-striding. That is
-// MatrixLineEdit's job.
+// Insert or remove one point, moving every parallel array of the plot (x/y/z,
+// hint_labels, error bars) together. Not for heatmaps; see MatrixLineEdit.
 struct PlotRowEdit {
     enum class Op { Insert, Remove };
     Op          op         = Op::Insert;
     PlotKind    kind       = PlotKind::Line;
     int         plot_index = 0;
-    // Insert: the index the new point will occupy (== the old size to append).
-    // Its values are copied from row-1 where that exists, so the new point
-    // lands on top of its neighbour and the plot's shape is undisturbed until
-    // the user edits it; at row 0, or into an empty plot, it is zero-filled.
-    // Remove: the index to erase.
+    // Insert: index of the new point (old size to append); values copied from
+    // row-1, or zero-filled at row 0. Remove: the index to erase.
     std::size_t row        = 0;
     int         plane_index = -1;   // see PlotCellEdit
 };
 
-// The appearance of one 2D plot object, from that object's own tab in the
-// Data panel (v1.0 step 11.6).
-//
-// The 3D kinds have had this since step 7d -- AxesEdit3D::Bar3DEdit and
-// SurfaceEdit -- and the 2D ones had nothing at all: a LinePlot's or a
-// HeatmapPlot's options could not be edited from any panel, and neither could
-// a plane's, since PlaneEdit carries only the plane's own placement. What
-// forced the gap closed is that `colorbar` and `show_legend` are per-object
-// flags with nowhere to be toggled from.
-//
-// Addressed exactly as a PlotDataOp is -- (plane, index), plane -1 meaning the
-// axes itself -- because it names the same object, and two addressing schemes
-// for one object are two chances to disagree about which one a control edits.
-//
-// There is deliberately **no `kind` field**, unlike PlotCellEdit: the variant's
-// own alternative names the kind, and a separate tag could disagree with it.
-// PlotCellEdit needs one because a `double value` carries no type.
-//
-// The whole options struct rather than per-field deltas, as everywhere else on
-// this channel: the panel keeps a local copy and republishes it on any change.
+// Appearance of one 2D plot object, from its Data-panel tab. Addressed like a
+// PlotDataOp; the variant alternative is the kind. Carries the whole options
+// struct.
 struct PlotStyleEdit {
     int plot_index  = 0;
     int plane_index = -1;
@@ -81,42 +47,25 @@ struct PlotStyleEdit {
                  HeatmapOptions, ScatterZOptions> opts;
 };
 
-// Insert or remove a whole matrix row / column of a HeatmapPlot, re-striding
-// the row-major buffer (and HeatmapOptions::hint_labels, which shares that
-// layout) around the change.
-//
-// Never allowed below 1x1: Axes::heatmap() rejects rows<1 || cols<1, so the
-// panel must not be able to manufacture a shape the public API would refuse.
-// New lines copy their predecessor, as PlotRowEdit's inserts do, so the
-// picture does not jump until a value is actually edited; at index 0 there is
-// no predecessor and they are zero-filled.
-// A `bar3d` grid rides this too (step 6c): its heights are a |u| x |v|
-// row-major matrix with u as the major index, so "row" is a u line and
-// "column" a v line, and the same re-striding applies. What differs is that a
-// bar3d line also owns a *coordinate* -- the u or v value the new line sits
-// at -- which a heatmap's does not, its extent being the axis.
+// Insert or remove a whole row/column of a heatmap (or a bar3d/surface grid,
+// where a row is a u line and a column a v line), re-striding the buffer and
+// hint_labels. Never below 1x1. New lines copy their predecessor, or are
+// zero-filled at index 0; grid kinds also get a new coordinate.
 struct MatrixLineEdit {
     enum class Op   { Insert, Remove };
     enum class Axis { Row, Col };
     Op          op         = Op::Insert;
     Axis        axis       = Axis::Row;
     int         plot_index = 0;
-    // Insert: the index the new line will occupy (== rows/cols to append).
-    // Remove: the index to erase.
+    // Insert: index of the new line (rows/cols to append). Remove: index to erase.
     std::size_t index      = 0;
     int         plane_index = -1;   // see PlotCellEdit
-    // Which gridded kind this addresses. Last and defaulted, like
-    // plane_index, so every construction written before bar3d arrived still
-    // names a heatmap.
+    // Defaults to Heatmap.
     PlotKind    kind       = PlotKind::Heatmap;
 };
 
-// BarPlot::bar_width is a single per-plot scalar rather than a per-bar column,
-// so it can't ride in a PlotCellEdit — but it is still plot *data*, and is
-// journaled and replayed alongside the rest.
-//
-// A `bar3d` grid has two of them, `u_width` and `v_width`, which is what
-// `column` selects; a 2D bar has one and ignores it.
+// A plot's bar width (a per-plot scalar), journaled like other data. For
+// Bar3D, `column` selects u_width or v_width.
 struct BarWidthEdit {
     int    plot_index  = 0;
     double width       = 1.0;
@@ -125,27 +74,17 @@ struct BarWidthEdit {
     int    column      = 0;    // Bar3D: 0 = along u, 1 = along v
 };
 
-// One entry of a plot object's edit stream. Ordering across the whole stream
-// is load-bearing, and the reason these live in one sequence rather than in
-// per-kind buckets: every index is relative to the arrays as they stood when
-// the op was recorded, so a cell edit staged before a row insert must be
-// applied before it too. (Clicking a row button deactivates the focused
-// input, so both routinely land in the same frame.)
+// One op in a plot's edit stream. Order matters: indices refer to the arrays
+// as they were when recorded, so ops must replay in sequence.
 using PlotDataOp = std::variant<PlotCellEdit, PlotRowEdit, MatrixLineEdit, BarWidthEdit>;
 
-// The one field every alternative shares, read without caring which it is.
-// Here rather than at each call site because "which plane is this op for" is
-// asked by the router, the journal and the panel alike, and a std::visit
-// written three times is three chances to add a fifth op and forget one.
+// The plane_index every op carries.
 inline int plot_op_plane(const PlotDataOp& op) {
     return std::visit([](const auto& o) { return o.plane_index; }, op);
 }
 
-// One axes slot's worth of pending widget-panel edits. Every field is
-// optional: absent = untouched this round. For xticks_override/
-// yticks_override the *outer* optional means "the tick table was touched
-// since the last drain"; an empty inner vector means "clear the override,
-// revert to auto ticks" (distinct from "not touched").
+// One axes slot's pending panel edits; absent = untouched. For the tick
+// overrides, an empty inner vector means "revert to auto ticks".
 struct AxesEdit {
     std::optional<std::string> title, xtitle, ytitle;
     std::optional<bool>   xlim_auto, ylim_auto, grid_enabled;
@@ -153,42 +92,20 @@ struct AxesEdit {
     std::optional<std::vector<Tick>> xticks_override, yticks_override;
     std::optional<AxesStyle> axes_style;
 
-    // Each mirrors a whole options struct rather than per-field
-    // deltas, matching how axes_style above has always worked — the panel
-    // keeps a local copy and republishes it on any change.
+    // Whole options structs; the panel republishes its local copy on change.
     std::optional<GridOptions>     grid_opts;
     std::optional<bool>            legend_enabled;
     std::optional<LegendOptions>   legend_opts;
     std::optional<ColorbarOptions> colorbar_opts;
 
-    // Data panel. Appended to (never cleared), so an empty vector
-    // simply means "no data was committed since the last drain" — no outer
-    // optional needed, unlike the tick overrides above where empty-vs-absent
-    // carries meaning. Strictly ordered; see PlotDataOp.
+    // Data panel ops, appended in order; empty = none since the last drain.
     std::vector<PlotDataOp> plot_ops;
 
-    // Per-plot-object appearance, from the same panel and on the same
-    // append-only terms (v1.0 step 11.6). Separate from plot_ops because that
-    // stream exists to replay *data* onto the caller thread and this does not:
-    // a style edit is applied wherever it lands and has no journal.
+    // Per-object appearance. Not journaled, unlike plot_ops.
     std::vector<PlotStyleEdit> plot_styles;
 };
 
-// Keyed by AxesSlot::index (1-indexed, unique within one Figure). A
-// vector-of-pairs rather than a map: slot counts are tiny (subplot grids,
-// not thousands of axes).
-// The 3D counterpart, and a separate struct rather than extra fields on
-// AxesEdit for the reason RenderSnapshot3D is separate from RenderSnapshot: a
-// slot is one kind or the other, so one struct with two disjoint halves would
-// be half-meaningless whichever slot it addressed. The overlap that does exist
-// (titles, grid, axes_style) is genuine -- those mean the same thing to both.
-//
-// plot_ops arrived with the planes: an Axes3D holds no plot objects of its
-// own, but every plane does, and each op names the plane it belongs to
-// (PlotCellEdit::plane_index). One stream per slot rather than one per plane,
-// for the reason PlotDataOp is one stream rather than per-kind buckets --
-// order across the whole stream is what makes an index recorded before a
-// structural op still mean what it meant.
+// The 3D counterpart of AxesEdit. plot_ops name their plane via plane_index.
 struct AxesEdit3D {
     std::optional<std::string> title, xtitle, ytitle, ztitle;
     std::optional<bool>   xlim_auto, ylim_auto, zlim_auto, grid_enabled;
@@ -198,54 +115,34 @@ struct AxesEdit3D {
     std::optional<AxesStyle>   axes_style;
     std::optional<GridOptions> grid_opts;
 
-    // The hoisted decoration's switch and cosmetics, the same three AxesEdit
-    // carries and meaning the same thing (v1.0 step 11.2). A colorbar's
-    // styling could not ride this channel before, because it was not the
-    // axes' -- it was read off whichever plane had asked, where nothing could
-    // set it.
+    // Same meaning as in AxesEdit.
     std::optional<bool>            legend_enabled;
     std::optional<LegendOptions>   legend_opts;
     std::optional<ColorbarOptions> colorbar_opts;
 
-    // The camera rides this channel rather than living in PanelState, which
-    // is what makes a dragged view survive refresh() and lets a caller script
-    // the same thing through Axes3D::set_camera(). It is the exact analogue of
-    // pan/zoom pushing limits.
+    // Camera edits go through here (not PanelState) so a dragged view survives
+    // refresh().
     std::optional<Camera3D>   camera;
     std::optional<Box3DStyle> box_style;
     std::optional<BoxAspect>  aspect;
 
-    // One plane's placement, from a plane's own tab in the Data panel. A
-    // vector rather than one optional-per-field on AxesEdit3D because an
-    // axes holds any number of planes; `plane_index` is positional, exactly
-    // as a plot object's index is, and an entry naming a plane that has since
-    // gone is skipped rather than clamped.
+    // Per-plane placement from the plane's Data-panel tab; entries naming a
+    // plane that no longer exists are skipped.
     struct PlaneEdit {
         int plane_index = 0;
         std::optional<PlaneOrientation> orient;
         std::optional<double>           offset;
-        // The whole options struct, matching how axes_style and grid_opts
-        // above work: the panel keeps a local copy and republishes it.
+        // Whole options struct.
         std::optional<Plane2DOptions>   opts;
     };
     std::vector<PlaneEdit> planes;
 
-    // The appearance of one `bar3d` grid or one surface, from the Appearance
-    // block in its Data-panel tab (step 7d, in the Controls panel until 10.3;
-    // the bar3d one is the row step 6c recorded as deliberately missing). Vectors and positional indices for exactly
-    // PlaneEdit's reason: an axes holds any number of each.
-    //
-    // The whole options struct, as everywhere else on this channel -- but see
-    // apply_axes3d_edit(), which restores `hint_labels` afterwards. Those are
-    // *data*, edited in the Data panel and re-strided by a MatrixLineEdit, and
-    // a stale copy riding an appearance edit would silently revert them.
+    // Appearance of the axes' own 3D objects, positional. apply_axes3d_edit()
+    // preserves `hint_labels`, which are data edited elsewhere.
     struct Bar3DEdit   { int plot_index = 0; std::optional<Bar3DOptions>   opts; };
     struct SurfaceEdit { int plot_index = 0; std::optional<SurfaceOptions> opts; };
-    // And one scatter3d cloud (v1.0 step 12.8), on identical terms.
     struct Scatter3DEdit { int plot_index = 0; std::optional<Scatter3DOptions> opts; };
-    // And one line3d path (v1.0 step 13.5), on identical terms.
     struct Line3DEdit  { int plot_index = 0; std::optional<Line3DOptions>  opts; };
-    // And one triangulated mesh (v1.0 step 14.4), on identical terms.
     struct SurfaceTriEdit { int plot_index = 0; std::optional<SurfaceTriOptions> opts; };
     std::vector<Bar3DEdit>     bars3d;
     std::vector<SurfaceEdit>   surfaces;
@@ -253,56 +150,41 @@ struct AxesEdit3D {
     std::vector<Line3DEdit>    lines3d;
     std::vector<SurfaceTriEdit> surface_tri;
 
-    // Data panel, addressed at a plane. Appended to, never cleared -- the
-    // same reading AxesEdit::plot_ops has.
+    // Data panel ops, appended in order.
     std::vector<PlotDataOp> plot_ops;
 
-    // One plane's plot object's appearance, addressed at the plane (v1.0 step
-    // 11.6). What sits directly on the axes goes down `bars3d` and `surfaces`
-    // above instead, so an entry here always names a plane.
+    // Appearance of plot objects on planes (always plane-addressed).
     std::vector<PlotStyleEdit> plot_styles;
 };
 
+// Pending edits for a whole figure. Per-axes entries are keyed by
+// AxesSlot::index.
 struct FigureEdits {
     std::vector<std::pair<int, AxesEdit>>   per_axes;
     std::vector<std::pair<int, AxesEdit3D>> per_axes3d;
 
-    // Figure-level, so deliberately outside per_axes: one suptitle spans the
-    // whole subplot grid, and the panel edits it from whichever axes happens
-    // to be selected.
+    // Figure-level: the suptitle spans the whole grid.
     std::optional<std::string>     suptitle;
     std::optional<SuptitleOptions> suptitle_opts;
 
-    // Figure-level for the same reason the suptitle is: the margins
-    // are the border around the whole grid and the gaps are between
-    // subplots, so neither belongs to any one axes slot.
+    // Figure-level layout.
     std::optional<FigureMargins> margins;
     std::optional<float>         col_gap, row_gap;
 
-    // The grid's weights, from dragging a boundary between subplots or the
-    // Layout fields (v1.0 step 15.3). Whole vectors, as everywhere on this lane.
-    // Unlike the rest of it they are journaled, so a drag survives refresh().
+    // Grid weights from dragging or the Layout fields; journaled, so a drag
+    // survives refresh().
     std::optional<std::vector<float>> col_ratios, row_ratios;
 
-    // FigureEditBox's drain tests this, not per_axes.empty(): a
-    // figure-level-only edit carries no per-axes entry and would otherwise be
-    // dropped. Every field above has to be listed. Missing one is not a
-    // compile error, it is a control that silently does nothing until some
-    // unrelated per-axes edit happens to ride along with it.
+    // Must list every field above: a missing one is silently dropped when it
+    // arrives without a per-axes edit.
     bool empty() const {
         return per_axes.empty() && per_axes3d.empty() && !suptitle && !suptitle_opts
                && !margins && !col_gap && !row_gap && !col_ratios && !row_ratios;
     }
 };
 
-// Whether a drain carries nothing but navigation, and so leaves the stored
-// layout alone (v1.0 step 15.2; see FigureSnapshot::layout_generation). An
-// allow-list, deliberately: a field added to either edit struct later counts
-// as a change until someone decides otherwise, which costs a refit rather
-// than a stale layout.
-//
-// 2D: limits and tick overrides, whose only layout effect is the tick labels.
-// 3D: the camera, which has none -- a 3D cell's labels are inside its frame.
+// True if a drain holds only navigation (2D limits/ticks, 3D camera), which
+// leaves the stored layout alone. An allow-list: new fields count as changes.
 inline bool is_navigation_only(const FigureEdits& f) {
     if (f.suptitle || f.suptitle_opts || f.margins || f.col_gap || f.row_gap
         || f.col_ratios || f.row_ratios)
@@ -328,16 +210,12 @@ inline bool is_navigation_only(const FigureEdits& f) {
     return true;
 }
 
-// The data ops the render thread has already folded into the published
-// snapshot, kept so the caller thread can replay them onto the authoritative
-// Axes::Impl. Only *data* is journaled, not AxesEdit's appearance/limit
-// fields -- see FigureEditBox -- plus, since v1.0 step 15.3, the grid's weights.
+// Data ops already applied to the published snapshot, for the caller thread to
+// replay onto Axes::Impl. Also the grid ratios.
 struct PlotDataJournal {
     std::vector<std::pair<int, std::vector<PlotDataOp>>> per_axes;
 
-    // The grid's weights as last dragged (v1.0 step 15.3): the one figure-level
-    // edit journaled, and only its latest value, since a drag restages the whole
-    // vector every frame and only where it ended matters.
+    // Grid weights as last dragged (latest value only).
     std::optional<std::vector<float>> col_ratios, row_ratios;
 
     bool empty() const { return per_axes.empty() && !col_ratios && !row_ratios; }
@@ -346,27 +224,16 @@ struct PlotDataJournal {
 // ---------------------------------------------------------------------------
 // Applying data ops
 //
-// Each overload targets either an Axes::Impl (caller thread) or a
-// RenderSnapshot (render thread). Templated because those two declare the same
-// five plot vectors under the same names, so one body keeps the two drain
-// paths semantically identical -- which is what makes an op journaled on one
-// thread and replayed on the other produce the same result.
-//
-// Every index is re-validated here and out-of-range ops are silently skipped:
-// the panel indexes frame N's snapshot while this runs against frame N+1, and
-// throwing is not an option because the render-thread path runs on
-// WindowThread, which has no exception barrier.
-//
-// Plot bulk data is a CowVec, so every write goes through mut(). Note the
-// ordering in each case: validate the index *before* calling mut(), so an
-// out-of-range op costs no clone.
+// Templated over Axes::Impl (caller thread) and RenderSnapshot (render thread),
+// which share member names, so a journaled op replays identically. Indices are
+// re-validated and stale ops silently skipped (the panel indexed an older
+// frame; the render thread cannot throw). Validate before mut() to avoid a
+// needless clone.
 // ---------------------------------------------------------------------------
 
 namespace edits_detail {
 
-// Uniform "give me something writable" for the templates below, which have to
-// work over both a CowVec (the plot data) and the plain std::vector<std::string>
-// that opts.hint_labels still is.
+// Writable access for both CowVec and plain vectors (opts.hint_labels).
 template <class T> std::vector<T>& mut_ref(CowVec<T>& v)      { return v.mut(); }
 template <class T> std::vector<T>& mut_ref(std::vector<T>& v) { return v; }
 
@@ -401,9 +268,7 @@ void apply_plot_data_op(T& t, const PlotCellEdit& e) {
         case PlotKind::Heatmap: {
             if (pi >= t.heatmaps.size()) return;
             auto& hp = t.heatmaps[pi];
-            // Re-check the shape too: `element` was folded as row*cols+col
-            // against the dimensions the panel saw, which may have changed —
-            // and now *can* change structurally, via MatrixLineEdit.
+            // Re-check the shape; it may have changed since the panel saw it.
             if (hp.rows <= 0 || hp.cols <= 0) return;
             const std::size_t n = static_cast<std::size_t>(hp.rows)
                                 * static_cast<std::size_t>(hp.cols);
@@ -412,8 +277,7 @@ void apply_plot_data_op(T& t, const PlotCellEdit& e) {
             return;
         }
         case PlotKind::Bar3D:
-            // Native to a 3D axes, so it never indexes any of the five
-            // vectors above -- see apply_axes3d_data_op() below.
+            // 3D-native; see apply_axes3d_data_op().
             return;
     }
 }
@@ -427,10 +291,8 @@ void apply_plot_data_op(T& t, const BarWidthEdit& e) {
 
 namespace edits_detail {
 
-// Insert at `row`, seeding from row-1 when `copy_prev` and such a row exists,
-// else value-initialized. Erase at `row`. Both silently no-op when the index
-// does not fit this particular vector -- the arrays can have been resized out
-// from under a stale edit.
+// Insert at `row` (seeded from row-1 if `copy_prev`, else value-initialized) or
+// erase at `row`. No-op when the index doesn't fit.
 template <class V>
 void row_insert(V& v, std::size_t row, bool copy_prev) {
     if (row > v.size()) return;
@@ -456,27 +318,16 @@ void apply_plot_data_op(T& t, const PlotRowEdit& e) {
     const std::size_t pi = static_cast<std::size_t>(e.plot_index);
     const bool insert = (e.op == PlotRowEdit::Op::Insert);
 
-    // One structural change applied to every parallel array of a plot object
-    // at once, which is what keeps x/y/z from ever desynchronizing. A new
-    // point copies its predecessor so the plotted shape is undisturbed until
-    // the user edits it.
+    // Apply the change to all required parallel arrays; new points copy their
+    // predecessor.
     auto required = [&](auto&... cols) {
         if (insert) (edits_detail::row_insert(cols, e.row, true), ...);
         else        (edits_detail::row_remove(cols, e.row), ...);
     };
 
-    // Index-aligned companions the plot may or may not have: hint_labels and
-    // the eight error-bar vectors. They must move too, or everything past the
-    // edit point slides onto the wrong point -- invisible until someone reads
-    // the plot. Each is left strictly alone when empty, since empty means
-    // "this plot has none of these at all".
-    //
-    // `copy_prev` differs between the two deliberately: a new point gets a
-    // *blank* hint label (inheriting someone else's "Peak" is an assertion
-    // nobody made) but a *copy* of its neighbour's error data, because the
-    // inserted point is itself a copy of that neighbour and a measurement
-    // copied is copied with its uncertainty. A zero would draw nothing rather
-    // than something wrong, but it would still claim the copy is exact.
+    // Optional index-aligned arrays (hint_labels, error bars) move too; empty
+    // ones are left alone. New points get a blank label but copy the
+    // neighbour's error data.
     auto optional_cols = [&](bool copy_prev, auto&... cols) {
         auto one = [&](auto& c) {
             if (c.empty()) return;
@@ -526,26 +377,15 @@ void apply_plot_data_op(T& t, const PlotRowEdit& e) {
             break;
         case PlotKind::Heatmap:
         case PlotKind::Bar3D:
-            // Not addressable — see PlotRowEdit. Neither is a list of points:
-            // a matrix and a bar grid both change shape a whole line at a
-            // time, which is MatrixLineEdit's job. The Data panel never emits
-            // one of these for either; ignore it if one ever arrives.
+            // Not point-addressable; MatrixLineEdit handles these.
             break;
     }
 }
 
 namespace edits_detail {
 
-// Insert or remove one whole line of a rows x cols row-major buffer,
-// re-striding it around the change. `row_axis` names the major index, so a
-// row is `cols` contiguous elements and a column is one element per row.
-//
-// Shared by the two gridded kinds -- a heatmap's matrix and a bar3d's heights
-// -- because the layout is the same layout and a second transcription of a
-// splice loop written bottom-up for a reason is a second chance to write it
-// top-down. Both also carry an index-aligned hint_labels through it, which
-// must move in lockstep or every label past the change lands on the wrong
-// cell. An empty buffer is left alone: empty means "this plot has none".
+// Insert or remove one line of a rows x cols row-major buffer. `row_axis`: a
+// row is `cols` contiguous elements. Empty buffers are left alone.
 template <class V>
 void grid_reshape(V& v, std::size_t rows, std::size_t cols,
                   bool row_axis, bool insert, std::size_t index) {
@@ -555,8 +395,7 @@ void grid_reshape(V& v, std::size_t rows, std::size_t cols,
     if (row_axis) {
         const std::size_t at = index * cols;
         if (insert) {
-            // Seed from the row above; at row 0 there is none, so the new
-            // row is value-initialized.
+            // Seed from the row above; zero-filled at row 0.
             std::vector<Value> seed(cols);
             if (index > 0)
                 seed.assign(vv.begin() + static_cast<std::ptrdiff_t>(at - cols),
@@ -568,9 +407,7 @@ void grid_reshape(V& v, std::size_t rows, std::size_t cols,
                      vv.begin() + static_cast<std::ptrdiff_t>(at + cols));
         }
     } else {
-        // Walk bottom-up so each splice happens at a higher offset than
-        // the next one: offsets computed with the *original* stride stay
-        // valid for every row still to come.
+        // Bottom-up, so offsets computed with the original stride stay valid.
         for (std::size_t r = rows; r-- > 0; ) {
             const std::size_t at = r * cols + index;
             if (insert) {
@@ -583,11 +420,7 @@ void grid_reshape(V& v, std::size_t rows, std::size_t cols,
     }
 }
 
-// Whether a structural edit of a rows x cols grid is one the panel is allowed
-// to make. Never below 1x1 on either kind -- Axes::heatmap() and
-// Axes3D::bar3d() both reject that shape outright, so the panel must not be
-// able to manufacture one the public API would refuse, and a grid shrunk to
-// zero on either axis cannot be regrown from here.
+// Whether a structural grid edit is allowed; never below 1x1.
 inline bool grid_line_ok(std::size_t rows, std::size_t cols,
                          bool row_axis, bool insert, std::size_t index) {
     if (rows == 0 || cols == 0) return false;
@@ -598,10 +431,7 @@ inline bool grid_line_ok(std::size_t rows, std::size_t cols,
 
 } // namespace edits_detail
 
-// Inserts or removes a whole matrix row / column, re-striding the row-major
-// buffer around the change. HeatmapOptions::hint_labels shares that exact
-// layout (index = row*cols + col), so it is re-strided in lockstep or every
-// label past the change lands on the wrong cell.
+// Insert or remove a heatmap row/column, re-striding data and hint_labels.
 template <class T>
 void apply_plot_data_op(T& t, const MatrixLineEdit& e) {
     if (e.kind != PlotKind::Heatmap || e.plot_index < 0) return;
@@ -612,18 +442,14 @@ void apply_plot_data_op(T& t, const MatrixLineEdit& e) {
 
     const std::size_t rows = static_cast<std::size_t>(hp.rows);
     const std::size_t cols = static_cast<std::size_t>(hp.cols);
-    // A buffer that doesn't match its own declared shape can't be re-strided
-    // coherently; leave it entirely alone rather than guess.
+    // A buffer not matching its shape is left alone.
     if (hp.data.size() != rows * cols) return;
 
     const bool insert = (e.op == MatrixLineEdit::Op::Insert);
     const bool row_ax = (e.axis == MatrixLineEdit::Axis::Row);
     if (!edits_detail::grid_line_ok(rows, cols, row_ax, insert, e.index)) return;
 
-    // Hint_labels is optional and may legitimately be empty ("no custom
-    // labels at all"); anything else is resized to the documented full
-    // rows*cols before re-striding, so a short user-supplied vector can't
-    // silently desynchronize from here on.
+    // Non-empty hint_labels are padded to rows*cols first so they stay aligned.
     auto& labels = hp.opts.hint_labels;
     if (!labels.empty()) labels.resize(rows * cols);
 
@@ -634,29 +460,15 @@ void apply_plot_data_op(T& t, const MatrixLineEdit& e) {
 }
 
 // ---------------------------------------------------------------------------
-// Applying data ops to a 3D axes' own plot objects
-//
-// A `bar3d` grid lives on the axes rather than on a plane, so its ops carry
-// plane index -1 -- the same address a 2D slot's ops carry, which is why these
-// are a separate overload set rather than more cases inside the bodies above:
-// the two targets have disjoint members (`bars3d` against the five 2D
-// vectors), and one body over both would name members neither has.
-//
-// The `kind` guard on each is what keeps the two sets from ever both firing:
-// an op is Bar3D or it is not, and whichever set does not want it drops it in
-// its first line. Everything else -- re-validating every index, silently
-// skipping what no longer fits -- follows the rules the 2D bodies set, and for
-// the same reason: the panel indexed frame N while this runs against N+1.
+// Applying data ops to a 3D axes' own plot objects (plane index -1). The
+// `kind` guard keeps these and the 2D bodies from both firing. Same
+// re-validation rules as above.
 // ---------------------------------------------------------------------------
 
 namespace edits_detail {
 
-// Where a new grid line's coordinate goes: midway between its neighbours when
-// it lands between two, and one local spacing past the end otherwise.
-//
-// A copy of its predecessor -- which is what a new heatmap *row* gets, since
-// that is a row of values and the extent is the axis -- would put two bars in
-// exactly the same place, so the two seeds are deliberately different rules.
+// Coordinate for a new grid line: midway between neighbours, or one spacing
+// past the end.
 inline double grid_coord_seed(const CowVec<double>& c, std::size_t at) {
     const std::size_t n = c.size();
     if (n == 0) return 0.0;
@@ -667,13 +479,8 @@ inline double grid_coord_seed(const CowVec<double>& c, std::size_t at) {
 
 } // namespace edits_detail
 
-// Column 0/1 are the grid's own coordinate vectors (`element` indexes u or v);
-// 2/3 are the row-major matrices (`element` is i * |v| + j, u major), of which
-// `bottoms` exists only when the caller gave a base per bar.
-//
-// A surface (step 7d) is addressed the same way and shares the first three
-// columns exactly, because it is stored in the same layout. It has no fourth:
-// a sheet has no base to stand on.
+// Bar3D columns: 0 = u, 1 = v (`element` indexes the vector), 2 = heights,
+// 3 = bottoms (`element` is i * |v| + j). Surfaces use columns 0-2.
 namespace edits_detail {
 inline void put_cell(CowVec<double>& v, std::size_t i, double value) {
     if (i < v.size()) v.mut()[i] = value;
@@ -706,10 +513,8 @@ void apply_axes3d_data_op(T& t, const PlotCellEdit& e) {
             default: return;
         }
     }
-    // A cloud is the plain vector shape -- three coordinate columns and, when
-    // the series has one, the fourth dimension. `element` is the point index
-    // in every column, since all four are indexed alike; column 3 writes
-    // nothing on a flat series, whose `colors` is empty.
+    // Scatter3D: x, y, z, colors (`element` is the point index; colors is empty
+    // for a flat series).
     if (e.kind == PlotKind::Scatter3D) {
         if (pi >= t.scatter3d.size()) return;
         auto& s = t.scatter3d[pi];
@@ -721,9 +526,7 @@ void apply_axes3d_data_op(T& t, const PlotCellEdit& e) {
             default: return;
         }
     }
-    // A path takes a cloud's shape here too: the same four columns, the same
-    // element-is-the-point-index rule. Editing a coordinate moves a vertex and
-    // the two segments meeting there follow, which is what the picture shows.
+    // Line3D: same columns as Scatter3D.
     if (e.kind == PlotKind::Line3D) {
         if (pi >= t.lines3d.size()) return;
         auto& l = t.lines3d[pi];
@@ -735,12 +538,8 @@ void apply_axes3d_data_op(T& t, const PlotCellEdit& e) {
             default: return;
         }
     }
-    // A mesh, in the same four columns and with the same
-    // element-is-the-vertex-index rule. **The topology is not reachable from
-    // here at all**, and that is the step's stated consequence rather than an
-    // omission: editing a vertex moves a point, and a mesh built by the
-    // Delaunay overloads does *not* re-triangulate, because topology jumping
-    // under a drag would be worse than a mesh that deforms.
+    // SurfaceTri: same columns (vertex index). Topology is not editable, and
+    // editing a vertex does not re-triangulate.
     if (e.kind == PlotKind::SurfaceTri) {
         if (pi >= t.surface_tri.size()) return;
         auto& m = t.surface_tri[pi];
@@ -763,15 +562,10 @@ void apply_axes3d_data_op(T& t, const BarWidthEdit& e) {
     else if (e.column == 1) t.bars3d[pi].v_width = e.width;
 }
 
-// Adds or removes a whole u line or v line of the grid: the coordinate vector
-// and every row-major buffer that strides against it, in one step, or the
-// three stop describing the same grid.
 namespace edits_detail {
 
-// The body both gridded 3D kinds share: the coordinate vector and every
-// row-major buffer that strides against it, moved in one step, or the three
-// stop describing the same grid. `alt` is a second matrix the plot may not
-// have (a bar grid's per-bar bases); an empty one is left empty.
+// Move a grid's coordinate vector and every matrix striding against it
+// together. `alt` is an optional second matrix (bar bottoms); empty stays empty.
 template <class Labels>
 void grid_line_apply(CowVec<double>& u, CowVec<double>& v,
                      CowVec<double>& primary, CowVec<double>& alt, Labels& labels,
@@ -780,14 +574,13 @@ void grid_line_apply(CowVec<double>& u, CowVec<double>& v,
     const bool insert = (e.op == MatrixLineEdit::Op::Insert);
     const bool row_ax = (e.axis == MatrixLineEdit::Axis::Row);
     if (!grid_line_ok(rows, cols, row_ax, insert, e.index)) return;
-    // A buffer that doesn't match its own grid can't be re-strided coherently;
-    // leave the whole plot alone rather than guess, as the heatmap does.
+    // A mismatched buffer is left alone, as for heatmaps.
     if (primary.size() != rows * cols) return;
     if (!alt.empty() && alt.size() != rows * cols) return;
 
     if (!labels.empty()) labels.resize(rows * cols);
 
-    // The coordinate first, while `rows`/`cols` still describe the buffers.
+    // Coordinate first, while rows/cols still describe the buffers.
     CowVec<double>& coord = row_ax ? u : v;
     if (insert) {
         const double at = grid_coord_seed(coord, e.index);
@@ -817,9 +610,7 @@ void apply_axes3d_data_op(T& t, const MatrixLineEdit& e) {
     if (e.kind == PlotKind::Surface) {
         if (pi >= t.surfaces.size()) return;
         auto& s = t.surfaces[pi];
-        // A surface has no second matrix, so it passes an empty one that
-        // grid_reshape() leaves alone -- the same slot a bar grid's absent
-        // `bottoms` occupies, rather than a second code path.
+        // No second matrix: pass an empty one.
         CowVec<double> none;
         edits_detail::grid_line_apply(s.u, s.v, s.heights, none,
                                       s.opts.hint_labels, e);
@@ -829,27 +620,12 @@ void apply_axes3d_data_op(T& t, const MatrixLineEdit& e) {
 
 template <class T>
 void apply_axes3d_data_op(T&, const PlotRowEdit&) {
-    // Neither gridded 3D kind has a single point to insert: adding one bar or
-    // one vertex would mean choosing a u line or a v line and re-striding,
-    // which is exactly what MatrixLineEdit is. The Data panel never emits one
-    // of these for a grid; ignore it if one ever arrives.
+    // Not point-addressable for grids; MatrixLineEdit handles them.
 }
 
-// Applies a whole ordered op stream. Order is preserved exactly as recorded —
-// see PlotDataOp.
-//
-// Two overloads, distinguished by whether the target *has* planes rather than
-// by the caller knowing which it holds, so the four apply_plot_data_op()
-// bodies above stay the single definition either way. An op addressed at a
-// plane is skipped by the 2D one: it is not reachable from the panel, and it
-// is the same silent-skip that a stale plot index already gets, since the
-// alternative is writing a value into whichever object happens to share the
-// index.
-//
-// Plane -1 means "the axes itself", which is every op a 2D slot produces and,
-// in a 3D slot, the `bar3d` grids (step 6c) and the surfaces (step 7d) -- so
-// the two overloads read the same address and route it to the objects their
-// own target actually holds.
+// Applies an ordered op stream. The 2D overload skips plane-addressed ops; the
+// 3D overload (targets with planes) routes plane -1 to the axes' own objects
+// and others to the plane's sheet.
 template <class T>
 void apply_plot_data_ops(T& t, const std::vector<PlotDataOp>& ops) {
     for (const auto& op : ops) {
@@ -873,19 +649,11 @@ void apply_plot_data_ops(T& t, const std::vector<PlotDataOp>& ops) {
     }
 }
 
-
-
 // ---------------------------------------------------------------------------
-// Plot-object appearance (v1.0 step 11.6)
+// Plot-object appearance
 // ---------------------------------------------------------------------------
-// One object's options, written into whichever vector holds its kind.
-//
-// `hint_labels` is carried across rather than taken from the edit, for exactly
-// the reason apply_axes3d_edit() carries a bar grid's: those are *data*, owned
-// by the Data panel's table and re-strided by a row insert or remove, while
-// the options copy the panel republishes is only re-seeded when the selection
-// or the object count changes. Without this, ticking a checkbox after adding a
-// point would quietly restore the labels to their old length.
+// Assign an object's options, keeping its current `hint_labels` (data owned by
+// the Data panel, which the options copy may have stale).
 template <class Vec, class Opts>
 void assign_plot_opts(Vec& v, int idx, const Opts& o) {
     if (idx < 0 || static_cast<std::size_t>(idx) >= v.size()) return;
@@ -894,10 +662,7 @@ void assign_plot_opts(Vec& v, int idx, const Opts& o) {
     v[static_cast<std::size_t>(idx)].opts.hint_labels = std::move(labels);
 }
 
-// The variant alternative chooses the vector, so this is one overload set
-// rather than a switch: a target that holds `lines` and a target that holds
-// `lines` are the same shape whether it is Axes::Impl, a RenderSnapshot, or a
-// plane's sheet inside either.
+// The variant alternative picks the vector.
 template <class T>
 void apply_plot_style_edit(T& t, const PlotStyleEdit& e) {
     if (const auto* o = std::get_if<LineOptions>(&e.opts))          assign_plot_opts(t.lines,     e.plot_index, *o);
@@ -907,15 +672,8 @@ void apply_plot_style_edit(T& t, const PlotStyleEdit& e) {
     else if (const auto* o = std::get_if<ScatterZOptions>(&e.opts)) assign_plot_opts(t.scatter_z, e.plot_index, *o);
 }
 
-// Two overloads on the same rule apply_plot_data_ops() uses: whether the
-// target *has* planes, rather than the caller knowing which it holds, so the
-// body above stays the single definition for Axes::Impl, RenderSnapshot,
-// Axes3D::Impl and RenderSnapshot3D alike.
-//
-// A 3D target skips plane -1 rather than routing it: what lives directly on a
-// 3D axes is bar3d grids and surfaces, and those have had lanes of their own
-// (AxesEdit3D::bars3d / ::surfaces) since step 7d. A 2D target skips the
-// opposite half, exactly as it skips a plane-addressed data op.
+// As apply_plot_data_ops(): 2D targets take plane -1 only; 3D targets take
+// plane-addressed edits only (their own objects use AxesEdit3D's lanes).
 template <class T>
 void apply_plot_style_edits(T& t, const std::vector<PlotStyleEdit>& es) {
     for (const auto& e : es) {
@@ -934,12 +692,8 @@ void apply_plot_style_edits(T& t, const std::vector<PlotStyleEdit>& es) {
     }
 }
 
-// The 3D half of an edit drain, written once and called from both paths:
-// the caller-thread one writes live Axes3D::Impl, the render-thread one
-// patches a published RenderSnapshot3D, and the two carry the same fields
-// under the same names. A template rather than two copies precisely
-// because a field added to one and forgotten in the other is a control
-// that works until the next refresh() and then silently reverts.
+// Apply a 3D edit to Axes3D::Impl (caller thread) or RenderSnapshot3D (render
+// thread); one template so both paths stay identical.
 template <typename T>
 void apply_axes3d_edit(T& dst, const AxesEdit3D& e) {
     if (e.title)  dst.title  = *e.title;
@@ -961,8 +715,7 @@ void apply_axes3d_edit(T& dst, const AxesEdit3D& e) {
     if (e.camera)       dst.camera       = *e.camera;
     if (e.box_style)    dst.box_style    = *e.box_style;
     if (e.aspect)       dst.aspect       = *e.aspect;
-    // Empty means "back to auto", absent means "unchanged" -- the same
-    // reading the 2D tick overrides have.
+    // Empty = back to auto; absent = unchanged.
     if (e.xticks_override)
         dst.xticks_override = e.xticks_override->empty()
             ? std::nullopt : std::optional(*e.xticks_override);
@@ -973,10 +726,7 @@ void apply_axes3d_edit(T& dst, const AxesEdit3D& e) {
         dst.zticks_override = e.zticks_override->empty()
             ? std::nullopt : std::optional(*e.zticks_override);
 
-    // The planes, placement then data. Positional and re-validated here
-    // for the reason every plot index is: the panel indexed frame N while
-    // this runs against frame N+1, and a plane the caller has since
-    // dropped must be skipped rather than clamped onto its neighbour.
+    // Planes: re-validated, stale indices skipped.
     apply_plot_style_edits(dst, e.plot_styles);
 
     for (const auto& pe : e.planes) {
@@ -989,15 +739,7 @@ void apply_axes3d_edit(T& dst, const AxesEdit3D& e) {
         if (pe.opts)   p.opts   = *pe.opts;
     }
 
-    // The gridded kinds' appearance. Positional and re-validated for the
-    // same reason the planes are.
-    //
-    // `hint_labels` is carried across rather than taken from the edit: it
-    // is *data*, owned by the Data panel and re-strided whenever a grid
-    // line is added or removed, and the Cosmetic panel's local copy of the
-    // options struct is only re-seeded when the selection or the object
-    // count changes. Without this, colouring a grid after adding a u line
-    // would quietly restore the labels to their old shape.
+    // The axes' own 3D objects; `hint_labels` is kept (it is data).
     for (const auto& be : e.bars3d) {
         if (be.plot_index < 0 || !be.opts) continue;
         const std::size_t bi = static_cast<std::size_t>(be.plot_index);

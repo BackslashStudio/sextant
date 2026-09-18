@@ -1,12 +1,6 @@
 #pragma once
-// Spatial index behind the hover hint, which runs on every frame the cursor
-// is over the plot and was otherwise O(N) in the point count.
-//
-// Buckets a plot's points into a uniform grid so a query visits only the cells
-// the hit radius overlaps. Built in *data* space and keyed on
-// FigureSnapshot::data_generation, so it survives pan and zoom -- an index
-// keyed on the view would be rebuilt exactly when it is needed most. Built
-// lazily: only a plot that is actually hovered ever pays for one.
+// Uniform-grid spatial index for the hover hint. Built lazily in data space
+// and keyed on FigureSnapshot::data_generation, so it survives pan and zoom.
 #include "cow_vec.h"
 #include "plot_objects.h"
 
@@ -18,24 +12,17 @@
 
 namespace sextant {
 
-// Below this many points a linear scan beats building (and allocating) a
-// grid, so PointGrid stays in its unindexed pass-through mode. Bars and
-// small scatters land here and never allocate anything.
+// Below this many points a linear scan is used instead of a grid.
 inline constexpr std::size_t kHintIndexMinPoints = 1024;
 
-// Average points per cell to aim for. Higher means fewer, fatter cells: less
-// per-cell iteration overhead for the same candidate count.
+// Target average points per cell.
 inline constexpr std::size_t kHintIndexPointsPerCell = 4;
 
-// Ceiling on total cells, so a pathological point count cannot turn the
-// index itself into the memory problem.
+// Cap on total cells.
 inline constexpr std::size_t kHintIndexMaxCells = 1u << 20;
 
-// One plot object's points, bucketed by data-space position.
-//
-// `indexed == false` is a fully working fallback rather than an error state:
-// for_each_in() then scans linearly, applying the bounds test inline. That is
-// what small plots use, and what an unstamped snapshot generation degrades to.
+// One plot object's points, bucketed by position. `indexed == false` falls
+// back to a linear scan (small plots, unstamped snapshots).
 struct PointGrid {
     bool   indexed = false;
     double x0 = 0.0, y0 = 0.0;      // grid origin = data minimum
@@ -44,12 +31,9 @@ struct PointGrid {
     std::vector<std::uint32_t> cell_start;  // nx*ny + 1 prefix sums into points
     std::vector<std::uint32_t> points;      // point indices, grouped by cell
 
-    // Calls f(i) for every point index i that *might* lie in the data-space
-    // box. The indexed path is deliberately conservative — it hands over every
-    // point of every overlapped cell without re-testing — because the caller
-    // applies the real (circular, pixel-space) hit test anyway, and a second
-    // bounds test here would just cost more. The unindexed path does test,
-    // since there is nothing else narrowing it down.
+    // Calls f(i) for every point that might lie in the box. The indexed path is
+    // conservative (no re-test; the caller does the real hit test); the linear
+    // path tests bounds.
     template <class F>
     void for_each_in(const CowVec<double>& x, const CowVec<double>& y,
                      double xlo, double xhi, double ylo, double yhi, F&& f) const {
@@ -75,9 +59,7 @@ struct PointGrid {
         }
     }
 
-    // Clamped to [0, n-1]. Written with negated comparisons so a NaN bound
-    // (possible only from a degenerate transform) lands in cell 0 rather than
-    // producing an out-of-range cast.
+    // Clamped to [0, n-1]; a NaN bound lands in cell 0.
     static int cell_of(double v, double origin, double inv, int n) {
         if (!(v > origin)) return 0;
         const double f = (v - origin) * inv;
@@ -86,24 +68,14 @@ struct PointGrid {
     }
 };
 
-// Per-window-thread cache of PointGrids, one per plot object.
-//
-// Held by PanelState (render-thread-only state, one per Figure), and used
-// exactly like DataRenderer's caches: set_frame_key() once per hovered axes
-// per frame, then a lookup per plot object. Entries for plots that later
-// disappear are not evicted — plot indices are positional, so the residue is
-// bounded by the largest plot count the figure has ever had, the same
-// trade-off DataRenderer's caches make.
+// Per-window-thread cache of PointGrids, one per plot object; owned by
+// PanelState. Call set_frame_key() per hovered axes per frame, then grid() per
+// plot. Stale entries are not evicted (bounded by the max plot count).
 class HintIndexCache {
 public:
-    // A data_generation of 0 means "never stamped" (see FigureSnapshot) and
-    // disables caching — which here means falling back to the linear scan,
-    // NOT rebuilding a grid every frame. Rebuilding would be strictly worse
-    // than the scan it replaces.
-    // `plane_index` is which plane of a 3D axes the following lookups are
-    // for, or -1 for a 2D axes -- the same addressing the edit journal uses.
-    // It has to be part of the key: two planes of one cell both hold "line 0"
-    // and their points are different points.
+    // data_generation 0 ("never stamped") disables caching and falls back to
+    // the linear scan. `plane_index` is the 3D plane (-1 for 2D) and is part of
+    // the key.
     void set_frame_key(unsigned long long data_generation, int axes_index,
                        int plane_index = -1) {
         data_generation_ = data_generation;
@@ -111,8 +83,7 @@ public:
         plane_index_ = plane_index;
     }
 
-    // Just the plane, for a 3D hit test walking several of them under one
-    // frame key.
+    // Change only the plane, for a 3D hit test across several planes.
     void set_plane(int plane_index) { plane_index_ = plane_index; }
 
     const PointGrid& grid(PlotKind kind, std::size_t plot_index,
@@ -136,10 +107,8 @@ private:
     static void build(PointGrid& g, const CowVec<double>& x, const CowVec<double>& y) {
         const std::size_t n = x.size();
 
-        // Bounds over finite points only. Non-finite points are excluded from
-        // the index entirely, which matches what the linear scan already did
-        // with them: NaN fails every comparison, and an infinite coordinate
-        // transforms to an infinite distance, so neither could ever win.
+        // Bounds over finite points only; non-finite points are left out of
+        // the index (they could never win the hit test anyway).
         double xlo = 0, xhi = 0, ylo = 0, yhi = 0;
         std::size_t finite = 0;
         for (std::size_t i = 0; i < n; ++i) {
@@ -156,8 +125,7 @@ private:
         std::size_t target = finite / kHintIndexPointsPerCell;
         if (target < 1) target = 1;
         if (target > kHintIndexMaxCells) target = kHintIndexMaxCells;
-        // A degenerate axis gets a single row/column, so all the resolution
-        // goes to the axis that actually has extent.
+        // A degenerate axis gets one row/column; the other gets all the cells.
         int side = static_cast<int>(std::sqrt(static_cast<double>(target)));
         if (side < 1) side = 1;
         g.nx = (span_x > 0.0) ? side : 1;
@@ -172,12 +140,8 @@ private:
         const std::size_t ncells = static_cast<std::size_t>(g.nx)
                                  * static_cast<std::size_t>(g.ny);
 
-        // Counting sort. Each point's cell is computed once, into a scratch
-        // array, rather than recomputed in the scatter pass — at 1M points
-        // that pass is the difference between a ~10 ms and a ~7 ms build, and
-        // this build lands on a frame the user is already hovering.
-        // kSkip marks a non-finite point, so the finiteness test is also paid
-        // only once.
+        // Counting sort. Each point's cell is computed once into `cells`;
+        // kSkip marks a non-finite point.
         constexpr std::uint32_t kSkip = 0xFFFFFFFFu;
         std::vector<std::uint32_t> cells(n);
         g.cell_start.assign(ncells + 1, 0);

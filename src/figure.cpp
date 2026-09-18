@@ -28,31 +28,21 @@ namespace sextant {
 
 namespace {
 
-// The one place an export's own admission that it gave up reaches a caller who
-// did not ask for it. `SvgSaveReport` is returned and can be ignored; a wrong
-// picture written without a word is the thing this exists to prevent, and a
-// line on stderr is the only channel a library has to a caller who ignored the
-// return value. It is not a log: nothing is printed on the exact path, which
-// is every scene without interpenetrating 3D geometry.
+// Print the export's warning to stderr, so a caller who ignores SvgSaveReport
+// still hears about a misordered picture. Silent when the order is exact.
 void warn_if_inexact(std::string_view path, const SvgSaveReport& r) {
     if (r.scene_order_exact || r.warning.empty()) return;
     std::cerr << "sextant: " << path << ": " << r.warning << '\n';
 }
 
-// Renders one frame. The plot and the controls are both docked ImGui panels:
-// the plot goes into an offscreen texture (PlotFbo) sized to the live content
-// region of its own dock panel and is displayed via ImGui::Image(), rather
-// than being drawn straight into the window. render_frame() itself stays
-// unaware that a dockspace exists.
+// Renders one frame: the plot goes into an offscreen PlotFbo sized to its dock
+// panel and is shown via ImGui::Image(); render_frame() is dock-unaware.
 void render_and_composite(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
                           PlotFbo& plot_fbo, const FigureSnapshot& snap,
                           const FigureOptions& opts, FigureEditBox& edit_box,
                           PanelState& panel_state)
 {
-    // Base clear of the real window. The docked Plot (+ Cosmetic, when
-    // visible) panels together tile the whole viewport once laid out, but
-    // this avoids any undefined-content flash on the very first frame or
-    // mid-resize.
+    // Base clear, to avoid undefined content before the docks are laid out.
     glViewport(0, 0, ctx.width(), ctx.height());
     glClearColor(0.93f, 0.93f, 0.93f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
@@ -66,9 +56,7 @@ void render_and_composite(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
 // Figure::Impl
 // -------------------------------------------------------------------------
 struct Figure::Impl {
-    // A cell holds one kind or the other, never both. The variant mirrors
-    // FigureAxesSnapshot's, and for the same reason -- there is no shared
-    // vocabulary worth inventing between an Axes and an Axes3D.
+    // A cell holds one kind or the other (mirrors FigureAxesSnapshot).
     struct Slot {
         int rows, cols, index;
         int last;   // bottom-right cell; == index for a single cell
@@ -95,13 +83,11 @@ struct Figure::Impl {
     std::string     suptitle_text;
     SuptitleOptions suptitle_opts;
 
-    // set_col_ratios()/set_row_ratios(), and dragged boundaries folded back in
-    // by refresh() (v1.0 step 15.3). Empty means equal weights.
+    // Grid weights from set_col/row_ratios() and dragged boundaries. Empty = equal.
     std::vector<float> col_ratios, row_ratios;
 
-    // Weights must be finite and positive, and there must be one per track once
-    // the grid has a shape. `n` <= 0 means no shape yet, which checks the values
-    // only; the call that fixes the shape checks the count.
+    // Weights must be finite and positive, one per track. `n` <= 0 (no shape
+    // yet) checks values only.
     static void check_ratios(const std::string& who, const std::vector<float>& r, int n,
                              const char* tracks) {
         for (float x : r)
@@ -113,17 +99,14 @@ struct Figure::Impl {
                 + std::to_string(n) + " " + tracks);
     }
 
-    // The ratios set before any subplot, against the shape being fixed now.
+    // Validate ratios set before any subplot against the shape fixed now.
     void check_ratios_for_shape(const std::string& who, int rows, int cols) const {
         check_ratios(who, col_ratios, cols, "columns");
         check_ratios(who, row_ratios, rows, "rows");
     }
 
-    // "This figure must have at least one cell to draw" -- which is what
-    // show(), savefig() and resize_to_frame() actually need. Deliberately not
-    // get_or_create_axes(): that answers the different question "give me the
-    // implicit Axes", and throws when slot 1 holds an Axes3D. A figure whose
-    // only cell is 3D still has to be showable and saveable.
+    // Ensure at least one cell exists (for show/savefig/resize_to_frame).
+    // Unlike get_or_create_axes(), accepts a 3D slot 1.
     void ensure_any_axes() {
         if (slots.empty()) {
             check_ratios_for_shape("Figure", 1, 1);
@@ -131,8 +114,7 @@ struct Figure::Impl {
         }
     }
 
-    // Sugar for the implicit single-axes case (slot 1,1,1). Anyone who never
-    // calls add_subplot() only ever sees this one slot.
+    // The implicit single-axes case (slot 1,1,1).
     Axes& get_or_create_axes() {
         ensure_any_axes();
         Axes* ax = slots.front().as2d();
@@ -143,9 +125,7 @@ struct Figure::Impl {
         return *ax;
     }
 
-    // The grid shape the first slot fixed, which every later one must share.
-    // rows = 0 when nothing has fixed one yet -- the case the shape-less
-    // add_subplot(index) and add_subplot({first, last}) refuse.
+    // The grid shape fixed by the first slot; rows = 0 if none yet.
     struct Shape { int rows = 0, cols = 0; };
     Shape grid_shape() const {
         if (slots.empty()) return {};
@@ -158,10 +138,8 @@ struct Figure::Impl {
             : "cells {" + std::to_string(first) + ", " + std::to_string(last) + "}";
     }
 
-    // Shared by every add_subplot() and add_subplot3d(): the grid rules are
-    // about the cells, not about what is in them, so a mixed figure obeys
-    // exactly the same ones a uniform figure always has. Returns the slot
-    // already at exactly these cells, or nullptr when they are free.
+    // Grid rules shared by add_subplot() and add_subplot3d(). Returns the slot
+    // at exactly these cells, or nullptr when they are free.
     Slot* find_or_reserve_slot(const char* who, int rows, int cols, int first, int last) {
         const std::string w(who);
         if (rows <= 0 || cols <= 0)
@@ -169,11 +147,8 @@ struct Figure::Impl {
         if (first < 1 || first > rows * cols || last < 1 || last > rows * cols)
             throw std::invalid_argument(w + ": index out of range");
 
-        // All slots on a Figure must share the same grid shape — this also
-        // rejects mixing axes() (the implicit 1x1 slot) with a later
-        // add_subplot() call of a different shape. That is also what rules
-        // out two subplots overlapping by being laid out on different grids:
-        // with one grid, a cell is either free or someone's.
+        // All slots share one grid shape (including the implicit 1x1 from
+        // axes()), so overlap can be checked cell by cell.
         const Shape g = grid_shape();
         if (g.rows != 0 && (g.rows != rows || g.cols != cols))
             throw std::invalid_argument(
@@ -209,16 +184,14 @@ struct Figure::Impl {
         return g;
     }
 
-    // A kind of axes (Axes or Axes3D) at the given cells: the one already
-    // there, or a new one. `other` names the kind a mismatch would find.
+    // The existing axes of kind A at these cells, or a new one. `other` names
+    // the kind a mismatch would find.
     template <class A>
     std::shared_ptr<A> add_impl(const char* who, const char* other,
                                 int rows, int cols, int first, int last) {
         if (Slot* s = find_or_reserve_slot(who, rows, cols, first, last)) {
             auto p = std::get_if<std::shared_ptr<A>>(&s->axes);
-            // Re-requesting an occupied cell returns what is in it, but a
-            // cell of the other kind is not an A, and silently replacing it
-            // would throw away whatever the caller had already put there.
+            // A cell holding the other kind throws rather than being replaced.
             if (!p)
                 throw std::invalid_argument(
                     std::string(who) + ": " + describe(first, last)
@@ -240,12 +213,10 @@ struct Figure::Impl {
 
     FigureSnapshot build_figure_snapshot() const {
         FigureSnapshot fs;
-        // Rebuilt wholesale from live Axes::Impl, so the data may well have
-        // changed — bump both, conservatively.
+        // Rebuilt from live Axes::Impl, so bump both generations.
         fs.generation      = next_snapshot_generation();
         fs.data_generation = next_snapshot_generation();
-        // refresh() is a submission, so a refit -- including after the caller
-        // set limits, which is navigation only when it comes from the panel.
+        // refresh() always triggers a layout refit.
         fs.layout_generation = next_snapshot_generation();
         fs.col_gap = opts.subplot_col_gap;
         fs.row_gap = opts.subplot_row_gap;
@@ -265,9 +236,7 @@ struct Figure::Impl {
         return fs;
     }
 
-    // 2D slots only; find_slot_impl3d() below is the other half. Each answers
-    // nullptr for the other kind rather than pretending, which is what lets
-    // the two edit lanes stay disjoint.
+    // 2D slots only; nullptr for a 3D slot (see find_slot_impl3d()).
     Axes::Impl* find_slot_impl(int idx) {
         for (auto& s : slots)
             if (s.index == idx) return s.as2d() ? s.as2d()->d.get() : nullptr;
@@ -280,10 +249,8 @@ struct Figure::Impl {
         return nullptr;
     }
 
-    // A dragged or typed weight vector, onto the authoritative one. One that no
-    // longer matches the grid (a figure that was reshaped since) is dropped
-    // rather than thrown about: this runs inside refresh(), for an edit the
-    // caller never made.
+    // Apply a dragged/typed weight vector; one no longer matching the grid is
+    // dropped (this runs inside refresh()).
     void fold_ratios(const std::optional<std::vector<float>>& cols,
                      const std::optional<std::vector<float>>& rows) {
         const Shape g = grid_shape();
@@ -297,15 +264,11 @@ struct Figure::Impl {
         if (rows && g.rows > 0 && fits(*rows, g.rows)) row_ratios = *rows;
     }
 
-    // Drains pending widget-panel edits into live Axes::Impl (direct field
-    // writes, safe because this always runs on the caller thread), then
-    // publishes a fresh snapshot. refresh() is a thin wrapper around this.
+    // Caller thread: drain panel edits into live Axes::Impl, then publish a
+    // fresh snapshot.
     void apply_edits_and_publish() {
-        // Journal first. These ops were already applied to the *snapshot* by
-        // the render thread, at a point strictly before anything still in
-        // pending_ -- replaying them out of order against the authoritative
-        // arrays would index the wrong elements once a structural op is in the
-        // mix. take_journal() is destructive, so each op lands exactly once.
+        // Journal first: those ops were applied on the render thread before
+        // anything still pending, and order matters for structural ops.
         if (auto journal = edit_box.take_journal()) {
             for (const auto& [idx, ops] : journal->per_axes) {
                 if (Axes::Impl* d2 = find_slot_impl(idx))
@@ -359,37 +322,21 @@ struct Figure::Impl {
         snapshot_box.store(std::make_shared<const FigureSnapshot>(build_figure_snapshot()));
     }
 
-    // Window-thread-safe counterpart to apply_edits_and_publish(), called once
-    // per frame from render_fn. Unlike that one it NEVER reads or writes live
-    // Axes::Impl: it patches the edited fields onto a copy of the already-
-    // published snapshot and republishes that copy. Axes::Impl is exactly what
-    // RenderSnapshot exists to keep a background render thread away from, and
-    // a caller thread is free to mutate it concurrently.
-    //
-    // Draining through load_and_clear_journaled() copies the plot-*data* ops
-    // aside into the replay journal, so the next caller-thread
-    // apply_edits_and_publish() folds them into Axes::Impl and a later
-    // refresh() no longer discards them. Everything else applied here is
-    // live-preview-only and does not survive a refresh -- see FigureEditBox
-    // for why that asymmetry is deliberate.
+    // Render-thread counterpart: never touches live Axes::Impl. Patches a copy
+    // of the published snapshot and republishes it. Data ops are journaled for
+    // the caller thread to replay; everything else is live preview only.
     void apply_panel_edits_to_snapshot() {
         auto edits = edit_box.load_and_clear_journaled();
         if (!edits) return;
         auto prev = snapshot_box.load();
         if (!prev) return;
 
-        // Copies decoration/limits but only shares the plot vectors (CowVec) —
-        // which matters here more than anywhere else, since a pan or zoom
-        // reaches this line on every frame of a drag just to change four
-        // doubles. apply_plot_data_ops() below clones whichever buffer it
-        // actually writes to.
+        // Shares plot buffers (CowVec); apply_plot_data_ops() clones on write.
         auto next = std::make_shared<FigureSnapshot>(*prev);
         // New content, so a new generation.
         next->generation = next_snapshot_generation();
 
-        // ...but only bump data_generation if an edit actually carries data
-        // ops. A pan or zoom lands here every frame of a drag with nothing
-        // but new limits, and must not invalidate the data-keyed caches.
+        // Bump data_generation only for data ops, so pan/zoom keeps the caches.
         bool data_changed = false;
         for (const auto& [idx, e] : edits->per_axes)
             if (!e.plot_ops.empty()) { data_changed = true; break; }
@@ -439,11 +386,8 @@ struct Figure::Impl {
                 break;
             }
         }
-        // Figure-level decoration and geometry — patched on the snapshot
-        // itself, not on any axes, and never touching data_generation.
-        // Margins and gaps have to be here as well as in
-        // apply_edits_and_publish() above, or dragging one would do nothing
-        // until the caller thread happened to call refresh().
+        // Figure-level edits, patched on the snapshot (also applied in
+        // apply_edits_and_publish()) so they take effect without refresh().
         if (edits->suptitle)      next->suptitle      = *edits->suptitle;
         if (edits->suptitle_opts) next->suptitle_opts = *edits->suptitle_opts;
         if (edits->margins)       next->margins       = *edits->margins;
@@ -454,19 +398,14 @@ struct Figure::Impl {
         snapshot_box.store(std::move(next));
     }
 
-    // What an open window is laying out with, so an export or an inverse
-    // made while it is on screen keeps its axis furniture (v1.0 step 15.2);
-    // null with no window, which is a fresh fit.
+    // The open window's layout measurements, so an export keeps them; null
+    // without a window.
     std::shared_ptr<const FigureMeasure> on_screen_measure() const {
         return open.load() ? panel_state.layout.load() : nullptr;
     }
 
-    // Target size for the window-based savefig_png()/savefig_svg(): an
-    // explicit w/h wins, otherwise whatever the "Plot" panel is currently
-    // rendering at. Spawns a non-blocking window first if none is open, since
-    // that is the only way to have a live size at all; live_plot_w/h are
-    // populated on the first frame after a window becomes visible, so a short
-    // poll covers the gap after show(false) returns.
+    // Target size for live exports: explicit w/h, else the Plot panel's live
+    // size. Opens a window if needed and polls until the first frame sets it.
     void resolve_live_save_size(Figure& fig, int& w, int& h) {
         if (!open.load()) fig.show(false);
         if (w > 0 && h > 0) return;
@@ -483,20 +422,10 @@ struct Figure::Impl {
         if (h <= 0) h = opts.height;
     }
 
-    // Routes a PNG export onto the window thread when one is running, so it
-    // reuses the GL context that thread already owns instead of standing up a
-    // fresh GLFW window, GL context, NanoVG context and font atlas per call.
-    //
-    // Returns false when there is nothing to route to (no window, the window
-    // thread has stopped taking work, or this *is* the window thread) and the
-    // caller falls back to its own headless context. A genuine failure inside
-    // the export is rethrown instead, so the caller cannot mistake one for the
-    // other and silently render twice.
-    //
-    // Blocks until the frame that services it, which is what lets fsnap stay
-    // on the caller's stack. It is deliberately the caller's *own* snapshot,
-    // freshly built from Axes::Impl rather than the one the render thread is
-    // displaying, so savefig() keeps reading Figure::Impl as it always has.
+    // Route a PNG export to the window thread's GL context, if there is one.
+    // Returns false when it can't (no window, stopping, or called from that
+    // thread) so the caller falls back to headless; real failures rethrow.
+    // Blocks until serviced; renders the caller's own fresh snapshot.
     bool export_png_via_window(const FigureSnapshot& fsnap, std::string_view path,
                                int w, int h, int peel_layers = 0,
                                const FigureMeasure* on_screen = nullptr) {
@@ -513,8 +442,7 @@ struct Figure::Impl {
 
 Figure::Figure(FigureOptions opts) : d(std::make_unique<Impl>()) {
     d->opts = std::move(opts);
-    // Normalize once, here, so every consumer of d->opts (the panel, both
-    // savefig paths) can use the factor as-is without repeating the clamp.
+        // Normalize supersample once here.
     d->opts.supersample = std::clamp(d->opts.supersample, 1, kMaxSupersample);
 }
 
@@ -567,17 +495,11 @@ std::shared_ptr<Axes3D> Figure::add_subplot3d(SubplotSpan span) {
 void Figure::show(bool pause) {
     d->ensure_any_axes();
 
-    // Build the initial snapshot on the caller thread before any render loop
-    // starts, so even the first frame never reads live Axes::Impl state.
-    // Routed through apply_edits_and_publish() (normally a no-op drain here)
-    // for consistency with every later publish.
+    // Publish the initial snapshot before the render loop starts.
     d->apply_edits_and_publish();
 
-    // The window always lives on its own background thread. render_fn
-    // captures `this` directly, which is safe because close()/~Figure()
-    // always stop() and join this thread first. It drains panel edits through
-    // apply_panel_edits_to_snapshot(), which never touches live Axes::Impl,
-    // so it is safe to run every frame while the caller thread mutates Axes.
+    // render_fn captures `this`; safe because close()/~Figure() join the
+    // thread first. It never touches live Axes::Impl.
     auto render_fn = [this](GLContext& ctx, NvgRenderer& nvg, DataRenderer& data, PlotFbo& plot_fbo) {
         d->apply_panel_edits_to_snapshot();
         auto snap = d->snapshot_box.load();  // loaded ONCE, reused for both draws below
@@ -614,9 +536,8 @@ bool Figure::is_open() const {
 }
 
 FrameStats Figure::frame_stats() const {
-    // Window_thread is reset by close(), so this reports all-zero both before
-    // the first show() and after the window is gone, matching the documented
-    // contract rather than dangling.
+    // window_thread is reset by close(), so this is all-zero before show() and
+    // after close.
     return d->window_thread ? d->window_thread->stats() : FrameStats{};
 }
 
@@ -649,9 +570,7 @@ void Figure::savefig_png(std::string_view path, PngExportOptions opts, int w, in
     const FigureSnapshot fsnap = d->build_figure_snapshot();
     const auto on_screen = d->on_screen_measure();
 
-    // Reuse the window's context when there is one; otherwise stand up a
-    // headless one. Same snapshot, same renderers, same FboReadback either
-    // way — only where the GL context came from differs.
+    // Use the window's GL context if there is one, else a headless one.
     if (d->export_png_via_window(fsnap, path, w, h, opts.peel_layers, on_screen.get())) return;
 
     GLContext    ctx({ .width=w, .height=h, .title="", .visible=false, .resizable=false });
@@ -682,11 +601,8 @@ void Figure::savefig_png_live(std::string_view path, PngExportOptions opts,
     const FigureSnapshot fsnap = d->build_figure_snapshot();
     const auto on_screen = d->on_screen_measure();
 
-    // Resolve_live_save_size() has already opened a window if there wasn't
-    // one, so this normally goes to the window thread. The headless fallback
-    // below is what makes savefig_png() callable from any thread rather than
-    // only the render thread — the window's context is never touched from
-    // here, it is the window's own thread that draws.
+    // Normally routed to the window thread; the headless fallback lets this be
+    // called from any thread.
     if (d->export_png_via_window(fsnap, path, w, h, opts.peel_layers, on_screen.get())) return;
 
     GLContext    ctx({ .width=w, .height=h, .title="", .visible=false, .resizable=false });
@@ -730,11 +646,8 @@ void Figure::resize(int width, int height) {
         throw std::invalid_argument("Figure::resize: width/height must be positive");
     d->opts.width  = width;
     d->opts.height = height;
-    // A live window is resized by its own thread on the next frame — GLFW
-    // window operations belong to the thread that created the window, and
-    // this call can come from anywhere. draw_widget_panel() consumes the
-    // request and adds the menu bar and Cosmetic column on top, so the plot
-    // area (not the window frame) ends up the requested size.
+    // The window resizes itself on its own thread next frame (GLFW is
+    // thread-bound), adding menu bar and panel so the plot area gets the size.
     d->panel_state.pending_plot_w.store(width,  std::memory_order_relaxed);
     d->panel_state.pending_plot_h.store(height, std::memory_order_relaxed);
 }
@@ -745,7 +658,7 @@ FigureSize Figure::size_for_frame(int frame_w, int frame_h, int slot_index) cons
     if (d->slots.empty()) return {};
 
     const FigureSnapshot fsnap = d->build_figure_snapshot();
-    // With a window open, for the layout it shows (v1.0 step 15.2).
+    // Use the open window's layout, if any.
     const FigureMeasure m = measure_figure(fsnap, d->on_screen_measure().get());
     const LayoutSize s = figure_size_for_frame(fsnap, m, slot_index,
                                                static_cast<float>(frame_w),

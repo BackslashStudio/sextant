@@ -9,8 +9,7 @@ namespace sextant {
 
 namespace {
 
-// Fullscreen triangle generated from gl_VertexID — no vertex buffer, but
-// core profile still requires *some* VAO to be bound for a draw call.
+// Fullscreen triangle from gl_VertexID; core profile still needs a VAO bound.
 constexpr char k_resolve_vert[] = R"(
 #version 410 core
 void main() {
@@ -19,12 +18,8 @@ void main() {
 }
 )";
 
-// Box filter: each destination pixel averages the uSamples x uSamples block
-// of source texels it was rendered from. texelFetch (not texture()) so the
-// mapping is exact and independent of filter/wrap state — with an integer
-// scale factor a box average is the correct downsample, and going through
-// the bilinear sampler instead would silently skip source texels for any
-// factor above 2.
+// Box filter: average each uSamples x uSamples source block with texelFetch
+// (exact, unlike bilinear sampling above factor 2).
 constexpr char k_resolve_frag[] = R"(
 #version 410 core
 uniform sampler2D uSrc;
@@ -100,10 +95,7 @@ void PlotFbo::ensure_size(int width, int height, int supersample) {
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
                            GL_TEXTURE_2D, color_tex_, 0);
 
-    // Combined depth+stencil attachment — NanoVG needs the 8-bit stencil
-    // for its stencil-then-cover fill technique (same as FboReadback and
-    // the live GLFW window's own GLFW_STENCIL_BITS hint). Never sampled,
-    // so a renderbuffer (not a texture) is the right/cheaper choice here.
+    // Depth+stencil renderbuffer; NanoVG needs the stencil.
     glGenRenderbuffers(1, &depth_rb_);
     glBindRenderbuffer(GL_RENDERBUFFER, depth_rb_);
     glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, rw, rh);
@@ -128,8 +120,7 @@ void PlotFbo::ensure_size(int width, int height, int supersample) {
                      GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
                                GL_TEXTURE_2D, resolved_tex_, 0);
-        // No depth/stencil: the resolve pass is one unblended fullscreen
-        // triangle with no tests enabled.
+        // No depth/stencil needed for the resolve pass.
         if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
             throw std::runtime_error("PlotFbo: resolve framebuffer incomplete");
     }
@@ -170,8 +161,7 @@ void PlotFbo::ensure_resolve_program() {
 
 void PlotFbo::resolve() {
     if (supersample_ <= 1 || resolved_fbo_ == 0) {
-        // Nothing to filter — color_texture() already hands out the target
-        // that was rendered into.
+        // Nothing to filter.
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         return;
     }
@@ -180,11 +170,8 @@ void PlotFbo::resolve() {
     glBindFramebuffer(GL_FRAMEBUFFER, resolved_fbo_);
     glViewport(0, 0, width_, height_);
 
-    // The source already carries final composited colors; blending or
-    // clipping them again here would corrupt the average. The caller is
-    // mid-ImGui-frame, whose backend re-establishes its own full draw state
-    // at ImGui_ImplOpenGL3_RenderDrawData() time, so leaving these off does
-    // not disturb it.
+    // No blending or scissor: the source is already composited. ImGui's
+    // backend restores its own state when it renders.
     glDisable(GL_BLEND);
     glDisable(GL_SCISSOR_TEST);
     glDisable(GL_DEPTH_TEST);

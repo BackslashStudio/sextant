@@ -12,12 +12,8 @@ Axes::~Axes() = default;
 
 namespace {
 
-// Copies the caller's ErrorBar into the plot object's ErrorBarData, which is
-// where per-point data has to live (see plot_objects.h). Each span is either
-// empty or exactly one entry per point -- anything else throws, like the x/y
-// length check beside every call, since a short error vector would draw a
-// series whose last points look certain. The values are not checked: a
-// negative is a magnitude and a non-finite entry masks that end (see ErrorBar).
+// Copies the caller's ErrorBar into ErrorBarData. Each span must be empty or
+// one entry per point, else throws. Values are not checked (see ErrorBar).
 ErrorBarData take_error_bars(const ErrorBar& eb, std::size_t n, const char* who) {
     auto take = [&](std::span<const double> s, const char* field) {
         if (!s.empty() && s.size() != n)
@@ -41,12 +37,8 @@ ErrorBarData take_error_bars(const ErrorBar& eb, std::size_t n, const char* who)
 
 } // namespace
 
-// The four vector-shaped ingests, as Impl members for the reason
-// ingest_heatmap() is one: Axes and Plane2D must accept exactly the same data
-// on exactly the same terms, and two copies of "x and y must have the same
-// length" is two chances to answer differently. `who` only names the caller in
-// the messages, so a caller who mixed up an axes and a plane is told which one
-// complained.
+// Vector-shaped ingests, shared by Axes and Plane2D. `who` names the caller in
+// error messages.
 void Axes::Impl::ingest_line(std::span<const double> x, std::span<const double> y,
                              const ErrorBar& eb, LineOptions opts, const char* who) {
     if (x.size() != y.size())
@@ -106,8 +98,7 @@ void Axes::Impl::ingest_bar(std::span<const double> x, std::span<const double> h
     });
 }
 
-// Each kind twice, with and without an ErrorBar. The overload without is the
-// empty ErrorBar, so the two cannot answer differently about anything else.
+// Each kind with and without an ErrorBar; the latter passes an empty one.
 Axes& Axes::line(std::span<const double> x, std::span<const double> y,
                  LineOptions opts) {
     return line(x, y, ErrorBar{}, std::move(opts));
@@ -192,13 +183,8 @@ Axes& Axes::hist(std::span<const double> data, int bins,
     for (int i = 0; i < bins; ++i)
         centers[static_cast<std::size_t>(i)] = lo + (i + 0.5) * bin_w;
 
-    // bar_opts goes through untouched, so a histogram gets the same edge,
-    // hint_labels and width control a bar chart has. `width` is read against
-    // the bin width; 1.0, hist()'s own default argument, makes the bins touch.
-    //
-    // No ErrorBar parameter, and so no ErrorBarData: a bin's height is a count
-    // this function derived, not a measurement the caller could have an
-    // uncertainty on. `bar_opts.errorbar` is style for bars never drawn.
+    // bar_opts passes through; `width` is relative to the bin width. No error
+    // bars for histograms.
 
     d->bars.push_back({
         std::move(centers),
@@ -219,10 +205,7 @@ void Axes::Impl::ingest_heatmap(std::span<const float> data, int rows, int cols,
     if (static_cast<int>(data.size()) < rows * cols)
         throw std::invalid_argument(w + ": data too small for rows×cols");
 
-    // A degenerate range collapses the whole image to a line and makes every
-    // index<->data conversion meaningless, so it is rejected here rather than
-    // guarded at each of the four places that convert. Reversed is allowed:
-    // it mirrors the image, which is a real thing to ask for.
+    // Reject degenerate ranges here once; reversed ranges mirror the image.
     for (const Range& r : { xrange, yrange }) {
         if (!std::isfinite(r.lo) || !std::isfinite(r.hi))
             throw std::invalid_argument(w + ": range bounds must be finite");
@@ -230,11 +213,7 @@ void Axes::Impl::ingest_heatmap(std::span<const float> data, int rows, int cols,
             throw std::invalid_argument(w + ": range must span a non-zero interval");
     }
 
-    // Sorted and de-duplicated once here rather than on every trace:
-    // the draw order becomes value order however the levels were listed, and
-    // a level given twice stops being traced, stroked and labelled twice on
-    // top of itself. Finiteness first — a NaN would neither sort nor compare
-    // usefully, and would silently trace nothing.
+    // Sort and de-duplicate once. Check finiteness first (NaN doesn't sort).
     for (double level : opts.contours)
         if (!std::isfinite(level))
             throw std::invalid_argument(w + ": contour levels must be finite");
@@ -256,15 +235,11 @@ Axes& Axes::heatmap(std::span<const float> data, int rows, int cols,
     return *this;
 }
 
-// The index-space specialization of heatmap(): one unit per cell, origin at
-// (0,0). This is what heatmap() itself meant before the extent became an
-// argument, so it is a forward and not a second ingest path.
+// heatmap() over the index extent: one unit per cell, origin at (0,0).
 Axes& Axes::imshow(std::span<const float> data, int rows, int cols,
                    HeatmapOptions opts) {
-    // rows/cols are validated by heatmap(); building the ranges from them
-    // first is harmless for a bad shape (the range is rejected too, with a
-    // less specific message) -- so clamp to keep heatmap()'s error the one
-    // the caller sees.
+    // Clamp so an invalid shape reports heatmap()'s rows/cols error rather than
+    // a range error.
     const Range xr{ 0.0, static_cast<double>(std::max(cols, 1)) };
     const Range yr{ 0.0, static_cast<double>(std::max(rows, 1)) };
     return heatmap(data, rows, cols, xr, yr, std::move(opts));

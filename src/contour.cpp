@@ -10,13 +10,10 @@ namespace {
 
 struct Pt { float x, y; };
 
-// Pixels of clear space either side of a label, inside the gap cut into the
-// line. Small: the text already carries its own side bearings.
+// Pixels of clear space either side of a label, inside the gap.
 constexpr float kLabelPad = 3.0f;
 
-// A line must be this many times the gap before it is worth breaking. Below
-// it the two remaining stubs are too short to read as a line at all, so the
-// label is dropped and the line drawn whole.
+// A line shorter than this many gaps keeps no label and is drawn whole.
 constexpr float kMinLabelledLength = 1.8f;
 
 constexpr float kPi     = 3.14159265358979f;
@@ -32,21 +29,14 @@ void trace_level(const HeatmapPlot& hp, double level, ContourSet& out) {
         return static_cast<double>(hp.data[static_cast<std::size_t>(row) * nx + j]);
     };
 
-    // Edge identity, so crossings shared by two neighbouring cells are the
-    // same entry rather than two floating-point-equal-ish points that have to
-    // be matched by distance. Chaining below is therefore exact.
+    // Edge identity, so shared crossings are the same entry and chaining is exact.
     const int h_count = ny * (nx - 1);
     auto h_id = [&](int i, int j) { return i * (nx - 1) + j; };
     auto v_id = [&](int i, int j) { return h_count + i * nx + j; };
 
-    // Where the level crosses an edge, linearly between its two samples.
-    // Computed identically from either adjoining cell (same two values, same
-    // endpoints), so both cells agree on the point bit for bit.
-    // Crossings are found in index space and emitted in *data* space, through
-    // the heatmap's own extent, so plan_contours() can project them with the
-    // same CoordTransform as any other data and neither render path has to
-    // know how a cell index becomes a coordinate. For imshow() the two spaces
-    // coincide, which is why the numbers below still read as cell centres.
+    // Crossing point, interpolated along the edge (bit-identical from either
+    // adjoining cell). Found in index space, emitted in data space via the
+    // heatmap's extent.
     auto hpt = [&](int i, int j) {
         const double a = val(i, j), b = val(i, j + 1);
         const double t = (b != a) ? std::clamp((level - a) / (b - a), 0.0, 1.0) : 0.5;
@@ -98,10 +88,8 @@ void trace_level(const HeatmapPlot& hp, double level, ContourSet& out) {
                 case 6:  case 9:  BT(); break;
                 case 7:  case 8:  LT(); break;
 
-                // Saddles. The centre value says whether the two diagonally
-                // opposite "inside" corners are joined through the middle
-                // (so the line goes around the other two separately) or are
-                // two islands (so it goes around each of them).
+                // Saddles: the centre value decides whether the two "inside"
+                // corners are joined through the middle or are separate islands.
                 case 5: {
                     const double c = (bl + br + tr + tl) * 0.25;
                     if (c >= level) { BR(); LT(); } else { LB(); RT(); }
@@ -119,10 +107,8 @@ void trace_level(const HeatmapPlot& hp, double level, ContourSet& out) {
 
     if (segs.empty()) return;
 
-    // Chain the loose segments into polylines. Walking from an edge only one
-    // segment touches (a line running off the sample grid) first matters:
-    // start in the middle of an open chain instead and its other half is
-    // stranded, coming out as a second line that a label would label twice.
+    // Chain segments into polylines, starting open chains at their ends so no
+    // half is stranded as a separate line.
     std::vector<bool> used(segs.size(), false);
 
     auto walk = [&](std::size_t start_seg, int start_edge) {
@@ -156,10 +142,8 @@ void trace_level(const HeatmapPlot& hp, double level, ContourSet& out) {
         out.push_back(std::move(line));
     };
 
-    // Both passes iterate `segs` in index order (cell order), not the hash
-    // maps, so the traced lines come out in the same order every run — the
-    // SVG writer emits them in this order and that output is compared byte
-    // for byte by the tests.
+    // Iterate in cell order (not hash order) so output is deterministic; the
+    // SVG tests compare bytes.
     for (std::size_t s = 0; s < segs.size(); ++s) {
         if (used[s]) continue;
         if (at[segs[s].first].size() == 1)       walk(s, segs[s].first);
@@ -207,16 +191,10 @@ ContourDraw plan_contours(const ContourSet& set, const ContourProjector& proj,
             py[i] = p.y;
             all_in_front = all_in_front && p.in_front;
         }
-        // Behind the eye a point does not project off-screen, it projects to
-        // the wrong side of the picture -- so a line with any vertex there is
-        // dropped whole rather than drawn across the figure. Always true under
-        // an orthographic camera and on a 2D axes, which is why neither is
-        // affected by this existing at all.
+        // Drop a line with any vertex behind the eye (never on 2D/orthographic).
         if (!all_in_front) continue;
 
-        // Cheap whole-line reject. Everything downstream is clipped to the
-        // frame anyway, but a zoomed-in view can leave most of a large grid's
-        // lines entirely offscreen, and this skips their arc-length pass.
+        // Cheap whole-line reject for fully offscreen lines.
         const auto [xlo, xhi] = std::minmax_element(px.begin(), px.end());
         const auto [ylo, yhi] = std::minmax_element(py.begin(), py.end());
         if (*xhi < frame.x || *xlo > frame.x + frame.w ||
@@ -231,9 +209,7 @@ ContourDraw plan_contours(const ContourSet& set, const ContourProjector& proj,
 
         if (!opts.contour_labels) { push_whole(); continue; }
 
-        // Arc length in *pixels*, because that is what the label's width is
-        // measured in — the gap has to be as wide as the text on screen, not
-        // as wide as some data-space equivalent that changes with the zoom.
+        // Arc length in pixels, since the gap must fit the text on screen.
         arc.resize(n);
         arc[0] = 0.0f;
         for (std::size_t i = 1; i < n; ++i)
@@ -278,13 +254,8 @@ ContourDraw plan_contours(const ContourSet& set, const ContourProjector& proj,
 
         const Pt anchor = at_arc(mid);
         const Pt a = at_arc(s0), b = at_arc(s1);
-        // The chord across the gap, not the tangent at one vertex: it is the
-        // direction the text has to span to fit in the hole. A line has no
-        // direction of its own, so the angle is folded into the half-open
-        // [-pi/2, pi/2) that keeps the text upright rather than clamped by a
-        // pair of `if`s -- the fold is exact at the vertical case, where a
-        // clamp depends on whether atan2f lands a hair either side of pi/2.
-        // Both verticals come out as -pi/2, text reading bottom to top.
+        // Label angle: the chord across the gap, folded into [-pi/2, pi/2) so
+        // text stays upright (both verticals read bottom to top).
         float angle = std::atan2(b.y - a.y, b.x - a.x);
         angle = std::fmod(angle + kHalfPi, kPi);
         if (angle < 0.0f) angle += kPi;
@@ -304,16 +275,13 @@ std::vector<PlaneContourDraw> plan_plane_contours(
     std::vector<PlaneContourDraw> out;
     for (std::size_t pi = 0; pi < planes.size(); ++pi) {
         const PlaneSnapshot& pl = planes[pi];
-        // A hidden plane's contours go with it: they annotate a field that is
-        // not on screen.
+        // Hidden planes have no contours.
         if (!plane_drawn(pl)) continue;
         for (std::size_t hi = 0; hi < pl.sheet.heatmaps.size(); ++hi) {
             const HeatmapPlot& hp = pl.sheet.heatmaps[hi];
             if (hp.opts.contours.empty() || hp.rows <= 0 || hp.cols <= 0) continue;
 
-            // Traced once and held across frames when there is a cache to hold
-            // it -- the geometry is in *data* space, so an orbit re-projects it
-            // and never re-traces it, exactly as a 2D pan does not.
+            // Cached in data space, so an orbit only re-projects.
             ContourSet traced;
             const ContourSet& set =
                 cache ? cache->get(axes_index, static_cast<int>(pi),

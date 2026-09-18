@@ -1,14 +1,10 @@
-# Range form: 3.21 is the real floor ($<TARGET_RUNTIME_DLLS:> is the newest
-# feature used), while the upper bound keeps policies at their NEW defaults on
-# modern CMake instead of silently reverting to 3.21-era behaviour.
+# 3.21 is the real floor ($<TARGET_RUNTIME_DLLS:>); the upper bound keeps
+# policies at their NEW defaults on newer CMake.
 cmake_minimum_required(VERSION 3.21...4.3)
 
-# Default vcpkg to the static-md triplet so FreeType/libpng/zlib link
-# statically into sextant.dll instead of shipping as separate DLLs beside
-# it. Must be set before project() — vcpkg's toolchain file (when passed via
-# -DCMAKE_TOOLCHAIN_FILE) reads this during the first project()/
-# enable_language() call. Override with -DVCPKG_TARGET_TRIPLET=x64-windows
-# to get the old separate-DLLs layout back.
+# Default vcpkg to the static-md triplet so FreeType/libpng/zlib link into
+# sextant.dll. Must be set before project(). Override with
+# -DVCPKG_TARGET_TRIPLET=x64-windows for separate DLLs.
 if(CMAKE_HOST_WIN32 AND NOT DEFINED VCPKG_TARGET_TRIPLET)
     set(VCPKG_TARGET_TRIPLET "x64-windows-static-md" CACHE STRING "Vcpkg target triplet")
 endif()
@@ -74,8 +70,7 @@ if(SEXTANT_USE_LIBPNG)
 endif()
 
 # ---------------------------------------------------------------------------
-# Third-party vendored sources
-# Requires running scripts/setup_deps.sh first to populate third_party/
+# Third-party vendored sources (run scripts/setup_deps.sh first)
 # ---------------------------------------------------------------------------
 set(GLAD_SOURCE   ${CMAKE_SOURCE_DIR}/third_party/glad/src/glad.c)
 set(NANOVG_SOURCE ${CMAKE_SOURCE_DIR}/third_party/nanovg/nanovg.c)
@@ -91,7 +86,7 @@ set(IMGUI_SOURCES
     ${IMGUI_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
 )
 
-# Warn if third-party files are missing (will be resolved after setup_deps.sh)
+# Warn if third-party files are missing
 foreach(_f ${GLAD_SOURCE} ${NANOVG_SOURCE} ${IMGUI_MAIN_SOURCE})
     if(NOT EXISTS ${_f})
         message(WARNING "Missing vendored file: ${_f}\nRun: bash scripts/setup_deps.sh")
@@ -143,13 +138,9 @@ set(SEXTANT_SOURCES
     src/widgets/data_panel.cpp
 )
 
-# Configures everything common to both the SHARED and STATIC sextant
-# targets. link_scope controls how glfw/Freetype/PNG are attached:
-#   - SHARED target: PRIVATE — their object code is merged into sextant.dll,
-#     so consumers don't need to (and shouldn't) link them separately.
-#   - STATIC target: PUBLIC — a static library can't embed its dependencies'
-#     object code, so consumers linking sextant_static must pull those libs
-#     in transitively via CMake's usage requirements instead.
+# Settings common to the SHARED and STATIC targets. link_scope: PRIVATE for
+# SHARED (deps are merged into sextant.dll), PUBLIC for STATIC (consumers must
+# link the deps transitively).
 function(sextant_configure_target target_name link_scope)
     if(EXISTS ${GLAD_SOURCE})
         target_sources(${target_name} PRIVATE ${GLAD_SOURCE})
@@ -175,15 +166,10 @@ function(sextant_configure_target target_name link_scope)
             ${IMGUI_SOURCE_DIR}/backends
     )
 
-    # IMGUI_USER_CONFIG gives every translation unit that sees imgui.h the same
-    # thread-local GImGui — required because each Figure::show() drives its own
-    # ImGui context from its own window thread. See src/widgets/sextant_imconfig.h.
-    # IMGUI_IMPL_OPENGL_LOADER_CUSTOM suppresses the gl3w-derived loader that
-    # imgui_impl_opengl3.cpp bundles, so the backend uses the GLAD loader
-    # sextant_imconfig.h includes instead. (This replaced IMGUI_IMPL_OPENGL_LOADER_GLAD,
-    # which imgui removed back in 2021 and had silently been a no-op ever since —
-    # the bundled loader was in use, and its unconditional teardown crashed
-    # sibling windows. See src/widgets/sextant_imconfig.h.)
+    # IMGUI_USER_CONFIG: a thread-local GImGui per window thread, and GLAD as
+    # the backend loader (see src/widgets/sextant_imconfig.h).
+    # IMGUI_IMPL_OPENGL_LOADER_CUSTOM disables imgui's bundled gl3w loader,
+    # whose shared teardown crashed sibling windows.
     target_compile_definitions(${target_name}
         PRIVATE
             IMGUI_IMPL_OPENGL_LOADER_CUSTOM
@@ -197,10 +183,8 @@ function(sextant_configure_target target_name link_scope)
 
     if(SEXTANT_USE_FREETYPE AND TARGET Freetype::Freetype)
         target_link_libraries(${target_name} ${link_scope} Freetype::Freetype)
-        # FONS_USE_FREETYPE switches nanovg's vendored fontstash.h (see
-        # third_party/nanovg/fontstash.h) from its built-in stb_truetype
-        # rasterizer to FreeType — this is the macro that actually wires
-        # FreeType in; SEXTANT_USE_FREETYPE alone gates nothing at the source level.
+        # FONS_USE_FREETYPE switches nanovg's fontstash.h from stb_truetype to
+        # FreeType (SEXTANT_USE_FREETYPE alone changes nothing in the sources).
         target_compile_definitions(${target_name} PRIVATE SEXTANT_USE_FREETYPE FONS_USE_FREETYPE)
     endif()
 
@@ -220,9 +204,8 @@ sextant_configure_target(sextant PRIVATE)
 target_compile_definitions(sextant PRIVATE SEXTANT_BUILD_SHARED)
 
 if(SEXTANT_BUILD_STATIC)
-    # Separate target name (not just a differently-suffixed output file) —
-    # on Windows the SHARED target's import library is also a "sextant.lib",
-    # so reusing that basename for the static lib would collide with it.
+    # A separate target name: on Windows the SHARED target's import library is
+    # already "sextant.lib".
     add_library(sextant_static STATIC ${SEXTANT_SOURCES})
     sextant_configure_target(sextant_static PUBLIC)
     target_compile_definitions(sextant_static PUBLIC SEXTANT_STATIC_DEFINE)
@@ -243,12 +226,8 @@ install(TARGETS ${SEXTANT_INSTALL_TARGETS}
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 
-# sextant_static links glfw PUBLIC (a static lib can't embed its
-# dependencies' object code the way sextant.dll does), so consumers of
-# sextant::sextant_static need glfw's archive transitively linked in too.
-# GLFW's own install() is disabled (GLFW_INSTALL OFF above) so it doesn't
-# install its headers/cmake-config — we only need the compiled archive here,
-# since GLFW types never appear in sextant's public headers.
+# sextant_static links glfw PUBLIC, so install its archive for consumers
+# (GLFW_INSTALL is OFF; GLFW types never appear in public headers).
 if(SEXTANT_BUILD_STATIC)
     install(TARGETS glfw
         EXPORT sextantTargets
@@ -257,27 +236,16 @@ if(SEXTANT_BUILD_STATIC)
 endif()
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
-# Bundle sextant's own runtime DLL dependencies into the install tree so
-# downstream consumers get a self-contained package.
-#
-# With the default x64-windows-static-md triplet (set above), FreeType/
-# libpng/zlib are linked statically and baked directly into sextant.dll —
-# there are no separate DLLs for them to bundle, so the block below is a
-# no-op (its EXISTS checks simply never find a .dll to install). It only
-# does real work if VCPKG_TARGET_TRIPLET is overridden back to a dynamic
-# triplet (e.g. -DVCPKG_TARGET_TRIPLET=x64-windows).
+# Bundle runtime DLL dependencies into the install tree. A no-op with the
+# default static-md triplet; only matters with a dynamic triplet
+# (e.g. -DVCPKG_TARGET_TRIPLET=x64-windows).
 if(WIN32)
     install(FILES $<TARGET_RUNTIME_DLLS:sextant> DESTINATION ${CMAKE_INSTALL_BINDIR})
 
-    # TARGET_RUNTIME_DLLS above can't see PNG::PNG/ZLIB::ZLIB — vcpkg's PNG/ZLIB
-    # Find-modules model them as UNKNOWN IMPORTED targets with only a per-config
-    # IMPORTED_LOCATION_<CONFIG> (CONFIG suffix must be UPPERCASE, e.g. _DEBUG,
-    # not _Debug) pointing at the .lib import stub rather than a plain
-    # IMPORTED_LOCATION, which CMake can't resolve to a runtime DLL on its own.
-    # Derive each one's actual .dll from its .lib path (same directory, vcpkg's
-    # install layout) and install just those two files — NOT a directory glob,
-    # since classic-mode vcpkg's bin/ holds every package ever installed on
-    # this machine, not just this project's dependencies.
+    # TARGET_RUNTIME_DLLS can't see vcpkg's PNG/ZLIB (UNKNOWN IMPORTED targets
+    # with only IMPORTED_LOCATION_<CONFIG>, uppercase, pointing at the .lib).
+    # Derive each .dll from its .lib path and install just those files (not a
+    # glob: classic-mode vcpkg's bin/ holds every installed package).
     if(SEXTANT_USE_LIBPNG AND TARGET PNG::PNG)
         string(TOUPPER "${CMAKE_BUILD_TYPE}" _sextant_cfg_upper)
         foreach(_sextant_dep_target PNG::PNG ZLIB::ZLIB)
@@ -290,8 +258,7 @@ if(WIN32)
                     string(REPLACE "/lib/" "/bin/" _sextant_dep_dll "${_sextant_dep_lib}")
                     string(REPLACE ".lib" ".dll" _sextant_dep_dll "${_sextant_dep_dll}")
                     if(NOT EXISTS "${_sextant_dep_dll}")
-                        # zlib's DLL is historically named zlib1.dll / zlibd1.dll
-                        # (a numeric suffix the .lib name doesn't have) — try that too.
+                        # zlib's DLL may be named zlib1.dll / zlibd1.dll.
                         string(REPLACE ".dll" "1.dll" _sextant_dep_dll_alt "${_sextant_dep_dll}")
                         if(EXISTS "${_sextant_dep_dll_alt}")
                             set(_sextant_dep_dll "${_sextant_dep_dll_alt}")
@@ -329,13 +296,9 @@ install(FILES
 )
 
 # ---------------------------------------------------------------------------
-# Convenience target: build + install into a fixed local prefix.
-# CMake's built-in "install" target is a phony rule the generator injects
-# directly into the build files — it has no entry in the CMake File API
-# codemodel, so IDEs (CLion) that enumerate targets from that model (as it
-# does for the Run/Debug "CMake Application" target dropdown) can't offer it.
-# Wrapping `cmake --install` in a real add_custom_target makes it show up
-# there, the same way GLFW's own "uninstall" custom target does.
+# Convenience target: build + install into a fixed local prefix. CMake's
+# built-in "install" isn't in the File API codemodel, so IDEs like CLion can't
+# list it; this custom target can be.
 # ---------------------------------------------------------------------------
 set(SEXTANT_LOCAL_INSTALL_PREFIX "${CMAKE_SOURCE_DIR}/dist" CACHE PATH
     "Prefix used by the 'install_dist' convenience target")
@@ -350,27 +313,23 @@ add_dependencies(install_dist ${SEXTANT_INSTALL_TARGETS})
 # Tests
 # ---------------------------------------------------------------------------
 if(SEXTANT_BUILD_TESTS)
-    # Step 2: GL stack / window open test
+    # GL stack / window open test
     add_executable(sextant_window_test tests/window_test/main.cpp)
     target_link_libraries(sextant_window_test PRIVATE sextant)
 
-    # Final integration smoke test (requires full pipeline)
+    # Integration smoke test
     add_executable(sextant_smoke tests/basic_smoke/main.cpp)
     target_link_libraries(sextant_smoke PRIVATE sextant)
 
-    # Performance harness — RAM/ingest/refresh/render scaling at large data
-    # sizes (see spec_test.md). Opens live windows, so it is not a CI test.
+    # Performance harness at large data sizes. Opens windows; not a CI test.
     add_executable(sextant_perf_test tests/perf_test/main.cpp)
     target_link_libraries(sextant_perf_test PRIVATE sextant)
 
-    # Step 31: internal layout checks. Deliberately linked against
-    # sextant_static and given src/ on its include path — what it verifies
-    # (text measurement, computed layout rects) is not reachable through the
-    # public headers, and the SHARED target exports only SEXTANT_API symbols.
+    # Internal layout checks: linked against sextant_static with src/ on the
+    # include path, since what it checks isn't reachable through public headers.
     if(SEXTANT_BUILD_STATIC)
-        # One translation unit per subject (see tests/layout_test/layout_test.h);
-        # main.cpp only calls them. It was a single 10k-line file until the v1.0
-        # deferred-plan cleanup. Listed rather than globbed, like SEXTANT_SOURCES.
+        # One translation unit per subject (see tests/layout_test/layout_test.h).
+        # Listed rather than globbed, like SEXTANT_SOURCES.
         add_executable(sextant_layout_test
             tests/layout_test/main.cpp
             tests/layout_test/common.cpp
@@ -406,19 +365,14 @@ if(SEXTANT_BUILD_TESTS)
             ${CMAKE_SOURCE_DIR}/third_party/glad/include
             ${CMAKE_SOURCE_DIR}/third_party/nanovg
             ${CMAKE_SOURCE_DIR}/third_party/stb
-            # Step 38: src/widgets/cell_shading.h names ImU32/IM_COL32 (no ImGui
-            # *calls*, so nothing extra is linked). It must be compiled under
-            # the same IMGUI_USER_CONFIG the library uses, or this target would
-            # see a differently-configured imgui.h than sextant_static did.
+            # cell_shading.h names ImU32/IM_COL32, so compile with the same
+            # IMGUI_USER_CONFIG as the library.
             ${IMGUI_SOURCE_DIR})
         target_compile_definitions(sextant_layout_test PRIVATE
             IMGUI_USER_CONFIG="widgets/sextant_imconfig.h")
 
-        # v1.0 deferred plan: why the gallery's sixth cell exhausts the split
-        # bound. Internal for the same reason layout_test is — it calls
-        # paint_order() directly and reads the PaintPolys back, and neither is
-        # reachable through the public headers. Not a test: it asserts nothing
-        # and prints a table.
+        # Diagnostic for painter splits: calls paint_order() directly (internal
+        # API). Asserts nothing; prints a table.
         add_executable(sextant_split_probe tests/split_probe/main.cpp)
         target_link_libraries(sextant_split_probe PRIVATE sextant_static)
         target_include_directories(sextant_split_probe PRIVATE

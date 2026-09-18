@@ -12,16 +12,12 @@
 namespace sextant {
 
 struct Axes::Impl {
-    // Plot objects
     std::vector<LinePlot>     lines;
     std::vector<ScatterPlot>  scatters;
     std::vector<BarPlot>      bars;
     std::vector<HeatmapPlot>  heatmaps;
     std::vector<ScatterZPlot> scatter_z;
-    // Decoration
-    // Font sizes for these three live in axes_style, not here — that is what
-    // lets the widget panel drive them through AxesEdit's existing
-    // std::optional<AxesStyle> channel with no extra plumbing.
+    // Font sizes for these live in axes_style, so the panel edits them via AxesEdit.
     std::string   title, xtitle, ytitle;
     bool          grid_enabled    = false;
     GridOptions   grid_opts;
@@ -36,18 +32,14 @@ struct Axes::Impl {
     bool   xlim_auto = true;
     bool   ylim_auto = true;
 
-
     // Explicit tick override set via Axes::set_xticks/set_yticks (or the
     // widget panel's tick table). Absent = auto-generated ticks.
     std::optional<std::vector<Tick>> xticks_override, yticks_override;
 
     // TODO: PlotObject list
 
-    // Captures everything the render path needs, so it can be handed across
-    // the caller/render-thread boundary without touching this Impl.
-    // Decoration and limits are copied; the plot vectors are CowVec, so the
-    // five assignments below share buffers rather than duplicating them, which
-    // is what makes refresh() cheap at large point counts.
+    // Copy for the render thread. Plot vectors are CowVec, so this shares
+    // buffers instead of copying the data.
     RenderSnapshot build_snapshot() const {
         RenderSnapshot s;
         s.lines = lines; s.scatters = scatters; s.bars = bars; s.heatmaps = heatmaps;
@@ -64,17 +56,8 @@ struct Axes::Impl {
         return s;
     }
 
-    // Ingest, shared by Axes and Plane2D. One copy rather than two because
-    // "what a plot kind accepts" is a property of the plot object, not of what
-    // it is drawn on -- a plane that validated its extent, its lengths or its
-    // error bars differently from an axes would be a difference nothing in the
-    // picture could justify. Members of Impl rather than free functions so that
-    // neither caller needs access to a type that is private to Axes. `who` only
-    // names the caller in the error messages.
-    //
-    // hist() is deliberately absent: it bins to a BarPlot, and the 3D analogue
-    // of a histogram is bar3d over a 2D histogram the caller computes (see
-    // memory/spec_3d.md's Scope), so a plane does not re-expose it.
+    // Ingest shared by Axes and Plane2D, so both validate identically. `who`
+    // names the caller in error messages. No hist(): planes don't expose it.
     void ingest_line(std::span<const double> x, std::span<const double> y,
                      const ErrorBar& err, LineOptions opts, const char* who);
     void ingest_scatter(std::span<const double> x, std::span<const double> y,

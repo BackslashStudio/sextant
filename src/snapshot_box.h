@@ -5,11 +5,9 @@
 
 namespace sextant {
 
-// Thread-safe latest-value-wins holder for a FigureSnapshot.
-// Caller thread calls store(); render thread calls load() once per frame.
-// A short-held mutex is intentional: this runs once per frame (~60Hz), not
-// in a hot inner loop, so a plain mutex is simpler and more portable across
-// MSVC/libstdc++/libc++ than std::atomic<std::shared_ptr<T>>.
+// Thread-safe latest-value-wins holder for a FigureSnapshot: the caller thread
+// store()s, the render thread load()s once per frame. A plain mutex is enough
+// at that rate.
 class SnapshotBox {
 public:
     void store(std::shared_ptr<const FigureSnapshot> s) {

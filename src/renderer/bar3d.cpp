@@ -43,18 +43,15 @@ void bar3d_faces(const Bar3DPlot& b, std::size_t k, const Transform3D& tf,
     double lo[3], hi[3];
     bar3d_bounds(b, k, lo, hi);
 
-    // A reversed limit mirrors its axis, so the data-space "+" end of a face
-    // is the box-space "-" one. Cosmetic -- it decides which faces are lit --
-    // but wrong in a way that would look like a lighting bug rather than a
-    // limits one, so it is taken from the transform rather than assumed.
+    // A reversed limit mirrors its axis, flipping which way (and so whether)
+    // a face is lit; take the sign from the transform.
     const double sgn[3] = { axis_sign(tf.xmin, tf.xmax),
                             axis_sign(tf.ymin, tf.ymax),
                             axis_sign(tf.zmin, tf.zmax) };
 
     int n = 0;
     for (int a = 0; a < 3; ++a) {
-        // The two axes the face spans, in index order, so the ring below is
-        // the same shape for every face.
+        // The two axes the face spans, in index order (same ring shape per face).
         const int p = (a + 1) % 3, q = (a + 2) % 3;
         for (int end = 0; end < 2; ++end) {
             const double at = end ? hi[a] : lo[a];
@@ -76,11 +73,9 @@ void bar3d_faces(const Bar3DPlot& b, std::size_t k, const Transform3D& tf,
     }
 }
 
-
 void bar3d_edges(const Bar3DFace f[6], Vec3 out[12][2]) {
-    // f[0] and f[1] are the two faces at the ends of the box's first axis, so
-    // their rings between them touch every edge: four sides each, plus the
-    // four connecting corresponding corners.
+    // f[0]/f[1] cap the first axis: their sides plus the four connecting edges
+    // cover all twelve.
     int n = 0;
     for (int e = 0; e < 4; ++e) {
         out[n][0] = f[0].p[e];       out[n][1] = f[0].p[(e + 1) % 4]; ++n;
@@ -132,9 +127,8 @@ void bar3d_draw_order(const Bar3DPlot& b, const Projector3D& proj,
     const Vec3 eye = eye_coord(proj);
     const std::size_t nv = b.v.size();
 
-    // The cell's own coordinate on each grid axis, in box space. The bar's
-    // height plays no part: the separating planes are the grid lines, and a
-    // bar's height cannot move it across one.
+    // The cell's grid coordinates in box space; height doesn't matter (grid
+    // lines are the separating planes).
     auto grid_key = [&](std::size_t k, int which) {
         const std::size_t i = nv ? k / nv : 0, j = nv ? k % nv : 0;
         double c[3] = { 0.0, 0.0, 0.0 };
@@ -156,15 +150,11 @@ std::vector<Bar3DPolygon> plan_bars3d(const Projector3D& proj,
                                       const std::vector<Bar3DPlot>& bars) {
     std::vector<Bar3DPolygon> out;
     const Transform3D& tf = proj.transform();
-    // The reference depth the edge width is quoted at: one pixel at the box
-    // centre is this many box units, and a bar further away covers more of
-    // them per pixel, so its stroke comes out narrower in exactly that ratio.
+    // Box units per pixel at the box centre; edge widths scale from it.
     const double ref = proj.box_units_per_pixel(Vec3{ 0.0, 0.0, 0.0 });
 
-    // Two bar3d objects in one axes have no separating planes between them, so
-    // there is no exact order for the pair -- only the grid inside each has
-    // one. Their centres' distance from the eye is the heuristic, and it is
-    // one because nothing better exists short of a BSP over the whole scene.
+    // Whole plots are ordered by centre distance (a heuristic; no separating
+    // plane exists between two bar grids).
     std::vector<std::size_t> plot_order;
     for (std::size_t i = 0; i < bars.size(); ++i)
         if (bars[i].count() > 0 && bars[i].heights.size() >= bars[i].count())
@@ -179,9 +169,7 @@ std::vector<Bar3DPolygon> plan_bars3d(const Projector3D& proj,
     std::vector<std::size_t> order;
     for (const std::size_t bi : plot_order) {
         const Bar3DPlot& b = bars[bi];
-        // The key the writer merges the plane plan against, carried on every
-        // polygon this plot produces: whole objects interleave with planes,
-        // the faces within one do not.
+        // The plot's distance on every polygon, for merging with other plans.
         const float plot_depth = static_cast<float>(bar3d_plot_distance(b, proj));
         const bool translucent = bar3d_translucent(b);
         const float alpha = bar3d_alpha(b);
@@ -189,20 +177,16 @@ std::vector<Bar3DPolygon> plan_bars3d(const Projector3D& proj,
         edge.a = bar3d_edge_alpha(b);
         bar3d_draw_order(b, proj, order);
 
-        // An outline is a stroke on the faces while a bar hides its own back:
-        // the six edges nobody can see are occluded, so stroking the three
-        // visible faces draws exactly the nine that show. A translucent bar
-        // hides nothing, so all twelve have to be drawn -- once each, and
-        // after the fills, which is the order the raster path uses too. That
-        // is what `edge_pass` collects them for.
+        // Opaque bars: stroking the visible faces draws exactly the visible
+        // edges. Translucent bars: all twelve edges, once each, after the
+        // fills (as the raster path does) -- collected in `edge_pass`.
         std::vector<Bar3DPolygon> edge_pass;
 
         Bar3DFace faces[6];
         for (const std::size_t k : order) {
             bar3d_faces(b, k, tf, faces);
 
-            // The bar's own centre, in box space: the depth its outline width
-            // is quoted at.
+            // The bar's box-space centre: where its edge width is measured.
             Vec3 bar_centre{};
             for (const Vec3& p : faces[0].p) bar_centre = bar_centre + p;
             for (const Vec3& p : faces[1].p) bar_centre = bar_centre + p;
@@ -217,8 +201,8 @@ std::vector<Bar3DPolygon> plan_bars3d(const Projector3D& proj,
                     : b.opts.edge_linewidth;
             }
 
-            // Hidden faces first and then the visible ones when the bar can be
-            // seen through; only the visible ones when it cannot.
+            // Hidden faces then visible ones for translucent bars; visible only
+            // for opaque.
             const Bar3DFaceOrder fo = bar3d_face_order(faces, tf, proj);
             for (int fi = translucent ? 0 : fo.front; fi < 6; ++fi) {
                 const Bar3DFace& f = faces[fo.index[fi]];

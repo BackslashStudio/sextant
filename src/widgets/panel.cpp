@@ -33,18 +33,15 @@ namespace sextant {
 
 namespace {
 
-// The measurements the plot panel is drawing with, for every consumer that is
-// not the plot itself; before the plot's first frame there are none, and a
-// fresh measure stands in (v1.0 step 15.2).
+// The plot panel's current measurements (a fresh measure before its first
+// frame).
 std::shared_ptr<const FigureMeasure> on_screen_measure(const PanelState& st,
                                                        const FigureSnapshot& fsnap) {
     if (auto m = st.layout.load()) return m;
     return std::make_shared<const FigureMeasure>(measure_figure(fsnap));
 }
 
-// Takes the concrete 2D snapshot, not the cell: the panel's scratch state is
-// entirely 2D vocabulary, so a 3D cell has nothing to seed it from and the
-// caller must not reach here with one.
+// Takes the 2D snapshot; never call with a 3D cell.
 void sync_from_snapshot(PanelState& st, int slot_index, const RenderSnapshot& sn) {
     std::snprintf(st.title_buf,  sizeof(st.title_buf),  "%s", sn.title.c_str());
     std::snprintf(st.xtitle_buf, sizeof(st.xtitle_buf), "%s", sn.xtitle.c_str());
@@ -64,16 +61,10 @@ void sync_from_snapshot(PanelState& st, int slot_index, const RenderSnapshot& sn
     st.last_synced_slot = slot_index;
 }
 
-// The 3D counterpart. Fills the same scratch fields where the two kinds share
-// one (titles, x/y limits, the two tick tables, axes_style, grid) and the 3D-
-// only ones beside them, so switching the selection between a 2D and a 3D slot
-// re-seeds everything through the one last_synced_slot gate.
-// The planes' scratch copy. Unlike everything else seeded here it is also
-// re-seeded whenever the *count* changes, because a plane added or dropped by
-// the caller shifts every index above it and the rows would otherwise go on
-// editing whichever plane now sits where the old one did. A resize alone
-// would leave the surviving entries pointing at the wrong planes just the
-// same, so the whole list is re-read.
+// The 3D counterpart: fills shared scratch fields and the 3D-only ones, via the
+// same last_synced_slot gate.
+// The planes' scratch copy, also re-seeded when the plane count changes
+// (indices shift, so the whole list is re-read).
 void sync_planes(PanelState& st, const RenderSnapshot3D& sn) {
     st.planes_local.clear();
     st.planes_local.reserve(sn.planes.size());
@@ -81,7 +72,7 @@ void sync_planes(PanelState& st, const RenderSnapshot3D& sn) {
         st.planes_local.push_back({ p.orient, p.offset, p.opts });
 }
 
-// The gridded kinds' appearance, on the same rule and for the same reason.
+// The 3D kinds' appearance, on the same rule.
 void sync_scene_objects(PanelState& st, const RenderSnapshot3D& sn) {
     st.bars3d_local.clear();
     st.bars3d_local.reserve(sn.bars3d.size());
@@ -128,15 +119,9 @@ void sync_from_snapshot(PanelState& st, int slot_index, const RenderSnapshot3D& 
     st.last_synced_slot = slot_index;
 }
 
-// An axis left on "auto" has no limits of its own to show: the snapshot's
-// xmin/xmax are the declared defaults, and what the axis actually reads is
-// whatever compute_figure_layout() resolved from the data. So for those axes
-// the fields track the resolved numbers, every frame rather than only on a
-// slot change — otherwise they would go stale the moment the data moved.
-//
-// It stops the instant the user drags one, because dragging a limit field
-// clears that axis's `auto` flag in the same edit; from then on the declared
-// value *is* what the axis reads and the seeding above is correct again.
+// For axes on "auto", the limit fields track the resolved limits every frame
+// (the snapshot only has declared defaults). Dragging a field clears `auto`,
+// after which the declared value is correct.
 void track_resolved_limits(PanelState& st, int slot,
                            bool xauto, bool yauto, bool zauto) {
     const PanelState::ResolvedLimits* r = st.resolved_for(slot);
@@ -146,9 +131,7 @@ void track_resolved_limits(PanelState& st, int slot,
     if (zauto && r->is_3d) { st.zmin_local = r->zmin; st.zmax_local = r->zmax; }
 }
 
-// Figure-level, so seeded separately from sync_from_snapshot() above — the
-// suptitle does not belong to any axes slot and must not be re-seeded when
-// the selected slot changes (that would discard an in-progress edit).
+// Figure-level: seeded once, not on slot change (would discard an edit).
 void sync_figure_from_snapshot(PanelState& st, const FigureSnapshot& fsnap) {
     if (st.suptitle_synced) return;
     std::snprintf(st.suptitle_buf, sizeof(st.suptitle_buf), "%s", fsnap.suptitle.c_str());
@@ -156,8 +139,7 @@ void sync_figure_from_snapshot(PanelState& st, const FigureSnapshot& fsnap) {
     st.suptitle_synced = true;
 }
 
-// Same once-only rule, tracked separately from the suptitle's flag so the
-// two seed independently of each other.
+// Same once-only rule, with its own flag.
 void sync_layout_from_snapshot(PanelState& st, const FigureSnapshot& fsnap) {
     if (st.layout_synced) return;
     st.margins_local = fsnap.margins;
@@ -166,8 +148,7 @@ void sync_layout_from_snapshot(PanelState& st, const FigureSnapshot& fsnap) {
     st.layout_synced = true;
 }
 
-// One "position | label | remove" table for an X or Y tick override.
-// Returns true if the scratch vector changed this frame.
+// A "position | label | remove" table for a tick override; true on change.
 bool draw_tick_table(const char* table_id, std::vector<Tick>& scratch) {
     bool changed = false;
     int remove_i = -1;
@@ -206,15 +187,9 @@ bool draw_tick_table(const char* table_id, std::vector<Tick>& scratch) {
     return changed;
 }
 
-// Lays out the dockspace: "Plot" alone, or split into "Plot" and a right-hand
-// column (opts.panel_width wide) holding "Cosmetic" and/or "Data". Both side
-// panels dock into the *same* node, so when both are visible ImGui gives them
-// a shared tab bar.
-//
-// Rebuilt on the first frame and whenever either visibility toggles; skipped
-// otherwise, which is what leaves the user's live-dragged split alone.
-// Toggling a side panel off and back on re-establishes the default split
-// fraction rather than restoring what the user had dragged it to.
+// Dock layout: "Plot" alone, or split with a right column (panel_width wide)
+// holding "Cosmetic" and/or "Data" in one shared node. Rebuilt on the first
+// frame and when a side panel toggles (restoring the default split).
 void ensure_layout(ImGuiID dockspace_id, float panel_width, PanelState& st) {
     const bool first_build = ImGui::DockBuilderGetNode(dockspace_id) == nullptr;
     if (!first_build && st.layout_cosmetic_visible == st.cosmetic_visible
@@ -224,17 +199,9 @@ void ensure_layout(ImGuiID dockspace_id, float panel_width, PanelState& st) {
 
     ImGui::DockBuilderRemoveNode(dockspace_id);
     ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
-    // Dock/window sizes live in ImGui's own logical/screen-coordinate space
-    // (see draw_plot_panel()'s comment) — use the viewport's own size here
-    // rather than ctx.width()/height() (physical framebuffer pixels), since
-    // panel_width is meant as a plain window-creation-scale pixel count.
-    //
-    // `panel_width` reaches this already multiplied by the chrome's DPI scale
-    // (see the call site): the split is stored as a *fraction*, so once the
-    // window is itself DPI-scaled an unscaled 240 would hold 240 physical
-    // pixels of 1.5x-sized widgets. The fraction is why only the first build
-    // needs this — a later move to another monitor resizes the window, and a
-    // fraction of a wider window is already wider.
+    // Use the viewport's logical size (not framebuffer pixels). panel_width
+    // arrives DPI-scaled; the split is stored as a fraction, so only the first
+    // build needs the scale.
     const ImVec2 size = ImGui::GetMainViewport()->Size;
     ImGui::DockBuilderSetNodeSize(dockspace_id, size);
 
@@ -247,20 +214,9 @@ void ensure_layout(ImGuiID dockspace_id, float panel_width, PanelState& st) {
         if (st.cosmetic_visible) ImGui::DockBuilderDockWindow("Cosmetic", dock_side);
         if (st.data_visible)     ImGui::DockBuilderDockWindow("Data",     dock_side);
 
-        // Seed the shared tab bar's selection explicitly. DockBuilderRemoveNode
-        // destroyed the old node along with its SelectedTabId, and ImGui's
-        // fallback is to select whichever tab was added last, so toggling
-        // Cosmetic off/on while Data is visible would re-select Data. A
-        // window's TabId is GetID("#TAB") seeded by the window id.
-        //
-        // That seed is not the last word, though: when the node next updates
-        // its tab bar, the *focused* window's tab wins (imgui.cpp,
-        // DockNodeUpdateTabBar, "Apply NavWindow focus back to the tab bar"),
-        // and a window is focused as it appears. With both panels appearing
-        // on the same frame -- startup, since step 10.3 made Data default-on
-        // -- the one drawn second took focus and the tab. So the wanted panel
-        // is also focused explicitly, once both have been drawn; see
-        // pending_panel_focus in draw_widget_panel().
+        // Seed the tab bar's selection (a rebuilt node otherwise selects the
+        // last tab). ImGui also gives the tab to the focused window, so the
+        // wanted panel is focused explicitly too (pending_panel_focus).
         if (st.cosmetic_visible && st.data_visible) {
             const char* want = st.focus_data_on_rebuild ? "Data" : "Cosmetic";
             if (ImGuiDockNode* n = ImGui::DockBuilderGetNode(dock_side))
@@ -274,10 +230,8 @@ void ensure_layout(ImGuiID dockspace_id, float panel_width, PanelState& st) {
     ImGui::DockBuilderFinish(dockspace_id);
 }
 
-// Renders the 3-pass plot into plot_fbo at the "Plot" panel's *live*
-// content-region size (so dragging the dock splitter live-resizes it) and
-// displays the result via ImGui::Image — this is what makes the plot itself
-// a dockable/resizable panel rather than a fixed region of the window.
+// Renders the plot into plot_fbo at the "Plot" panel's live size and shows it
+// via ImGui::Image(), making the plot a resizable dock panel.
 void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
                      PlotFbo& plot_fbo, const FigureSnapshot& fsnap,
                      FigureEditBox& edit_box, PanelState& st, int supersample) {
@@ -285,27 +239,20 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
     ImGui::Begin("Plot", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
     ImGui::PopStyleVar();
 
-    // GetContentRegionAvail() is in ImGui's logical/screen-coordinate space,
-    // NOT physical framebuffer pixels, and on a DPI-scaled display those
-    // differ. Rendering plot_fbo at the logical size under-resolves it
-    // relative to the pixels it covers, and ImGui then applies its own
-    // logical->physical scaling on top -- the combination is what looked
-    // stretched while resizing. So: render at avail scaled up to physical
-    // pixels, but keep the on-screen display size at the logical avail.
+    // GetContentRegionAvail() is logical, not framebuffer pixels: render at the
+    // physical size but display at the logical size.
     const ImVec2 avail = ImGui::GetContentRegionAvail();
     const ImVec2 fb_scale = ImGui::GetIO().DisplayFramebufferScale;
     const int render_w = std::max(1, static_cast<int>(avail.x * fb_scale.x));
     const int render_h = std::max(1, static_cast<int>(avail.y * fb_scale.y));
     st.live_plot_w.store(render_w, std::memory_order_relaxed);
     st.live_plot_h.store(render_h, std::memory_order_relaxed);
-    // The FBO is allocated supersample times larger in
-    // each axis, but render_w/render_h stay the display size — layout (and so
-    // the `layout` vector used below for hint/navigate hit-testing) stays in
-    // those same coordinates, and only rasterization is enlarged.
+    // The FBO is supersample times larger; render_w/render_h and the layout
+    // stay at display size.
     plot_fbo.ensure_size(render_w, render_h, supersample);
 
-    // From the stored measurements, re-measured only on an event: a new
-    // layout generation, a new size, or File > Refit layout (v1.0 step 15.2).
+    // From stored measurements, re-measured on layout generation, size change
+    // or File > Refit layout.
     const FigureLayout fl = st.layout.fit(fsnap, render_w, render_h);
 
     std::vector<AxesLayout> layout;
@@ -314,10 +261,7 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
                  plot_fbo.supersample(), &layout, &fl);
     plot_fbo.unbind();
 
-    // What "auto" resolved to this frame, for the Cosmetic panel to show. The
-    // layout is the only place it exists -- the snapshot carries the declared
-    // limits, which an automatic axes never uses -- and this is the only point
-    // where the layout and PanelState are both in hand.
+    // Store the resolved auto limits for the Cosmetic panel.
     st.resolved.clear();
     st.resolved.reserve(layout.size());
     for (const AxesLayout& al : layout) {
@@ -336,24 +280,17 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
         st.resolved.push_back(r);
     }
 
-    // GL textures are bottom-up (origin at bottom-left) but ImGui's default
-    // UVs assume top-down image data — flip v (uv0=(0,1), uv1=(1,0)) or the
-    // plot renders upside down.
+    // GL textures are bottom-up; flip v.
     const ImVec2 image_pos = ImGui::GetCursorScreenPos();
     ImGui::Image(static_cast<ImTextureID>(plot_fbo.color_texture()), avail,
                 ImVec2(0.0f, 1.0f), ImVec2(1.0f, 0.0f));
 
-    // Image() itself doesn't participate in ImGui's active-item tracking, so
-    // an invisible button laid exactly on top is what gives correct
-    // IsItemHovered()/IsItemActive() — including keeping a drag "active"
-    // (and thus still delivering io.MouseDelta) even if the cursor slides
-    // off the image mid-drag.
+    // An invisible button over the image provides hover/active tracking,
+    // keeping a drag active if the cursor leaves the image.
     ImGui::SetCursorScreenPos(image_pos);
     ImGui::InvisibleButton("##plot_nav", avail);
 
-    // Click-to-select, and what navigation below is allowed to do with this
-    // frame's input. Read off the button straight after submitting it, while
-    // it is still the "last item" every IsItem*() query means.
+    // Selection and navigation gating, read while the button is the last item.
     PlotNavGate gate;
     const bool in_hovered = ImGui::IsItemHovered();
     {
@@ -369,9 +306,8 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
         in.dragged        = io.MouseDragMaxDistanceSqr[ImGuiMouseButton_Left]
                             >= io.MouseDragThreshold * io.MouseDragThreshold;
 
-        // A boundary between two subplots first (v1.0 step 15.3): what it
-        // owns -- hovering it, pressing on it, the drag that starts -- neither
-        // selects a cell nor navigates one.
+        // Grid boundary dragging first; what it owns doesn't select or
+        // navigate.
         GridDragOut grid = update_grid_drag(st, fsnap, fl, render_w, render_h, in,
                                             4.0f * fb_scale.x);
         if (grid.col_ratios || grid.row_ratios)
@@ -387,10 +323,8 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
         gate = update_plot_selection(st, fsnap, layout, in);
     }
 
-    // Which subplot the panels are editing, now that no panel says so in a
-    // combo of its own. Drawn over the image with the window's draw list, so
-    // it never reaches plot_fbo and so never reaches a saved file. Pointless
-    // with one subplot, which is also the case the menu hides its combo for.
+    // Outline the selected subplot, drawn over the image (never saved). Only
+    // with more than one subplot.
     if (fsnap.axes.size() > 1) {
         for (const AxesLayout& al : layout) {
             if (al.slot.index != st.selected_slot_index) continue;
@@ -406,11 +340,8 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
         }
     }
 
-    // Hit-tests whichever axes cell is under the cursor, independent of
-    // navigate_enabled/selected_slot_index: unlike Navigate, hints must work
-    // over any subplot regardless of which is selected for pan/zoom. Drawn
-    // into plot_fbo's already-rendered texture in a fresh NanoVG bracket,
-    // which is safe because the texture is sampled later.
+    // Hover hints over any subplot (independent of selection), drawn into the
+    // already-rendered texture in a new NanoVG frame.
     if (st.hints_enabled && in_hovered) {
         const ImGuiIO& io = ImGui::GetIO();
         const float cursor_x = (io.MousePos.x - image_pos.x) * fb_scale.x;
@@ -419,11 +350,8 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
             const FigureAxesSnapshot* fa = nullptr;
             for (const auto& a : fsnap.axes)
                 if (a.slot.index == cell->slot.index) { fa = &a; break; }
-            // Hit-testing a 3D cell is a ray cast, not a transform inverse
-            // (spec_3d.md §11): the cursor's ray against every surface in the
-            // scene -- each plane and each bar3d bar -- and then, on the
-            // nearest plane it meets, the same 2D search. A bar answers by
-            // being hit, since it is opaque geometry rather than a sheet.
+            // 3D: ray cast against planes and bars, then the 2D search on the
+            // nearest plane hit.
             std::optional<HintResult> hint;
             if (fa && fa->snap2d()) {
                 st.hint_index.set_frame_key(fsnap.data_generation, cell->slot.index);
@@ -451,10 +379,8 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
         for (const auto& al : layout)
             if (al.slot.index == st.selected_slot_index) { cur = &al; break; }
 
-        // A 3D slot navigates a camera rather than a pair of limits, so it
-        // takes the whole block below rather than sharing it. Both push
-        // through the same FigureEditBox channel, which is what makes a
-        // dragged view survive refresh() in either case.
+        // A 3D slot navigates its camera. Both kinds push through
+        // FigureEditBox, so the view survives refresh().
         const RenderSnapshot3D* sel3d = nullptr;
         for (const auto& a : fsnap.axes)
             if (a.slot.index == st.selected_slot_index) { sel3d = a.snap3d(); break; }
@@ -476,10 +402,8 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
                 moved = true;
             }
 
-            // Fly keys, and the one input gate pan/zoom never needed: they are
-            // read only while the selected cell is hovered or being dragged AND
-            // ImGui does not want the keyboard, or typing "W" into the title
-            // field would fly the camera instead of writing a letter.
+            // Fly keys only while the selected cell is hovered or dragged and
+            // ImGui doesn't want the keyboard (typing "W" shouldn't fly).
             if (gate.keys && !io.WantCaptureKeyboard) {
                 FlyInput fly;
                 fly.forward = ImGui::IsKeyDown(ImGuiKey_W);
@@ -490,10 +414,8 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
                 fly.down    = ImGui::IsKeyDown(ImGuiKey_Q);
                 fly.dt      = io.DeltaTime;
                 if (fly.forward || fly.back || fly.left || fly.right || fly.up || fly.down) {
-                    // The camera's own basis, out of the projector the frame
-                    // was just drawn with -- so A/D strafes across the screen
-                    // whatever angle the box is being viewed from, and W/S
-                    // dollies along the direction it is actually looking.
+                    // The camera basis from this frame's projector (A/D strafe,
+                    // W/S dolly along the view).
                     cam = fly_camera(cam,
                                      cur->proj3d ? cur->proj3d->right()
                                                  : Vec3{ 0.0, 1.0, 0.0 },
@@ -552,29 +474,19 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
         }
     }
 
-    // Everything that draws into plot_fbo is done -- filter the supersampled
-    // target down into the display-size texture ImGui::Image() referenced
-    // earlier. Safe after that Image() call because the texture is not
-    // sampled until ImGui_ImplOpenGL3_RenderDrawData(), later still.
+    // Box-filter the supersampled target into the texture Image() references
+    // (sampled later, at RenderDrawData()).
     plot_fbo.resolve();
 
     ImGui::End();
 }
 
-// The suptitle block, and the Layout section below it, belong to the *figure*
-// rather than to the selected axes -- so both kinds of axes show them, and
-// they are extracted here rather than written twice. A second copy is not a
-// duplication risk in the abstract sense: it is a control that silently stops
-// matching the other one the first time either is touched.
-//
-// No heading of its own: both panels put it under the Figure group's
-// "Suptitle" sub-heading (draw_figure_group() below).
+// The suptitle controls, figure-level and shared by the 2D and 3D panels
+// (under the Figure group's "Suptitle" heading).
 void draw_suptitle_fields(PanelState& st, FigureEditBox& edit_box) {
     auto push = [&]{ edit_box.update_figure([&](FigureEdits& f){ f.suptitle_opts = st.suptitle_local; }); };
 
-    // Three tables rather than one because the middle row is two pairs and
-    // the others are one wide control each -- and a table has no column span.
-    // Their first columns are the same width, so the three read as one.
+    // Three tables (the middle row has two pairs); matching first columns.
     if (begin_field_table("suptxt")) {
         field_row("Suptitle");
         if (ImGui::InputText("##suptitle", st.suptitle_buf, sizeof(st.suptitle_buf)))
@@ -603,15 +515,8 @@ void draw_suptitle_fields(PanelState& st, FigureEditBox& edit_box) {
     }
 }
 
-// Figure-level, like the suptitle above: the margins border the whole grid
-// and the gaps sit between subplots, so neither belongs to the selected
-// axes. There is deliberately no control for the space a tick label or
-// axis title occupies -- that is measured from the text, not chosen. (A 3D
-// cell is the exception the readout below shows: it reserves a fraction of
-// its own frame instead, because its labels move with the camera.)
-//
-// The fields only, with no header of their own: both panels put them under a
-// "Layout" sub-heading of their Figure group (steps 10.4, 10.5).
+// Margins and gaps: figure-level, shared by both panels (under "Layout").
+// Decoration space is measured from text, so there is no control for it.
 void draw_layout_fields(PanelState& st, const FigureSnapshot& fsnap,
                         FigureEditBox& edit_box, int idx) {
     auto push_margins = [&]{ edit_box.update_figure([&](FigureEdits& f){ f.margins = st.margins_local; }); };
@@ -619,9 +524,7 @@ void draw_layout_fields(PanelState& st, const FigureSnapshot& fsnap,
                                  f.col_gap = st.col_gap_local;
                                  f.row_gap = st.row_gap_local; }); };
 
-    // One row each, split: four margins in a narrow cell leave no room for a
-    // unit, so each value names its side instead and the row label carries
-    // the unit.
+    // Split rows: each value names its side; the row label carries the unit.
     if (begin_field_table("margins")) {
         field_row("Margin px");
         split_begin(4);
@@ -636,8 +539,7 @@ void draw_layout_fields(PanelState& st, const FigureSnapshot& fsnap,
         end_field_table();
     }
 
-    // Gaps separate subplots from each other, so on a single-axes figure
-    // there is nothing for them to separate.
+    // Gaps only apply with more than one subplot.
     ImGui::BeginDisabled(fsnap.axes.size() <= 1);
     if (begin_field_table("gaps")) {
         field_row("Gap px");
@@ -650,11 +552,8 @@ void draw_layout_fields(PanelState& st, const FigureSnapshot& fsnap,
     }
     ImGui::EndDisabled();
 
-    // The grid's weights (v1.0 step 15.3), one field per track, read from the
-    // snapshot every frame rather than from a local copy: a typed or dragged
-    // value lands in the snapshot on the next frame and, unlike the margins,
-    // is journaled, so a refresh() does not bring back an older one to fight.
-    // Dragging a boundary on the plot edits the same numbers.
+    // Grid weights, read from the snapshot every frame (they are journaled, so
+    // no local copy is needed). Boundary drags edit the same values.
     const int grid_rows = fsnap.axes.empty() ? 1 : std::max(1, fsnap.axes.front().slot.rows);
     const int grid_cols = fsnap.axes.empty() ? 1 : std::max(1, fsnap.axes.front().slot.cols);
     auto ratio_row = [&](const char* id, const char* label, int n, bool cols) {
@@ -680,11 +579,8 @@ void draw_layout_fields(PanelState& st, const FigureSnapshot& fsnap,
     ratio_row("colratios", "Col ratio", grid_cols, true);
     ratio_row("rowratios", "Row ratio", grid_rows, false);
 
-    // Read-only: the plot frame the current settings actually produce,
-    // for the selected axes. Laid out here from the stored measurements
-    // rather than reported back from the render pass -- the same numbers,
-    // since a dragged value is a submission and the plot panel has already
-    // refit for it this frame, and laying out is cheap without measuring.
+    // Read-only: the selected axes' resulting plot frame, laid out from the
+    // stored measurements.
     const int live_w = st.live_plot_w.load(std::memory_order_relaxed);
     const int live_h = st.live_plot_h.load(std::memory_order_relaxed);
     if (live_w > 0 && live_h > 0) {
@@ -705,9 +601,7 @@ void draw_layout_fields(PanelState& st, const FigureSnapshot& fsnap,
     }
 }
 
-// The Figure group, the one group both panels draw identically -- so it is
-// drawn here once rather than twice. Closed by default, since nothing in it
-// belongs to the axes being edited.
+// The Figure group, shared by both panels; closed by default.
 void draw_figure_group(PanelState& st, const FigureSnapshot& fsnap,
                        FigureEditBox& edit_box, int idx) {
     if (!section("Figure")) return;
@@ -717,15 +611,8 @@ void draw_figure_group(PanelState& st, const FigureSnapshot& fsnap,
     draw_layout_fields(st, fsnap, edit_box, idx);
 }
 
-// The Legend & colorbar group, the second group both panels draw identically
-// (v1.0 step 11.2; the Figure group above was the first). Templated on the
-// edit struct rather than duplicated, because the two differ only in which
-// lane the change goes down -- AxesEdit or AxesEdit3D -- and every field it
-// touches means the same thing in both.
-//
-// `has_colorbar` rather than the snapshot: the two kinds answer it through
-// different overloads of find_colorbar_requests(), and the caller has the
-// snapshot already.
+// The Legend & colorbar group, shared by both panels, templated on the edit
+// struct (AxesEdit or AxesEdit3D).
 template <typename Edit, typename Push>
 void draw_legend_colorbar_group(PanelState& st, bool has_colorbar, Push&& push) {
     auto push_legend   = [&]{ push([&](Edit& e){ e.legend_opts   = st.legend_local; }); };
@@ -774,11 +661,7 @@ void draw_legend_colorbar_group(PanelState& st, bool has_colorbar, Push&& push) 
     ImGui::EndDisabled();
 
     ImGui::SeparatorText("Colorbar");
-    // Whether a colorbar exists at all is a per-plot-object flag
-    // (HeatmapOptions/ScatterZOptions::colorbar), not something this panel
-    // can toggle — so say so rather than showing dead controls. These
-    // cosmetics style every bar of the axis, which since step 11.1 can be
-    // more than one.
+    // Colorbars are requested per plot object; these cosmetics style every bar.
     if (!has_colorbar)
         ImGui::TextDisabled("No colorbar on this axis.");
     if (begin_field_table("cbtext", 2)) {
@@ -823,11 +706,8 @@ void draw_legend_colorbar_group(PanelState& st, bool has_colorbar, Push&& push) 
     }
 }
 
-// The Cosmetic panel for a 3D slot (v1.0 step 2). A separate function rather
-// than branches threaded through the 2D one: nearly every section differs --
-// three axes instead of two, a camera instead of a pair of limits, a box
-// instead of a spine -- and the handful that are genuinely shared are the two
-// figure-level helpers above, which both call.
+// The Cosmetic panel for a 3D slot (separate from 2D: nearly every section
+// differs).
 void draw_cosmetic_3d(PanelState& st, const RenderSnapshot3D& sn,
                       const FigureSnapshot& fsnap, FigureEditBox& edit_box, int idx) {
     auto& sty = st.axes_style_local;
@@ -837,9 +717,7 @@ void draw_cosmetic_3d(PanelState& st, const RenderSnapshot3D& sn,
     auto push_camera = [&]{ st.camera_local = clamp_camera(st.camera_local);
                             edit_box.update3d(idx, [&](AxesEdit3D& e){ e.camera = st.camera_local; }); };
     auto push_box    = [&]{ edit_box.update3d(idx, [&](AxesEdit3D& e){ e.box_style = st.box3d_local; }); };
-    // Clamped here for the same reason the limits below are refused when
-    // degenerate: Axes3D::set_box_aspect() rejects a non-positive side, and
-    // the panel must not be able to reach a state the public API would not.
+    // Clamped: Axes3D::set_box_aspect() rejects non-positive sides.
     auto push_aspect = [&]{
         st.aspect_local.x = std::clamp(st.aspect_local.x, 0.05, 20.0);
         st.aspect_local.y = std::clamp(st.aspect_local.y, 0.05, 20.0);
@@ -847,16 +725,12 @@ void draw_cosmetic_3d(PanelState& st, const RenderSnapshot3D& sn,
         edit_box.update3d(idx, [&](AxesEdit3D& e){ e.aspect = st.aspect_local; });
     };
 
-    // Five groups (v1.0 steps 10.4 and 11.2), each one CollapsingHeader
-    // holding what used to be separate sections, now SeparatorText
-    // sub-headings inside it:
-    //   View   -- how the box is looked at and drawn: camera, box, grid
-    //   Figure -- the whole figure, not this axes: suptitle, layout
-    //   Axis   -- this axes' own text and frame: titles, axis frame
-    //   Ticks  -- what the axes show along them: limits, ticks and labels
-    //   Legend & colorbar -- the two hoisted decorations, shared with 2D
-    // Limits come first in Ticks, ahead of the three override tables, which
-    // are long enough to push anything after them out of sight.
+    // Five groups:
+    //   View   -- camera, box, grid
+    //   Figure -- suptitle, layout
+    //   Axis   -- titles, axis frame
+    //   Ticks  -- limits (first), ticks and labels
+    //   Legend & colorbar -- shared with 2D
 
     // ==== View ============================================================
     if (section("View", true)) {
@@ -867,8 +741,7 @@ void draw_cosmetic_3d(PanelState& st, const RenderSnapshot3D& sn,
             if (drag_double("##azim", &st.camera_local.azimuth, 0.25f, "%.1f deg")) push_camera();
             field_next("Elev");
             if (drag_double("##elev", &st.camera_local.elevation, 0.25f, "%.1f deg")) push_camera();
-            // FOV only under perspective, so an orthographic row leaves its
-            // second pair empty rather than showing a field that does nothing.
+            // FOV only under perspective.
             field_row("Zoom");
             if (drag_double("##zoom3d", &st.camera_local.zoom, 0.005f, "%.2fx")) push_camera();
             if (persp) {
@@ -882,11 +755,8 @@ void draw_cosmetic_3d(PanelState& st, const RenderSnapshot3D& sn,
             if (projection_combo("##proj3d", st.camera_local.projection)) push_camera();
             end_field_table();
         }
-        // There is no distance to set in either mode: the box is fitted to
-        // the cell every frame (see spec_3d.md §2), which under perspective
-        // is what *derives* the eye distance from the field of view. So fov
-        // is the whole of "how much perspective", and zoom stays a plain
-        // magnification of the finished picture in both modes.
+        // No distance control: the box is fitted every frame, and under
+        // perspective fov determines the eye distance; zoom magnifies.
         ImGui::TextDisabled("Target %.2f, %.2f, %.2f",
                             st.camera_local.target.x, st.camera_local.target.y,
                             st.camera_local.target.z);
@@ -915,9 +785,7 @@ void draw_cosmetic_3d(PanelState& st, const RenderSnapshot3D& sn,
             if (drag_float("##boxmargin", &st.box3d_local.margin, 0.0f, 0.45f, 0.001f, "%.3f")) push_box();
             end_field_table();
         }
-        // The one place 3D departs from "decoration space is measured": the
-        // margin is chosen because a 3D label's position depends on the
-        // camera and the camera's fit depends on the frame.
+        // Chosen, not measured: 3D label positions depend on the camera fit.
         ImGui::TextDisabled("Margin reserves room for labels, which move with the camera.");
         if (ImGui::Checkbox("Panes", &st.box3d_local.panes)) push_box();
         if (begin_field_table("boxcol", 2)) {
@@ -927,11 +795,7 @@ void draw_cosmetic_3d(PanelState& st, const RenderSnapshot3D& sn,
             if (color_swatch("##paneedge", st.box3d_local.pane_edge_color)) push_box();
             end_field_table();
         }
-        // "Grid##grid3d", not "Grid": an ImGui id is hashed from the label,
-        // so a checkbox labelled the same as a CollapsingHeader is a second
-        // item with that header's id in the same window. Here the heading is
-        // only a SeparatorText since step 10.4, which has no id, and the 2D
-        // panel's (step 10.5) is too; the suffix is kept all the same.
+        // "##grid3d" suffix avoids an id clash with a same-named header.
         if (ImGui::Checkbox("Grid##grid3d", &st.grid_local))
             edit_box.update3d(idx, [&](AxesEdit3D& e){ e.grid_enabled = st.grid_local; });
         ImGui::BeginDisabled(!st.grid_local);
@@ -948,16 +812,14 @@ void draw_cosmetic_3d(PanelState& st, const RenderSnapshot3D& sn,
     }
 
     // ==== Figure ==========================================================
-    // Figure-level, and the same code the 2D panel calls.
+    // Shared with the 2D panel.
     draw_figure_group(st, fsnap, edit_box, idx);
 
     // ==== Axis ============================================================
     if (section("Axis", true)) {
         ImGui::SeparatorText("Titles");
-        // Each title as its text field, then its colour and size on the row
-        // under it -- so a colour sits next to the text it colours rather than
-        // in a block of three further down. Two tables per title, because the
-        // text wants the whole width and a table has no column span.
+        // Each title's text field, then its color and size on the next row
+        // (separate tables; no column span).
         struct TitleUi {
             const char* label; const char* id;
             char* buf; std::size_t cap;
@@ -1011,13 +873,8 @@ void draw_cosmetic_3d(PanelState& st, const RenderSnapshot3D& sn,
         }
         ImGui::SeparatorText("Axis position");
         {
-            // Six placements, because a 3D axis's position is two numbers: an
-            // x axis needs a y *and* a z, and its four parallel box edges are
-            // the four combinations of their extremes (v1.0 step 20). Auto is
-            // the camera's silhouette edge, which is why it is named for that
-            // here and for Low in the 2D panel. Low and High are absolute --
-            // that coordinate's data minimum or maximum -- so an axis set to
-            // one stops migrating as the box turns.
+            // Six placements (two coordinates per axis). Auto is the silhouette
+            // edge; Low/High are fixed box faces.
             struct Pos3 {
                 const char*   label;
                 bool          row;    // starts a row, rather than continuing one
@@ -1037,8 +894,7 @@ void draw_cosmetic_3d(PanelState& st, const RenderSnapshot3D& sn,
                 for (const Pos3& p : pos3) {
                     ImGui::PushID(id++);
                     if (p.row) field_row(p.label); else field_next(p.label);
-                    // Greyed rather than hidden while its component is
-                    // pinned, so it stays visible what is overriding it.
+                    // Greyed while its component is pinned.
                     ImGui::BeginDisabled(p.pin->has_value());
                     if (axis_position_combo("##pos", *p.pos, "Auto (camera)")) push_style();
                     ImGui::EndDisabled();
@@ -1047,10 +903,8 @@ void draw_cosmetic_3d(PanelState& st, const RenderSnapshot3D& sn,
                 end_field_table();
             }
 
-            // Three components, not six per-axis pins: the x and z axes both
-            // want the same y, so an origin says it once. Setting all three
-            // is the crosshair; setting one crosses on that coordinate and
-            // leaves the other two on the box.
+            // Three origin components (not six pins): x and z axes share the
+            // same y.
             ImGui::TextDisabled("Origin components, which supersede the above.");
             struct Org {
                 const char* label;
@@ -1076,8 +930,7 @@ void draw_cosmetic_3d(PanelState& st, const RenderSnapshot3D& sn,
                     }
                     ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
                     ImGui::BeginDisabled(!pinned);
-                    // The checkbox consumed field_row()'s fill width; ask
-                    // again, as the limits rows do for the same reason.
+                    // The checkbox used the fill width; request it again.
                     ImGui::SetNextItemWidth(-FLT_MIN);
                     if (drag_double("##pinval", o.scratch, limit_drag_speed(*o.lo, *o.hi))) {
                         *o.pin = *o.scratch;
@@ -1115,10 +968,7 @@ void draw_cosmetic_3d(PanelState& st, const RenderSnapshot3D& sn,
             for (const AxisLim& a : axes) {
                 ImGui::PushID(a.label);
                 auto push = [&]{
-                    // A degenerate pair divides by zero in Transform3D, so it
-                    // is refused here exactly as Axes3D::set_xlim() refuses
-                    // it -- the panel must not be able to reach a state the
-                    // public API rejects.
+                    // Refuse a degenerate pair, as Axes3D::set_xlim() does.
                     if (*a.lo == *a.hi) return;
                     edit_box.update3d(idx, [&](AxesEdit3D& e){
                         e.*a.lo_field = *a.lo;
@@ -1126,11 +976,7 @@ void draw_cosmetic_3d(PanelState& st, const RenderSnapshot3D& sn,
                         e.*a.auto_field = false;
                     });
                 };
-                // Drag fields, as the 2D section uses, rather than
-                // type-and-commit boxes: a limit is a thing you want to feel
-                // your way to, and a field that shows nothing until it is
-                // committed reads as a control that does not work.
-                // Ctrl+click still types an exact value.
+                // Drag fields (Ctrl+click types an exact value).
                 const float speed = limit_drag_speed(*a.lo, *a.hi);
                 field_row(a.label);
                 split_begin(2);
@@ -1142,16 +988,11 @@ void draw_cosmetic_3d(PanelState& st, const RenderSnapshot3D& sn,
             }
             end_field_table();
         }
-        // Worth saying, because the box visibly does not move when these
-        // change: a limit says what range of data the box *spans*, not how
-        // big it is. Its size is the Box aspect and the automatic fit -- see
-        // spec_3d.md §2.
+        // Limits set the data range the box spans, not its size.
         ImGui::TextDisabled("Limits set the range the box spans.");
         ImGui::TextDisabled("Its size is under View: Box aspect and the camera.");
         ImGui::SeparatorText("Ticks & labels");
-        // The mark's colour, length and width on one row, the label's colour
-        // and size on the next -- one table, so the label row's second pair
-        // lines up under the mark row's.
+        // Mark on one row, label on the next, in one table.
         if (begin_field_table("tick3d", 3)) {
             field_row("Mark");
             if (color_swatch("##tickcol3d", sty.tick_color)) push_style();
@@ -1165,10 +1006,7 @@ void draw_cosmetic_3d(PanelState& st, const RenderSnapshot3D& sn,
             if (drag_float("##labsz3d", &sty.label_fontsize, 1.0f, 96.0f, 0.2f, "%.1f px")) push_style();
             end_field_table();
         }
-        // Not a 2D control with a third copy: a foreshortened edge holds
-        // fewer numbers than a 2D axis of the same tick list, so the labels
-        // are thinned per camera. Setting a table here is how a caller says
-        // which numbers matter.
+        // Tick tables choose which numbers show (labels are thinned per camera).
         ImGui::TextDisabled("Labels are thinned to fit the edge they sit on.");
 
         struct AxisTicks {
@@ -1188,17 +1026,10 @@ void draw_cosmetic_3d(PanelState& st, const RenderSnapshot3D& sn,
         }
     }
 
-    // Planes, bar grids and surfaces are not here. Since v1.0 step 10.3 each
-    // object's controls live in that object's own tab of the Data panel --
-    // the rule being that anything with a tab there is edited there, and
-    // nowhere else. See draw_plane_tab() and draw_object_appearance() in
-    // data_panel.cpp.
+    // Planes, bar grids and surfaces are edited in their Data-panel tabs.
 
     // ==== Legend & colorbar ===============================================
-    // The fifth group, and 3D's only one the 2D panel also has in full (step
-    // 11.2). It was absent while both were read off what the planes *hold* --
-    // which for a colorbar meant the styling could not be set at all, since a
-    // Plane2D has no setter for it. Both are the axes' own now.
+    // Shared with the 2D panel; styling is the axes'.
     draw_legend_colorbar_group<AxesEdit3D>(
         st, !find_colorbar_requests(sn).empty(),
         [&](auto&& fn){ edit_box.update3d(idx, fn); });
@@ -1224,20 +1055,14 @@ int sync_selected_slot(PanelState& st, const FigureSnapshot& fsnap) {
     if (fsnap.axes.empty()) return -1;
     const FigureAxesSnapshot* fa = axes_for_slot(fsnap, st.selected_slot_index);
     if (!fa) fa = &fsnap.axes.front();
-    // Normalized rather than only resolved: the menu's File > Resize and the
-    // Save dialog's frame mode also read selected_slot_index, and a subplot
-    // that does not exist has no frame to size by.
+    // Normalized: File > Resize and the Save dialog read selected_slot_index.
     st.selected_slot_index = fa->slot.index;
     if (st.last_synced_slot != fa->slot.index) {
         std::visit([&](const auto& sn) { sync_from_snapshot(st, fa->slot.index, sn); },
                    fa->snap);
     } else if (const RenderSnapshot3D* sn = fa->snap3d()) {
-        // The caller added or dropped an object. Every index above the change
-        // now names a different one, so the rows are re-seeded rather than
-        // resized -- see sync_planes(). Here rather than in a panel since
-        // step 10.3: the Data panel edits these copies, and a re-seed that
-        // only the Cosmetic panel ran would leave them stale whenever it is
-        // hidden.
+        // Object count changed: re-seed the lists (indices shifted). Done here
+        // so it happens even with the Cosmetic panel hidden.
         if (st.planes_local.size() != sn->planes.size())
             sync_planes(st, *sn);
         if (st.bars3d_local.size() != sn->bars3d.size() ||
@@ -1259,8 +1084,7 @@ PlotNavGate update_plot_selection(PanelState& st, const FigureSnapshot& fsnap,
                                   const std::vector<AxesLayout>& layout,
                                   const PlotPointer& in) {
     PlotNavGate gate;
-    // First, so that whatever navigation does below starts from the selected
-    // slot's own camera and limits even if no panel has drawn since it moved.
+    // First, so navigation starts from the selected slot's own camera/limits.
     const int selected = sync_selected_slot(st, fsnap);
     if (selected < 0) {
         st.press_slot = -1;
@@ -1274,9 +1098,7 @@ PlotNavGate update_plot_selection(PanelState& st, const FigureSnapshot& fsnap,
     if (in.pressed) {
         st.press_slot        = under_slot;
         st.press_on_selected = under_slot == selected;
-        // The second press of a double-click. If the first click is the one
-        // that selected this cell, the pair was a way of picking it, not of
-        // asking for its default view back.
+        // A double-click whose first click selected this cell doesn't reset it.
         gate.reset = in.double_clicked && st.press_on_selected
                      && !st.selected_by_last_click;
         st.selected_by_last_click = false;
@@ -1288,8 +1110,7 @@ PlotNavGate update_plot_selection(PanelState& st, const FigureSnapshot& fsnap,
     gate.keys  = over_selected || gate.drag;
 
     if (in.released) {
-        // A click, not the end of a drag, and ending where it began -- a press
-        // on one cell released over another says nothing about either.
+        // A click (not a drag) that ends in the cell it began in.
         if (!in.dragged && st.press_slot >= 0 && under_slot == st.press_slot
             && st.press_slot != selected) {
             select_slot(st, fsnap, st.press_slot);
@@ -1305,8 +1126,7 @@ GridBoundary find_grid_boundary(const FigureSnapshot& fsnap, const GridTracks& t
                                 float x, float y, float tol) {
     const int cols = static_cast<int>(t.col_x.size());
     const int rows = static_cast<int>(t.row_y.size());
-    // Whether a subplot covers both sides of boundary k (between tracks k-1
-    // and k) at track `other` of the other axis.
+    // Whether a subplot covers both sides of boundary k at track `other`.
     auto crossed = [&](bool col_boundary, int k, int other) {
         for (const auto& fa : fsnap.axes) {
             const AxesSlot& s = fa.slot;
@@ -1320,7 +1140,7 @@ GridBoundary find_grid_boundary(const FigureSnapshot& fsnap, const GridTracks& t
         }
         return false;
     };
-    // Which track of the other axis `v` is in, -1 in a gap or outside.
+    // The track of the other axis containing `v`, or -1.
     auto track_at = [](const std::vector<float>& pos, const std::vector<float>& len, float v) {
         for (std::size_t i = 0; i < pos.size(); ++i)
             if (v >= pos[i] && v <= pos[i] + len[i]) return static_cast<int>(i);
@@ -1359,8 +1179,7 @@ GridDragOut update_grid_drag(PanelState& st, const FigureSnapshot& fsnap,
         out.owns = true;
         out.cursor_ew = g.cols;
         out.cursor_ns = !g.cols;
-        // The two tracks' split, from the press: never smaller than either
-        // track's minimum, and left alone when the two minimums do not fit.
+        // Split from the press state, respecting both tracks' minimums.
         const float d     = (g.cols ? in.x : in.y) - g.press;
         const float total = g.len_a + g.len_b;
         float a = g.len_a;
@@ -1398,9 +1217,8 @@ GridDragOut update_grid_drag(PanelState& st, const FigureSnapshot& fsnap,
         return out;
     }
 
-    // A track can shrink to what its own single-track cells reserve plus the
-    // smallest frame; a span's reservation is shared with its other tracks,
-    // so it sets no minimum on any one of them.
+    // Minimum track size: its single-track cells' reservations plus the
+    // smallest frame (spans set no minimum).
     auto min_len = [&](int track) {
         float m = 0.0f;
         for (const CellLayout& c : layout.cells) {
@@ -1426,35 +1244,23 @@ GridDragOut update_grid_drag(PanelState& st, const FigureSnapshot& fsnap,
     return out;
 }
 
-// Not file-local, unlike the sections above: sextant_layout_test drives this
-// directly through a null-backend ImGui frame, which is the only way to assert
-// on panel behaviour without a window. draw_data_panel() is reachable the same
-// way, for the same reason.
+// Not file-local: the layout test drives it through a null-backend frame.
 void draw_cosmetic_panel(const FigureSnapshot& fsnap, FigureEditBox& edit_box, PanelState& st) {
     ImGui::Begin("Cosmetic", nullptr, ImGuiWindowFlags_NoCollapse);
 
-    // Navigate and Hints used to head this panel. They live in the menu bar's
-    // Edit menu now: neither is a property of the figure or of the selected
-    // axes — they say what the mouse does over the plot — and hiding Cosmetic
-    // used to take the only way of reaching them with it. Everything below
-    // this point does edit the selected axes, which is what this panel is for.
+    // Navigate and Hints are in the Edit menu; this panel edits the selected
+    // axes only.
     if (fsnap.axes.empty()) {
         ImGui::TextDisabled("No axes yet.");
         ImGui::End();
         return;
     }
 
-    // Which axes this edits is chosen in the menu bar or by clicking a subplot
-    // (step 10.2) -- no longer by a combo here, which the Data panel had to
-    // duplicate for whenever this panel was hidden. Synced here as well as by
-    // the plot, so the panel is correct driven on its own (as the tests do).
+    // The selection comes from the menu bar or a click; synced here too so the
+    // panel works on its own (as in tests).
     const FigureAxesSnapshot* cur = axes_for_slot(fsnap, sync_selected_slot(st, fsnap));
 
-    // Which sections are drawn depends on the selected slot's kind. Nearly
-    // every one of them differs -- three axes against two, a camera against a
-    // pair of limits -- so the two kinds get separate functions rather than
-    // one function full of branches; what they genuinely share is the Figure
-    // group both call.
+    // Separate functions per kind; they share the Figure group.
     sync_figure_from_snapshot(st, fsnap);
     sync_layout_from_snapshot(st, fsnap);
 
@@ -1471,24 +1277,18 @@ void draw_cosmetic_panel(const FigureSnapshot& fsnap, FigureEditBox& edit_box, P
     const RenderSnapshot* cur2d = cur->snap2d();
     track_resolved_limits(st, idx, cur2d->xlim_auto, cur2d->ylim_auto, false);
 
-    // Each group republishes its whole options struct on any change, the
-    // pattern axes_style has always used — AxesEdit carries one optional per
-    // struct rather than per field.
+    // Each group republishes its whole options struct on change.
     auto& sty = st.axes_style_local;
     auto push_style    = [&]{ edit_box.update(idx, [&](AxesEdit& e){ e.axes_style     = sty; }); };
     auto push_grid     = [&]{ edit_box.update(idx, [&](AxesEdit& e){ e.grid_opts      = st.grid_opts_local; }); };
     auto push_legend   = [&]{ edit_box.update(idx, [&](AxesEdit& e){ e.legend_opts    = st.legend_local; }); };
     auto push_colorbar = [&]{ edit_box.update(idx, [&](AxesEdit& e){ e.colorbar_opts  = st.colorbar_local; }); };
 
-    // Four groups (v1.0 step 10.5), the 3D panel's shape (step 10.4) wherever
-    // the two kinds share a group, so a selection that moves between a 2D and
-    // a 3D slot finds the same things under the same names:
-    //   Figure -- the whole figure, not this axes: suptitle, layout
-    //   Axis   -- this axes' own text and frame: titles, axis frame, grid
-    //   Ticks  -- what the axes show along them: limits, ticks and labels
-    //   Legend & colorbar -- the two keys, which 3D has no controls for
-    // There is no View group: with no camera and no box, a 2D axes has only
-    // its grid to put there, and a grid is drawn in the frame it lines.
+    // Four groups, matching the 3D panel's names:
+    //   Figure -- suptitle, layout
+    //   Axis   -- titles, axis frame, grid
+    //   Ticks  -- limits, ticks and labels
+    //   Legend & colorbar
 
     // ==== Figure ==========================================================
     draw_figure_group(st, fsnap, edit_box, idx);
@@ -1496,8 +1296,7 @@ void draw_cosmetic_panel(const FigureSnapshot& fsnap, FigureEditBox& edit_box, P
     // ==== Axis ============================================================
     if (section("Axis", true)) {
         ImGui::SeparatorText("Titles");
-        // Each title's text, then its colour and size on the row under it --
-        // two tables per title, as in 3D, because a table has no column span.
+        // Each title's text, then its color and size on the next row.
         struct TitleUi {
             const char* label; const char* id;
             char* buf; std::size_t cap;
@@ -1547,9 +1346,7 @@ void draw_cosmetic_panel(const FigureSnapshot& fsnap, FigureEditBox& edit_box, P
             if (drag_float("##framemargin", &sty.frame_margin, 0.0f, 400.0f, 0.5f, "%.0f px")) push_style();
             end_field_table();
         }
-        // Which of the four frame edges draw (v1.0 step 19). Independent of
-        // the ticks: turning an edge off that an axis sits on leaves that
-        // axis' marks and numbers with no line, which is deliberate.
+        // Frame edges, independent of ticks.
         if (begin_field_table("spines", 2)) {
             field_row("Bottom");
             if (ImGui::Checkbox("##spinebottom", &sty.spine_bottom)) push_style();
@@ -1564,13 +1361,8 @@ void draw_cosmetic_panel(const FigureSnapshot& fsnap, FigureEditBox& edit_box, P
 
         ImGui::SeparatorText("Axis position");
         {
-            // One row per axis: where it sits, then the origin component that
-            // supersedes it. The component is named by the coordinate it is
-            // measured in rather than by the axis it moves -- "X axis ... at
-            // y" -- because that is the only spelling in which the number the
-            // user types and the box it is dragged against are the same
-            // thing. `pin` and `scratch` are deliberately separate: the
-            // scratch survives un-ticking, so the value comes back.
+            // One row per axis: its placement, then the origin component
+            // ("X axis ... at y"). `scratch` survives un-ticking the pin.
             struct AxisPos {
                 const char* label;
                 const char* pin_label;
@@ -1590,8 +1382,7 @@ void draw_cosmetic_panel(const FigureSnapshot& fsnap, FigureEditBox& edit_box, P
                 for (const AxisPos& a : pos_axes) {
                     ImGui::PushID(a.label);
                     field_row(a.label);
-                    // Greyed rather than hidden while pinned, so it stays
-                    // visible that the enum is what the pin is overriding.
+                    // Greyed while pinned.
                     ImGui::BeginDisabled(a.pin->has_value());
                     if (axis_position_combo("##pos", *a.pos)) push_style();
                     ImGui::EndDisabled();
@@ -1605,8 +1396,7 @@ void draw_cosmetic_panel(const FigureSnapshot& fsnap, FigureEditBox& edit_box, P
                     }
                     ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
                     ImGui::BeginDisabled(!pinned);
-                    // The checkbox consumed field_next()'s fill width; ask
-                    // again, as the limits rows above do for the same reason.
+                    // The checkbox used the fill width; request it again.
                     ImGui::SetNextItemWidth(-FLT_MIN);
                     if (drag_double("##pinval", a.scratch, limit_drag_speed(*a.lo, *a.hi))) {
                         *a.pin = *a.scratch;
@@ -1619,9 +1409,7 @@ void draw_cosmetic_panel(const FigureSnapshot& fsnap, FigureEditBox& edit_box, P
             }
         }
         ImGui::SeparatorText("Grid");
-        // Labelled like the sub-heading above it, which is safe only because
-        // a SeparatorText has no id; the ##suffix keeps it apart from the 3D
-        // panel's own "Grid##grid3d" all the same.
+        // The ##suffix keeps it apart from the 3D panel's grid checkbox.
         if (ImGui::Checkbox("Grid##grid", &st.grid_local))
             edit_box.update(idx, [&](AxesEdit& e){ e.grid_enabled = st.grid_local; });
         ImGui::BeginDisabled(!st.grid_local);
@@ -1656,18 +1444,14 @@ void draw_cosmetic_panel(const FigureSnapshot& fsnap, FigureEditBox& edit_box, P
         if (begin_field_table("lim")) {
             for (const AxisLim& a : axes) {
                 ImGui::PushID(a.label);
-                // One row per axis: its Auto box, then low and high sharing
-                // what is left of the cell. Unlike 3D, 2D has always had the
-                // box -- a 2D axes goes back to auto from here, where a 3D one
-                // does it through Reset view.
+                // One row per axis: Auto, then low and high.
                 field_row(a.label);
                 if (ImGui::Checkbox("Auto", a.autoscale))
                     edit_box.update(idx, [&](AxesEdit& e){ e.*a.auto_field = *a.autoscale; });
                 ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
                 ImGui::BeginDisabled(*a.autoscale);
                 const float speed = limit_drag_speed(*a.lo, *a.hi);
-                // The checkbox consumed field_row()'s fill width; ask again,
-                // or the split would divide the column's default item width.
+                // The checkbox used the fill width; request it again.
                 ImGui::SetNextItemWidth(-FLT_MIN);
                 split_begin(2);
                 if (drag_double("##lo", a.lo, speed))
@@ -1682,7 +1466,7 @@ void draw_cosmetic_panel(const FigureSnapshot& fsnap, FigureEditBox& edit_box, P
             end_field_table();
         }
         ImGui::SeparatorText("Ticks & labels");
-        // Mark over Label in one table, so the second pairs line up.
+        // Mark over Label in one table, so pairs line up.
         if (begin_field_table("tick", 3)) {
             field_row("Mark");
             if (color_swatch("##tickcol", sty.tick_color)) push_style();
@@ -1706,7 +1490,7 @@ void draw_cosmetic_panel(const FigureSnapshot& fsnap, FigureEditBox& edit_box, P
     }
 
     // ==== Legend & colorbar ===============================================
-    // One definition, shared with the 3D panel since step 11.2.
+    // Shared with the 3D panel.
     draw_legend_colorbar_group<AxesEdit>(
         st, !find_colorbar_requests(*cur2d).empty(),
         [&](auto&& fn){ edit_box.update(idx, fn); });
@@ -1716,27 +1500,21 @@ void draw_cosmetic_panel(const FigureSnapshot& fsnap, FigureEditBox& edit_box, P
 
 namespace {
 
-// Top-of-window "File"/"View" menu. Must run before
-// ensure_layout()/DockSpaceOverViewport() — BeginMainMenuBar()
-// shrinks ImGui's main-viewport WorkSize by its own height as it's
-// submitted, and the dockspace needs to see that shrunk size to leave room
-// for the menu bar rather than sit underneath it.
+// The main menu bar. Must run before ensure_layout()/DockSpaceOverViewport(),
+// so the dockspace sees the work area shrunk by the menu bar.
 void draw_menu_bar(const FigureSnapshot& fsnap, PanelState& st) {
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("File")) {
             if (ImGui::MenuItem("Save")) {
                 if (!st.save_dialog_open) {
-                    // Prefill with the live plot size so the dialog shows
-                    // real numbers (not zeros) the first time it opens.
+                    // Prefill with the live plot size.
                     st.save_width  = st.live_plot_w.load(std::memory_order_relaxed);
                     st.save_height = st.live_plot_h.load(std::memory_order_relaxed);
                 }
                 st.save_dialog_open = true;
             }
             if (ImGui::MenuItem("Resize to plot frame")) {
-                // Prefill with the frame the selected axes currently has, so
-                // the dialog opens on the status quo and a nudge from there
-                // is meaningful.
+                // Prefill with the selected axes' current frame.
                 if (!st.resize_dialog_open) {
                     const int lw = st.live_plot_w.load(std::memory_order_relaxed);
                     const int lh = st.live_plot_h.load(std::memory_order_relaxed);
@@ -1753,26 +1531,20 @@ void draw_menu_bar(const FigureSnapshot& fsnap, PanelState& st) {
                 }
                 st.resize_dialog_open = true;
             }
-            // A refit on demand: re-measure what navigation left frozen, the
-            // tick labels, without having to resize the window for it.
+            // Re-measure on demand (e.g. tick labels frozen by navigation).
             if (ImGui::MenuItem("Refit layout"))
                 st.layout.request_refit();
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("View")) {
             ImGui::MenuItem("Cosmetic Panel", nullptr, &st.cosmetic_visible);
-            // Turning Data on should bring it to the front of the shared tab
-            // bar; toggling Cosmetic must not. ensure_layout() consumes and
-            // clears the flag on its next rebuild.
+            // Turning Data on brings it to the front; ensure_layout() clears
+            // the flag.
             if (ImGui::MenuItem("Data Panel", nullptr, &st.data_visible))
                 st.focus_data_on_rebuild = st.data_visible;
             ImGui::EndMenu();
         }
-        // The two interaction modes. They belong here rather than in the
-        // Cosmetic panel because neither is a property of a figure or of the
-        // selected axes — they govern what the mouse does over the plot — and
-        // because Cosmetic can be hidden, which used to take the only way of
-        // reaching them with it.
+        // Interaction modes: they govern the mouse over the plot.
         if (ImGui::BeginMenu("Edit")) {
             ImGui::MenuItem("Navigate", nullptr, &st.navigate_enabled);
             if (ImGui::IsItemHovered())
@@ -1783,10 +1555,7 @@ void draw_menu_bar(const FigureSnapshot& fsnap, PanelState& st) {
                 ImGui::SetTooltip("Show a tooltip for the data point under the cursor.");
             ImGui::EndMenu();
         }
-        // The subplot every panel edits. Here rather than in the panels
-        // (step 10.2) because it outlives either of them being hidden, which
-        // is why there used to be two copies. Clicking a subplot sets the
-        // same selection.
+        // The subplot every panel edits (clicking a subplot also sets it).
         if (fsnap.axes.size() > 1) {
             int sel = st.selected_slot_index;
             ImGui::SetNextItemWidth(220.0f);
@@ -1800,14 +1569,9 @@ void draw_menu_bar(const FigureSnapshot& fsnap, PanelState& st) {
     }
 }
 
-// Undocked popup for the save path/size, opened from the File menu. Flagged
-// NoDocking and never registered with the dockspace, so it floats freely.
-//
-// The "Figure / Plot frame" selector and size fields are shared by the Save
-// and Resize dialogs so the two mean the same thing by the same words. In
-// PlotFrame mode the entered numbers describe the selected subplot's data
-// area and the figure size is derived from them; the derived number is shown,
-// since it is what the file or the window actually becomes.
+// Floating save dialog (NoDocking). The "Figure / Plot frame" selector is
+// shared with the Resize dialog; in PlotFrame mode the figure size is derived
+// and shown.
 void size_mode_fields(const FigureSnapshot& fsnap, PanelState& st,
                       PanelState::SizeMode& mode, int* w, int* h,
                       const char* frame_hint) {
@@ -1829,8 +1593,7 @@ void size_mode_fields(const FigureSnapshot& fsnap, PanelState& st,
                                 static_cast<double>(s.width), static_cast<double>(s.height),
                                 st.selected_slot_index);
         }
-        // Legend and colorbar are carved from the cell that owns them, so a
-        // frame size only pins down the axes it was asked about.
+        // A frame size only determines the axes it was asked about.
         if (fsnap.axes.size() > 1)
             ImGui::TextDisabled("Other subplots may differ (legend/colorbar).");
     } else {
@@ -1838,9 +1601,7 @@ void size_mode_fields(const FigureSnapshot& fsnap, PanelState& st,
     }
 }
 
-// Whether the typed filename asks for the vector path. The same extension test
-// the save site makes, and here so the dialog offers the bound that the save
-// will actually consult rather than both of them.
+// Whether the filename asks for SVG (the same test the save site uses).
 bool save_path_is_svg(const char* path) {
     const std::string s = path ? path : "";
     const auto dot = s.rfind('.');
@@ -1855,15 +1616,9 @@ bool scene_has_3d(const FigureSnapshot& fsnap) {
     return false;
 }
 
-// The modal a knowingly-wrong export raises. It is modal rather than a status
-// line because the file is already written: the user is about to go and look
-// at a picture that has geometry on the wrong side of other geometry, and the
-// one moment they can be told is now. The text is the exporter's own sentence,
-// which names the bound that bound and the number to beat.
-// An undocked window rather than a true modal, which is what every other
-// dialog here is -- a popup would have to be opened from inside the same ID
-// scope it is drawn in, and the save that raises this happens later in the
-// frame and outside every window. It still has to be dismissed by hand.
+// The warning window raised by a knowingly misordered export (the file is
+// already written). Shows the exporter's own sentence. An undocked window
+// rather than a popup, since it is raised outside any window scope.
 void draw_save_warning(PanelState& st) {
     if (st.save_warning.empty()) return;
     st.save_warning_open = false;
@@ -1893,11 +1648,8 @@ void draw_save_dialog(const FigureSnapshot& fsnap, PanelState& st) {
     size_mode_fields(fsnap, st, st.save_size_mode, &st.save_width, &st.save_height,
                      "<=0 uses the Plot panel's current size.");
 
-    // The bound each format is allowed to give up at, shown only for the
-    // format the filename names and only when the figure has 3D in it -- these
-    // mean nothing for a 2D figure, and a control that cannot change the
-    // output is worse than no control. Both are "0 = automatic", so the
-    // default state of the dialog is the default behaviour.
+    // Export bounds, only for the chosen format and only when the figure has
+    // 3D (0 = automatic).
     if (scene_has_3d(fsnap)) {
         ImGui::Separator();
         if (save_path_is_svg(st.save_path_buf)) {
@@ -1924,9 +1676,7 @@ void draw_save_dialog(const FigureSnapshot& fsnap, PanelState& st) {
     ImGui::End();
 }
 
-// Resizes the live window so the selected subplot's plot frame
-// comes out at the requested size — the figure size is derived, and the
-// window then grows by the menu bar and Cosmetic column on top of that.
+// Resizes the window so the selected subplot's frame gets the requested size.
 void draw_resize_dialog(const FigureSnapshot& fsnap, PanelState& st) {
     if (!st.resize_dialog_open) return;
 
@@ -1934,8 +1684,7 @@ void draw_resize_dialog(const FigureSnapshot& fsnap, PanelState& st) {
     ImGui::Begin("Resize", &st.resize_dialog_open,
                  ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_AlwaysAutoResize);
 
-    // Always frame-driven here — resizing the figure directly is what
-    // dragging the window edge already does.
+    // Always frame-driven (dragging the window edge resizes the figure).
     PanelState::SizeMode mode = PanelState::SizeMode::PlotFrame;
     size_mode_fields(fsnap, st, mode, &st.resize_frame_w, &st.resize_frame_h, "");
 
@@ -1959,14 +1708,8 @@ void draw_resize_dialog(const FigureSnapshot& fsnap, PanelState& st) {
     ImGui::End();
 }
 
-// Applies a pending plot-area size to the real window. The request names the
-// *plot* size, so whatever the menu bar and the Cosmetic/Data column occupy is
-// measured off the current frame and added back; deriving that chrome from
-// panel_width and a menu-bar height would go stale the moment the user dragged
-// the dock splitter or hid Cosmetic.
-//
-// Only the window thread may call this, which is why the request is an atomic
-// this consumes rather than a direct call.
+// Applies a pending plot-area size to the window, adding the chrome measured
+// from the current frame. Window thread only (the request is an atomic).
 void apply_pending_resize(GLContext& ctx, PanelState& st) {
     const int want_w = st.pending_plot_w.load(std::memory_order_relaxed);
     const int want_h = st.pending_plot_h.load(std::memory_order_relaxed);
@@ -1974,8 +1717,7 @@ void apply_pending_resize(GLContext& ctx, PanelState& st) {
 
     const int plot_w = st.live_plot_w.load(std::memory_order_relaxed);
     const int plot_h = st.live_plot_h.load(std::memory_order_relaxed);
-    // Nothing has been rendered yet, so there is no chrome to measure —
-    // leave the request pending rather than guessing at it.
+    // Nothing rendered yet: leave the request pending.
     if (plot_w <= 0 || plot_h <= 0) return;
 
     st.pending_plot_w.store(0, std::memory_order_relaxed);
@@ -1985,8 +1727,7 @@ void apply_pending_resize(GLContext& ctx, PanelState& st) {
     const int target_fb_h = want_h + (ctx.height() - plot_h);
     if (target_fb_w <= 0 || target_fb_h <= 0) return;
 
-    // GlfwSetWindowSize speaks screen coordinates; everything above is in
-    // framebuffer pixels, and the two differ under OS display scaling.
+    // glfwSetWindowSize uses screen coordinates, not framebuffer pixels.
     int win_w = 0, win_h = 0, fb_w = 0, fb_h = 0;
     glfwGetWindowSize(ctx.window(), &win_w, &win_h);
     glfwGetFramebufferSize(ctx.window(), &fb_w, &fb_h);
@@ -2021,33 +1762,22 @@ void draw_widget_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
         draw_cosmetic_panel(fsnap, edit_box, st);
     if (st.data_visible)
         draw_data_panel(fsnap, edit_box, st);
-    // After both side panels have begun, so this outranks whichever of them
-    // was focused by appearing -- see ensure_layout().
+    // After both side panels have begun (see ensure_layout()).
     if (st.pending_panel_focus) {
         ImGui::SetWindowFocus(st.pending_panel_focus);
         st.pending_panel_focus = nullptr;
     }
     draw_save_dialog(fsnap, st);
-    // One frame behind the save that raises it -- the save is serviced below,
-    // after every panel has been drawn -- which is invisible and is why this
-    // reads the string rather than an edge.
+    // Reads the stored warning (set by a save one frame earlier).
     draw_save_warning(st);
     draw_resize_dialog(fsnap, st);
 
-    // After the plot panel has published this frame's live size, so the
-    // chrome it measures is current.
+    // After the plot panel has published this frame's live size.
     apply_pending_resize(ctx, st);
 
-    // Serviced here rather than inline in draw_save_dialog() because a PNG
-    // save needs ctx/nvg/data. export_figure_png() reuses whatever GL context
-    // is current and renders into its own throwaway FBO, so this is safe
-    // mid-frame. Width/height <=0 default to the Plot panel's live size.
-    //
-    // It exports `fsnap` -- the snapshot the render thread holds, already
-    // patched with any panel edits -- so what is saved matches what is on
-    // screen without the caller thread having to refresh() first. And it is
-    // laid out with the window's measurements, at whatever size is asked for,
-    // so the file is not a refit of what is shown (v1.0 step 15.2).
+    // Serviced here since a PNG save needs ctx/nvg/data (safe mid-frame: its
+    // own FBO). Exports the render thread's snapshot, including panel edits,
+    // laid out with the window's measurements. Width/height <= 0 = live size.
     if (st.save_requested) {
         st.save_requested = false;
         const auto on_screen = on_screen_measure(st, fsnap);
@@ -2072,10 +1802,7 @@ void draw_widget_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
                                   { .max_splits = static_cast<std::size_t>(
                                         std::max(0, st.save_max_splits)) },
                                   &report, on_screen.get());
-                // The one place the GUI can tell the user, and it has to be
-                // taken: the file is written either way, and the difference
-                // between an exact picture and one with geometry on the wrong
-                // side of other geometry is not visible in a file listing.
+                // Tell the user: the file is written either way.
                 if (!report.scene_order_exact) {
                     st.save_warning      = report.warning;
                     st.save_warning_open = true;
