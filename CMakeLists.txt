@@ -36,11 +36,27 @@ find_package(OpenGL REQUIRED)
 # GLFW
 if(SEXTANT_FETCH_GLFW)
     include(FetchContent)
+    find_package(Git REQUIRED)
+    # Patched for macOS (cmake/glfw/): a software-renderer fallback for GPU-less
+    # machines, and the CGL lock around [NSOpenGLContext update]. The hash puts
+    # the patches' content into the declared details, so editing one re-patches.
+    file(GLOB glfw_patches "${CMAKE_CURRENT_SOURCE_DIR}/cmake/glfw/*.patch")
+    list(SORT glfw_patches)
+    set(glfw_patch_text "")
+    foreach(patch IN LISTS glfw_patches)
+        file(READ "${patch}" text)
+        string(APPEND glfw_patch_text "${text}")
+    endforeach()
+    string(SHA256 glfw_patch_hash "${glfw_patch_text}")
     FetchContent_Declare(
         glfw
         GIT_REPOSITORY https://github.com/glfw/glfw.git
         GIT_TAG        3.4
         GIT_SHALLOW    TRUE
+        PATCH_COMMAND  ${CMAKE_COMMAND} -DGIT=${GIT_EXECUTABLE}
+                       -DPATCH_DIR=${CMAKE_CURRENT_SOURCE_DIR}/cmake/glfw
+                       -DPATCH_HASH=${glfw_patch_hash}
+                       -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/glfw/apply_patches.cmake
     )
     set(GLFW_BUILD_DOCS     OFF CACHE BOOL "" FORCE)
     set(GLFW_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
@@ -332,7 +348,7 @@ if(SEXTANT_BUILD_TESTS)
     target_include_directories(sextant_gl_probe PRIVATE ${CMAKE_SOURCE_DIR}/third_party/glad/include)
     target_link_libraries(sextant_gl_probe PRIVATE glfw)
     if(APPLE)
-        # Windowless CGL probe: reaches renderers GLFW's NSGL path cannot.
+        # Windowless CGL probe: the context headless export uses, without GLFW.
         target_sources(sextant_gl_probe PRIVATE tests/gl_probe/cgl_probe.cpp)
         target_link_libraries(sextant_gl_probe PRIVATE OpenGL::GL)
     endif()

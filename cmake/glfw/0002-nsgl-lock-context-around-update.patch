@@ -1,0 +1,66 @@
+diff --git a/src/cocoa_window.m b/src/cocoa_window.m
+index 0dcf0a3..1b97398 100644
+--- a/src/cocoa_window.m
++++ b/src/cocoa_window.m
+@@ -31,6 +31,8 @@
+ #include <float.h>
+ #include <string.h>
+ 
++#include <OpenGL/OpenGL.h>
++
+ // HACK: This enum value is missing from framework headers on OS X 10.11 despite
+ //       having been (according to documentation) added in Mac OS X 10.7
+ #define NSWindowCollectionBehaviorFullScreenNone (1 << 9)
+@@ -196,6 +198,22 @@ static NSUInteger translateKeyToModifierFlag(int key)
+ static const NSRange kEmptyRange = { NSNotFound, 0 };
+ 
+ 
++// sextant: a context may be rendered and swapped on another thread, which then
++// holds its CGL lock for the frame; take the same lock around update, which runs
++// here on the main thread, so the drawable never changes mid-frame
++//
++static void updateContextNSGL(_GLFWwindow* window)
++{
++    if (window->context.source != GLFW_NATIVE_CONTEXT_API)
++        return;
++
++    CGLContextObj cgl = [window->context.nsgl.object CGLContextObj];
++    CGLLockContext(cgl);
++    [window->context.nsgl.object update];
++    CGLUnlockContext(cgl);
++}
++
++
+ //------------------------------------------------------------------------
+ // Delegate for window related notifications
+ //------------------------------------------------------------------------
+@@ -228,8 +246,7 @@ static const NSRange kEmptyRange = { NSNotFound, 0 };
+ 
+ - (void)windowDidResize:(NSNotification *)notification
+ {
+-    if (window->context.source == GLFW_NATIVE_CONTEXT_API)
+-        [window->context.nsgl.object update];
++    updateContextNSGL(window);
+ 
+     if (_glfw.ns.disabledCursorWindow == window)
+         _glfwCenterCursorInContentArea(window);
+@@ -263,8 +280,7 @@ static const NSRange kEmptyRange = { NSNotFound, 0 };
+ 
+ - (void)windowDidMove:(NSNotification *)notification
+ {
+-    if (window->context.source == GLFW_NATIVE_CONTEXT_API)
+-        [window->context.nsgl.object update];
++    updateContextNSGL(window);
+ 
+     if (_glfw.ns.disabledCursorWindow == window)
+         _glfwCenterCursorInContentArea(window);
+@@ -385,8 +401,7 @@ static const NSRange kEmptyRange = { NSNotFound, 0 };
+ 
+ - (void)updateLayer
+ {
+-    if (window->context.source == GLFW_NATIVE_CONTEXT_API)
+-        [window->context.nsgl.object update];
++    updateContextNSGL(window);
+ 
+     _glfwInputWindowDamage(window);
+ }

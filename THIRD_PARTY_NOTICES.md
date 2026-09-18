@@ -24,7 +24,7 @@ If you ship a binary that embeds sextant, ship this file with it.
 
 | Component | License | Notes |
 |---|---|---|
-| [GLFW](https://www.glfw.org/) 3.4 | zlib/libpng | Window and input. Built from source via `FetchContent` and statically linked. |
+| [GLFW](https://www.glfw.org/) 3.4 | zlib/libpng | Window and input. Built from source via `FetchContent` and statically linked. **Modified**: patched for macOS by `cmake/glfw/*.patch` (changes marked `sextant:` in the source). |
 
 ## Linked from the system (or vcpkg)
 

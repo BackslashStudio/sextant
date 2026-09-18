@@ -1,8 +1,9 @@
-// macOS half of sextant_gl_probe: a windowless CGL context, bypassing GLFW.
-// GLFW's NSGL backend always requires an accelerated renderer, so on a GPU-less
-// machine it finds no pixel format at all; CGL can still reach the Apple
-// Software Renderer. Asks for 4.1 core twice -- any renderer, then accelerated
-// only -- and reports which one each attempt got and whether it renders.
+// macOS half of sextant_gl_probe: a windowless CGL context, bypassing GLFW --
+// the kind headless export uses. Unpatched GLFW's NSGL backend always requires
+// an accelerated renderer, so on a GPU-less machine it finds no pixel format at
+// all; CGL can still reach the Apple Software Renderer. Asks for 4.1 core twice
+// -- any renderer, then accelerated only -- and reports which one each attempt
+// got and whether it renders.
 #define GL_SILENCE_DEPRECATION
 #include <OpenGL/OpenGL.h>
 #include <OpenGL/CGLRenderers.h>

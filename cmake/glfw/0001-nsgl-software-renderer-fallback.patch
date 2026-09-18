@@ -1,0 +1,19 @@
+diff --git a/src/nsgl_context.m b/src/nsgl_context.m
+index daa8367..3942f61 100644
+--- a/src/nsgl_context.m
++++ b/src/nsgl_context.m
+@@ -311,6 +311,14 @@ GLFWbool _glfwCreateContextNSGL(_GLFWwindow* window,
+ 
+     window->context.nsgl.pixelFormat =
+         [[NSOpenGLPixelFormat alloc] initWithAttributes:attribs];
++    // sextant: no accelerated renderer matched (a GPU-less VM such as a CI
++    // runner has none), so retry without NSOpenGLPFAAccelerated, attribs[0],
++    // which admits Apple's software renderer
++    if (window->context.nsgl.pixelFormat == nil)
++    {
++        window->context.nsgl.pixelFormat =
++            [[NSOpenGLPixelFormat alloc] initWithAttributes:attribs + 1];
++    }
+     if (window->context.nsgl.pixelFormat == nil)
+     {
+         _glfwInputError(GLFW_FORMAT_UNAVAILABLE,
