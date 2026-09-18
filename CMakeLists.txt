@@ -11,7 +11,11 @@ endif()
 
 project(sextant VERSION 0.3.0 LANGUAGES CXX C)
 if(APPLE)
-    enable_language(OBJCXX)   # tests/window_probe's NSPasteboard access
+    # OBJCXX for tests/window_probe's NSPasteboard access. OBJC first: enabled
+    # alone, OBJCXX claims .m files too and compiles GLFW's Cocoa sources as
+    # Objective-C++, which they are not.
+    enable_language(OBJC)
+    enable_language(OBJCXX)
 endif()
 
 include(GNUInstallDirs)
