@@ -437,10 +437,15 @@ namespace lt {
         const std::string d = render(shallow, 32, "peel_opt_shallow_32");
         // What this scene requires, pinned (the default is deliberately lower).
         const std::string e = render(deep, 12, "peel_opt_deep_12");
+        // The same export again: the comparisons above assume a renderer that
+        // repeats itself exactly.
+        const std::string b2 = render(deep, 32, "peel_opt_deep_32_again");
 
-        std::printf("  bars+sheet   4 vs 32 layers: %s; 12 vs 32: %s\n",
+        std::printf("  bars+sheet   4 vs 32 layers: %s; 12 vs 32: %s; 32 twice: %s\n",
                     a == b ? "identical" : "different",
-                    e == b ? "identical" : "different");
+                    e == b ? "identical" : "different",
+                    b2 == b ? "identical" : "different");
+        check(b2 == b, "peel option: the same export twice is byte-identical");
         std::printf("  two sheets   default vs 32 layers: %s\n",
                     c == d ? "identical" : "different");
 
