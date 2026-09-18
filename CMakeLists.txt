@@ -325,6 +325,13 @@ if(SEXTANT_BUILD_TESTS)
     add_executable(sextant_perf_test tests/perf_test/main.cpp)
     target_link_libraries(sextant_perf_test PRIVATE sextant)
 
+    # Reports the OpenGL driver a machine gives for sextant's 4.1 core
+    # context. Raw GLFW + GLAD, deliberately not linked against sextant, so it
+    # runs even where the library does not build.
+    add_executable(sextant_gl_probe tests/gl_probe/main.cpp ${GLAD_SOURCE})
+    target_include_directories(sextant_gl_probe PRIVATE ${CMAKE_SOURCE_DIR}/third_party/glad/include)
+    target_link_libraries(sextant_gl_probe PRIVATE glfw)
+
     # Internal layout checks: linked against sextant_static with src/ on the
     # include path, since what it checks isn't reachable through public headers.
     if(SEXTANT_BUILD_STATIC)

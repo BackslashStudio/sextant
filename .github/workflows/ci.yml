@@ -1,0 +1,172 @@
+name: CI
+
+on:
+  push:
+    paths-ignore: ['README.md', 'doc/**', 'LICENSE', 'THIRD_PARTY_NOTICES.md']
+  pull_request:
+    paths-ignore: ['README.md', 'doc/**', 'LICENSE', 'THIRD_PARTY_NOTICES.md']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    # macOS is expected to fail until the port lands; it runs for the log.
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows MSVC
+            os: windows-2025
+            experimental: false
+          - name: Linux GCC
+            os: ubuntu-24.04
+            experimental: false
+          - name: Linux Clang libc++
+            os: ubuntu-24.04
+            experimental: false
+            cc: clang
+            cxx: clang++
+            stdlib: -stdlib=libc++
+          - name: macOS arm64
+            os: macos-15
+            experimental: true
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # --- Dependencies -----------------------------------------------------
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build libfreetype-dev libpng-dev libgl-dev libgl1-mesa-dri \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev \
+            libwayland-dev libxkbcommon-dev wayland-protocols \
+            xvfb xauth fonts-dejavu-core fonts-liberation
+          if [ -n "${{ matrix.stdlib }}" ]; then
+            sudo apt-get install -y --no-install-recommends clang libc++-dev libc++abi-dev
+          fi
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja freetype libpng
+
+      - name: Set up MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      # The runners have no GPU; Windows' own opengl32 stops at GL 1.1.
+      - name: Install Mesa llvmpipe (Windows)
+        if: runner.os == 'Windows'
+        uses: ssciwr/setup-mesa-dist-win@v3
+
+      - name: Point vcpkg at a cached binary dir (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          mkdir -p vcpkg-bincache
+          echo "VCPKG_DEFAULT_BINARY_CACHE=$(cygpath -w "$PWD/vcpkg-bincache")" >> "$GITHUB_ENV"
+
+      - name: Restore vcpkg binary cache (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/cache@v6
+        with:
+          path: vcpkg-bincache
+          key: vcpkg-${{ runner.os }}-static-md-${{ github.run_id }}
+          restore-keys: vcpkg-${{ runner.os }}-static-md-
+
+      # Static-md, as CMakeLists.txt defaults to on Windows: FreeType/libpng
+      # link into sextant.dll.
+      - name: Install FreeType and libpng (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          "$(cygpath -u "$VCPKG_INSTALLATION_ROOT")/vcpkg" install \
+            freetype:x64-windows-static-md libpng:x64-windows-static-md zlib:x64-windows-static-md
+
+      # --- Configure and build ----------------------------------------------
+
+      - name: Configure
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: |
+          args=(-S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSEXTANT_BUILD_TESTS=ON)
+          if [ "$RUNNER_OS" = Windows ]; then
+            args+=("-DCMAKE_TOOLCHAIN_FILE=$(cygpath -m "$VCPKG_INSTALLATION_ROOT")/scripts/buildsystems/vcpkg.cmake")
+          fi
+          if [ -n "${{ matrix.stdlib }}" ]; then
+            args+=("-DCMAKE_CXX_FLAGS=${{ matrix.stdlib }}"
+                   "-DCMAKE_EXE_LINKER_FLAGS=${{ matrix.stdlib }}"
+                   "-DCMAKE_SHARED_LINKER_FLAGS=${{ matrix.stdlib }}")
+          fi
+          cmake "${args[@]}"
+
+      # gl_probe needs only GLFW, so it is built and run before the library:
+      # it reports the runner's OpenGL even where sextant does not build.
+      - name: Build gl_probe
+        run: cmake --build build --target sextant_gl_probe
+
+      - name: Run gl_probe
+        continue-on-error: ${{ matrix.experimental }}
+        run: |
+          mkdir -p out && cd out
+          wrap=()
+          if [ "$RUNNER_OS" = Linux ]; then wrap=(xvfb-run -a -s "-screen 0 1920x1080x24"); fi
+          status=0
+          "${wrap[@]}" ../build/sextant_gl_probe 2>&1 | tee gl_probe.txt || status=$?
+          {
+            echo "### gl_probe — ${{ matrix.name }}"
+            echo '```'
+            cat gl_probe.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
+
+      - name: Build
+        run: cmake --build build
+
+      # --- Tests ------------------------------------------------------------
+
+      # stdin from /dev/null: under xvfb basic_smoke sees DISPLAY and calls
+      # show(true), whose ENTER prompt must not wait.
+      - name: basic_smoke
+        timeout-minutes: 5
+        run: |
+          cd out
+          wrap=()
+          if [ "$RUNNER_OS" = Linux ]; then wrap=(xvfb-run -a -s "-screen 0 1920x1080x24"); fi
+          "${wrap[@]}" ../build/sextant_smoke < /dev/null
+
+      - name: layout_test
+        timeout-minutes: 20
+        run: |
+          cd out
+          wrap=()
+          if [ "$RUNNER_OS" = Linux ]; then wrap=(xvfb-run -a -s "-screen 0 1920x1080x24"); fi
+          "${wrap[@]}" ../build/sextant_layout_test
+
+      - name: Upload outputs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: outputs-${{ matrix.os }}-${{ strategy.job-index }}
+          path: |
+            out/*.png
+            out/*.svg
+            out/*.txt
+          if-no-files-found: ignore
