@@ -363,6 +363,7 @@ if(SEXTANT_BUILD_TESTS)
             tests/layout_test/common.cpp
             tests/layout_test/text_metrics.cpp
             tests/layout_test/glyph_boxes.cpp
+            tests/layout_test/gl_poison.cpp
             tests/layout_test/layout.cpp
             tests/layout_test/frame_size.cpp
             tests/layout_test/placement.cpp

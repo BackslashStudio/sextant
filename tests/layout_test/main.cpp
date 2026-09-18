@@ -1,7 +1,9 @@
 // sextant_layout_test entry point; the checks live in the subject .cpp files.
 #include "layout_test.h"
+#include "gl_poison.h"
 
 #include <cstdio>
+#include <cstdlib>
 
 int main() {
     using namespace lt;
@@ -9,6 +11,14 @@ int main() {
     // Unbuffered, so output up to a crash isn't lost.
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::printf("=== sextant_layout_test ===\n\n");
+
+    // SEXTANT_POISON_GL=<seed>: every GL allocation made without data starts as
+    // random bytes, so output that changes with the seed read memory never written.
+    if (const char* seed = std::getenv("SEXTANT_POISON_GL")) {
+        gl_renderer();   // loads GLAD, whose pointers the wrappers replace
+        install_gl_poison(static_cast<unsigned>(std::strtoul(seed, nullptr, 10)));
+        std::printf("GL allocations poisoned, seed %s\n\n", seed);
+    }
 
     // text_metrics.cpp
     test_text_metrics();
@@ -183,6 +193,11 @@ int main() {
     test_cell_shading_cache();
     test_data_panel_shading();
 
+    if (std::getenv("SEXTANT_POISON_GL")) {
+        const PoisonCounts n = gl_poison_counts();
+        std::printf("\npoisoned: %d textures, %d renderbuffers, %d buffers\n",
+                    n.textures, n.renderbuffers, n.buffers);
+    }
     std::printf("\n%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

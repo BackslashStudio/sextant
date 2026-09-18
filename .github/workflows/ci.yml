@@ -31,6 +31,7 @@ jobs:
           - name: Linux GCC
             os: ubuntu-24.04
             experimental: false
+            poison: true
           - name: Linux Clang libc++
             os: ubuntu-24.04
             experimental: false
@@ -190,6 +191,36 @@ jobs:
           fi
           exit $status
 
+      # layout_test again with every GL allocation made without data filled
+      # with random bytes (SEXTANT_POISON_GL, seeded per run). The checks must
+      # still pass and every output must match the run above byte for byte;
+      # anything else means sextant read GPU memory it never wrote.
+      - name: layout_test, GL allocations poisoned
+        if: matrix.poison
+        timeout-minutes: 20
+        run: |
+          mkdir -p out/poisoned
+          cd out/poisoned
+          status=0
+          SEXTANT_POISON_GL=${{ github.run_number }} xvfb-run -a -s "-screen 0 1920x1080x24" \
+            ../../build/sextant_layout_test 2>&1 | tee layout_test.txt || status=$?
+          problems=()
+          grep -q '^poisoned: [1-9]' layout_test.txt || problems+=("the poison never ran")
+          for f in *.png *.svg; do
+            cmp -s "$f" "../$f" || problems+=("$f differs from the unpoisoned run")
+          done
+          if [ $status -ne 0 ] || [ ${#problems[@]} -ne 0 ]; then
+            {
+              echo "### layout_test with poisoned GL allocations failed — ${{ matrix.name }}"
+              echo '```'
+              awk '/^\[/ { sec = $0 } /FAIL:/ { if (sec != last) { print sec; last = sec } print }' layout_test.txt
+              printf '%s\n' "${problems[@]}"
+              tail -n 1 layout_test.txt
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
       - name: Upload outputs
         if: always()
         uses: actions/upload-artifact@v7
@@ -199,4 +230,5 @@ jobs:
             out/*.png
             out/*.svg
             out/*.txt
+            out/poisoned/layout_test.txt
           if-no-files-found: ignore

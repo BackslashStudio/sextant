@@ -324,8 +324,12 @@ namespace lt {
         // Both sides must occur.
         check(red_front > 500 && blue_front > 500,
               "peel: the two sheets each lead at thousands of pixels, so no whole-object order exists");
+        // Where the renderer does not repeat itself, 2% rather than 0.5% (the
+        // macOS runner: 18 of 3074 off by up to 30 levels in one run, 0 in the
+        // runs before); the whole-object control is wrong at half of them.
+        const int ratio = renderer_repeats_exactly() ? 200 : 50;
         if (peeling)
-            check(disagree * 200 < agree,
+            check(disagree * ratio < agree,
                   "peel: every overlapped pixel composites in the order its own ray meets the sheets");
         else
             check(disagree > red_front / 2 && disagree > blue_front / 2,
