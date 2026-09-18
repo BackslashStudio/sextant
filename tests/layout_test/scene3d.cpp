@@ -2,6 +2,8 @@
 // sextant_layout_test; see layout_test.h.
 #include "layout_test.h"
 
+#include <glad/glad.h>   // GL_RENDERER, for the peel option's noisy-renderer case
+
 namespace lt {
     // -------------------------------------------------------------------------
     // The scene is ordered across kinds
@@ -418,15 +420,34 @@ namespace lt {
             }
         }
 
+        std::string renderer;
         auto render = [&](const FigureSnapshot& fs, int layers, const std::string& stem) {
             GLContext ctx({
                 .width = W, .height = H,
                 .title = "layout_test", .visible = false
             });
+            if (const auto* r = glGetString(GL_RENDERER))
+                renderer = reinterpret_cast<const char *>(r);
             NvgRenderer nvg(ctx.nvg());
             DataRenderer data_r;
             export_figure_png(ctx, nvg, data_r, fs, stem + ".png", W, H, 1, layers);
             return read_file_bytes(stem + ".png");
+        };
+
+        // Pixels that differ between two exports; -1 if either is unreadable.
+        auto px_diff = [](const std::string& a, const std::string& b) {
+            int aw = 0, ah = 0, bw = 0, bh = 0, comp = 0;
+            unsigned char* pa = stbi_load((a + ".png").c_str(), &aw, &ah, &comp, 4);
+            unsigned char* pb = stbi_load((b + ".png").c_str(), &bw, &bh, &comp, 4);
+            int px = -1;
+            if (pa && pb && aw == bw && ah == bh) {
+                px = 0;
+                for (int i = 0; i < aw * ah; ++i)
+                    if (std::memcmp(pa + 4 * i, pb + 4 * i, 4) != 0) ++px;
+            }
+            if (pa) stbi_image_free(pa);
+            if (pb) stbi_image_free(pb);
+            return px;
         };
 
         // Four against thirty-two (explicit, so this doesn't depend on the
@@ -445,12 +466,33 @@ namespace lt {
                     a == b ? "identical" : "different",
                     e == b ? "identical" : "different",
                     b2 == b ? "identical" : "different");
-        check(b2 == b, "peel option: the same export twice is byte-identical");
         std::printf("  two sheets   default vs 32 layers: %s\n",
                     c == d ? "identical" : "different");
 
+        // Apple's software renderer (the macOS CI runner) does not repeat a
+        // translucent export exactly (v1.0 step 21.1: 292 px between two
+        // identical exports of the deep scene, against ~6800 for 4 vs 32 layers).
+        // There, "identical" becomes "small next to what the layer count changes".
+        const bool noisy = renderer == "Apple Software Renderer";
+
         check(!a.empty() && !c.empty(), "peel option: the exports produced files");
-        if (peeling) {
+        if (peeling && noisy) {
+            const int noise = px_diff("peel_opt_deep_32", "peel_opt_deep_32_again");
+            const int deep4 = px_diff("peel_opt_deep_4", "peel_opt_deep_32");
+            const int deep12 = px_diff("peel_opt_deep_12", "peel_opt_deep_32");
+            const int sheets = px_diff("peel_opt_shallow_auto", "peel_opt_shallow_32");
+            std::printf("  %s: px differing, 32 twice %d, 4 vs 32 %d, 12 vs 32 %d, "
+                        "two sheets %d\n", renderer.c_str(), noise, deep4, deep12, sheets);
+            check(noise >= 0 && deep4 > 5 * noise,
+                  "peel option (noisy renderer): raising the count changes a scene that "
+                  "needs more layers, far beyond run-to-run noise");
+            check(sheets >= 0 && 10 * sheets < deep4,
+                  "peel option (noisy renderer): and changes a scene that does not only by noise");
+            check(deep12 >= 0 && 10 * deep12 < deep4,
+                  "peel option (noisy renderer): twelve layers is what a sheet through a bar "
+                  "grid needs, up to noise");
+        } else if (peeling) {
+            check(b2 == b, "peel option: the same export twice is byte-identical");
             check(a != b,
                   "peel option: raising the count changes a scene that needs more layers");
             check(c == d,
@@ -459,6 +501,7 @@ namespace lt {
                   "peel option: twelve layers is what a sheet through a bar grid needs");
         } else {
             // With peeling off, the override must not re-enable it.
+            check(b2 == b, "peel option (control): the same export twice is byte-identical");
             check(a == b && c == d && e == b,
                   "peel option (control): with peeling off the count is inert");
         }
