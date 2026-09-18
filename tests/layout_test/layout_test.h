@@ -1,0 +1,322 @@
+// sextant_layout_test -- internal checks for things not reachable through
+// <sextant/sextant.h>. Links sextant_static and includes headers out of src/.
+//
+// The suite is one executable split over several translation units, one per
+// subject (text metrics, 2D layout, contours, the 3D chain, the panels, ...).
+// main.cpp only calls them in order. This header is what they share: the
+// check counter, and the handful of snapshot builders that more than one
+// subject needs. A helper used by a single .cpp stays in that .cpp.
+#pragma once
+
+// Declarations only: nanovg.c already compiles stb_image's implementation
+// into the library, so defining it here again is a duplicate-symbol error.
+#include "stb_image.h"
+
+#include "edit_box.h"
+#include "figure_edits.h"
+#include "figure_export.h"
+#include "renderer/data_renderer.h"
+#include "renderer/gl_context.h"
+#include "renderer/nvg_renderer.h"
+#include "font_discovery.h"
+#include "renderer/figure_layout.h"
+#include "renderer/box3d.h"
+#include "renderer/bar3d.h"
+#include "renderer/plane2d.h"
+#include "renderer/surface.h"
+#include "renderer/surface_tri.h"
+#include "renderer/painter3d.h"
+#include "colormaps.h"
+#include "coord_transform3d.h"
+#include "text_metrics.h"
+#include "contour.h"
+#include "hint.h"
+#include "widgets/cell_shading.h"
+#include "widgets/data_panel.h"
+#include "widgets/panel.h"
+#include "widgets/imgui_context.h"
+#include <imgui_internal.h>   // ImGuiWindow, TreeNodeSetOpen, the id-conflict detector
+#include "widgets/panel_state.h"
+
+#include <sextant/sextant.h>
+
+#include "nanovg.h"
+
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cmath>
+#include <cstdio>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <functional>
+#include <initializer_list>
+#include <iterator>
+#include <limits>
+#include <optional>
+#include <sstream>
+#include <set>
+#include <string>
+#include <thread>
+#include <utility>
+#include <vector>
+
+namespace lt {
+
+// ---------------------------------------------------------------------------
+// The tally. Every .cpp counts into the same pair, and main.cpp reports them.
+// ---------------------------------------------------------------------------
+extern int g_checks;
+extern int g_failures;
+
+void check(bool ok, const std::string& what);
+
+// ---------------------------------------------------------------------------
+// Builders shared by more than one subject file. Anything used by exactly one
+// belongs in that file, not here.
+// ---------------------------------------------------------------------------
+
+// A one-line figure, built directly rather than through the public API so a
+// test can set the pieces layout actually keys on (font sizes, titles, tick
+// overrides) without going through Figure/Axes.
+sextant::FigureSnapshot make_snapshot(int rows, int cols, int n_cells,
+                                      double x_scale = 1.0, double y_scale = 1.0);
+
+// One 2D axes holding one line, in the public snapshot shape -- what the panel
+// tests drive, where make_snapshot()'s 50-point sine would only be noise.
+sextant::FigureSnapshot one_line_snapshot(const std::vector<double>& x,
+                                          const std::vector<double>& y);
+
+// Reads the first axes-background rect out of an SVG -- the frame, as the
+// writer actually emitted it.
+bool read_first_svg_frame(const std::string& path, sextant::PlotRect& out);
+
+// Index extent by default -- [0,cols] x [0,rows] -- i.e. what Axes::imshow()
+// builds, so every expectation stays in the cell-index numbers marching
+// squares is easiest to reason about. `xr`/`yr` override it for the checks
+// that are specifically about a heatmap placed somewhere else.
+sextant::HeatmapPlot make_heatmap(int rows, int cols,
+                                  const std::function<float(int, int)>& f,
+                                  sextant::HeatmapOptions opts,
+                                  std::optional<sextant::Range> xr = std::nullopt,
+                                  std::optional<sextant::Range> yr = std::nullopt);
+
+// One empty 3D axes in a grid, with the camera the caller wants.
+sextant::FigureSnapshot make_snapshot3d(int rows, int cols, int index,
+                                        sextant::Camera3D cam = {});
+
+bool near_px(float a, float b, float tol = 1e-3f);
+
+// A plane carrying one heatmap, built directly rather than through the public
+// API, so the snapshot-level tests can state exactly what is on it.
+sextant::PlaneSnapshot make_plane(sextant::PlaneOrientation o, double offset,
+                                  std::vector<float> data, int rows, int cols,
+                                  sextant::Range xr, sextant::Range yr,
+                                  sextant::HeatmapOptions ho = {});
+
+// Two planes, each holding one line and one heatmap, so a check can state
+// "this one and not that one".
+sextant::RenderSnapshot3D two_plane_snapshot();
+
+// A grid of bars over the box's middle, with distinct heights, u and v -- the
+// scene the bar3d hit-test and edit checks share.
+sextant::Bar3DPlot bar3d_grid();
+
+// A 3x3 sheet with a label per sample -- the surface counterpart of bar3d_grid().
+sextant::SurfacePlot ripple_surface();
+
+// ---------------------------------------------------------------------------
+// The suite, in the order main.cpp runs it. One group per source file.
+// ---------------------------------------------------------------------------
+
+// text_metrics.cpp
+void test_text_metrics();
+void test_missing_font_fallback();
+void test_concurrent_measurement();
+
+// layout.cpp
+void test_font_size_drives_layout();
+void test_absent_decorations_cost_nothing();
+void test_wide_tick_labels();
+void test_zero_tick();
+void test_grid_alignment();
+void test_margins();
+void test_degenerate_sizes();
+void test_legend_and_colorbar_carve();
+void test_multiple_colorbars();
+void test_colorbar_labels();
+void test_show_legend_and_new_keys();
+void test_png_svg_frame_agreement();
+void test_layout_cost();
+void test_figure_edit_lane();
+void test_public_margins_api();
+
+// frame_size.cpp
+void test_frame_size_round_trip();
+void test_frame_size_responds_to_layout();
+void test_public_frame_resize();
+void test_subplot_spans();
+
+// placement.cpp
+void test_extended_frame();
+void test_legend_anchors();
+void test_colorbar_anchors();
+void test_placement_grid();
+void test_frame_size_round_trip_anchors();
+void test_placement_rendered();
+
+// stored_layout.cpp
+void test_stored_measure();
+void test_stored_inverse();
+void test_layout_store();
+void test_navigation_edits();
+void test_stored_export();
+
+// grid_ratios.cpp
+void test_grid_ratio_layout();
+void test_grid_ratio_inverse();
+void test_grid_ratio_api();
+void test_grid_ratio_journal();
+void test_grid_boundary_drag();
+
+// errorbar2d.cpp
+void test_errorbar_api();
+void test_errorbar_data();
+void test_errorbar_whisker_shape();
+void test_errorbar_rendered();
+void test_errorbar_hint_and_rows();
+
+// line2d.cpp
+void test_line_loop_segments();
+void test_line_loop_rendered();
+
+// axis_position.cpp
+void test_axis_placement();
+void test_axis_position_layout();
+void test_axis_origin_and_limits();
+void test_axis_position_rendered();
+void test_axis_placement3d();
+void test_axis_position_3d_plan();
+void test_axis_origin_3d_limits();
+
+// errorbar3d.cpp
+void test_errorbar3d_api();
+void test_errorbar3d_data();
+void test_errorbar3d_geometry();
+void test_errorbar3d_rendered();
+
+// contour.cpp
+void test_contour_tracing();
+void test_contour_planning();
+void test_contour_cache();
+
+// heatmap.cpp
+void test_heatmap_extent();
+void test_heatmap_extent_render();
+
+// axes3d.cpp
+void test_axes3d_projection();
+void test_axes3d_box_plan();
+void test_axes3d_limits_rescale_not_resize();
+void test_axes3d_coexistence();
+void test_axes3d_public_api();
+void test_annotation_invariance();
+void test_axes3d_render();
+
+// camera3d.cpp
+void test_camera_navigation();
+void test_camera_fit_and_pan();
+void test_perspective_projection();
+void test_perspective_near_clipping();
+void test_camera_edit_lane();
+
+// bar3d.cpp
+void test_bar3d_clip_matrix();
+void test_bar3d_ingest();
+void test_bar3d_faces();
+void test_bar3d_painter_order();
+void test_bar3d_hints();
+void test_bar3d_data_panel();
+
+// surface3d.cpp
+void test_surface_ingest();
+void test_surface_draw_order();
+void test_surface_colorbar();
+void test_surface_legend_key();
+void test_surface_render();
+void test_surface_data_panel();
+void test_surface_hints();
+
+// line3d.cpp
+void test_line3d_ingest();
+void test_line3d_render();
+void test_line3d_svg_order();
+void test_line3d_legend_and_colorbar();
+void test_line3d_hints_and_panel();
+
+// surface_tri.cpp
+void test_surface_tri_ingest();
+void test_surface_tri_render();
+void test_surface_tri_svg();
+void test_surface_tri_legend_and_colorbar();
+void test_surface_tri_hints_and_panel();
+void test_delaunay();
+
+// scatter3d.cpp
+void test_scatter3d_ingest();
+void test_scatter3d_render();
+void test_scatter3d_svg_order();
+void test_scatter3d_legend_and_colorbar();
+void test_scatter3d_hints();
+void test_scatter3d_data_panel();
+
+// plane2d.cpp
+void test_plane2d_ingest();
+void test_plane_raster();
+void test_plane2d_geometry();
+void test_plane2d_decoration_hoist();
+void test_axes3d_colorbar_style();
+
+// plane2d_render.cpp
+void test_plane2d_render();
+void test_plane2d_composite();
+void test_plane2d_kinds();
+void test_plane2d_legend_and_contours();
+
+// plane2d_panel.cpp
+void test_plane2d_edit_journal();
+void test_plane2d_data_tables();
+void test_plane2d_hints();
+void test_plane2d_visibility();
+
+// scene3d.cpp
+void test_scene3d_order();
+void test_depth_peel_order();
+void test_png_peel_option();
+
+// scene3d_svg.cpp
+void test_scene3d_svg_order();
+void test_scene3d_svg_wireframe();
+void test_export_budget();
+void test_painter3d();
+
+// cell_shading.cpp
+void test_cell_shading_ramp();
+void test_cell_shading_range();
+void test_cell_shading_cache();
+void test_data_panel_shading();
+
+// panel.cpp
+void test_cosmetic_panel_3d();
+void test_cosmetic_groups_3d();
+void test_cosmetic_groups_2d();
+void test_panel_id_conflicts();
+void test_subplot_selection();
+void test_data_panel_object_tabs();
+void test_plot_style_lane();
+void test_panel_axis_position();
+void test_panel_axis_position_3d();
+void test_panel_dpi_scale();
+
+}  // namespace lt

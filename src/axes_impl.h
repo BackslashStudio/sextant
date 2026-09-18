@@ -5,6 +5,7 @@
 #include "plot_objects.h"
 #include "tick.h"
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -62,6 +63,30 @@ struct Axes::Impl {
         s.yticks_override = yticks_override;
         return s;
     }
+
+    // Ingest, shared by Axes and Plane2D. One copy rather than two because
+    // "what a plot kind accepts" is a property of the plot object, not of what
+    // it is drawn on -- a plane that validated its extent, its lengths or its
+    // error bars differently from an axes would be a difference nothing in the
+    // picture could justify. Members of Impl rather than free functions so that
+    // neither caller needs access to a type that is private to Axes. `who` only
+    // names the caller in the error messages.
+    //
+    // hist() is deliberately absent: it bins to a BarPlot, and the 3D analogue
+    // of a histogram is bar3d over a 2D histogram the caller computes (see
+    // memory/spec_3d.md's Scope), so a plane does not re-expose it.
+    void ingest_line(std::span<const double> x, std::span<const double> y,
+                     const ErrorBar& err, LineOptions opts, const char* who);
+    void ingest_scatter(std::span<const double> x, std::span<const double> y,
+                        const ErrorBar& err, ScatterOptions opts, const char* who);
+    void ingest_scatter_z(std::span<const double> x, std::span<const double> y,
+                          std::span<const double> z, const ErrorBar& err,
+                          ScatterZOptions opts, const char* who);
+    void ingest_bar(std::span<const double> x, std::span<const double> height,
+                    const ErrorBar& err, BarOptions opts, const char* who);
+    void ingest_heatmap(std::span<const float> data, int rows, int cols,
+                        Range xrange, Range yrange, HeatmapOptions opts,
+                        const char* who);
 };
 
 } // namespace sextant

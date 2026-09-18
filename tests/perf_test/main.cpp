@@ -3,7 +3,7 @@
 // What large datasets cost in RAM, whether the live window stays smooth, and
 // what supersampling and stroke expansion cost at scale.
 //
-// Usage:  sextant_perf_test [all|ingest|snapshot|render|export|edit|interactive]
+// Usage:  sextant_perf_test [all|ingest|snapshot|render|export|peel|svg3d|edit|interactive]
 //         With no argument it asks at the terminal, falling back to "all" when
 //         stdin is closed. "all" covers the automated sections only -- `edit`
 //         and `interactive` wait on a human.
@@ -29,6 +29,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <iostream>
 #include <cstring>
 #include <random>
@@ -409,7 +410,7 @@ void bench_render() {
         const std::vector<float> m = make_matrix(d[0], d[1]);
         for (int ss : { 1, 2 }) {
             auto fig = sextant::Figure::create(perf_opts("perf heatmap", ss));
-            fig->axes()->heatmap(m, d[0], d[1]);
+            fig->axes()->imshow(m, d[0], d[1]);
             const RenderSample r = sample_render(fig);
             char label[32];
             std::snprintf(label, sizeof(label), "%dx%d", d[0], d[1]);
@@ -420,6 +421,573 @@ void bench_render() {
 }
 
 // ---------------------------------------------------------------------------
+// 4c. Depth peeling (step 8) — what the exact translucent path costs
+// ---------------------------------------------------------------------------
+// Timed through savefig() and not through the live loop, because peeling is
+// pure fragment work and section 3's own control row establishes that the live
+// numbers cannot see GPU cost at all. glReadPixels synchronises, so these do.
+//
+// The comparison is made across *processes*: SEXTANT_PEEL_LAYERS is read once
+// per run, so this section is meant to be run twice and the tables read
+// against each other --
+//
+//     sextant_perf_test peel                            (peeling, 8 layers)
+//     SEXTANT_PEEL_LAYERS=0 sextant_perf_test peel      (whole-object order)
+//
+// The opaque row is the control and must not move between the two: an opaque
+// scene enters neither path, so anything that moves there is noise and sets
+// the scale for reading the rest.
+//
+// **Four blocks, sweeping the two resources separately**, because the whole
+// question is which resource each path spends and they are not the same one:
+//
+//   4c.1  a bar grid against a surface at three supersamples — the baseline
+//         case, and the one the correctness work is written about.
+//   4c.2  K stacked translucent slices — depth complexity with almost no
+//         geometry, which is what peeling's passes are spent on and where
+//         step 7b's composite is quadratic per fragment.
+//   4c.3  one surface from 25² to 200² samples — geometry with roughly fixed
+//         depth complexity, which is what the whole-object path's per-frame
+//         sort and index upload are spent on, and which peeling skips.
+//   4c.4  every kind translucent at once, at two window sizes — the "does it
+//         fall over" row, with more translucent geometry than any figure in
+//         the gallery.
+//
+// Every figure is shown once before being timed, so `savefig()` routes onto
+// the window thread and reuses its context (see 4b). Without that, ~50 ms of
+// headless context creation per call sits in every number and the deltas this
+// section exists for are a few percent of noise.
+void bench_peel() {
+    std::printf("\n=== 4c. Translucent 3D: depth peeling vs the whole-object order ===\n");
+    if (const char* env = std::getenv("SEXTANT_PEEL_LAYERS"))
+        std::printf("SEXTANT_PEEL_LAYERS=%s\n", env);
+    else
+        std::printf("SEXTANT_PEEL_LAYERS unset (peeling on, 8 layers)\n");
+    std::printf("\nEvery figure is shown once first, so savefig() routes onto the window\n");
+    std::printf("thread and reuses its context (see 4b) -- otherwise ~50 ms of headless\n");
+    std::printf("context creation per call would swamp what is being measured. One\n");
+    std::printf("untimed save warms the caches, five timed saves follow, and the median\n");
+    std::printf("is reported. 'delta' is against the same scene made opaque, which is the\n");
+    std::printf("only row in each block that enters neither translucent path.\n\n");
+    std::printf("Run the section twice -- once unset, once with SEXTANT_PEEL_LAYERS=0 --\n");
+    std::printf("and read the two tables against each other. The layer count is read once\n");
+    std::printf("per process, so a sweep over it is a sweep over runs.\n");
+
+    constexpr int kReps = 5;
+    auto timed = [&](auto& fig) {
+        fig->show(false);
+        fig->savefig("perf_peel.png");          // warm-up: lazily-built caches
+        std::vector<double> t;
+        for (int i = 0; i < kReps; ++i) {
+            const auto t0 = Clock::now();
+            fig->savefig("perf_peel.png");
+            t.push_back(ms_since(t0));
+        }
+        std::sort(t.begin(), t.end());
+        fig->close();
+        return t[kReps / 2];
+    };
+
+    auto grid = [](int n, double lo, double hi) {
+        std::vector<double> g(static_cast<std::size_t>(n));
+        for (int i = 0; i < n; ++i)
+            g[static_cast<std::size_t>(i)] = lo + (hi - lo) * i / (n - 1);
+        return g;
+    };
+    auto ripple_on = [](const std::vector<double>& u, const std::vector<double>& v) {
+        std::vector<double> h(u.size() * v.size());
+        for (std::size_t i = 0; i < u.size(); ++i)
+            for (std::size_t j = 0; j < v.size(); ++j) {
+                const double r = std::hypot(u[i], v[j]);
+                h[i * v.size() + j] = 2.0 * std::exp(-r / 3.0) * std::cos(r * 1.6);
+            }
+        return h;
+    };
+    auto slice = [](int rows, int cols, double phase) {
+        std::vector<float> m(static_cast<std::size_t>(rows) * cols);
+        for (int r = 0; r < rows; ++r)
+            for (int c = 0; c < cols; ++c) {
+                const double x = -4.0 + 8.0 * c / (cols - 1);
+                const double y = -4.0 + 8.0 * r / (rows - 1);
+                m[static_cast<std::size_t>(r) * cols + c] =
+                    static_cast<float>(std::sin(x + phase) * std::cos(y - phase));
+            }
+        return m;
+    };
+    auto fig_at = [&](int w, int h, int ss) {
+        sextant::FigureOptions o = perf_opts("peel", ss);
+        o.width = w; o.height = h;
+        return sextant::Figure::create(o);
+    };
+
+    const sextant::Range kExt{ -4.0, 4.0 };
+
+    // -- 4c.1  bar grid against surface, swept over supersample -------------
+    //
+    // The baseline case, and the one test_surface3d's fourth cell is: a 17x17
+    // translucent bar grid and a translucent surface over the same samples.
+    // Two elevations, because near zero the view is horizontal, the ray runs
+    // the length of the grid and the depth complexity is as deep as this scene
+    // gets -- which is both the case step 8 exists for and its worst for cost.
+    std::printf("\n--- 4c.1  bar grid x surface, 17x17, 900x700 ---\n");
+    std::printf("%-22s %6s %12s %12s %14s\n",
+                "scene", "ss", "savefig ms", "delta ms", "target Mpx");
+    std::printf("%-22s %6s %12s %12s %14s\n",
+                "----------------------", "------", "------------", "------------",
+                "--------------");
+    {
+        const std::vector<double> cu = grid(17, -4.0, 4.0), cv = grid(17, -4.0, 4.0);
+        const std::vector<double> ch = ripple_on(cu, cv);
+        double base = 0.0;
+        auto row = [&](const char* label, double elev, float alpha, int ss) {
+            auto fig = fig_at(900, 700, ss);
+            auto ax = fig->add_subplot3d(1, 1, 1);
+            ax->set_view(-60.0, elev);
+            ax->bar3d(sextant::PlaneOrientation::XY, cu, cv, ch,
+                      { .color = sextant::Color::Orange, .alpha = alpha,
+                        .width = 0.7f, .depth = 0.7f, .bottom = -2.5 });
+            ax->surface(sextant::PlaneOrientation::XY, cu, cv, ch,
+                        { .colormap = true, .cmap = sextant::Colormap::Viridis,
+                          .alpha = alpha });
+            const double ms = timed(fig);
+            if (alpha >= 1.0f) base = ms;
+            std::printf("%-22s %6d %12.1f %12.1f %14.1f\n", label, ss, ms, ms - base,
+                        900.0 * 700.0 * ss * ss / 1.0e6);
+        };
+        for (int ss : { 1, 2, 4 }) {
+            row("opaque (control)",     25.0, 1.00f, ss);
+            row("translucent, elev 25", 25.0, 0.55f, ss);
+            row("translucent, elev 2",   2.0, 0.55f, ss);
+        }
+    }
+
+    // -- 4c.2  depth complexity: K stacked translucent slices ---------------
+    //
+    // The dimension peeling spends its passes on. K full-extent slices stacked
+    // in z puts K translucent layers on nearly every pixel of the box with
+    // almost no primitives at all -- one quad each since 7a -- so this
+    // isolates layers from geometry. It is also where the two paths are least
+    // alike: peeling runs min(K, 8) passes over the plot rect, while the
+    // whole-object path runs step 7b's composite, which is *quadratic per
+    // fragment* in the group size (every slot re-gathers every plane) and
+    // falls back to groups of 8 past the cap.
+    //
+    // The opaque control here is genuinely cheaper rather than merely
+    // path-free: opaque slices occlude one another and early-Z discards most
+    // of them. That inflates every delta in this block, equally in both runs,
+    // so the comparison across runs holds but the absolute delta does not mean
+    // "what one translucent plane costs".
+    std::printf("\n--- 4c.2  depth complexity: K stacked slices, 900x700, ss 2 ---\n");
+    std::printf("%-8s %10s %12s %12s %12s\n",
+                "slices", "quads", "opaque ms", "alpha ms", "delta ms");
+    std::printf("%-8s %10s %12s %12s %12s\n",
+                "--------", "----------", "------------", "------------", "------------");
+    {
+        constexpr int R = 64, C = 64;
+        std::vector<std::vector<float>> fields;
+        for (int k = 0; k < 24; ++k) fields.push_back(slice(R, C, 0.3 * k));
+        auto build = [&](int planes, float alpha) {
+            auto fig = fig_at(900, 700, 2);
+            auto ax = fig->add_subplot3d(1, 1, 1);
+            ax->set_view(-55.0, 22.0);
+            for (int k = 0; k < planes; ++k) {
+                const double z = -3.0 + 6.0 * k / std::max(1, planes - 1);
+                ax->plane(sextant::PlaneOrientation::XY, z, { .alpha = alpha })
+                        ->heatmap(fields[static_cast<std::size_t>(k)], R, C, kExt, kExt,
+                                  { .cmap = sextant::Colormap::Viridis });
+            }
+            return fig;
+        };
+        for (int k : { 1, 2, 4, 8, 16, 24 }) {
+            auto op = build(k, 1.0f);
+            const double o = timed(op);
+            auto tl = build(k, 0.5f);
+            const double a = timed(tl);
+            std::printf("%-8d %10d %12.1f %12.1f %12.1f\n", k, k, o, a, a - o);
+        }
+    }
+
+    // -- 4c.3  primitive count: one translucent surface, 25^2 .. 200^2 ------
+    //
+    // The dimension the *other* path spends on, and the number the plan's
+    // step-9 table asks for. A translucent sheet is sorted cell by cell every
+    // frame by surface_draw_order() and its index buffer re-uploaded; at
+    // 200x200 that is 39,601 cells sorted and 237,606 indices pushed across
+    // the bus per frame, for an order the depth test produces for nothing.
+    // Under peeling the sheet draws exactly as an opaque one does, so this
+    // delta should stay flat while the other climbs. Depth complexity is held
+    // roughly constant -- one sheet, seen from above -- so what moves here is
+    // geometry alone.
+    std::printf("\n--- 4c.3  primitive count: one surface, 900x700, ss 2 ---\n");
+    std::printf("%-10s %10s %12s %12s %12s\n",
+                "samples", "cells", "opaque ms", "alpha ms", "delta ms");
+    std::printf("%-10s %10s %12s %12s %12s\n",
+                "----------", "----------", "------------", "------------", "------------");
+    {
+        for (int n : { 25, 50, 100, 200 }) {
+            const std::vector<double> u = grid(n, -4.0, 4.0), v = grid(n, -4.0, 4.0);
+            const std::vector<double> h = ripple_on(u, v);
+            auto build = [&](float alpha) {
+                auto fig = fig_at(900, 700, 2);
+                auto ax = fig->add_subplot3d(1, 1, 1);
+                ax->set_view(-55.0, 30.0);
+                ax->surface(sextant::PlaneOrientation::XY, u, v, h,
+                            { .colormap = true, .cmap = sextant::Colormap::Viridis,
+                              .alpha = alpha });
+                return fig;
+            };
+            auto op = build(1.0f);
+            const double o = timed(op);
+            auto tl = build(0.55f);
+            const double a = timed(tl);
+            char label[24];
+            std::snprintf(label, sizeof(label), "%dx%d", n, n);
+            std::printf("%-10s %10d %12.1f %12.1f %12.1f\n",
+                        label, (n - 1) * (n - 1), o, a, a - o);
+        }
+    }
+
+    // -- 4c.4  everything at once -------------------------------------------
+    //
+    // Not a sweep: one scene with every kind translucent, at two window sizes,
+    // to answer "does it fall over". Four slices, two bar grids and two
+    // 100x100 sheets, all interleaving, at an elevation low enough that they
+    // do -- more translucent geometry than any figure the gallery holds. No
+    // control row: the number to carry away is the absolute one, read against
+    // the 16.7 ms a 60 Hz frame has and against the same row in the other run.
+    std::printf("\n--- 4c.4  the whole scene translucent: 4 slices + 2 grids + 2 sheets ---\n");
+    std::printf("%-14s %6s %12s %14s %12s\n",
+                "window", "ss", "savefig ms", "target Mpx", "cells");
+    std::printf("%-14s %6s %12s %14s %12s\n",
+                "--------------", "------", "------------", "--------------", "------------");
+    {
+        constexpr int R = 64, C = 64;
+        const std::vector<double> bu = grid(17, -4.0, 4.0), bv = grid(17, -4.0, 4.0);
+        const std::vector<double> bh = ripple_on(bu, bv);
+        const std::vector<double> su = grid(100, -4.0, 4.0), sv = grid(100, -4.0, 4.0);
+        const std::vector<double> sh = ripple_on(su, sv);
+        const int sizes[][2] = { {1280, 800}, {1920, 1200} };
+        for (const auto& d : sizes) {
+            auto fig = fig_at(d[0], d[1], 2);
+            auto ax = fig->add_subplot3d(1, 1, 1);
+            ax->set_view(-55.0, 8.0);
+            for (int k = 0; k < 4; ++k)
+                ax->plane(sextant::PlaneOrientation::XY, -2.0 + 1.4 * k, { .alpha = 0.45f })
+                        ->heatmap(slice(R, C, 0.4 * k), R, C, kExt, kExt,
+                                  { .cmap = sextant::Colormap::Viridis });
+            ax->bar3d(sextant::PlaneOrientation::XY, bu, bv, bh,
+                      { .color = sextant::Color::Orange, .alpha = 0.5f,
+                        .width = 0.7f, .depth = 0.7f, .bottom = -3.0 });
+            ax->bar3d(sextant::PlaneOrientation::YZ, bu, bv, bh,
+                      { .color = sextant::Color::Blue, .alpha = 0.5f,
+                        .width = 0.5f, .depth = 0.5f, .bottom = -3.0 });
+            ax->surface(sextant::PlaneOrientation::XY, su, sv, sh,
+                        { .colormap = true, .cmap = sextant::Colormap::Viridis,
+                          .alpha = 0.5f });
+            ax->surface(sextant::PlaneOrientation::ZX, su, sv, sh,
+                        { .color = sextant::Color::from_hex(0xff5533), .alpha = 0.5f });
+            const double ms = timed(fig);
+            char label[32];
+            std::snprintf(label, sizeof(label), "%dx%d", d[0], d[1]);
+            std::printf("%-14s %6d %12.1f %14.1f %12d\n", label, 2, ms,
+                        static_cast<double>(d[0]) * d[1] * 4 / 1.0e6,
+                        2 * 99 * 99 + 2 * 16 * 16);
+        }
+    }
+
+    // -- 4c.5  how many layers a scene actually needs ------------------------
+    //
+    // Eight is the default and nothing before this said what it should be. The
+    // count is a bound like the SVG's `max_splits`, and it fails the same way:
+    // what the last layer does not reach is simply absent from the picture,
+    // with nothing said about it. Unlike the SVG's, it cannot be reported --
+    // peeling stops early when a pass peels nothing, but a pass that peels
+    // *something* on the last iteration is indistinguishable from one that
+    // finished.
+    //
+    // So the requirement is measured from the outside: render the same scene at
+    // a rising layer count and find where the PNG stops changing. Since
+    // `PngExportOptions::peel_layers` this is one process rather than a sweep
+    // over runs. png_writer's output is deterministic, so "the same file" is
+    // exactly the question.
+    //
+    // The scene is the gallery's sixth cell -- a sheet threaded through a grid
+    // of translucent bars, so a ray crosses two faces per bar plus the sheet.
+    std::printf("\n--- 4c.5  the peel-layer requirement, by rendering until it stops ---\n");
+    {
+        const std::vector<double> u = grid(13, -3.0, 3.0), v = grid(13, -3.0, 3.0);
+        std::vector<double> ripple(u.size() * v.size()), midway(u.size() * v.size());
+        for (std::size_t i = 0; i < u.size(); ++i)
+            for (std::size_t j = 0; j < v.size(); ++j) {
+                const double r = std::hypot(u[i], v[j]);
+                const std::size_t k = i * v.size() + j;
+                ripple[k] = 1.6 * std::exp(-r / 2.0) * std::cos(r * 1.7);
+                midway[k] = -1.5 + 0.5 * ripple[k];
+            }
+        auto fig = fig_at(500, 475, 1);
+        auto ax = fig->add_subplot3d(1, 1, 1);
+        ax->bar3d(sextant::PlaneOrientation::XY, u, v, ripple,
+                  { .color = sextant::Color::Orange, .alpha = 0.5f,
+                    .width = 0.7f, .depth = 0.7f, .bottom = -1.5 });
+        ax->surface(sextant::PlaneOrientation::XY, u, v, midway,
+                    { .colormap = true, .cmap = sextant::Colormap::Viridis,
+                      .alpha = 0.55f });
+        fig->show(false);
+        auto bytes = [](const char* p) {
+            std::FILE* f = std::fopen(p, "rb");
+            std::string s;
+            if (!f) return s;
+            char buf[65536];
+            std::size_t n;
+            while ((n = std::fread(buf, 1, sizeof buf, f)) > 0) s.append(buf, n);
+            std::fclose(f);
+            return s;
+        };
+        const int layers[] = { 2, 4, 6, 8, 10, 12, 16, 24, 32, 48 };
+        std::string prev;
+        std::printf("%-10s %12s %14s\n", "layers", "PNG KB", "vs previous");
+        for (const int L : layers) {
+            fig->savefig_png("perf_peel_layers.png", { .peel_layers = L });
+            const std::string cur = bytes("perf_peel_layers.png");
+            std::printf("%-10d %12.1f %14s\n", L,
+                        static_cast<double>(cur.size()) / 1024.0,
+                        prev.empty() ? "-" : (cur == prev ? "identical" : "CHANGED"));
+            prev = cur;
+        }
+        fig->close();
+        std::printf("The first count whose picture equals the one below it is the\n"
+                    "requirement; every row after it must say identical.\n");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// 4d. Newell's algorithm (step 9) — what an exact SVG costs
+// ---------------------------------------------------------------------------
+// The step's viability is a number rather than an argument, and this is the
+// number: how long an SVG export takes and how big the file gets, as the
+// scene's primitive count grows. Splitting is quadratic in the worst case, and
+// the whole question is whether the scenes this library actually draws are
+// anywhere near that worst case.
+//
+// SVG export is pure CPU -- no GL context, no readback -- so unlike the raster
+// benchmarks this one measures exactly what it looks like it measures.
+//
+// The comparison is across *processes*, since the switch is read once:
+//
+//     sextant_perf_test svg3d                        (Newell, splitting)
+//     SEXTANT_NEWELL=0 sextant_perf_test svg3d       (the whole-object order)
+//
+// The first two rows are scenes with **nothing interleaving**: a bar grid on
+// its own, a surface on its own. They are the control, and they must not move
+// between the two runs -- Newell resolves every pair with its cheap tests,
+// splits nothing, and produces the same file. Everything after them holds a
+// plane cutting through the geometry, which is memory/spec_3d.md §10's flaw
+// and the case the step exists for.
+void bench_newell() {
+    std::printf("\n=== 4d. SVG export with an exact painter's order (step 9) ===\n");
+    if (const char* env = std::getenv("SEXTANT_NEWELL"))
+        std::printf("SEXTANT_NEWELL=%s\n", env);
+    else
+        std::printf("SEXTANT_NEWELL unset (Newell's algorithm on)\n");
+    std::printf("Pure CPU: an SVG export builds no GL context and reads back nothing,\n");
+    std::printf("so these times are the painter and the writer and nothing else.\n\n");
+    std::printf("%-34s %10s %12s %12s\n", "scene", "polygons", "export ms", "SVG KB");
+    std::printf("%-34s %10s %12s %12s\n",
+                "----------------------------------", "----------", "------------", "------------");
+
+    auto grid = [](int n, double lo, double hi) {
+        std::vector<double> g(static_cast<std::size_t>(n));
+        for (int i = 0; i < n; ++i)
+            g[static_cast<std::size_t>(i)] = lo + (hi - lo) * i / (n - 1);
+        return g;
+    };
+    auto ripple_on = [](const std::vector<double>& u, const std::vector<double>& v) {
+        std::vector<double> h(u.size() * v.size());
+        for (std::size_t i = 0; i < u.size(); ++i)
+            for (std::size_t j = 0; j < v.size(); ++j) {
+                const double r = std::hypot(u[i], v[j]);
+                h[i * v.size() + j] = 1.6 * std::exp(-r / 3.0) * std::cos(r * 1.5);
+            }
+        return h;
+    };
+    auto slice = [](int rows, int cols) {
+        std::vector<float> m(static_cast<std::size_t>(rows) * cols);
+        for (int r = 0; r < rows; ++r)
+            for (int c = 0; c < cols; ++c)
+                m[static_cast<std::size_t>(r) * cols + c] =
+                    static_cast<float>(std::sin(0.3 * c) * std::cos(0.3 * r));
+        return m;
+    };
+
+    constexpr int W = 900, H = 700;
+    auto run = [&](const char* label, int surf_n, int bar_n, bool cut, int polys) {
+        sextant::FigureOptions o;
+        o.width = W; o.height = H; o.title = "newell"; o.vsync = false;
+        auto fig = sextant::Figure::create(o);
+        auto ax = fig->add_subplot3d(1, 1, 1);
+        ax->set_view(-55.0, 24.0);
+        if (surf_n > 1) {
+            const std::vector<double> u = grid(surf_n, -4.0, 4.0), v = grid(surf_n, -4.0, 4.0);
+            ax->surface(sextant::PlaneOrientation::XY, u, v, ripple_on(u, v),
+                        { .colormap = true, .cmap = sextant::Colormap::Viridis });
+        }
+        if (bar_n > 1) {
+            const std::vector<double> u = grid(bar_n, -4.0, 4.0), v = grid(bar_n, -4.0, 4.0);
+            ax->bar3d(sextant::PlaneOrientation::XY, u, v, ripple_on(u, v),
+                      { .color = sextant::Color::Orange, .width = 0.7f, .depth = 0.7f,
+                        .bottom = -2.0 });
+        }
+        if (cut)
+            ax->plane(sextant::PlaneOrientation::YZ, 0.0)
+                    ->heatmap(slice(48, 48), 48, 48, { -4.0, 4.0 }, { -2.0, 2.0 },
+                              { .cmap = sextant::Colormap::Viridis });
+
+        std::vector<double> t;
+        for (int rep = 0; rep < 3; ++rep) {
+            const auto t0 = Clock::now();
+            fig->savefig("perf_newell.svg");
+            t.push_back(ms_since(t0));
+        }
+        std::sort(t.begin(), t.end());
+        double kb = 0.0;
+        if (FILE* f = std::fopen("perf_newell.svg", "rb")) {
+            std::fseek(f, 0, SEEK_END);
+            kb = static_cast<double>(std::ftell(f)) / 1024.0;
+            std::fclose(f);
+        }
+        std::printf("%-34s %10d %12.1f %12.1f\n", label, polys, t[1], kb);
+    };
+
+    // Controls: nothing interleaves, so nothing may split and neither the time
+    // nor the file may move between the two runs.
+    run("bar grid 9x9, alone (control)",        0,  9, false, 8 * 8 * 3);
+    run("surface 50x50, alone (control)",      50,  0, false, 49 * 49);
+    // The step's own case, at four sizes.
+    run("bar grid 9x9 + a cut",                 0,  9, true,  8 * 8 * 3 + 1);
+    run("surface 25x25 + a cut",               25,  0, true,  24 * 24 + 1);
+    run("surface 50x50 + a cut",               50,  0, true,  49 * 49 + 1);
+    run("surface 100x100 + a cut",            100,  0, true,  99 * 99 + 1);
+    run("surface 100x100 + grid 17 + a cut",  100, 17, true,  99 * 99 + 16 * 16 * 3 + 1);
+
+    // And the scene the step is actually judged on: `window_test`'s
+    // `test_translucent3d`, every pair of kinds crossing, at the size and
+    // camera the gallery draws it. The rows above are one plane cutting one
+    // object and split a handful of times; this one is 288 translucent bars
+    // and two sheets that run *inside* them, and it is where the splitting
+    // -- and everything the splitting costs -- actually lives. The wall-clock
+    // claims in step 9's own commit messages are about this figure, and until
+    // now there was no headless way to reproduce them.
+    {
+        constexpr int NU = 13, NV = 13, NX = 48, NY = 48;
+        std::vector<double> gx(NU), gy(NV), ripple(NU * NV), bowl(NU * NV), midway(NU * NV);
+        for (int i = 0; i < NU; ++i) gx[static_cast<std::size_t>(i)] = -3.0 + 6.0 * i / (NU - 1);
+        for (int j = 0; j < NV; ++j) gy[static_cast<std::size_t>(j)] = -3.0 + 6.0 * j / (NV - 1);
+        for (int i = 0; i < NU; ++i)
+            for (int j = 0; j < NV; ++j) {
+                const double x = gx[static_cast<std::size_t>(i)];
+                const double y = gy[static_cast<std::size_t>(j)];
+                const double r = std::hypot(x, y);
+                const std::size_t k = static_cast<std::size_t>(i * NV + j);
+                ripple[k] = 1.6 * std::exp(-r / 2.0) * std::cos(r * 1.7);
+                bowl[k]   = 0.22 * (x * x - y * y);
+                midway[k] = -1.5 + 0.5 * ripple[k];
+            }
+        auto slice_at = [&](double z) {
+            std::vector<float> m(static_cast<std::size_t>(NY) * NX);
+            for (int r = 0; r < NY; ++r)
+                for (int c = 0; c < NX; ++c) {
+                    const double x = -3.0 + 6.0 * c / (NX - 1);
+                    const double y = -3.0 + 6.0 * r / (NY - 1);
+                    m[static_cast<std::size_t>(r) * NX + c] =
+                        static_cast<float>(std::sin(x + z) * std::cos(y - z));
+                }
+            return m;
+        };
+        std::vector<double> gx2(NU), gy2(NV);
+        for (int i = 0; i < NU; ++i) gx2[static_cast<std::size_t>(i)] = gx[static_cast<std::size_t>(i)] + 0.25;
+        for (int j = 0; j < NV; ++j) gy2[static_cast<std::size_t>(j)] = gy[static_cast<std::size_t>(j)] + 0.25;
+
+        const sextant::Range ext{ -3.0, 3.0 };
+        const sextant::HeatmapOptions kCool{ .vmin = -1.2f, .vmax = 5.0f };
+        const sextant::HeatmapOptions kWarm{ .vmin = -5.0f, .vmax = 1.2f };
+
+        sextant::FigureOptions o;
+        o.width = 1500; o.height = 950; o.title = "newell gallery"; o.vsync = false;
+        auto fig = sextant::Figure::create(o);
+
+        auto c1 = fig->add_subplot3d(2, 3, 1);
+        c1->plane(sextant::PlaneOrientation::XY, 0.0, { .alpha = 0.6f })
+                ->heatmap(slice_at(0.0), NY, NX, ext, ext, kCool);
+        c1->plane(sextant::PlaneOrientation::YZ, 0.0, { .alpha = 0.6f })
+                ->heatmap(slice_at(1.5), NY, NX, ext, ext, kWarm);
+
+        auto c2 = fig->add_subplot3d(2, 3, 2);
+        c2->bar3d(sextant::PlaneOrientation::XY, gx, gy, ripple,
+                  { .color = sextant::Color::Orange, .alpha = 0.5f,
+                    .width = 0.45f, .depth = 0.45f, .bottom = -1.5 });
+        c2->bar3d(sextant::PlaneOrientation::XY, gx2, gy2, bowl,
+                  { .color = sextant::Color::Blue, .alpha = 0.5f,
+                    .width = 0.45f, .depth = 0.45f, .bottom = -1.5 });
+
+        auto c3 = fig->add_subplot3d(2, 3, 3);
+        c3->surface(sextant::PlaneOrientation::XY, gx, gy, ripple,
+                    { .color = sextant::Color::from_hex(0xff5533), .alpha = 0.55f });
+        c3->surface(sextant::PlaneOrientation::XY, gx, gy, bowl,
+                    { .color = sextant::Color::from_hex(0x3388ff), .alpha = 0.55f });
+
+        auto c4 = fig->add_subplot3d(2, 3, 4);
+        c4->bar3d(sextant::PlaneOrientation::XY, gx, gy, ripple,
+                  { .color = sextant::Color::Green, .alpha = 0.5f,
+                    .width = 0.8f, .depth = 0.8f, .bottom = -1.5 });
+        c4->plane(sextant::PlaneOrientation::YZ, 0.0, { .alpha = 0.6f })
+                ->heatmap(slice_at(0.6), NY, NX, ext, ext, kWarm);
+
+        auto c5 = fig->add_subplot3d(2, 3, 5);
+        c5->surface(sextant::PlaneOrientation::XY, gx, gy, ripple,
+                    { .colormap = true, .cmap = sextant::Colormap::Viridis, .alpha = 0.6f });
+        c5->plane(sextant::PlaneOrientation::XY, 0.35, { .alpha = 0.6f })
+                ->heatmap(slice_at(0.35), NY, NX, ext, ext, kWarm);
+
+        auto c6 = fig->add_subplot3d(2, 3, 6);
+        c6->bar3d(sextant::PlaneOrientation::XY, gx, gy, ripple,
+                  { .color = sextant::Color::Orange, .alpha = 0.5f,
+                    .width = 0.7f, .depth = 0.7f, .bottom = -1.5 });
+        c6->surface(sextant::PlaneOrientation::XY, gx, gy, midway,
+                    { .colormap = true, .cmap = sextant::Colormap::Viridis, .alpha = 0.55f });
+
+        // Through savefig_svg() rather than savefig(), because the report is
+        // half of what this row is for: the split bound is the one an
+        // interleaving scene actually reaches, and a timing that does not say
+        // whether the export was *exact* is a timing of two different things.
+        // SEXTANT_PERF_MAX_SPLITS raises it, which is how the number a scene
+        // needs gets found -- there is no other way to ask.
+        std::size_t budget = 0;
+        if (const char* s = std::getenv("SEXTANT_PERF_MAX_SPLITS"))
+            budget = static_cast<std::size_t>(std::strtoull(s, nullptr, 10));
+
+        sextant::SvgSaveReport rep{};
+        std::vector<double> t;
+        for (int r = 0; r < 3; ++r) {
+            const auto t0 = Clock::now();
+            rep = fig->savefig_svg("perf_newell_gallery.svg", { .max_splits = budget });
+            t.push_back(ms_since(t0));
+        }
+        std::sort(t.begin(), t.end());
+        double kb = 0.0;
+        if (FILE* f = std::fopen("perf_newell_gallery.svg", "rb")) {
+            std::fseek(f, 0, SEEK_END);
+            kb = static_cast<double>(std::ftell(f)) / 1024.0;
+            std::fclose(f);
+        }
+        std::printf("%-34s %10s %12.1f %12.1f\n",
+                    "gallery: 6 interleaving cells", "-", t[1], kb);
+        std::printf("%-34s worst cell %zu splits, %zu tests -- %s\n", "",
+                    rep.splits, rep.tests,
+                    rep.scene_order_exact ? "exact"
+                                          : "GAVE UP (raise SEXTANT_PERF_MAX_SPLITS)");
+    }
+}
 // 4. Data-panel editing — interactive, not automatable
 // ---------------------------------------------------------------------------
 void bench_edit() {
@@ -610,7 +1178,7 @@ void bench_interactive() {
     char title[128];
     if (kind == "heatmap") {
         const std::vector<float> m = make_matrix(static_cast<int>(rows), static_cast<int>(cols));
-        ax->heatmap(m, static_cast<int>(rows), static_cast<int>(cols));
+        ax->imshow(m, static_cast<int>(rows), static_cast<int>(cols));
         std::snprintf(title, sizeof(title), "heatmap %zux%zu, supersample %zu", rows, cols, ss);
     } else {
         const Series s = make_series(n);
@@ -627,7 +1195,7 @@ void bench_interactive() {
             // throughput session it has always been and remains comparable
             // with earlier numbers.
             if (dashed) {
-                lo.label = style_name;
+                lo.name = style_name;
                 ax->line(s.x, s.y, lo);
                 ax->grid(true, { .linestyle = style }).legend();
             } else {
@@ -642,11 +1210,11 @@ void bench_interactive() {
 
     std::printf("\nOpening: %s\n", title);
     std::printf("Things worth trying:\n");
-    std::printf("  - Controls > Navigate on, then drag to pan and scroll to zoom.\n");
+    std::printf("  - Cosmetic > Navigate on, then drag to pan and scroll to zoom.\n");
     std::printf("    Watch ms/frame while dragging: every pan step republishes the\n");
     std::printf("    snapshot and re-expands the geometry.\n");
     std::printf("  - View > Data Panel on, and scroll it.\n");
-    std::printf("  - Resize the window, and drag the Plot/Controls splitter.\n");
+    std::printf("  - Resize the window, and drag the Plot/Cosmetic splitter.\n");
     std::printf("  - Double-click the plot to reset the view.\n");
     if (dashed) {
         std::printf("\n  Dashed run — the grid and the legend swatch use the same style,\n");
@@ -655,7 +1223,7 @@ void bench_interactive() {
         std::printf("    across both (a pan leaves the scale alone, a scroll zoom scales\n");
         std::printf("    both axes together), so ms/frame should not move.\n");
         std::printf("  - Now resize the window in ONE direction only, or drag the\n");
-        std::printf("    Plot/Controls splitter. That changes the aspect ratio, which is\n");
+        std::printf("    Plot/Cosmetic splitter. That changes the aspect ratio, which is\n");
         std::printf("    the one case that has to rebuild the arc lengths — the only\n");
         std::printf("    place dashing costs anything, and it grows with point count.\n");
         std::printf("  - Check the dashes stay the same size on screen as you zoom in:\n");
@@ -728,7 +1296,7 @@ int main(int argc, char** argv) {
     } else {
         which = prompt_choice(
             "Which test?",
-            { "all", "ingest", "snapshot", "render", "export", "edit", "interactive" },
+            { "all", "ingest", "snapshot", "render", "export", "peel", "svg3d", "edit", "interactive" },
             "all");
         std::printf("\n");
     }
@@ -742,13 +1310,16 @@ int main(int argc, char** argv) {
     if (all || which == "render")      bench_render();
     if (all || which == "export")      bench_export();
     if (all || which == "export")      bench_export_live();
+    if (all || which == "peel")        bench_peel();
+    if (all || which == "svg3d")       bench_newell();
     if (which == "edit")               bench_edit();
     if (which == "interactive")        bench_interactive();
 
     if (!all && which != "ingest" && which != "snapshot" && which != "render"
-             && which != "export" && which != "edit" && which != "interactive") {
+             && which != "export" && which != "peel" && which != "svg3d"
+             && which != "edit" && which != "interactive") {
         std::printf("unknown test '%s'\n", which.c_str());
-        std::printf("usage: sextant_perf_test [all|ingest|snapshot|render|export|edit|interactive]\n");
+        std::printf("usage: sextant_perf_test [all|ingest|snapshot|render|export|peel|svg3d|edit|interactive]\n");
         return 1;
     }
 

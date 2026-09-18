@@ -15,9 +15,9 @@ int main() {
 
     auto fig = sextant::Figure::create({.width=900, .height=400, .title="Smoke Test"});
     auto ax  = fig->axes();
-    ax->line(x, y_sin, {.color=sextant::Color::Blue,  .label="sin"});
+    ax->line(x, y_sin, {.color=sextant::Color::Blue,  .name="sin"});
     ax->line(x, y_cos, {.color=sextant::Color::Red,
-                        .linestyle=sextant::LineStyle::Dashed, .label="cos"});
+                        .linestyle=sextant::LineStyle::Dashed, .name="cos"});
     ax->set_title("Trig functions")
       .set_xtitle("x")
       .set_ytitle("amplitude")

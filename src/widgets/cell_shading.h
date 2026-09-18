@@ -81,10 +81,14 @@ public:
     // One vector column — x and y get their own ranges rather than a shared
     // one, since they are unrelated quantities and a common range would
     // flatten whichever has the smaller span into a single colour.
-    const ValueRange& column(unsigned long long generation, int slot,
+    //
+    // `plane` is which plane of a 3D slot the object is on, or -1 for a 2D
+    // axes -- part of the key for the same reason `slot` is: two planes of
+    // one cell each hold a "line 0" whose ranges are unrelated.
+    const ValueRange& column(unsigned long long generation, int slot, int plane,
                              PlotKind kind, int plot_index, int column,
                              const double* values, std::size_t count) {
-        Entry& e = entries_[key_of(slot, kind, plot_index, column)];
+        Entry& e = entries_[key_of(slot, plane, kind, plot_index, column)];
         if (fresh(e, generation, count)) return e.range;
         e.range = ValueRange{};
         for (std::size_t i = 0; i < count; ++i) accumulate(e.range, values[i]);
@@ -95,9 +99,9 @@ public:
     // Packed rather than a struct with its own hash functor. The four fields
     // identify one column of one plot of one axes for as long as the plot
     // list is stable, the same contract DataRenderer's CacheKey relies on.
-    const ValueRange& matrix(unsigned long long generation, int slot,
+    const ValueRange& matrix(unsigned long long generation, int slot, int plane,
                              int plot_index, const CowVec<float>& values) {
-        Entry& e = entries_[key_of(slot, PlotKind::Heatmap, plot_index, kMatrixCol)];
+        Entry& e = entries_[key_of(slot, plane, PlotKind::Heatmap, plot_index, kMatrixCol)];
         if (fresh(e, generation, values.size())) return e.range;
         e.range = ValueRange{};
         for (std::size_t i = 0; i < values.size(); ++i)
@@ -118,12 +122,18 @@ private:
     // Non-finite values are skipped rather than poisoning the range: one NaN
     // would make every comparison false and leave the table neutral, which
     // looks exactly like the feature being off.
-    static unsigned long long key_of(int slot, PlotKind kind, int plot_index, int column) {
+    static unsigned long long key_of(int slot, int plane, PlotKind kind,
+                                     int plot_index, int column) {
         const auto u = [](int v, unsigned mask) {
             return static_cast<unsigned long long>(static_cast<unsigned>(v) & mask);
         };
+        // The plane rides bits 16..27, the gap the original layout left
+        // between `column` and `plot_index`, and is biased so that -1 ("the
+        // axes itself") is 0 -- every 2D key is then bit-for-bit what it
+        // always was.
         return (u(slot, 0xFFFF) << 48) | (u(static_cast<int>(kind), 0xF) << 44)
-             | (u(plot_index, 0xFFFF) << 28) | u(column, 0xFFFF);
+             | (u(plot_index, 0xFFFF) << 28) | (u(plane + 1, 0xFFF) << 16)
+             | u(column, 0xFFFF);
     }
 
     static bool fresh(const Entry& e, unsigned long long generation, std::size_t count) {

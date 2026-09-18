@@ -229,8 +229,8 @@ Ship that file with any binary that embeds sextant.
 
 3D plots, with hybrid 2D/3D plot support.
 
+**macOS is not supported currently**, but it's on the way. 
+
 ## Not in scope
 
 remote rendering, integration with Qt/GTK/wxWidgets.
-
-**macOS is not supported currently**, and not by oversight: AppKit requires window creation and event polling on the process main thread, which is incompatible with `show(false)` returning immediately while the window runs on its own thread. Supporting it means a second threading model, not a port.

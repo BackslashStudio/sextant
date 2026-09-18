@@ -12,110 +12,154 @@ Axes::~Axes() = default;
 
 namespace {
 
-// Moves the six bulk vectors out of the caller's ErrorBarOptions into the plot
-// object's ErrorBarData, which is where per-point data has to live (see
-// plot_objects.h). Each is either empty or exactly one entry per point --
-// anything else throws, like the x/y length check just above, since a short
-// error vector would draw a series whose last points look certain.
-//
-// `accept_x` is false for line() and bar(), which draw a y error bar only.
-// Setting an x field there throws rather than being silently dropped.
-ErrorBarData take_error_bars(ErrorBarOptions& eb, std::size_t n,
-                             const char* who, bool accept_x) {
-    auto take = [&](std::vector<double>& v, const char* field) {
-        if (!v.empty() && v.size() != n)
+// Copies the caller's ErrorBar into the plot object's ErrorBarData, which is
+// where per-point data has to live (see plot_objects.h). Each span is either
+// empty or exactly one entry per point -- anything else throws, like the x/y
+// length check beside every call, since a short error vector would draw a
+// series whose last points look certain. The values are not checked: a
+// negative is a magnitude and a non-finite entry masks that end (see ErrorBar).
+ErrorBarData take_error_bars(const ErrorBar& eb, std::size_t n, const char* who) {
+    auto take = [&](std::span<const double> s, const char* field) {
+        if (!s.empty() && s.size() != n)
             throw std::invalid_argument(
-                std::string(who) + ": errorbar." + field + " has " +
-                std::to_string(v.size()) + " entries, need one per point (" +
+                std::string(who) + ": err." + field + " has " +
+                std::to_string(s.size()) + " entries, need one per point (" +
                 std::to_string(n) + ")");
-        std::vector<double> out = std::move(v);
-        v.clear();   // a moved-from vector is only *valid*, not certainly empty
-        return out;
+        return CowVec<double>(std::vector<double>(s.begin(), s.end()));
     };
-    if (!accept_x && (!eb.xmin.empty() || !eb.xmax.empty() || !eb.xvar.empty()))
-        throw std::invalid_argument(
-            std::string(who) + ": error bars are y-direction only here; "
-            "x error bars are drawn by scatter() and scatter_z()");
-
     ErrorBarData d;
-    d.ymin = take(eb.ymin, "ymin");
-    d.ymax = take(eb.ymax, "ymax");
-    d.yvar = take(eb.yvar, "yvar");
-    if (accept_x) {
-        d.xmin = take(eb.xmin, "xmin");
-        d.xmax = take(eb.xmax, "xmax");
-        d.xvar = take(eb.xvar, "xvar");
-    }
+    d.x_cap_lo = take(eb.x_cap_lo, "x_cap_lo");
+    d.x_cap_hi = take(eb.x_cap_hi, "x_cap_hi");
+    d.x_box_lo = take(eb.x_box_lo, "x_box_lo");
+    d.x_box_hi = take(eb.x_box_hi, "x_box_hi");
+    d.y_cap_lo = take(eb.y_cap_lo, "y_cap_lo");
+    d.y_cap_hi = take(eb.y_cap_hi, "y_cap_hi");
+    d.y_box_lo = take(eb.y_box_lo, "y_box_lo");
+    d.y_box_hi = take(eb.y_box_hi, "y_box_hi");
     return d;
 }
 
 } // namespace
 
-Axes& Axes::line(std::span<const double> x, std::span<const double> y,
-                 LineOptions opts) {
+// The four vector-shaped ingests, as Impl members for the reason
+// ingest_heatmap() is one: Axes and Plane2D must accept exactly the same data
+// on exactly the same terms, and two copies of "x and y must have the same
+// length" is two chances to answer differently. `who` only names the caller in
+// the messages, so a caller who mixed up an axes and a plane is told which one
+// complained.
+void Axes::Impl::ingest_line(std::span<const double> x, std::span<const double> y,
+                             const ErrorBar& eb, LineOptions opts, const char* who) {
     if (x.size() != y.size())
-        throw std::invalid_argument("line: x and y must have the same length");
-    ErrorBarData err = take_error_bars(opts.errorbar, x.size(), "line", false);
-    d->lines.push_back({
+        throw std::invalid_argument(std::string(who) + ": x and y must have the same length");
+    ErrorBarData err = take_error_bars(eb, x.size(), who);
+    lines.push_back({
         std::vector<double>(x.begin(), x.end()),
         std::vector<double>(y.begin(), y.end()),
         std::move(err),
         std::move(opts),
     });
-    return *this;
 }
 
-Axes& Axes::line(std::span<const double> y, LineOptions opts) {
-    std::vector<double> x(y.size());
-    for (std::size_t i = 0; i < x.size(); ++i) x[i] = static_cast<double>(i);
-    return line(x, y, std::move(opts));
-}
-
-Axes& Axes::scatter(std::span<const double> x, std::span<const double> y,
-                    ScatterOptions opts) {
+void Axes::Impl::ingest_scatter(std::span<const double> x, std::span<const double> y,
+                                const ErrorBar& eb, ScatterOptions opts, const char* who) {
     if (x.size() != y.size())
-        throw std::invalid_argument("scatter: x and y must have the same length");
-    ErrorBarData err = take_error_bars(opts.errorbar, x.size(), "scatter", true);
-    d->scatters.push_back({
+        throw std::invalid_argument(std::string(who) + ": x and y must have the same length");
+    ErrorBarData err = take_error_bars(eb, x.size(), who);
+    scatters.push_back({
         std::vector<double>(x.begin(), x.end()),
         std::vector<double>(y.begin(), y.end()),
         std::move(err),
         std::move(opts),
     });
-    return *this;
 }
 
-Axes& Axes::scatter_z(std::span<const double> x, std::span<const double> y,
-                      std::span<const double> z, ScatterZOptions opts) {
+void Axes::Impl::ingest_scatter_z(std::span<const double> x, std::span<const double> y,
+                                  std::span<const double> z, const ErrorBar& eb,
+                                  ScatterZOptions opts, const char* who) {
     if (x.size() != y.size() || x.size() != z.size())
-        throw std::invalid_argument("scatter_z: x, y, and z must have the same length");
-    ErrorBarData err = take_error_bars(opts.errorbar, x.size(), "scatter_z", true);
-    d->scatter_z.push_back({
+        throw std::invalid_argument(std::string(who) + ": x, y, and z must have the same length");
+    ErrorBarData err = take_error_bars(eb, x.size(), who);
+    scatter_z.push_back({
         std::vector<double>(x.begin(), x.end()),
         std::vector<double>(y.begin(), y.end()),
         std::vector<double>(z.begin(), z.end()),
         std::move(err),
         std::move(opts),
     });
-    return *this;
 }
 
-Axes& Axes::bar(std::span<const double> x, std::span<const double> height,
-                BarOptions opts) {
+void Axes::Impl::ingest_bar(std::span<const double> x, std::span<const double> height,
+                            const ErrorBar& eb, BarOptions opts, const char* who) {
     if (x.size() != height.size())
-        throw std::invalid_argument("bar: x and height must have the same length");
-    ErrorBarData err = take_error_bars(opts.errorbar, x.size(), "bar", false);
+        throw std::invalid_argument(std::string(who) + ": x and height must have the same length");
+    ErrorBarData err = take_error_bars(eb, x.size(), who);
     // Derive data-space bar width from inter-bar spacing × fractional opts.width.
     double spacing = 1.0;
     if (x.size() > 1)
         spacing = std::abs(x[1] - x[0]);
-    d->bars.push_back({
+    bars.push_back({
         std::vector<double>(x.begin(), x.end()),
         std::vector<double>(height.begin(), height.end()),
         spacing * static_cast<double>(opts.width),
         std::move(err),
         std::move(opts),
     });
+}
+
+// Each kind twice, with and without an ErrorBar. The overload without is the
+// empty ErrorBar, so the two cannot answer differently about anything else.
+Axes& Axes::line(std::span<const double> x, std::span<const double> y,
+                 LineOptions opts) {
+    return line(x, y, ErrorBar{}, std::move(opts));
+}
+
+Axes& Axes::line(std::span<const double> x, std::span<const double> y,
+                 const ErrorBar& err, LineOptions opts) {
+    d->ingest_line(x, y, err, std::move(opts), "line");
+    return *this;
+}
+
+Axes& Axes::line(std::span<const double> y, LineOptions opts) {
+    return line(y, ErrorBar{}, std::move(opts));
+}
+
+Axes& Axes::line(std::span<const double> y, const ErrorBar& err, LineOptions opts) {
+    std::vector<double> x(y.size());
+    for (std::size_t i = 0; i < x.size(); ++i) x[i] = static_cast<double>(i);
+    return line(x, y, err, std::move(opts));
+}
+
+Axes& Axes::scatter(std::span<const double> x, std::span<const double> y,
+                    ScatterOptions opts) {
+    return scatter(x, y, ErrorBar{}, std::move(opts));
+}
+
+Axes& Axes::scatter(std::span<const double> x, std::span<const double> y,
+                    const ErrorBar& err, ScatterOptions opts) {
+    d->ingest_scatter(x, y, err, std::move(opts), "scatter");
+    return *this;
+}
+
+Axes& Axes::scatter_z(std::span<const double> x, std::span<const double> y,
+                      std::span<const double> z, ScatterZOptions opts) {
+    return scatter_z(x, y, z, ErrorBar{}, std::move(opts));
+}
+
+Axes& Axes::scatter_z(std::span<const double> x, std::span<const double> y,
+                      std::span<const double> z, const ErrorBar& err,
+                      ScatterZOptions opts) {
+    d->ingest_scatter_z(x, y, z, err, std::move(opts), "scatter_z");
+    return *this;
+}
+
+Axes& Axes::bar(std::span<const double> x, std::span<const double> height,
+                BarOptions opts) {
+    return bar(x, height, ErrorBar{}, std::move(opts));
+}
+
+Axes& Axes::bar(std::span<const double> x, std::span<const double> height,
+                const ErrorBar& err, BarOptions opts) {
+    d->ingest_bar(x, height, err, std::move(opts), "bar");
     return *this;
 }
 
@@ -152,11 +196,9 @@ Axes& Axes::hist(std::span<const double> data, int bins,
     // hint_labels and width control a bar chart has. `width` is read against
     // the bin width; 1.0, hist()'s own default argument, makes the bins touch.
     //
-    // Error bars are the one exception: a bin's height is a count this
-    // function derived, not a measurement the caller could have an uncertainty
-    // on, so anything set there is dropped and the BarPlot is built with no
-    // ErrorBarData. The only BarOptions field hist() does not honor.
-    bar_opts.errorbar = ErrorBarOptions{};
+    // No ErrorBar parameter, and so no ErrorBarData: a bin's height is a count
+    // this function derived, not a measurement the caller could have an
+    // uncertainty on. `bar_opts.errorbar` is style for bars never drawn.
 
     d->bars.push_back({
         std::move(centers),
@@ -168,12 +210,25 @@ Axes& Axes::hist(std::span<const double> data, int bins,
     return *this;
 }
 
-Axes& Axes::heatmap(std::span<const float> data, int rows, int cols,
-                    HeatmapOptions opts) {
+void Axes::Impl::ingest_heatmap(std::span<const float> data, int rows, int cols,
+                                Range xrange, Range yrange, HeatmapOptions opts,
+                                const char* who) {
+    const std::string w = who;
     if (rows < 1 || cols < 1)
-        throw std::invalid_argument("heatmap: rows and cols must be positive");
+        throw std::invalid_argument(w + ": rows and cols must be positive");
     if (static_cast<int>(data.size()) < rows * cols)
-        throw std::invalid_argument("heatmap: data too small for rows×cols");
+        throw std::invalid_argument(w + ": data too small for rows×cols");
+
+    // A degenerate range collapses the whole image to a line and makes every
+    // index<->data conversion meaningless, so it is rejected here rather than
+    // guarded at each of the four places that convert. Reversed is allowed:
+    // it mirrors the image, which is a real thing to ask for.
+    for (const Range& r : { xrange, yrange }) {
+        if (!std::isfinite(r.lo) || !std::isfinite(r.hi))
+            throw std::invalid_argument(w + ": range bounds must be finite");
+        if (r.lo == r.hi)
+            throw std::invalid_argument(w + ": range must span a non-zero interval");
+    }
 
     // Sorted and de-duplicated once here rather than on every trace:
     // the draw order becomes value order however the levels were listed, and
@@ -182,17 +237,37 @@ Axes& Axes::heatmap(std::span<const float> data, int rows, int cols,
     // usefully, and would silently trace nothing.
     for (double level : opts.contours)
         if (!std::isfinite(level))
-            throw std::invalid_argument("heatmap: contour levels must be finite");
+            throw std::invalid_argument(w + ": contour levels must be finite");
     std::sort(opts.contours.begin(), opts.contours.end());
     opts.contours.erase(std::unique(opts.contours.begin(), opts.contours.end()),
                         opts.contours.end());
 
-    d->heatmaps.push_back({
+    heatmaps.push_back({
         std::vector<float>(data.begin(), data.begin() + rows * cols),
         rows, cols,
+        xrange, yrange,
         std::move(opts),
     });
+}
+
+Axes& Axes::heatmap(std::span<const float> data, int rows, int cols,
+                    Range xrange, Range yrange, HeatmapOptions opts) {
+    d->ingest_heatmap(data, rows, cols, xrange, yrange, std::move(opts), "heatmap");
     return *this;
+}
+
+// The index-space specialization of heatmap(): one unit per cell, origin at
+// (0,0). This is what heatmap() itself meant before the extent became an
+// argument, so it is a forward and not a second ingest path.
+Axes& Axes::imshow(std::span<const float> data, int rows, int cols,
+                   HeatmapOptions opts) {
+    // rows/cols are validated by heatmap(); building the ranges from them
+    // first is harmless for a bad shape (the range is rejected too, with a
+    // less specific message) -- so clamp to keep heatmap()'s error the one
+    // the caller sees.
+    const Range xr{ 0.0, static_cast<double>(std::max(cols, 1)) };
+    const Range yr{ 0.0, static_cast<double>(std::max(rows, 1)) };
+    return heatmap(data, rows, cols, xr, yr, std::move(opts));
 }
 
 Axes& Axes::set_title(std::string_view text, float fontsize) {
@@ -222,26 +297,6 @@ Axes& Axes::legend(LegendOptions opts) {
 Axes& Axes::set_colorbar_style(ColorbarOptions opts) {
     d->colorbar_opts = opts; return *this;
 }
-
-namespace {
-// Builds an explicit tick list, falling back to generate_ticks()'s own
-// "%g" format when a position has no matching label.
-std::vector<Tick> make_tick_override(std::span<const double> pos,
-                                     const std::vector<std::string>& labels) {
-    std::vector<Tick> ticks;
-    ticks.reserve(pos.size());
-    for (std::size_t i = 0; i < pos.size(); ++i) {
-        if (i < labels.size()) {
-            ticks.push_back({pos[i], labels[i]});
-        } else {
-            char buf[32];
-            std::snprintf(buf, sizeof(buf), "%g", pos[i]);
-            ticks.push_back({pos[i], buf});
-        }
-    }
-    return ticks;
-}
-} // namespace
 
 Axes& Axes::set_xticks(std::span<const double> pos, std::vector<std::string> labels) {
     if (pos.empty()) d->xticks_override.reset();

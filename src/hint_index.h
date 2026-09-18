@@ -100,10 +100,20 @@ public:
     // disables caching — which here means falling back to the linear scan,
     // NOT rebuilding a grid every frame. Rebuilding would be strictly worse
     // than the scan it replaces.
-    void set_frame_key(unsigned long long data_generation, int axes_index) {
+    // `plane_index` is which plane of a 3D axes the following lookups are
+    // for, or -1 for a 2D axes -- the same addressing the edit journal uses.
+    // It has to be part of the key: two planes of one cell both hold "line 0"
+    // and their points are different points.
+    void set_frame_key(unsigned long long data_generation, int axes_index,
+                       int plane_index = -1) {
         data_generation_ = data_generation;
         axes_index_ = axes_index;
+        plane_index_ = plane_index;
     }
+
+    // Just the plane, for a 3D hit test walking several of them under one
+    // frame key.
+    void set_plane(int plane_index) { plane_index_ = plane_index; }
 
     const PointGrid& grid(PlotKind kind, std::size_t plot_index,
                           const CowVec<double>& x, const CowVec<double>& y) {
@@ -113,7 +123,7 @@ public:
             || n > 0xFFFFFFFFull)
             return unindexed;
 
-        Entry& e = map_[Key{ axes_index_, static_cast<int>(kind),
+        Entry& e = map_[Key{ axes_index_, plane_index_, static_cast<int>(kind),
                              static_cast<int>(plot_index) }];
         if (e.data_generation != data_generation_) {
             build(e.grid, x, y);
@@ -197,14 +207,15 @@ private:
     }
 
     struct Key {
-        int axes = -1, kind = -1, plot = -1;
+        int axes = -1, plane = -1, kind = -1, plot = -1;
         bool operator==(const Key& o) const {
-            return axes == o.axes && kind == o.kind && plot == o.plot;
+            return axes == o.axes && plane == o.plane && kind == o.kind && plot == o.plot;
         }
     };
     struct KeyHash {
         std::size_t operator()(const Key& k) const {
             return (static_cast<std::size_t>(static_cast<unsigned>(k.axes)) << 40)
+                 ^ (static_cast<std::size_t>(static_cast<unsigned>(k.plane)) << 20)
                  ^ (static_cast<std::size_t>(static_cast<unsigned>(k.kind)) << 32)
                  ^ static_cast<unsigned>(k.plot);
         }
@@ -216,6 +227,7 @@ private:
 
     unsigned long long data_generation_ = 0;
     int                axes_index_ = -1;
+    int                plane_index_ = -1;
     std::unordered_map<Key, Entry, KeyHash> map_;
 };
 

@@ -42,15 +42,20 @@ void trace_level(const HeatmapPlot& hp, double level, ContourSet& out) {
     // Where the level crosses an edge, linearly between its two samples.
     // Computed identically from either adjoining cell (same two values, same
     // endpoints), so both cells agree on the point bit for bit.
+    // Crossings are found in index space and emitted in *data* space, through
+    // the heatmap's own extent, so plan_contours() can project them with the
+    // same CoordTransform as any other data and neither render path has to
+    // know how a cell index becomes a coordinate. For imshow() the two spaces
+    // coincide, which is why the numbers below still read as cell centres.
     auto hpt = [&](int i, int j) {
         const double a = val(i, j), b = val(i, j + 1);
         const double t = (b != a) ? std::clamp((level - a) / (b - a), 0.0, 1.0) : 0.5;
-        return Pt{ static_cast<float>(j + 0.5 + t), static_cast<float>(i + 0.5) };
+        return Pt{ static_cast<float>(hp.x_at(j + 0.5 + t)), static_cast<float>(hp.y_at(i + 0.5)) };
     };
     auto vpt = [&](int i, int j) {
         const double a = val(i, j), b = val(i + 1, j);
         const double t = (b != a) ? std::clamp((level - a) / (b - a), 0.0, 1.0) : 0.5;
-        return Pt{ static_cast<float>(j + 0.5), static_cast<float>(i + 0.5 + t) };
+        return Pt{ static_cast<float>(hp.x_at(j + 0.5)), static_cast<float>(hp.y_at(i + 0.5 + t)) };
     };
 
     std::unordered_map<int, Pt>               pts;
@@ -180,12 +185,13 @@ std::string format_contour_level(double level) {
     return buf;
 }
 
-ContourDraw plan_contours(const ContourSet& set, const CoordTransform& tr,
+ContourDraw plan_contours(const ContourSet& set, const ContourProjector& proj,
                           const HeatmapOptions& opts,
                           const std::string& font_path)
 {
     ContourDraw out;
     std::vector<float> px, py, arc;
+    const PlotRect& frame = proj.frame();
 
     for (const auto& line : set) {
         const std::size_t n = line.x.size();
@@ -193,18 +199,28 @@ ContourDraw plan_contours(const ContourSet& set, const CoordTransform& tr,
 
         px.resize(n);
         py.resize(n);
+        bool all_in_front = true;
         for (std::size_t i = 0; i < n; ++i) {
-            px[i] = tr.to_px(static_cast<double>(line.x[i]));
-            py[i] = tr.to_py(static_cast<double>(line.y[i]));
+            const ContourProjector::Pt p = proj.at(static_cast<double>(line.x[i]),
+                                                   static_cast<double>(line.y[i]));
+            px[i] = p.x;
+            py[i] = p.y;
+            all_in_front = all_in_front && p.in_front;
         }
+        // Behind the eye a point does not project off-screen, it projects to
+        // the wrong side of the picture -- so a line with any vertex there is
+        // dropped whole rather than drawn across the figure. Always true under
+        // an orthographic camera and on a 2D axes, which is why neither is
+        // affected by this existing at all.
+        if (!all_in_front) continue;
 
         // Cheap whole-line reject. Everything downstream is clipped to the
         // frame anyway, but a zoomed-in view can leave most of a large grid's
         // lines entirely offscreen, and this skips their arc-length pass.
         const auto [xlo, xhi] = std::minmax_element(px.begin(), px.end());
         const auto [ylo, yhi] = std::minmax_element(py.begin(), py.end());
-        if (*xhi < tr.px || *xlo > tr.px + tr.pw ||
-            *yhi < tr.py || *ylo > tr.py + tr.ph) continue;
+        if (*xhi < frame.x || *xlo > frame.x + frame.w ||
+            *yhi < frame.y || *ylo > frame.y + frame.h) continue;
 
         auto push_whole = [&] {
             ContourRun r;
@@ -280,19 +296,61 @@ ContourDraw plan_contours(const ContourSet& set, const CoordTransform& tr,
     return out;
 }
 
-const ContourSet& ContourCache::get(int axes_index, int plot_index,
+std::vector<PlaneContourDraw> plan_plane_contours(
+    const Projector3D& proj, const std::vector<PlaneSnapshot>& planes,
+    const std::string& font_path, ContourCache* cache,
+    unsigned long long data_generation, int axes_index)
+{
+    std::vector<PlaneContourDraw> out;
+    for (std::size_t pi = 0; pi < planes.size(); ++pi) {
+        const PlaneSnapshot& pl = planes[pi];
+        // A hidden plane's contours go with it: they annotate a field that is
+        // not on screen.
+        if (!plane_drawn(pl)) continue;
+        for (std::size_t hi = 0; hi < pl.sheet.heatmaps.size(); ++hi) {
+            const HeatmapPlot& hp = pl.sheet.heatmaps[hi];
+            if (hp.opts.contours.empty() || hp.rows <= 0 || hp.cols <= 0) continue;
+
+            // Traced once and held across frames when there is a cache to hold
+            // it -- the geometry is in *data* space, so an orbit re-projects it
+            // and never re-traces it, exactly as a 2D pan does not.
+            ContourSet traced;
+            const ContourSet& set =
+                cache ? cache->get(axes_index, static_cast<int>(pi),
+                                   static_cast<int>(hi), data_generation, hp)
+                      : (traced = trace_contours(hp));
+
+            PlaneContourDraw d;
+            d.draw = plan_contours(set, ContourProjector(proj, pl.orient, pl.offset),
+                                   hp.opts, font_path);
+            if (d.draw.runs.empty()) continue;
+            d.color     = hp.opts.contour_color;
+            d.linewidth = hp.opts.contour_linewidth;
+            d.fontsize  = hp.opts.contour_fontsize;
+            d.plane     = pi;
+            d.plot      = hi;
+            out.push_back(std::move(d));
+        }
+    }
+    return out;
+}
+
+const ContourSet& ContourCache::get(int axes_index, int plane_index, int plot_index,
                                     unsigned long long data_generation,
                                     const HeatmapPlot& hp)
 {
-    const long long key = (static_cast<long long>(axes_index) << 32)
-                        | static_cast<long long>(static_cast<unsigned>(plot_index));
+    const long long key = (static_cast<long long>(axes_index) << 40)
+                        ^ (static_cast<long long>(static_cast<unsigned>(plane_index)) << 20)
+                        ^ static_cast<long long>(static_cast<unsigned>(plot_index));
     Entry& e = entries_[key];
 
     const bool usable = data_generation != 0
                      && e.generation == data_generation
                      && e.levels == hp.opts.contours
                      && e.origin == hp.opts.origin
-                     && e.rows == hp.rows && e.cols == hp.cols;
+                     && e.rows == hp.rows && e.cols == hp.cols
+                     && e.xrange.lo == hp.xrange.lo && e.xrange.hi == hp.xrange.hi
+                     && e.yrange.lo == hp.yrange.lo && e.yrange.hi == hp.yrange.hi;
     if (!usable) {
         e.set        = trace_contours(hp);
         e.generation = data_generation;
@@ -300,6 +358,8 @@ const ContourSet& ContourCache::get(int axes_index, int plot_index,
         e.origin     = hp.opts.origin;
         e.rows       = hp.rows;
         e.cols       = hp.cols;
+        e.xrange     = hp.xrange;
+        e.yrange     = hp.yrange;
     }
     return e.set;
 }

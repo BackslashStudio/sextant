@@ -30,13 +30,17 @@ void WindowThread::stop() {
 
 std::future<WindowThread::ExportResult>
 WindowThread::submit_png_export(const FigureSnapshot& snap, std::string path,
-                                int width, int height, int supersample) {
+                                int width, int height, int supersample,
+                                int peel_layers,
+                                const FigureMeasure* on_screen) {
     ExportJob job;
     job.snap        = &snap;
+    job.on_screen   = on_screen;
     job.path        = std::move(path);
     job.width       = width;
     job.height      = height;
     job.supersample = supersample;
+    job.peel_layers = peel_layers;
     auto fut = job.result.get_future();
 
     // Servicing this needs the loop to come around to it, so a submit from
@@ -67,7 +71,8 @@ void WindowThread::drain_exports(GLContext& ctx, NvgRenderer& nvg, DataRenderer&
         r.serviced = true;
         try {
             export_figure_png(ctx, nvg, data, *job.snap, job.path,
-                              job.width, job.height, job.supersample);
+                              job.width, job.height, job.supersample,
+                              job.peel_layers, job.on_screen);
         } catch (...) {
             r.error = std::current_exception();
         }
@@ -90,7 +95,13 @@ void WindowThread::retire_pending_exports() {
 void WindowThread::thread_main() {
     GLContext    ctx({ .width=opts_.width, .height=opts_.height,
                        .title=opts_.title, .visible=true,
-                       .resizable=opts_.resizable, .vsync=opts_.vsync });
+                       .resizable=opts_.resizable, .vsync=opts_.vsync,
+                       // The live window alone: FigureOptions::width/height
+                       // become a physical size, so a figure is as big on a 4K
+                       // 150% display as on a 1080p one. savefig()'s own
+                       // contexts (figure.cpp) leave this off and keep meaning
+                       // exact pixels.
+                       .scale_to_monitor=true });
     NvgRenderer  nvg(ctx.nvg());
     DataRenderer data;
     PlotFbo      plot_fbo;  // lazily sized by render_fn_ on first use
@@ -116,6 +127,10 @@ void WindowThread::thread_main() {
 
     while (!ctx.should_close() && !stop_requested_.load()) {
         imgui_ctx.make_current();  // this thread's context, never a sibling's
+        // Before the frame, so a monitor change is picked up by the frame that
+        // draws on the new monitor rather than one frame late. After
+        // make_current(), since it writes this context's style.
+        imgui_ctx.sync_dpi_scale(ctx);
 
         // Timed region is the render work alone. swap_buffers() below blocks
         // on vsync, so including it would pin every sample near the refresh

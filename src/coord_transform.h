@@ -69,7 +69,13 @@ inline AxisLimits zoom_limits(const CoordTransform& tr, float cursor_x_px, float
 struct DataBounds { double xmin, xmax, ymin, ymax; };
 
 
-inline DataBounds auto_scale(const AllPlotData& all, double pad = 0.05) {
+// The breathing room automatic limits leave around the data, as a fraction of
+// its range. Named because resolve_limits() re-pads by hand -- it folds an
+// origin component in before the padding (v1.0 step 19) -- and the two have to
+// agree or a plain plot's limits would shift the moment that path was taken.
+inline constexpr double kAutoScalePad = 0.05;
+
+inline DataBounds auto_scale(const AllPlotData& all, double pad = kAutoScalePad) {
     double xlo =  std::numeric_limits<double>::max();
     double xhi = -std::numeric_limits<double>::max();
     double ylo =  std::numeric_limits<double>::max();
@@ -86,26 +92,18 @@ inline DataBounds auto_scale(const AllPlotData& all, double pad = 0.05) {
     auto grow_err = [&](const CowVec<double>& xs, const CowVec<double>& ys,
                         const ErrorBarData& err) {
         const std::size_t n = std::min(xs.size(), ys.size());
-        if (err.has_x_span())
+        auto grow = [&](const CowVec<double>& ps, ErrOffsets (ErrorBarData::*at)(std::size_t) const,
+                        double& lo, double& hi) {
             for (std::size_t i = 0; i < n; ++i) {
-                xlo = std::min(xlo, err.x_lo(i, xs[i]));
-                xhi = std::max(xhi, err.x_hi(i, xs[i]));
+                const ErrOffsets e = (err.*at)(i);
+                lo = std::min(lo, ps[i] - e.lo);
+                hi = std::max(hi, ps[i] + e.hi);
             }
-        if (err.has_x_box())
-            for (std::size_t i = 0; i < n; ++i) {
-                xlo = std::min(xlo, xs[i] - err.x_var(i));
-                xhi = std::max(xhi, xs[i] + err.x_var(i));
-            }
-        if (err.has_y_span())
-            for (std::size_t i = 0; i < n; ++i) {
-                ylo = std::min(ylo, err.y_lo(i, ys[i]));
-                yhi = std::max(yhi, err.y_hi(i, ys[i]));
-            }
-        if (err.has_y_box())
-            for (std::size_t i = 0; i < n; ++i) {
-                ylo = std::min(ylo, ys[i] - err.y_var(i));
-                yhi = std::max(yhi, ys[i] + err.y_var(i));
-            }
+        };
+        if (err.has_x_cap()) grow(xs, &ErrorBarData::x_cap, xlo, xhi);
+        if (err.has_x_box()) grow(xs, &ErrorBarData::x_box, xlo, xhi);
+        if (err.has_y_cap()) grow(ys, &ErrorBarData::y_cap, ylo, yhi);
+        if (err.has_y_box()) grow(ys, &ErrorBarData::y_box, ylo, yhi);
     };
 
     for (const auto& lp : all.lines) {
@@ -138,9 +136,13 @@ inline DataBounds auto_scale(const AllPlotData& all, double pad = 0.05) {
         grow_err(bp.centers, bp.heights, bp.err);
     }
     for (const auto& hp : all.heatmaps) {
-        // Heatmap fills [0, cols] × [0, rows] in data space
-        xlo = std::min(xlo, 0.0); xhi = std::max(xhi, static_cast<double>(hp.cols));
-        ylo = std::min(ylo, 0.0); yhi = std::max(yhi, static_cast<double>(hp.rows));
+        // Heatmap fills its own xrange × yrange in data space (for imshow(),
+        // that is the old [0,cols] × [0,rows]). Either range may be reversed,
+        // so bound by both ends rather than assuming lo < hi.
+        xlo = std::min({ xlo, hp.xrange.lo, hp.xrange.hi });
+        xhi = std::max({ xhi, hp.xrange.lo, hp.xrange.hi });
+        ylo = std::min({ ylo, hp.yrange.lo, hp.yrange.hi });
+        yhi = std::max({ yhi, hp.yrange.lo, hp.yrange.hi });
     }
 
     if (xlo > xhi) { xlo = 0; xhi = 1; }
@@ -167,17 +169,32 @@ inline double nice_step(double raw) {
 inline std::vector<Tick> generate_ticks(double lo, double hi, int target = 7) {
     if (lo >= hi) return {};
     const double step  = nice_step((hi - lo) / target);
+    if (!(step > 0.0)) return {};
     const double first = std::ceil(lo / step) * step;
     std::vector<Tick> ticks;
-    for (double v = first; v <= hi + step * 1e-6; v += step) {
+    // **`first + k * step`, not `v += step`.** Accumulating drifts: an axis
+    // from -0.3 starts at ceil(-0.3/0.1)*0.1 = -0.30000000000000004, and eight
+    // additions of 0.1 land on -2.77556e-17 rather than on zero -- which "%g"
+    // prints in full, so the tick that should read "0" reads "-2.77556e-17".
+    // Multiplying re-derives each tick from the two exact numbers instead of
+    // from the previous tick, so the error cannot compound along the axis.
+    for (int k = 0; ; ++k) {
+        double v = first + k * step;
+        if (v > hi + step * 1e-6) break;
         if (v < lo - step * 1e-6) continue;
+        // Multiplying removes the compounding but not the last-bit residue:
+        // `first` is itself inexact, so the tick nearest zero can still miss
+        // it by an ulp or two. Anything within a millionth of a step of zero
+        // *is* the zero tick -- no axis has two ticks that close -- and
+        // snapping the position as well as the label keeps the two agreeing.
+        //
+        // This also subsumes the older `v == 0.0` guard, which existed because
         // ceil(lo/step)*step yields a *negative* zero whenever the axis starts
-        // below zero, and "%g" prints its sign -- so the zero tick came out as
-        // "-0" on nearly every figure. Comparing equal to 0.0 catches both
-        // signed zeros; assigning the literal replaces it with a positive one.
-        const double label_v = (v == 0.0) ? 0.0 : v;
+        // below zero and "%g" prints its sign, so the zero tick came out as
+        // "-0" on nearly every figure.
+        if (std::fabs(v) < step * 1e-6) v = 0.0;
         char buf[32];
-        std::snprintf(buf, sizeof(buf), "%g", label_v);
+        std::snprintf(buf, sizeof(buf), "%g", v);
         ticks.push_back({v, buf});
     }
     return ticks;

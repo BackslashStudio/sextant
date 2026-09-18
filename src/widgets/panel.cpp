@@ -8,6 +8,7 @@
 #include "../render_frame.h"
 #include "../figure_export.h"
 #include "../hint.h"
+#include "../plot_data_view.h"
 #include "../renderer/gl_context.h"
 #include "../renderer/nvg_renderer.h"
 #include "../renderer/data_renderer.h"
@@ -25,27 +26,124 @@
 #include <cfloat>
 #include <cmath>
 #include <cstdio>
+#include <memory>
 #include <string>
 
 namespace sextant {
 
 namespace {
 
-void sync_from_snapshot(PanelState& st, const FigureAxesSnapshot& fa) {
-    std::snprintf(st.title_buf,  sizeof(st.title_buf),  "%s", fa.snap.title.c_str());
-    std::snprintf(st.xtitle_buf, sizeof(st.xtitle_buf), "%s", fa.snap.xtitle.c_str());
-    std::snprintf(st.ytitle_buf, sizeof(st.ytitle_buf), "%s", fa.snap.ytitle.c_str());
-    st.grid_local  = fa.snap.grid_enabled;
-    st.xauto_local = fa.snap.xlim_auto; st.xmin_local = fa.snap.xmin; st.xmax_local = fa.snap.xmax;
-    st.yauto_local = fa.snap.ylim_auto; st.ymin_local = fa.snap.ymin; st.ymax_local = fa.snap.ymax;
-    st.xticks_scratch = fa.snap.xticks_override.value_or(std::vector<Tick>{});
-    st.yticks_scratch = fa.snap.yticks_override.value_or(std::vector<Tick>{});
-    st.axes_style_local = fa.snap.axes_style;
-    st.grid_opts_local  = fa.snap.grid_opts;
-    st.legend_enabled_local = fa.snap.legend_enabled;
-    st.legend_local     = fa.snap.legend_opts;
-    st.colorbar_local   = fa.snap.colorbar_opts;
-    st.last_synced_slot = fa.slot.index;
+// The measurements the plot panel is drawing with, for every consumer that is
+// not the plot itself; before the plot's first frame there are none, and a
+// fresh measure stands in (v1.0 step 15.2).
+std::shared_ptr<const FigureMeasure> on_screen_measure(const PanelState& st,
+                                                       const FigureSnapshot& fsnap) {
+    if (auto m = st.layout.load()) return m;
+    return std::make_shared<const FigureMeasure>(measure_figure(fsnap));
+}
+
+// Takes the concrete 2D snapshot, not the cell: the panel's scratch state is
+// entirely 2D vocabulary, so a 3D cell has nothing to seed it from and the
+// caller must not reach here with one.
+void sync_from_snapshot(PanelState& st, int slot_index, const RenderSnapshot& sn) {
+    std::snprintf(st.title_buf,  sizeof(st.title_buf),  "%s", sn.title.c_str());
+    std::snprintf(st.xtitle_buf, sizeof(st.xtitle_buf), "%s", sn.xtitle.c_str());
+    std::snprintf(st.ytitle_buf, sizeof(st.ytitle_buf), "%s", sn.ytitle.c_str());
+    st.grid_local  = sn.grid_enabled;
+    st.xauto_local = sn.xlim_auto; st.xmin_local = sn.xmin; st.xmax_local = sn.xmax;
+    st.yauto_local = sn.ylim_auto; st.ymin_local = sn.ymin; st.ymax_local = sn.ymax;
+    st.xticks_scratch = sn.xticks_override.value_or(std::vector<Tick>{});
+    st.yticks_scratch = sn.yticks_override.value_or(std::vector<Tick>{});
+    st.axes_style_local = sn.axes_style;
+    st.origin_x_scratch = sn.axes_style.origin_x.value_or(0.0);
+    st.origin_y_scratch = sn.axes_style.origin_y.value_or(0.0);
+    st.grid_opts_local  = sn.grid_opts;
+    st.legend_enabled_local = sn.legend_enabled;
+    st.legend_local     = sn.legend_opts;
+    st.colorbar_local   = sn.colorbar_opts;
+    st.last_synced_slot = slot_index;
+}
+
+// The 3D counterpart. Fills the same scratch fields where the two kinds share
+// one (titles, x/y limits, the two tick tables, axes_style, grid) and the 3D-
+// only ones beside them, so switching the selection between a 2D and a 3D slot
+// re-seeds everything through the one last_synced_slot gate.
+// The planes' scratch copy. Unlike everything else seeded here it is also
+// re-seeded whenever the *count* changes, because a plane added or dropped by
+// the caller shifts every index above it and the rows would otherwise go on
+// editing whichever plane now sits where the old one did. A resize alone
+// would leave the surviving entries pointing at the wrong planes just the
+// same, so the whole list is re-read.
+void sync_planes(PanelState& st, const RenderSnapshot3D& sn) {
+    st.planes_local.clear();
+    st.planes_local.reserve(sn.planes.size());
+    for (const auto& p : sn.planes)
+        st.planes_local.push_back({ p.orient, p.offset, p.opts });
+}
+
+// The gridded kinds' appearance, on the same rule and for the same reason.
+void sync_scene_objects(PanelState& st, const RenderSnapshot3D& sn) {
+    st.bars3d_local.clear();
+    st.bars3d_local.reserve(sn.bars3d.size());
+    for (const auto& b : sn.bars3d) st.bars3d_local.push_back(b.opts);
+    st.surfaces_local.clear();
+    st.surfaces_local.reserve(sn.surfaces.size());
+    for (const auto& s : sn.surfaces) st.surfaces_local.push_back(s.opts);
+    st.scatter3d_local.clear();
+    st.scatter3d_local.reserve(sn.scatter3d.size());
+    for (const auto& c : sn.scatter3d) st.scatter3d_local.push_back(c.opts);
+    st.line3d_local.clear();
+    st.line3d_local.reserve(sn.lines3d.size());
+    for (const auto& l : sn.lines3d) st.line3d_local.push_back(l.opts);
+    st.surface_tri_local.clear();
+    st.surface_tri_local.reserve(sn.surface_tri.size());
+    for (const auto& m : sn.surface_tri) st.surface_tri_local.push_back(m.opts);
+}
+
+void sync_from_snapshot(PanelState& st, int slot_index, const RenderSnapshot3D& sn) {
+    std::snprintf(st.title_buf,  sizeof(st.title_buf),  "%s", sn.title.c_str());
+    std::snprintf(st.xtitle_buf, sizeof(st.xtitle_buf), "%s", sn.xtitle.c_str());
+    std::snprintf(st.ytitle_buf, sizeof(st.ytitle_buf), "%s", sn.ytitle.c_str());
+    std::snprintf(st.ztitle_buf, sizeof(st.ztitle_buf), "%s", sn.ztitle.c_str());
+    st.grid_local  = sn.grid_enabled;
+    st.xauto_local = sn.xlim_auto; st.xmin_local = sn.xmin; st.xmax_local = sn.xmax;
+    st.yauto_local = sn.ylim_auto; st.ymin_local = sn.ymin; st.ymax_local = sn.ymax;
+    st.zauto_local = sn.zlim_auto; st.zmin_local = sn.zmin; st.zmax_local = sn.zmax;
+    st.xticks_scratch = sn.xticks_override.value_or(std::vector<Tick>{});
+    st.yticks_scratch = sn.yticks_override.value_or(std::vector<Tick>{});
+    st.zticks_scratch = sn.zticks_override.value_or(std::vector<Tick>{});
+    st.axes_style_local = sn.axes_style;
+    st.origin_x_scratch = sn.axes_style.origin_x.value_or(0.0);
+    st.origin_y_scratch = sn.axes_style.origin_y.value_or(0.0);
+    st.origin_z_scratch = sn.axes_style.origin_z.value_or(0.0);
+    st.grid_opts_local  = sn.grid_opts;
+    st.legend_enabled_local = sn.legend_enabled;
+    st.legend_local     = sn.legend_opts;
+    st.colorbar_local   = sn.colorbar_opts;
+    st.camera_local     = sn.camera;
+    st.box3d_local      = sn.box_style;
+    st.aspect_local     = sn.aspect;
+    sync_planes(st, sn);
+    sync_scene_objects(st, sn);
+    st.last_synced_slot = slot_index;
+}
+
+// An axis left on "auto" has no limits of its own to show: the snapshot's
+// xmin/xmax are the declared defaults, and what the axis actually reads is
+// whatever compute_figure_layout() resolved from the data. So for those axes
+// the fields track the resolved numbers, every frame rather than only on a
+// slot change — otherwise they would go stale the moment the data moved.
+//
+// It stops the instant the user drags one, because dragging a limit field
+// clears that axis's `auto` flag in the same edit; from then on the declared
+// value *is* what the axis reads and the seeding above is correct again.
+void track_resolved_limits(PanelState& st, int slot,
+                           bool xauto, bool yauto, bool zauto) {
+    const PanelState::ResolvedLimits* r = st.resolved_for(slot);
+    if (!r) return;   // no frame drawn yet (the headless panel test)
+    if (xauto) { st.xmin_local = r->xmin; st.xmax_local = r->xmax; }
+    if (yauto) { st.ymin_local = r->ymin; st.ymax_local = r->ymax; }
+    if (zauto && r->is_3d) { st.zmin_local = r->zmin; st.zmax_local = r->zmax; }
 }
 
 // Figure-level, so seeded separately from sync_from_snapshot() above — the
@@ -109,7 +207,7 @@ bool draw_tick_table(const char* table_id, std::vector<Tick>& scratch) {
 }
 
 // Lays out the dockspace: "Plot" alone, or split into "Plot" and a right-hand
-// column (opts.panel_width wide) holding "Controls" and/or "Data". Both side
+// column (opts.panel_width wide) holding "Cosmetic" and/or "Data". Both side
 // panels dock into the *same* node, so when both are visible ImGui gives them
 // a shared tab bar.
 //
@@ -119,9 +217,9 @@ bool draw_tick_table(const char* table_id, std::vector<Tick>& scratch) {
 // fraction rather than restoring what the user had dragged it to.
 void ensure_layout(ImGuiID dockspace_id, float panel_width, PanelState& st) {
     const bool first_build = ImGui::DockBuilderGetNode(dockspace_id) == nullptr;
-    if (!first_build && st.layout_controls_visible == st.controls_visible
+    if (!first_build && st.layout_cosmetic_visible == st.cosmetic_visible
                      && st.layout_data_visible == st.data_visible) return;
-    st.layout_controls_visible = st.controls_visible;
+    st.layout_cosmetic_visible = st.cosmetic_visible;
     st.layout_data_visible     = st.data_visible;
 
     ImGui::DockBuilderRemoveNode(dockspace_id);
@@ -130,28 +228,44 @@ void ensure_layout(ImGuiID dockspace_id, float panel_width, PanelState& st) {
     // (see draw_plot_panel()'s comment) — use the viewport's own size here
     // rather than ctx.width()/height() (physical framebuffer pixels), since
     // panel_width is meant as a plain window-creation-scale pixel count.
+    //
+    // `panel_width` reaches this already multiplied by the chrome's DPI scale
+    // (see the call site): the split is stored as a *fraction*, so once the
+    // window is itself DPI-scaled an unscaled 240 would hold 240 physical
+    // pixels of 1.5x-sized widgets. The fraction is why only the first build
+    // needs this — a later move to another monitor resizes the window, and a
+    // fraction of a wider window is already wider.
     const ImVec2 size = ImGui::GetMainViewport()->Size;
     ImGui::DockBuilderSetNodeSize(dockspace_id, size);
 
-    if (st.controls_visible || st.data_visible) {
+    if (st.cosmetic_visible || st.data_visible) {
         const float side_frac = std::clamp(panel_width / size.x, 0.05f, 0.6f);
         ImGuiID dock_side, dock_plot;
         ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Right, side_frac,
                                     &dock_side, &dock_plot);
         ImGui::DockBuilderDockWindow("Plot", dock_plot);
-        if (st.controls_visible) ImGui::DockBuilderDockWindow("Controls", dock_side);
+        if (st.cosmetic_visible) ImGui::DockBuilderDockWindow("Cosmetic", dock_side);
         if (st.data_visible)     ImGui::DockBuilderDockWindow("Data",     dock_side);
 
         // Seed the shared tab bar's selection explicitly. DockBuilderRemoveNode
         // destroyed the old node along with its SelectedTabId, and ImGui's
         // fallback is to select whichever tab was added last, so toggling
-        // Controls off/on while Data is visible would re-select Data. A
+        // Cosmetic off/on while Data is visible would re-select Data. A
         // window's TabId is GetID("#TAB") seeded by the window id.
-        if (st.controls_visible && st.data_visible) {
-            if (ImGuiDockNode* n = ImGui::DockBuilderGetNode(dock_side)) {
-                const char* want = st.focus_data_on_rebuild ? "Data" : "Controls";
+        //
+        // That seed is not the last word, though: when the node next updates
+        // its tab bar, the *focused* window's tab wins (imgui.cpp,
+        // DockNodeUpdateTabBar, "Apply NavWindow focus back to the tab bar"),
+        // and a window is focused as it appears. With both panels appearing
+        // on the same frame -- startup, since step 10.3 made Data default-on
+        // -- the one drawn second took focus and the tab. So the wanted panel
+        // is also focused explicitly, once both have been drawn; see
+        // pending_panel_focus in draw_widget_panel().
+        if (st.cosmetic_visible && st.data_visible) {
+            const char* want = st.focus_data_on_rebuild ? "Data" : "Cosmetic";
+            if (ImGuiDockNode* n = ImGui::DockBuilderGetNode(dock_side))
                 n->SelectedTabId = ImHashStr("#TAB", 0, ImHashStr(want));
-            }
+            st.pending_panel_focus = want;
         }
     } else {
         ImGui::DockBuilderDockWindow("Plot", dockspace_id);
@@ -190,11 +304,37 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
     // those same coordinates, and only rasterization is enlarged.
     plot_fbo.ensure_size(render_w, render_h, supersample);
 
+    // From the stored measurements, re-measured only on an event: a new
+    // layout generation, a new size, or File > Refit layout (v1.0 step 15.2).
+    const FigureLayout fl = st.layout.fit(fsnap, render_w, render_h);
+
     std::vector<AxesLayout> layout;
     plot_fbo.bind();
     render_frame(ctx, nvg, data, fsnap, render_w, render_h,
-                 plot_fbo.supersample(), &layout);
+                 plot_fbo.supersample(), &layout, &fl);
     plot_fbo.unbind();
+
+    // What "auto" resolved to this frame, for the Cosmetic panel to show. The
+    // layout is the only place it exists -- the snapshot carries the declared
+    // limits, which an automatic axes never uses -- and this is the only point
+    // where the layout and PanelState are both in hand.
+    st.resolved.clear();
+    st.resolved.reserve(layout.size());
+    for (const AxesLayout& al : layout) {
+        PanelState::ResolvedLimits r;
+        r.slot = al.slot.index;
+        if (al.proj3d) {
+            const Transform3D& t = al.proj3d->transform();
+            r.is_3d = true;
+            r.xmin = t.xmin; r.xmax = t.xmax;
+            r.ymin = t.ymin; r.ymax = t.ymax;
+            r.zmin = t.zmin; r.zmax = t.zmax;
+        } else {
+            r.xmin = al.tr.xmin; r.xmax = al.tr.xmax;
+            r.ymin = al.tr.ymin; r.ymax = al.tr.ymax;
+        }
+        st.resolved.push_back(r);
+    }
 
     // GL textures are bottom-up (origin at bottom-left) but ImGui's default
     // UVs assume top-down image data — flip v (uv0=(0,1), uv1=(1,0)) or the
@@ -211,12 +351,67 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
     ImGui::SetCursorScreenPos(image_pos);
     ImGui::InvisibleButton("##plot_nav", avail);
 
+    // Click-to-select, and what navigation below is allowed to do with this
+    // frame's input. Read off the button straight after submitting it, while
+    // it is still the "last item" every IsItem*() query means.
+    PlotNavGate gate;
+    const bool in_hovered = ImGui::IsItemHovered();
+    {
+        const ImGuiIO& io = ImGui::GetIO();
+        PlotPointer in;
+        in.x = (io.MousePos.x - image_pos.x) * fb_scale.x;
+        in.y = (io.MousePos.y - image_pos.y) * fb_scale.y;
+        in.hovered        = in_hovered;
+        in.active         = ImGui::IsItemActive();
+        in.pressed        = ImGui::IsItemActivated();
+        in.double_clicked = in.pressed && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
+        in.released       = ImGui::IsItemDeactivated();
+        in.dragged        = io.MouseDragMaxDistanceSqr[ImGuiMouseButton_Left]
+                            >= io.MouseDragThreshold * io.MouseDragThreshold;
+
+        // A boundary between two subplots first (v1.0 step 15.3): what it
+        // owns -- hovering it, pressing on it, the drag that starts -- neither
+        // selects a cell nor navigates one.
+        GridDragOut grid = update_grid_drag(st, fsnap, fl, render_w, render_h, in,
+                                            4.0f * fb_scale.x);
+        if (grid.col_ratios || grid.row_ratios)
+            edit_box.update_figure([&](FigureEdits& f) {
+                if (grid.col_ratios) f.col_ratios = std::move(*grid.col_ratios);
+                if (grid.row_ratios) f.row_ratios = std::move(*grid.row_ratios);
+            });
+        if (grid.cursor_ew) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+        if (grid.cursor_ns) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+        if (grid.owns) {
+            in.hovered = in.active = in.pressed = in.double_clicked = in.released = false;
+        }
+        gate = update_plot_selection(st, fsnap, layout, in);
+    }
+
+    // Which subplot the panels are editing, now that no panel says so in a
+    // combo of its own. Drawn over the image with the window's draw list, so
+    // it never reaches plot_fbo and so never reaches a saved file. Pointless
+    // with one subplot, which is also the case the menu hides its combo for.
+    if (fsnap.axes.size() > 1) {
+        for (const AxesLayout& al : layout) {
+            if (al.slot.index != st.selected_slot_index) continue;
+            const ImVec2 p0(image_pos.x + al.cell.x / fb_scale.x + 1.0f,
+                            image_pos.y + al.cell.y / fb_scale.y + 1.0f);
+            const ImVec2 p1(image_pos.x + (al.cell.x + al.cell.w) / fb_scale.x - 1.0f,
+                            image_pos.y + (al.cell.y + al.cell.h) / fb_scale.y - 1.0f);
+            ImVec4 accent = ImGui::GetStyleColorVec4(ImGuiCol_CheckMark);
+            accent.w *= 0.75f;
+            ImGui::GetWindowDrawList()->AddRect(p0, p1, ImGui::GetColorU32(accent),
+                                                0.0f, 0, 1.5f);
+            break;
+        }
+    }
+
     // Hit-tests whichever axes cell is under the cursor, independent of
     // navigate_enabled/selected_slot_index: unlike Navigate, hints must work
     // over any subplot regardless of which is selected for pan/zoom. Drawn
     // into plot_fbo's already-rendered texture in a fresh NanoVG bracket,
     // which is safe because the texture is sampled later.
-    if (st.hints_enabled && ImGui::IsItemHovered()) {
+    if (st.hints_enabled && in_hovered) {
         const ImGuiIO& io = ImGui::GetIO();
         const float cursor_x = (io.MousePos.x - image_pos.x) * fb_scale.x;
         const float cursor_y = (io.MousePos.y - image_pos.y) * fb_scale.y;
@@ -224,18 +419,29 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
             const FigureAxesSnapshot* fa = nullptr;
             for (const auto& a : fsnap.axes)
                 if (a.slot.index == cell->slot.index) { fa = &a; break; }
-            if (fa) {
+            // Hit-testing a 3D cell is a ray cast, not a transform inverse
+            // (spec_3d.md §11): the cursor's ray against every surface in the
+            // scene -- each plane and each bar3d bar -- and then, on the
+            // nearest plane it meets, the same 2D search. A bar answers by
+            // being hit, since it is opaque geometry rather than a sheet.
+            std::optional<HintResult> hint;
+            if (fa && fa->snap2d()) {
                 st.hint_index.set_frame_key(fsnap.data_generation, cell->slot.index);
-                if (auto hint = find_hint(fa->snap, cell->tr, cursor_x, cursor_y,
-                                          &st.hint_index)) {
-                    plot_fbo.bind();
-                    glViewport(0, 0, plot_fbo.render_width(), plot_fbo.render_height());
-                    ctx.begin_nvg_frame(render_w, render_h,
-                                        static_cast<float>(plot_fbo.supersample()));
-                    nvg.draw_hint(render_w, render_h, hint->anchor_x, hint->anchor_y, hint->text);
-                    ctx.end_nvg_frame();
-                    plot_fbo.unbind();
-                }
+                hint = find_hint(*fa->snap2d(), cell->tr, cursor_x, cursor_y,
+                                 &st.hint_index);
+            } else if (fa && fa->snap3d() && cell->proj3d) {
+                st.hint_index.set_frame_key(fsnap.data_generation, cell->slot.index);
+                hint = find_hint3d(*fa->snap3d(), *cell->proj3d, cursor_x, cursor_y,
+                                   &st.hint_index);
+            }
+            if (hint) {
+                plot_fbo.bind();
+                glViewport(0, 0, plot_fbo.render_width(), plot_fbo.render_height());
+                ctx.begin_nvg_frame(render_w, render_h,
+                                    static_cast<float>(plot_fbo.supersample()));
+                nvg.draw_hint(render_w, render_h, hint->anchor_x, hint->anchor_y, hint->text);
+                ctx.end_nvg_frame();
+                plot_fbo.unbind();
             }
         }
     }
@@ -245,11 +451,73 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
         for (const auto& al : layout)
             if (al.slot.index == st.selected_slot_index) { cur = &al; break; }
 
-        if (cur) {
+        // A 3D slot navigates a camera rather than a pair of limits, so it
+        // takes the whole block below rather than sharing it. Both push
+        // through the same FigureEditBox channel, which is what makes a
+        // dragged view survive refresh() in either case.
+        const RenderSnapshot3D* sel3d = nullptr;
+        for (const auto& a : fsnap.axes)
+            if (a.slot.index == st.selected_slot_index) { sel3d = a.snap3d(); break; }
+
+        if (cur && sel3d) {
+            const ImGuiIO& io = ImGui::GetIO();
+            const int idx = cur->slot.index;
+            Camera3D cam = st.camera_local;
+            bool moved = false;
+
+            if (gate.drag && (io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f)) {
+                cam = orbit_camera(cam, io.MouseDelta.x * fb_scale.x,
+                                        io.MouseDelta.y * fb_scale.y);
+                moved = true;
+            }
+
+            if (gate.wheel && io.MouseWheel != 0.0f) {
+                cam = zoom_camera(cam, io.MouseWheel);
+                moved = true;
+            }
+
+            // Fly keys, and the one input gate pan/zoom never needed: they are
+            // read only while the selected cell is hovered or being dragged AND
+            // ImGui does not want the keyboard, or typing "W" into the title
+            // field would fly the camera instead of writing a letter.
+            if (gate.keys && !io.WantCaptureKeyboard) {
+                FlyInput fly;
+                fly.forward = ImGui::IsKeyDown(ImGuiKey_W);
+                fly.back    = ImGui::IsKeyDown(ImGuiKey_S);
+                fly.left    = ImGui::IsKeyDown(ImGuiKey_A);
+                fly.right   = ImGui::IsKeyDown(ImGuiKey_D);
+                fly.up      = ImGui::IsKeyDown(ImGuiKey_E);
+                fly.down    = ImGui::IsKeyDown(ImGuiKey_Q);
+                fly.dt      = io.DeltaTime;
+                if (fly.forward || fly.back || fly.left || fly.right || fly.up || fly.down) {
+                    // The camera's own basis, out of the projector the frame
+                    // was just drawn with -- so A/D strafes across the screen
+                    // whatever angle the box is being viewed from, and W/S
+                    // dollies along the direction it is actually looking.
+                    cam = fly_camera(cam,
+                                     cur->proj3d ? cur->proj3d->right()
+                                                 : Vec3{ 0.0, 1.0, 0.0 },
+                                     cur->proj3d ? cur->proj3d->forward()
+                                                 : Vec3{ -1.0, 0.0, 0.0 },
+                                     fly);
+                    moved = true;
+                }
+            }
+
+            if (gate.reset) {
+                cam = sel3d->default_camera;
+                moved = true;
+            }
+
+            if (moved) {
+                st.camera_local = cam;
+                edit_box.update3d(idx, [&](AxesEdit3D& e) { e.camera = cam; });
+            }
+        } else if (cur) {
             const ImGuiIO& io = ImGui::GetIO();
             const int idx = cur->slot.index;
 
-            if (ImGui::IsItemActive() && (io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f)) {
+            if (gate.drag && (io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f)) {
                 const auto lim = pan_limits(cur->tr,
                     io.MouseDelta.x * fb_scale.x, io.MouseDelta.y * fb_scale.y);
                 st.xmin_local = lim.xmin; st.xmax_local = lim.xmax;
@@ -261,7 +529,7 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
                 });
             }
 
-            if (ImGui::IsItemHovered() && io.MouseWheel != 0.0f) {
+            if (gate.wheel && io.MouseWheel != 0.0f) {
                 const float cursor_x = (io.MousePos.x - image_pos.x) * fb_scale.x;
                 const float cursor_y = (io.MousePos.y - image_pos.y) * fb_scale.y;
                 const float factor = std::pow(0.9f, io.MouseWheel);
@@ -275,7 +543,7 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
                 });
             }
 
-            if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+            if (gate.reset) {
                 st.xauto_local = st.yauto_local = true;
                 edit_box.update(idx, [&](AxesEdit& e) {
                     e.xlim_auto = true; e.ylim_auto = true;
@@ -293,12 +561,881 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
     ImGui::End();
 }
 
-void draw_controls_panel(const FigureSnapshot& fsnap, FigureEditBox& edit_box, PanelState& st) {
-    ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_NoCollapse);
+// The suptitle block, and the Layout section below it, belong to the *figure*
+// rather than to the selected axes -- so both kinds of axes show them, and
+// they are extracted here rather than written twice. A second copy is not a
+// duplication risk in the abstract sense: it is a control that silently stops
+// matching the other one the first time either is touched.
+//
+// No heading of its own: both panels put it under the Figure group's
+// "Suptitle" sub-heading (draw_figure_group() below).
+void draw_suptitle_fields(PanelState& st, FigureEditBox& edit_box) {
+    auto push = [&]{ edit_box.update_figure([&](FigureEdits& f){ f.suptitle_opts = st.suptitle_local; }); };
+
+    // Three tables rather than one because the middle row is two pairs and
+    // the others are one wide control each -- and a table has no column span.
+    // Their first columns are the same width, so the three read as one.
+    if (begin_field_table("suptxt")) {
+        field_row("Suptitle");
+        if (ImGui::InputText("##suptitle", st.suptitle_buf, sizeof(st.suptitle_buf)))
+            edit_box.update_figure([&](FigureEdits& f){ f.suptitle = st.suptitle_buf; });
+        field_row("Font");
+        if (font_combo("##supfont", st.suptitle_local.font_path)) push();
+        end_field_table();
+    }
+    if (begin_field_table("supcs", 2)) {
+        field_row("Color");
+        if (color_swatch("##supcol", st.suptitle_local.color)) push();
+        field_next("Size");
+        if (drag_float("##supsz", &st.suptitle_local.fontsize, 1.0f, 96.0f, 0.2f, "%.1f px")) push();
+        end_field_table();
+    }
+    if (begin_field_table("supal")) {
+        field_row("Align");
+        if (halign_combo("##supalign", st.suptitle_local.align)) push();
+        field_row("Offset");
+        split_begin(2);
+        if (drag_float("##supox", &st.suptitle_local.offset_x, -2000.0f, 2000.0f, 0.5f, "x %.0f px")) push();
+        split_next();
+        if (drag_float("##supoy", &st.suptitle_local.offset_y, -2000.0f, 2000.0f, 0.5f, "y %.0f px")) push();
+        split_end();
+        end_field_table();
+    }
+}
+
+// Figure-level, like the suptitle above: the margins border the whole grid
+// and the gaps sit between subplots, so neither belongs to the selected
+// axes. There is deliberately no control for the space a tick label or
+// axis title occupies -- that is measured from the text, not chosen. (A 3D
+// cell is the exception the readout below shows: it reserves a fraction of
+// its own frame instead, because its labels move with the camera.)
+//
+// The fields only, with no header of their own: both panels put them under a
+// "Layout" sub-heading of their Figure group (steps 10.4, 10.5).
+void draw_layout_fields(PanelState& st, const FigureSnapshot& fsnap,
+                        FigureEditBox& edit_box, int idx) {
+    auto push_margins = [&]{ edit_box.update_figure([&](FigureEdits& f){ f.margins = st.margins_local; }); };
+    auto push_gaps    = [&]{ edit_box.update_figure([&](FigureEdits& f){
+                                 f.col_gap = st.col_gap_local;
+                                 f.row_gap = st.row_gap_local; }); };
+
+    // One row each, split: four margins in a narrow cell leave no room for a
+    // unit, so each value names its side instead and the row label carries
+    // the unit.
+    if (begin_field_table("margins")) {
+        field_row("Margin px");
+        split_begin(4);
+        if (drag_float("##marl", &st.margins_local.left, 0.0f, 2000.0f, 0.5f, "L %.0f")) push_margins();
+        split_next();
+        if (drag_float("##marr", &st.margins_local.right, 0.0f, 2000.0f, 0.5f, "R %.0f")) push_margins();
+        split_next();
+        if (drag_float("##mart", &st.margins_local.top, 0.0f, 2000.0f, 0.5f, "T %.0f")) push_margins();
+        split_next();
+        if (drag_float("##marb", &st.margins_local.bottom, 0.0f, 2000.0f, 0.5f, "B %.0f")) push_margins();
+        split_end();
+        end_field_table();
+    }
+
+    // Gaps separate subplots from each other, so on a single-axes figure
+    // there is nothing for them to separate.
+    ImGui::BeginDisabled(fsnap.axes.size() <= 1);
+    if (begin_field_table("gaps")) {
+        field_row("Gap px");
+        split_begin(2);
+        if (drag_float("##gapc", &st.col_gap_local, 0.0f, 2000.0f, 0.5f, "col %.0f")) push_gaps();
+        split_next();
+        if (drag_float("##gapr", &st.row_gap_local, 0.0f, 2000.0f, 0.5f, "row %.0f")) push_gaps();
+        split_end();
+        end_field_table();
+    }
+    ImGui::EndDisabled();
+
+    // The grid's weights (v1.0 step 15.3), one field per track, read from the
+    // snapshot every frame rather than from a local copy: a typed or dragged
+    // value lands in the snapshot on the next frame and, unlike the margins,
+    // is journaled, so a refresh() does not bring back an older one to fight.
+    // Dragging a boundary on the plot edits the same numbers.
+    const int grid_rows = fsnap.axes.empty() ? 1 : std::max(1, fsnap.axes.front().slot.rows);
+    const int grid_cols = fsnap.axes.empty() ? 1 : std::max(1, fsnap.axes.front().slot.cols);
+    auto ratio_row = [&](const char* id, const char* label, int n, bool cols) {
+        if (n <= 1) return;
+        std::vector<float> w = grid_weights(cols ? fsnap.col_ratios : fsnap.row_ratios, n);
+        if (!begin_field_table(id)) return;
+        field_row(label);
+        split_begin(n);
+        bool changed = false;
+        for (int k = 0; k < n; ++k) {
+            if (k > 0) split_next();
+            ImGui::PushID(k);
+            changed |= drag_float("##w", &w[static_cast<std::size_t>(k)], 0.05f, 100.0f, 0.01f, "%.2f");
+            ImGui::PopID();
+        }
+        split_end();
+        end_field_table();
+        if (changed)
+            edit_box.update_figure([&](FigureEdits& f) {
+                if (cols) f.col_ratios = w; else f.row_ratios = w;
+            });
+    };
+    ratio_row("colratios", "Col ratio", grid_cols, true);
+    ratio_row("rowratios", "Row ratio", grid_rows, false);
+
+    // Read-only: the plot frame the current settings actually produce,
+    // for the selected axes. Laid out here from the stored measurements
+    // rather than reported back from the render pass -- the same numbers,
+    // since a dragged value is a submission and the plot panel has already
+    // refit for it this frame, and laying out is cheap without measuring.
+    const int live_w = st.live_plot_w.load(std::memory_order_relaxed);
+    const int live_h = st.live_plot_h.load(std::memory_order_relaxed);
+    if (live_w > 0 && live_h > 0) {
+        const FigureLayout fl = compute_figure_layout(fsnap, *on_screen_measure(st, fsnap),
+                                                      live_w, live_h);
+        for (const auto& c : fl.cells) {
+            if (c.slot.index != idx) continue;
+            ImGui::TextDisabled("Frame %.0f x %.0f at (%.0f, %.0f)",
+                                static_cast<double>(c.frame.w), static_cast<double>(c.frame.h),
+                                static_cast<double>(c.frame.x), static_cast<double>(c.frame.y));
+            ImGui::TextDisabled("Reserved L%.0f R%.0f T%.0f B%.0f",
+                                static_cast<double>(c.reserved.left),
+                                static_cast<double>(c.reserved.right),
+                                static_cast<double>(c.reserved.top),
+                                static_cast<double>(c.reserved.bottom));
+            break;
+        }
+    }
+}
+
+// The Figure group, the one group both panels draw identically -- so it is
+// drawn here once rather than twice. Closed by default, since nothing in it
+// belongs to the axes being edited.
+void draw_figure_group(PanelState& st, const FigureSnapshot& fsnap,
+                       FigureEditBox& edit_box, int idx) {
+    if (!section("Figure")) return;
+    ImGui::SeparatorText("Suptitle");
+    draw_suptitle_fields(st, edit_box);
+    ImGui::SeparatorText("Layout");
+    draw_layout_fields(st, fsnap, edit_box, idx);
+}
+
+// The Legend & colorbar group, the second group both panels draw identically
+// (v1.0 step 11.2; the Figure group above was the first). Templated on the
+// edit struct rather than duplicated, because the two differ only in which
+// lane the change goes down -- AxesEdit or AxesEdit3D -- and every field it
+// touches means the same thing in both.
+//
+// `has_colorbar` rather than the snapshot: the two kinds answer it through
+// different overloads of find_colorbar_requests(), and the caller has the
+// snapshot already.
+template <typename Edit, typename Push>
+void draw_legend_colorbar_group(PanelState& st, bool has_colorbar, Push&& push) {
+    auto push_legend   = [&]{ push([&](Edit& e){ e.legend_opts   = st.legend_local; }); };
+    auto push_colorbar = [&]{ push([&](Edit& e){ e.colorbar_opts = st.colorbar_local; }); };
+
+    if (!section("Legend & colorbar")) return;
+
+    ImGui::SeparatorText("Legend");
+    if (ImGui::Checkbox("Show##legend", &st.legend_enabled_local))
+        push([&](Edit& e){ e.legend_enabled = st.legend_enabled_local; });
+    ImGui::BeginDisabled(!st.legend_enabled_local);
+    if (begin_field_table("legtext", 2)) {
+        field_row("Text");
+        if (color_swatch("##legtextcol", st.legend_local.text_color)) push_legend();
+        field_next("Size");
+        if (drag_float("##legsz", &st.legend_local.fontsize, 1.0f, 96.0f, 0.2f, "%.1f px")) push_legend();
+        end_field_table();
+    }
+    if (begin_field_table("legpos")) {
+        field_row("Font");
+        if (font_combo("##legfont", st.legend_local.font_path)) push_legend();
+        field_row("Anchor");
+        if (legend_anchor_combo("##leganchor", st.legend_local.anchor)) push_legend();
+        field_row("Margin");
+        if (drag_float("##legmargin", &st.legend_local.margin, 0.0f, 400.0f, 0.5f, "%.0f px")) push_legend();
+        field_row("Offset");
+        split_begin(2);
+        if (drag_float("##legox", &st.legend_local.offset_x, -400.0f, 400.0f, 0.5f, "x %.0f px")) push_legend();
+        split_next();
+        if (drag_float("##legoy", &st.legend_local.offset_y, -400.0f, 400.0f, 0.5f, "y %.0f px")) push_legend();
+        split_end();
+        end_field_table();
+    }
+    if (ImGui::Checkbox("Frame##legendframe", &st.legend_local.frameon)) push_legend();
+    ImGui::BeginDisabled(!st.legend_local.frameon);
+    if (begin_field_table("legendframe", 3)) {
+        field_row("Fill");
+        if (color_swatch("##legfill", st.legend_local.frame_color)) push_legend();
+        field_next("Border");
+        if (color_swatch("##legborder", st.legend_local.border_color)) push_legend();
+        field_next("Width");
+        if (drag_float("##legbw", &st.legend_local.border_linewidth, 0.0f, 6.0f, 0.02f, "%.2f px")) push_legend();
+        end_field_table();
+    }
+    ImGui::EndDisabled();
+    ImGui::EndDisabled();
+
+    ImGui::SeparatorText("Colorbar");
+    // Whether a colorbar exists at all is a per-plot-object flag
+    // (HeatmapOptions/ScatterZOptions::colorbar), not something this panel
+    // can toggle — so say so rather than showing dead controls. These
+    // cosmetics style every bar of the axis, which since step 11.1 can be
+    // more than one.
+    if (!has_colorbar)
+        ImGui::TextDisabled("No colorbar on this axis.");
+    if (begin_field_table("cbtext", 2)) {
+        field_row("Text");
+        if (color_swatch("##cbtextcol", st.colorbar_local.text_color)) push_colorbar();
+        field_next("Size");
+        if (drag_float("##cbsz", &st.colorbar_local.fontsize, 1.0f, 96.0f, 0.2f, "%.1f px")) push_colorbar();
+        end_field_table();
+    }
+    if (begin_field_table("cbfont")) {
+        field_row("Font");
+        if (font_combo("##cbfont", st.colorbar_local.font_path)) push_colorbar();
+        end_field_table();
+    }
+    if (begin_field_table("cbborder", 2)) {
+        field_row("Border");
+        if (color_swatch("##cbborder", st.colorbar_local.border_color)) push_colorbar();
+        field_next("Width");
+        if (drag_float("##cbbw", &st.colorbar_local.border_linewidth, 0.0f, 6.0f, 0.02f, "%.2f px")) push_colorbar();
+        end_field_table();
+    }
+    if (begin_field_table("cbanchor")) {
+        field_row("Anchor");
+        if (colorbar_anchor_combo("##cbanchor", st.colorbar_local.anchor)) push_colorbar();
+        end_field_table();
+    }
+    if (begin_field_table("cbsize", 2)) {
+        field_row("Bar");
+        if (drag_float("##cbwidth", &st.colorbar_local.width, 1.0f, 200.0f, 0.5f, "%.0f px")) push_colorbar();
+        field_next("Margin");
+        if (drag_float("##cbmargin", &st.colorbar_local.margin, 0.0f, 400.0f, 0.5f, "%.0f px")) push_colorbar();
+        end_field_table();
+    }
+    if (begin_field_table("cboffset")) {
+        field_row("Offset");
+        split_begin(2);
+        if (drag_float("##cbox", &st.colorbar_local.offset_x, -400.0f, 400.0f, 0.5f, "x %.0f px")) push_colorbar();
+        split_next();
+        if (drag_float("##cboy", &st.colorbar_local.offset_y, -400.0f, 400.0f, 0.5f, "y %.0f px")) push_colorbar();
+        split_end();
+        end_field_table();
+    }
+}
+
+// The Cosmetic panel for a 3D slot (v1.0 step 2). A separate function rather
+// than branches threaded through the 2D one: nearly every section differs --
+// three axes instead of two, a camera instead of a pair of limits, a box
+// instead of a spine -- and the handful that are genuinely shared are the two
+// figure-level helpers above, which both call.
+void draw_cosmetic_3d(PanelState& st, const RenderSnapshot3D& sn,
+                      const FigureSnapshot& fsnap, FigureEditBox& edit_box, int idx) {
+    auto& sty = st.axes_style_local;
+
+    auto push_style  = [&]{ edit_box.update3d(idx, [&](AxesEdit3D& e){ e.axes_style = sty; }); };
+    auto push_grid   = [&]{ edit_box.update3d(idx, [&](AxesEdit3D& e){ e.grid_opts  = st.grid_opts_local; }); };
+    auto push_camera = [&]{ st.camera_local = clamp_camera(st.camera_local);
+                            edit_box.update3d(idx, [&](AxesEdit3D& e){ e.camera = st.camera_local; }); };
+    auto push_box    = [&]{ edit_box.update3d(idx, [&](AxesEdit3D& e){ e.box_style = st.box3d_local; }); };
+    // Clamped here for the same reason the limits below are refused when
+    // degenerate: Axes3D::set_box_aspect() rejects a non-positive side, and
+    // the panel must not be able to reach a state the public API would not.
+    auto push_aspect = [&]{
+        st.aspect_local.x = std::clamp(st.aspect_local.x, 0.05, 20.0);
+        st.aspect_local.y = std::clamp(st.aspect_local.y, 0.05, 20.0);
+        st.aspect_local.z = std::clamp(st.aspect_local.z, 0.05, 20.0);
+        edit_box.update3d(idx, [&](AxesEdit3D& e){ e.aspect = st.aspect_local; });
+    };
+
+    // Five groups (v1.0 steps 10.4 and 11.2), each one CollapsingHeader
+    // holding what used to be separate sections, now SeparatorText
+    // sub-headings inside it:
+    //   View   -- how the box is looked at and drawn: camera, box, grid
+    //   Figure -- the whole figure, not this axes: suptitle, layout
+    //   Axis   -- this axes' own text and frame: titles, axis frame
+    //   Ticks  -- what the axes show along them: limits, ticks and labels
+    //   Legend & colorbar -- the two hoisted decorations, shared with 2D
+    // Limits come first in Ticks, ahead of the three override tables, which
+    // are long enough to push anything after them out of sight.
+
+    // ==== View ============================================================
+    if (section("View", true)) {
+        ImGui::SeparatorText("Camera");
+        const bool persp = st.camera_local.projection == Projection::Perspective;
+        if (begin_field_table("cam3d", 2)) {
+            field_row("Azim");
+            if (drag_double("##azim", &st.camera_local.azimuth, 0.25f, "%.1f deg")) push_camera();
+            field_next("Elev");
+            if (drag_double("##elev", &st.camera_local.elevation, 0.25f, "%.1f deg")) push_camera();
+            // FOV only under perspective, so an orthographic row leaves its
+            // second pair empty rather than showing a field that does nothing.
+            field_row("Zoom");
+            if (drag_double("##zoom3d", &st.camera_local.zoom, 0.005f, "%.2fx")) push_camera();
+            if (persp) {
+                field_next("FOV");
+                if (drag_double("##fov3d", &st.camera_local.fov, 0.1f, "%.0f deg")) push_camera();
+            }
+            end_field_table();
+        }
+        if (begin_field_table("cam3dp")) {
+            field_row("Projection");
+            if (projection_combo("##proj3d", st.camera_local.projection)) push_camera();
+            end_field_table();
+        }
+        // There is no distance to set in either mode: the box is fitted to
+        // the cell every frame (see spec_3d.md §2), which under perspective
+        // is what *derives* the eye distance from the field of view. So fov
+        // is the whole of "how much perspective", and zoom stays a plain
+        // magnification of the finished picture in both modes.
+        ImGui::TextDisabled("Target %.2f, %.2f, %.2f",
+                            st.camera_local.target.x, st.camera_local.target.y,
+                            st.camera_local.target.z);
+        if (persp)
+            ImGui::TextDisabled("Wider fov = closer camera. The box fills the cell either way.");
+        if (ImGui::SmallButton("Reset view")) {
+            st.camera_local = sn.default_camera;
+            edit_box.update3d(idx, [&](AxesEdit3D& e){ e.camera = st.camera_local; });
+        }
+        ImGui::SameLine();
+        ImGui::TextDisabled("(or double-click the plot)");
+        ImGui::TextDisabled(persp
+            ? "Navigate: drag to orbit, W/S dolly, AD/QE move, scroll to zoom."
+            : "Navigate: drag to orbit, WASD/QE to move, scroll to zoom.");
+        ImGui::SeparatorText("Box");
+        if (begin_field_table("box3d")) {
+            field_row("Aspect");
+            split_begin(3);
+            if (drag_double("##aspx", &st.aspect_local.x, 0.005f, "x %.2f")) push_aspect();
+            split_next();
+            if (drag_double("##aspy", &st.aspect_local.y, 0.005f, "y %.2f")) push_aspect();
+            split_next();
+            if (drag_double("##aspz", &st.aspect_local.z, 0.005f, "z %.2f")) push_aspect();
+            split_end();
+            field_row("Margin");
+            if (drag_float("##boxmargin", &st.box3d_local.margin, 0.0f, 0.45f, 0.001f, "%.3f")) push_box();
+            end_field_table();
+        }
+        // The one place 3D departs from "decoration space is measured": the
+        // margin is chosen because a 3D label's position depends on the
+        // camera and the camera's fit depends on the frame.
+        ImGui::TextDisabled("Margin reserves room for labels, which move with the camera.");
+        if (ImGui::Checkbox("Panes", &st.box3d_local.panes)) push_box();
+        if (begin_field_table("boxcol", 2)) {
+            field_row("Color");
+            if (color_swatch("##panecol", st.box3d_local.pane_color)) push_box();
+            field_next("Edge color");
+            if (color_swatch("##paneedge", st.box3d_local.pane_edge_color)) push_box();
+            end_field_table();
+        }
+        // "Grid##grid3d", not "Grid": an ImGui id is hashed from the label,
+        // so a checkbox labelled the same as a CollapsingHeader is a second
+        // item with that header's id in the same window. Here the heading is
+        // only a SeparatorText since step 10.4, which has no id, and the 2D
+        // panel's (step 10.5) is too; the suffix is kept all the same.
+        if (ImGui::Checkbox("Grid##grid3d", &st.grid_local))
+            edit_box.update3d(idx, [&](AxesEdit3D& e){ e.grid_enabled = st.grid_local; });
+        ImGui::BeginDisabled(!st.grid_local);
+        if (begin_field_table("grid3d", 3)) {
+            field_row("Color");
+            if (color_swatch("##gridcol3d", st.grid_opts_local.color)) push_grid();
+            field_next("Style");
+            if (linestyle_combo("##gridls3d", st.grid_opts_local.linestyle)) push_grid();
+            field_next("Width");
+            if (drag_float("##gridw3d", &st.grid_opts_local.linewidth, 0.1f, 10.0f, 0.05f, "%.2f px")) push_grid();
+            end_field_table();
+        }
+        ImGui::EndDisabled();
+    }
+
+    // ==== Figure ==========================================================
+    // Figure-level, and the same code the 2D panel calls.
+    draw_figure_group(st, fsnap, edit_box, idx);
+
+    // ==== Axis ============================================================
+    if (section("Axis", true)) {
+        ImGui::SeparatorText("Titles");
+        // Each title as its text field, then its colour and size on the row
+        // under it -- so a colour sits next to the text it colours rather than
+        // in a block of three further down. Two tables per title, because the
+        // text wants the whole width and a table has no column span.
+        struct TitleUi {
+            const char* label; const char* id;
+            char* buf; std::size_t cap;
+            std::optional<std::string> AxesEdit3D::*text;
+            Color* color; float* size;
+        };
+        const TitleUi titles[4] = {
+            { "Title",   "title",  st.title_buf,  sizeof(st.title_buf),  &AxesEdit3D::title,
+              &sty.title_color,  &sty.title_fontsize },
+            { "X title", "xtitle", st.xtitle_buf, sizeof(st.xtitle_buf), &AxesEdit3D::xtitle,
+              &sty.xtitle_color, &sty.xtitle_fontsize },
+            { "Y title", "ytitle", st.ytitle_buf, sizeof(st.ytitle_buf), &AxesEdit3D::ytitle,
+              &sty.ytitle_color, &sty.ytitle_fontsize },
+            { "Z title", "ztitle", st.ztitle_buf, sizeof(st.ztitle_buf), &AxesEdit3D::ztitle,
+              &sty.ztitle_color, &sty.ztitle_fontsize },
+        };
+        for (const TitleUi& t : titles) {
+            ImGui::PushID(t.id);
+            if (begin_field_table("text")) {
+                field_row(t.label);
+                if (ImGui::InputText("##text", t.buf, t.cap))
+                    edit_box.update3d(idx, [&](AxesEdit3D& e){ e.*t.text = std::string(t.buf); });
+                end_field_table();
+            }
+            if (begin_field_table("style", 2)) {
+                field_row("Color");
+                if (color_swatch("##color", *t.color)) push_style();
+                field_next("Size");
+                if (drag_float("##size", t.size, 1.0f, 96.0f, 0.2f, "%.1f px")) push_style();
+                end_field_table();
+            }
+            ImGui::PopID();
+        }
+        if (begin_field_table("font3d")) {
+            field_row("Font");
+            if (font_combo("##axesfont3d", sty.font_path)) push_style();
+            end_field_table();
+        }
+        ImGui::SeparatorText("Axis frame");
+        if (begin_field_table("spine3d", 2)) {
+            field_row("Color");
+            if (color_swatch("##spinecol3d", sty.spine_color)) push_style();
+            field_next("Width");
+            if (drag_float("##spinew3d", &sty.spine_linewidth, 0.1f, 10.0f, 0.05f, "%.2f px")) push_style();
+            end_field_table();
+        }
+        if (begin_field_table("framemargin3d")) {
+            field_row("Margin");
+            if (drag_float("##framemargin3d", &sty.frame_margin, 0.0f, 400.0f, 0.5f, "%.0f px")) push_style();
+            end_field_table();
+        }
+        ImGui::SeparatorText("Axis position");
+        {
+            // Six placements, because a 3D axis's position is two numbers: an
+            // x axis needs a y *and* a z, and its four parallel box edges are
+            // the four combinations of their extremes (v1.0 step 20). Auto is
+            // the camera's silhouette edge, which is why it is named for that
+            // here and for Low in the 2D panel. Low and High are absolute --
+            // that coordinate's data minimum or maximum -- so an axis set to
+            // one stops migrating as the box turns.
+            struct Pos3 {
+                const char*   label;
+                bool          row;    // starts a row, rather than continuing one
+                AxisPosition* pos;
+                const std::optional<double>* pin;   // what supersedes it
+            };
+            const Pos3 pos3[6] = {
+                { "X at y", true,  &sty.xaxis_y, &sty.origin_y },
+                { "and z",  false, &sty.xaxis_z, &sty.origin_z },
+                { "Y at x", true,  &sty.yaxis_x, &sty.origin_x },
+                { "and z",  false, &sty.yaxis_z, &sty.origin_z },
+                { "Z at x", true,  &sty.zaxis_x, &sty.origin_x },
+                { "and y",  false, &sty.zaxis_y, &sty.origin_y },
+            };
+            if (begin_field_table("axpos3d", 2)) {
+                int id = 0;
+                for (const Pos3& p : pos3) {
+                    ImGui::PushID(id++);
+                    if (p.row) field_row(p.label); else field_next(p.label);
+                    // Greyed rather than hidden while its component is
+                    // pinned, so it stays visible what is overriding it.
+                    ImGui::BeginDisabled(p.pin->has_value());
+                    if (axis_position_combo("##pos", *p.pos, "Auto (camera)")) push_style();
+                    ImGui::EndDisabled();
+                    ImGui::PopID();
+                }
+                end_field_table();
+            }
+
+            // Three components, not six per-axis pins: the x and z axes both
+            // want the same y, so an origin says it once. Setting all three
+            // is the crosshair; setting one crosses on that coordinate and
+            // leaves the other two on the box.
+            ImGui::TextDisabled("Origin components, which supersede the above.");
+            struct Org {
+                const char* label;
+                std::optional<double>* pin;
+                double* scratch;
+                const double* lo;
+                const double* hi;
+            };
+            const Org orgs[3] = {
+                { "at x", &sty.origin_x, &st.origin_x_scratch, &st.xmin_local, &st.xmax_local },
+                { "at y", &sty.origin_y, &st.origin_y_scratch, &st.ymin_local, &st.ymax_local },
+                { "at z", &sty.origin_z, &st.origin_z_scratch, &st.zmin_local, &st.zmax_local },
+            };
+            if (begin_field_table("origin3d")) {
+                for (const Org& o : orgs) {
+                    ImGui::PushID(o.label);
+                    field_row(o.label);
+                    bool pinned = o.pin->has_value();
+                    if (ImGui::Checkbox("##pin", &pinned)) {
+                        if (pinned) *o.pin = *o.scratch;
+                        else        o.pin->reset();
+                        push_style();
+                    }
+                    ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+                    ImGui::BeginDisabled(!pinned);
+                    // The checkbox consumed field_row()'s fill width; ask
+                    // again, as the limits rows do for the same reason.
+                    ImGui::SetNextItemWidth(-FLT_MIN);
+                    if (drag_double("##pinval", o.scratch, limit_drag_speed(*o.lo, *o.hi))) {
+                        *o.pin = *o.scratch;
+                        push_style();
+                    }
+                    ImGui::EndDisabled();
+                    ImGui::PopID();
+                }
+                end_field_table();
+            }
+        }
+        ImGui::TextDisabled("An Auto edge turns with the camera. Titles stay");
+        ImGui::TextDisabled("on it even when the line moves inward.");
+    }
+
+    // ==== Ticks ===========================================================
+    if (section("Ticks", true)) {
+        ImGui::SeparatorText("Limits");
+        struct AxisLim {
+            const char* label;
+            double* lo; double* hi;
+            std::optional<double> AxesEdit3D::*lo_field;
+            std::optional<double> AxesEdit3D::*hi_field;
+            std::optional<bool>   AxesEdit3D::*auto_field;
+        };
+        const AxisLim axes[3] = {
+            { "X", &st.xmin_local, &st.xmax_local,
+              &AxesEdit3D::xmin, &AxesEdit3D::xmax, &AxesEdit3D::xlim_auto },
+            { "Y", &st.ymin_local, &st.ymax_local,
+              &AxesEdit3D::ymin, &AxesEdit3D::ymax, &AxesEdit3D::ylim_auto },
+            { "Z", &st.zmin_local, &st.zmax_local,
+              &AxesEdit3D::zmin, &AxesEdit3D::zmax, &AxesEdit3D::zlim_auto },
+        };
+        if (begin_field_table("lim3d")) {
+            for (const AxisLim& a : axes) {
+                ImGui::PushID(a.label);
+                auto push = [&]{
+                    // A degenerate pair divides by zero in Transform3D, so it
+                    // is refused here exactly as Axes3D::set_xlim() refuses
+                    // it -- the panel must not be able to reach a state the
+                    // public API rejects.
+                    if (*a.lo == *a.hi) return;
+                    edit_box.update3d(idx, [&](AxesEdit3D& e){
+                        e.*a.lo_field = *a.lo;
+                        e.*a.hi_field = *a.hi;
+                        e.*a.auto_field = false;
+                    });
+                };
+                // Drag fields, as the 2D section uses, rather than
+                // type-and-commit boxes: a limit is a thing you want to feel
+                // your way to, and a field that shows nothing until it is
+                // committed reads as a control that does not work.
+                // Ctrl+click still types an exact value.
+                const float speed = limit_drag_speed(*a.lo, *a.hi);
+                field_row(a.label);
+                split_begin(2);
+                if (drag_double("##lo", a.lo, speed)) push();
+                split_next();
+                if (drag_double("##hi", a.hi, speed)) push();
+                split_end();
+                ImGui::PopID();
+            }
+            end_field_table();
+        }
+        // Worth saying, because the box visibly does not move when these
+        // change: a limit says what range of data the box *spans*, not how
+        // big it is. Its size is the Box aspect and the automatic fit -- see
+        // spec_3d.md §2.
+        ImGui::TextDisabled("Limits set the range the box spans.");
+        ImGui::TextDisabled("Its size is under View: Box aspect and the camera.");
+        ImGui::SeparatorText("Ticks & labels");
+        // The mark's colour, length and width on one row, the label's colour
+        // and size on the next -- one table, so the label row's second pair
+        // lines up under the mark row's.
+        if (begin_field_table("tick3d", 3)) {
+            field_row("Mark");
+            if (color_swatch("##tickcol3d", sty.tick_color)) push_style();
+            field_next("Length");
+            if (drag_float("##ticklen3d", &sty.tick_length, 0.0f, 40.0f, 0.1f, "%.1f px")) push_style();
+            field_next("Width");
+            if (drag_float("##tickw3d", &sty.tick_linewidth, 0.1f, 10.0f, 0.05f, "%.2f px")) push_style();
+            field_row("Label");
+            if (color_swatch("##labcol3d", sty.label_color)) push_style();
+            field_next("Size");
+            if (drag_float("##labsz3d", &sty.label_fontsize, 1.0f, 96.0f, 0.2f, "%.1f px")) push_style();
+            end_field_table();
+        }
+        // Not a 2D control with a third copy: a foreshortened edge holds
+        // fewer numbers than a 2D axis of the same tick list, so the labels
+        // are thinned per camera. Setting a table here is how a caller says
+        // which numbers matter.
+        ImGui::TextDisabled("Labels are thinned to fit the edge they sit on.");
+
+        struct AxisTicks {
+            const char* label; const char* id;
+            std::vector<Tick>* scratch;
+            std::optional<std::vector<Tick>> AxesEdit3D::*field;
+        };
+        const AxisTicks tt[3] = {
+            { "X ticks", "xt3d", &st.xticks_scratch, &AxesEdit3D::xticks_override },
+            { "Y ticks", "yt3d", &st.yticks_scratch, &AxesEdit3D::yticks_override },
+            { "Z ticks", "zt3d", &st.zticks_scratch, &AxesEdit3D::zticks_override },
+        };
+        for (const AxisTicks& a : tt) {
+            ImGui::TextDisabled("%s", a.label);
+            if (draw_tick_table(a.id, *a.scratch))
+                edit_box.update3d(idx, [&](AxesEdit3D& e){ e.*a.field = *a.scratch; });
+        }
+    }
+
+    // Planes, bar grids and surfaces are not here. Since v1.0 step 10.3 each
+    // object's controls live in that object's own tab of the Data panel --
+    // the rule being that anything with a tab there is edited there, and
+    // nowhere else. See draw_plane_tab() and draw_object_appearance() in
+    // data_panel.cpp.
+
+    // ==== Legend & colorbar ===============================================
+    // The fifth group, and 3D's only one the 2D panel also has in full (step
+    // 11.2). It was absent while both were read off what the planes *hold* --
+    // which for a colorbar meant the styling could not be set at all, since a
+    // Plane2D has no setter for it. Both are the axes' own now.
+    draw_legend_colorbar_group<AxesEdit3D>(
+        st, !find_colorbar_requests(sn).empty(),
+        [&](auto&& fn){ edit_box.update3d(idx, fn); });
+}
+
+const FigureAxesSnapshot* axes_for_slot(const FigureSnapshot& fsnap, int slot_index) {
+    for (const FigureAxesSnapshot& fa : fsnap.axes)
+        if (fa.slot.index == slot_index) return &fa;
+    return nullptr;
+}
+
+} // namespace
+
+const AxesLayout* find_cell_at(const std::vector<AxesLayout>& layout, float x, float y) {
+    for (const AxesLayout& al : layout) {
+        const PlotRect& c = al.cell;
+        if (x >= c.x && x < c.x + c.w && y >= c.y && y < c.y + c.h) return &al;
+    }
+    return nullptr;
+}
+
+int sync_selected_slot(PanelState& st, const FigureSnapshot& fsnap) {
+    if (fsnap.axes.empty()) return -1;
+    const FigureAxesSnapshot* fa = axes_for_slot(fsnap, st.selected_slot_index);
+    if (!fa) fa = &fsnap.axes.front();
+    // Normalized rather than only resolved: the menu's File > Resize and the
+    // Save dialog's frame mode also read selected_slot_index, and a subplot
+    // that does not exist has no frame to size by.
+    st.selected_slot_index = fa->slot.index;
+    if (st.last_synced_slot != fa->slot.index) {
+        std::visit([&](const auto& sn) { sync_from_snapshot(st, fa->slot.index, sn); },
+                   fa->snap);
+    } else if (const RenderSnapshot3D* sn = fa->snap3d()) {
+        // The caller added or dropped an object. Every index above the change
+        // now names a different one, so the rows are re-seeded rather than
+        // resized -- see sync_planes(). Here rather than in a panel since
+        // step 10.3: the Data panel edits these copies, and a re-seed that
+        // only the Cosmetic panel ran would leave them stale whenever it is
+        // hidden.
+        if (st.planes_local.size() != sn->planes.size())
+            sync_planes(st, *sn);
+        if (st.bars3d_local.size() != sn->bars3d.size() ||
+            st.surfaces_local.size() != sn->surfaces.size() ||
+            st.scatter3d_local.size() != sn->scatter3d.size() ||
+            st.line3d_local.size() != sn->lines3d.size() ||
+            st.surface_tri_local.size() != sn->surface_tri.size())
+            sync_scene_objects(st, *sn);
+    }
+    return fa->slot.index;
+}
+
+void select_slot(PanelState& st, const FigureSnapshot& fsnap, int slot_index) {
+    st.selected_slot_index = slot_index;
+    sync_selected_slot(st, fsnap);
+}
+
+PlotNavGate update_plot_selection(PanelState& st, const FigureSnapshot& fsnap,
+                                  const std::vector<AxesLayout>& layout,
+                                  const PlotPointer& in) {
+    PlotNavGate gate;
+    // First, so that whatever navigation does below starts from the selected
+    // slot's own camera and limits even if no panel has drawn since it moved.
+    const int selected = sync_selected_slot(st, fsnap);
+    if (selected < 0) {
+        st.press_slot = -1;
+        st.press_on_selected = false;
+        return gate;
+    }
+
+    const AxesLayout* under = find_cell_at(layout, in.x, in.y);
+    const int under_slot = under ? under->slot.index : -1;
+
+    if (in.pressed) {
+        st.press_slot        = under_slot;
+        st.press_on_selected = under_slot == selected;
+        // The second press of a double-click. If the first click is the one
+        // that selected this cell, the pair was a way of picking it, not of
+        // asking for its default view back.
+        gate.reset = in.double_clicked && st.press_on_selected
+                     && !st.selected_by_last_click;
+        st.selected_by_last_click = false;
+    }
+
+    gate.drag = in.active && st.press_on_selected;
+    const bool over_selected = in.hovered && under_slot == selected;
+    gate.wheel = over_selected;
+    gate.keys  = over_selected || gate.drag;
+
+    if (in.released) {
+        // A click, not the end of a drag, and ending where it began -- a press
+        // on one cell released over another says nothing about either.
+        if (!in.dragged && st.press_slot >= 0 && under_slot == st.press_slot
+            && st.press_slot != selected) {
+            select_slot(st, fsnap, st.press_slot);
+            st.selected_by_last_click = true;
+        }
+        st.press_slot        = -1;
+        st.press_on_selected = false;
+    }
+    return gate;
+}
+
+GridBoundary find_grid_boundary(const FigureSnapshot& fsnap, const GridTracks& t,
+                                float x, float y, float tol) {
+    const int cols = static_cast<int>(t.col_x.size());
+    const int rows = static_cast<int>(t.row_y.size());
+    // Whether a subplot covers both sides of boundary k (between tracks k-1
+    // and k) at track `other` of the other axis.
+    auto crossed = [&](bool col_boundary, int k, int other) {
+        for (const auto& fa : fsnap.axes) {
+            const AxesSlot& s = fa.slot;
+            if (col_boundary) {
+                if (s.col0() < k && k <= s.col1() && s.row0() <= other && other <= s.row1())
+                    return true;
+            } else {
+                if (s.row0() < k && k <= s.row1() && s.col0() <= other && other <= s.col1())
+                    return true;
+            }
+        }
+        return false;
+    };
+    // Which track of the other axis `v` is in, -1 in a gap or outside.
+    auto track_at = [](const std::vector<float>& pos, const std::vector<float>& len, float v) {
+        for (std::size_t i = 0; i < pos.size(); ++i)
+            if (v >= pos[i] && v <= pos[i] + len[i]) return static_cast<int>(i);
+        return -1;
+    };
+
+    for (int k = 1; k < cols; ++k) {
+        const float lo = t.col_x[k - 1] + t.col_w[k - 1] - tol;
+        const float hi = t.col_x[k] + tol;
+        if (x < lo || x > hi) continue;
+        const int r = track_at(t.row_y, t.row_h, y);
+        if (r >= 0 && !crossed(true, k, r)) return { true, true, k };
+    }
+    for (int k = 1; k < rows; ++k) {
+        const float lo = t.row_y[k - 1] + t.row_h[k - 1] - tol;
+        const float hi = t.row_y[k] + tol;
+        if (y < lo || y > hi) continue;
+        const int c = track_at(t.col_x, t.col_w, x);
+        if (c >= 0 && !crossed(false, k, c)) return { true, false, k };
+    }
+    return {};
+}
+
+GridDragOut update_grid_drag(PanelState& st, const FigureSnapshot& fsnap,
+                             const FigureLayout& layout, int fig_w, int fig_h,
+                             const PlotPointer& in, float tol) {
+    GridDragOut out;
+    PanelState::GridDrag& g = st.grid_drag;
+    const GridTracks t = grid_tracks(fsnap, layout.suptitle_band, fig_w, fig_h);
+
+    auto emit = [&](bool cols, const std::vector<float>& w) {
+        if (cols) out.col_ratios = w; else out.row_ratios = w;
+    };
+
+    if (g.active) {
+        out.owns = true;
+        out.cursor_ew = g.cols;
+        out.cursor_ns = !g.cols;
+        // The two tracks' split, from the press: never smaller than either
+        // track's minimum, and left alone when the two minimums do not fit.
+        const float d     = (g.cols ? in.x : in.y) - g.press;
+        const float total = g.len_a + g.len_b;
+        float a = g.len_a;
+        if (g.min_a <= total - g.min_b)
+            a = std::clamp(g.len_a + d, g.min_a, total - g.min_b);
+        if (a != g.last_a && total > 0.0f
+            && g.k > 0 && g.k < static_cast<int>(g.w0.size())) {
+            std::vector<float> w = g.w0;
+            const float wsum = g.w0[g.k - 1] + g.w0[g.k];
+            w[g.k - 1] = wsum * a / total;
+            w[g.k]     = wsum - w[g.k - 1];
+            emit(g.cols, w);
+            g.last_a = a;
+        }
+        if (in.released || !in.active) g.active = false;
+        return out;
+    }
+
+    // Hovering or pressing: only while no other drag holds the button.
+    if (!in.hovered || (in.active && !in.pressed)) return out;
+    const GridBoundary b = find_grid_boundary(fsnap, t, in.x, in.y, tol);
+    if (!b.found) return out;
+    out.owns = true;
+    out.cursor_ew = b.cols;
+    out.cursor_ns = !b.cols;
+    if (!in.pressed) return out;
+
+    const int n = static_cast<int>(b.cols ? t.col_x.size() : t.row_y.size());
+    std::vector<float> w0 = grid_weights(b.cols ? fsnap.col_ratios : fsnap.row_ratios, n);
+
+    if (in.double_clicked) {
+        const float half = (w0[b.k - 1] + w0[b.k]) * 0.5f;
+        w0[b.k - 1] = w0[b.k] = half;
+        emit(b.cols, w0);
+        return out;
+    }
+
+    // A track can shrink to what its own single-track cells reserve plus the
+    // smallest frame; a span's reservation is shared with its other tracks,
+    // so it sets no minimum on any one of them.
+    auto min_len = [&](int track) {
+        float m = 0.0f;
+        for (const CellLayout& c : layout.cells) {
+            const AxesSlot& s = c.slot;
+            if (b.cols && s.col0() == track && s.col1() == track)
+                m = std::max(m, c.reserved.left + c.reserved.right);
+            if (!b.cols && s.row0() == track && s.row1() == track)
+                m = std::max(m, c.reserved.top + c.reserved.bottom);
+        }
+        return m + kMinFrameSize;
+    };
+
+    g.active = true;
+    g.cols   = b.cols;
+    g.k      = b.k;
+    g.press  = b.cols ? in.x : in.y;
+    g.w0     = std::move(w0);
+    g.len_a  = b.cols ? t.col_w[b.k - 1] : t.row_h[b.k - 1];
+    g.len_b  = b.cols ? t.col_w[b.k]     : t.row_h[b.k];
+    g.min_a  = min_len(b.k - 1);
+    g.min_b  = min_len(b.k);
+    g.last_a = g.len_a;
+    return out;
+}
+
+// Not file-local, unlike the sections above: sextant_layout_test drives this
+// directly through a null-backend ImGui frame, which is the only way to assert
+// on panel behaviour without a window. draw_data_panel() is reachable the same
+// way, for the same reason.
+void draw_cosmetic_panel(const FigureSnapshot& fsnap, FigureEditBox& edit_box, PanelState& st) {
+    ImGui::Begin("Cosmetic", nullptr, ImGuiWindowFlags_NoCollapse);
 
     // Navigate and Hints used to head this panel. They live in the menu bar's
     // Edit menu now: neither is a property of the figure or of the selected
-    // axes — they say what the mouse does over the plot — and hiding Controls
+    // axes — they say what the mouse does over the plot — and hiding Cosmetic
     // used to take the only way of reaching them with it. Everything below
     // this point does edit the selected axes, which is what this panel is for.
     if (fsnap.axes.empty()) {
@@ -307,21 +1444,32 @@ void draw_controls_panel(const FigureSnapshot& fsnap, FigureEditBox& edit_box, P
         return;
     }
 
-    // --- Axes selector (only shown when there's more than one subplot).
-    if (fsnap.axes.size() > 1)
-        axes_selector("##axessel", fsnap, st.selected_slot_index);
+    // Which axes this edits is chosen in the menu bar or by clicking a subplot
+    // (step 10.2) -- no longer by a combo here, which the Data panel had to
+    // duplicate for whenever this panel was hidden. Synced here as well as by
+    // the plot, so the panel is correct driven on its own (as the tests do).
+    const FigureAxesSnapshot* cur = axes_for_slot(fsnap, sync_selected_slot(st, fsnap));
 
-    const FigureAxesSnapshot* cur = nullptr;
-    for (const auto& fa : fsnap.axes)
-        if (fa.slot.index == st.selected_slot_index) { cur = &fa; break; }
-    if (!cur) cur = &fsnap.axes.front();
-
-    if (st.last_synced_slot != cur->slot.index)
-        sync_from_snapshot(st, *cur);
+    // Which sections are drawn depends on the selected slot's kind. Nearly
+    // every one of them differs -- three axes against two, a camera against a
+    // pair of limits -- so the two kinds get separate functions rather than
+    // one function full of branches; what they genuinely share is the Figure
+    // group both call.
     sync_figure_from_snapshot(st, fsnap);
     sync_layout_from_snapshot(st, fsnap);
 
     const int idx = cur->slot.index;
+
+    if (const RenderSnapshot3D* cur3d = cur->snap3d()) {
+        track_resolved_limits(st, idx, cur3d->xlim_auto, cur3d->ylim_auto,
+                              cur3d->zlim_auto);
+        draw_cosmetic_3d(st, *cur3d, fsnap, edit_box, idx);
+        ImGui::End();
+        return;
+    }
+
+    const RenderSnapshot* cur2d = cur->snap2d();
+    track_resolved_limits(st, idx, cur2d->xlim_auto, cur2d->ylim_auto, false);
 
     // Each group republishes its whole options struct on any change, the
     // pattern axes_style has always used — AxesEdit carries one optional per
@@ -331,265 +1479,242 @@ void draw_controls_panel(const FigureSnapshot& fsnap, FigureEditBox& edit_box, P
     auto push_grid     = [&]{ edit_box.update(idx, [&](AxesEdit& e){ e.grid_opts      = st.grid_opts_local; }); };
     auto push_legend   = [&]{ edit_box.update(idx, [&](AxesEdit& e){ e.legend_opts    = st.legend_local; }); };
     auto push_colorbar = [&]{ edit_box.update(idx, [&](AxesEdit& e){ e.colorbar_opts  = st.colorbar_local; }); };
-    auto push_suptitle = [&]{ edit_box.update_figure([&](FigureEdits& f){ f.suptitle_opts = st.suptitle_local; }); };
-    auto push_margins  = [&]{ edit_box.update_figure([&](FigureEdits& f){ f.margins = st.margins_local; }); };
-    auto push_gaps     = [&]{ edit_box.update_figure([&](FigureEdits& f){
-                                  f.col_gap = st.col_gap_local;
-                                  f.row_gap = st.row_gap_local; }); };
 
-    // ---- Text -----------------------------------------------------------
-    if (section("Text", true)) {
-        if (begin_field_table("txt")) {
-            field_row("Title");
-            if (ImGui::InputText("##title", st.title_buf, sizeof(st.title_buf)))
-                edit_box.update(idx, [&](AxesEdit& e){ e.title = st.title_buf; });
-            field_row("size");
-            if (drag_float("##titlesz", &sty.title_fontsize, 1.0f, 96.0f, 0.2f, "%.1f px")) push_style();
-            field_row("color");
-            if (color_swatch("##titlecol", sty.title_color)) push_style();
+    // Four groups (v1.0 step 10.5), the 3D panel's shape (step 10.4) wherever
+    // the two kinds share a group, so a selection that moves between a 2D and
+    // a 3D slot finds the same things under the same names:
+    //   Figure -- the whole figure, not this axes: suptitle, layout
+    //   Axis   -- this axes' own text and frame: titles, axis frame, grid
+    //   Ticks  -- what the axes show along them: limits, ticks and labels
+    //   Legend & colorbar -- the two keys, which 3D has no controls for
+    // There is no View group: with no camera and no box, a 2D axes has only
+    // its grid to put there, and a grid is drawn in the frame it lines.
 
-            field_row("X title");
-            if (ImGui::InputText("##xtitle", st.xtitle_buf, sizeof(st.xtitle_buf)))
-                edit_box.update(idx, [&](AxesEdit& e){ e.xtitle = st.xtitle_buf; });
-            field_row("size");
-            if (drag_float("##xtitlesz", &sty.xtitle_fontsize, 1.0f, 96.0f, 0.2f, "%.1f px")) push_style();
-            field_row("color");
-            if (color_swatch("##xtitlecol", sty.xtitle_color)) push_style();
+    // ==== Figure ==========================================================
+    draw_figure_group(st, fsnap, edit_box, idx);
 
-            field_row("Y title");
-            if (ImGui::InputText("##ytitle", st.ytitle_buf, sizeof(st.ytitle_buf)))
-                edit_box.update(idx, [&](AxesEdit& e){ e.ytitle = st.ytitle_buf; });
-            field_row("size");
-            if (drag_float("##ytitlesz", &sty.ytitle_fontsize, 1.0f, 96.0f, 0.2f, "%.1f px")) push_style();
-            field_row("color");
-            if (color_swatch("##ytitlecol", sty.ytitle_color)) push_style();
-
+    // ==== Axis ============================================================
+    if (section("Axis", true)) {
+        ImGui::SeparatorText("Titles");
+        // Each title's text, then its colour and size on the row under it --
+        // two tables per title, as in 3D, because a table has no column span.
+        struct TitleUi {
+            const char* label; const char* id;
+            char* buf; std::size_t cap;
+            std::optional<std::string> AxesEdit::*text;
+            Color* color; float* size;
+        };
+        const TitleUi titles[3] = {
+            { "Title",   "title",  st.title_buf,  sizeof(st.title_buf),  &AxesEdit::title,
+              &sty.title_color,  &sty.title_fontsize },
+            { "X title", "xtitle", st.xtitle_buf, sizeof(st.xtitle_buf), &AxesEdit::xtitle,
+              &sty.xtitle_color, &sty.xtitle_fontsize },
+            { "Y title", "ytitle", st.ytitle_buf, sizeof(st.ytitle_buf), &AxesEdit::ytitle,
+              &sty.ytitle_color, &sty.ytitle_fontsize },
+        };
+        for (const TitleUi& t : titles) {
+            ImGui::PushID(t.id);
+            if (begin_field_table("text")) {
+                field_row(t.label);
+                if (ImGui::InputText("##text", t.buf, t.cap))
+                    edit_box.update(idx, [&](AxesEdit& e){ e.*t.text = std::string(t.buf); });
+                end_field_table();
+            }
+            if (begin_field_table("style", 2)) {
+                field_row("Color");
+                if (color_swatch("##color", *t.color)) push_style();
+                field_next("Size");
+                if (drag_float("##size", t.size, 1.0f, 96.0f, 0.2f, "%.1f px")) push_style();
+                end_field_table();
+            }
+            ImGui::PopID();
+        }
+        if (begin_field_table("font")) {
             field_row("Font");
             if (font_combo("##axesfont", sty.font_path)) push_style();
             end_field_table();
         }
-
-        // Figure-wide, not per-axes — flagged so it isn't mistaken for a
-        // property of the axes selected above.
-        ImGui::Spacing();
-        ImGui::TextDisabled("Figure-wide");
-        if (begin_field_table("suptxt")) {
-            field_row("Suptitle");
-            if (ImGui::InputText("##suptitle", st.suptitle_buf, sizeof(st.suptitle_buf)))
-                edit_box.update_figure([&](FigureEdits& f){ f.suptitle = st.suptitle_buf; });
-            field_row("size");
-            if (drag_float("##supsz", &st.suptitle_local.fontsize, 1.0f, 96.0f, 0.2f, "%.1f px")) push_suptitle();
-            field_row("color");
-            if (color_swatch("##supcol", st.suptitle_local.color)) push_suptitle();
-            field_row("Font");
-            if (font_combo("##supfont", st.suptitle_local.font_path)) push_suptitle();
-            field_row("Align");
-            if (halign_combo("##supalign", st.suptitle_local.align)) push_suptitle();
-            field_row("Offset x");
-            if (drag_float("##supox", &st.suptitle_local.offset_x, -2000.0f, 2000.0f, 0.5f, "%.0f px")) push_suptitle();
-            field_row("Offset y");
-            if (drag_float("##supoy", &st.suptitle_local.offset_y, -2000.0f, 2000.0f, 0.5f, "%.0f px")) push_suptitle();
+        ImGui::SeparatorText("Axis frame");
+        if (begin_field_table("spine", 2)) {
+            field_row("Color");
+            if (color_swatch("##spinecol", sty.spine_color)) push_style();
+            field_next("Width");
+            if (drag_float("##spinew", &sty.spine_linewidth, 0.5f, 6.0f, 0.02f, "%.2f px")) push_style();
             end_field_table();
         }
-    }
-
-    // ---- Layout ---------------------------------------------------------
-    // Figure-level, like the suptitle above: the margins border the whole grid
-    // and the gaps sit between subplots, so neither belongs to the selected
-    // axes. There is deliberately no control for the space a tick label or
-    // axis title occupies -- that is measured from the text, not chosen.
-    if (section("Layout")) {
-        if (begin_field_table("margins")) {
-            field_row("Margin L");
-            if (drag_float("##marl", &st.margins_local.left, 0.0f, 2000.0f, 0.5f, "%.0f px")) push_margins();
-            field_row("R");
-            if (drag_float("##marr", &st.margins_local.right, 0.0f, 2000.0f, 0.5f, "%.0f px")) push_margins();
-            field_row("T");
-            if (drag_float("##mart", &st.margins_local.top, 0.0f, 2000.0f, 0.5f, "%.0f px")) push_margins();
-            field_row("B");
-            if (drag_float("##marb", &st.margins_local.bottom, 0.0f, 2000.0f, 0.5f, "%.0f px")) push_margins();
+        if (begin_field_table("framemargin")) {
+            field_row("Margin");
+            if (drag_float("##framemargin", &sty.frame_margin, 0.0f, 400.0f, 0.5f, "%.0f px")) push_style();
+            end_field_table();
+        }
+        // Which of the four frame edges draw (v1.0 step 19). Independent of
+        // the ticks: turning an edge off that an axis sits on leaves that
+        // axis' marks and numbers with no line, which is deliberate.
+        if (begin_field_table("spines", 2)) {
+            field_row("Bottom");
+            if (ImGui::Checkbox("##spinebottom", &sty.spine_bottom)) push_style();
+            field_next("Top");
+            if (ImGui::Checkbox("##spinetop", &sty.spine_top)) push_style();
+            field_row("Left");
+            if (ImGui::Checkbox("##spineleft", &sty.spine_left)) push_style();
+            field_next("Right");
+            if (ImGui::Checkbox("##spineright", &sty.spine_right)) push_style();
             end_field_table();
         }
 
-        // Gaps separate subplots from each other, so on a single-axes figure
-        // there is nothing for them to separate.
-        ImGui::BeginDisabled(fsnap.axes.size() <= 1);
-        if (begin_field_table("gaps")) {
-            field_row("Gap col");
-            if (drag_float("##gapc", &st.col_gap_local, 0.0f, 2000.0f, 0.5f, "%.0f px")) push_gaps();
-            field_row("row");
-            if (drag_float("##gapr", &st.row_gap_local, 0.0f, 2000.0f, 0.5f, "%.0f px")) push_gaps();
+        ImGui::SeparatorText("Axis position");
+        {
+            // One row per axis: where it sits, then the origin component that
+            // supersedes it. The component is named by the coordinate it is
+            // measured in rather than by the axis it moves -- "X axis ... at
+            // y" -- because that is the only spelling in which the number the
+            // user types and the box it is dragged against are the same
+            // thing. `pin` and `scratch` are deliberately separate: the
+            // scratch survives un-ticking, so the value comes back.
+            struct AxisPos {
+                const char* label;
+                const char* pin_label;
+                AxisPosition* pos;
+                std::optional<double>* pin;
+                double* scratch;
+                const double* lo;      // the limits of the coordinate the
+                const double* hi;      // component is measured along
+            };
+            const AxisPos pos_axes[2] = {
+                { "X axis", "at y", &sty.xaxis_y, &sty.origin_y, &st.origin_y_scratch,
+                  &st.ymin_local, &st.ymax_local },
+                { "Y axis", "at x", &sty.yaxis_x, &sty.origin_x, &st.origin_x_scratch,
+                  &st.xmin_local, &st.xmax_local },
+            };
+            if (begin_field_table("axpos", 2)) {
+                for (const AxisPos& a : pos_axes) {
+                    ImGui::PushID(a.label);
+                    field_row(a.label);
+                    // Greyed rather than hidden while pinned, so it stays
+                    // visible that the enum is what the pin is overriding.
+                    ImGui::BeginDisabled(a.pin->has_value());
+                    if (axis_position_combo("##pos", *a.pos)) push_style();
+                    ImGui::EndDisabled();
+
+                    field_next(a.pin_label);
+                    bool pinned = a.pin->has_value();
+                    if (ImGui::Checkbox("##pin", &pinned)) {
+                        if (pinned) *a.pin = *a.scratch;
+                        else        a.pin->reset();
+                        push_style();
+                    }
+                    ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+                    ImGui::BeginDisabled(!pinned);
+                    // The checkbox consumed field_next()'s fill width; ask
+                    // again, as the limits rows above do for the same reason.
+                    ImGui::SetNextItemWidth(-FLT_MIN);
+                    if (drag_double("##pinval", a.scratch, limit_drag_speed(*a.lo, *a.hi))) {
+                        *a.pin = *a.scratch;
+                        push_style();
+                    }
+                    ImGui::EndDisabled();
+                    ImGui::PopID();
+                }
+                end_field_table();
+            }
+        }
+        ImGui::SeparatorText("Grid");
+        // Labelled like the sub-heading above it, which is safe only because
+        // a SeparatorText has no id; the ##suffix keeps it apart from the 3D
+        // panel's own "Grid##grid3d" all the same.
+        if (ImGui::Checkbox("Grid##grid", &st.grid_local))
+            edit_box.update(idx, [&](AxesEdit& e){ e.grid_enabled = st.grid_local; });
+        ImGui::BeginDisabled(!st.grid_local);
+        if (begin_field_table("grid", 3)) {
+            field_row("Color");
+            if (color_swatch("##gridcol", st.grid_opts_local.color)) push_grid();
+            field_next("Style");
+            if (linestyle_combo("##gridls", st.grid_opts_local.linestyle)) push_grid();
+            field_next("Width");
+            if (drag_float("##gridw", &st.grid_opts_local.linewidth, 0.1f, 6.0f, 0.02f, "%.2f px")) push_grid();
             end_field_table();
         }
         ImGui::EndDisabled();
-
-        // Read-only: the plot frame the current settings actually produce,
-        // for the selected axes. Recomputed here rather than reported back
-        // from the render pass, because it must reflect the values in this
-        // panel on the frame they are dragged — and layout is cheap enough
-        // (single-digit microseconds) to just run again.
-        const int live_w = st.live_plot_w.load(std::memory_order_relaxed);
-        const int live_h = st.live_plot_h.load(std::memory_order_relaxed);
-        if (live_w > 0 && live_h > 0) {
-            const FigureLayout fl = compute_figure_layout(fsnap, live_w, live_h);
-            for (const auto& c : fl.cells) {
-                if (c.slot.index != idx) continue;
-                ImGui::TextDisabled("Frame %.0f x %.0f at (%.0f, %.0f)",
-                                    static_cast<double>(c.frame.w), static_cast<double>(c.frame.h),
-                                    static_cast<double>(c.frame.x), static_cast<double>(c.frame.y));
-                ImGui::TextDisabled("Reserved L%.0f R%.0f T%.0f B%.0f",
-                                    static_cast<double>(fl.insets.left),
-                                    static_cast<double>(fl.insets.right),
-                                    static_cast<double>(fl.insets.top),
-                                    static_cast<double>(fl.insets.bottom));
-                break;
-            }
-        }
     }
 
-    // ---- Limits ---------------------------------------------------------
-    if (section("Limits", true)) {
+    // ==== Ticks ===========================================================
+    if (section("Ticks", true)) {
+        ImGui::SeparatorText("Limits");
+        struct AxisLim {
+            const char* label;
+            bool* autoscale; double* lo; double* hi;
+            std::optional<double> AxesEdit::*lo_field;
+            std::optional<double> AxesEdit::*hi_field;
+            std::optional<bool>   AxesEdit::*auto_field;
+        };
+        const AxisLim axes[2] = {
+            { "X", &st.xauto_local, &st.xmin_local, &st.xmax_local,
+              &AxesEdit::xmin, &AxesEdit::xmax, &AxesEdit::xlim_auto },
+            { "Y", &st.yauto_local, &st.ymin_local, &st.ymax_local,
+              &AxesEdit::ymin, &AxesEdit::ymax, &AxesEdit::ylim_auto },
+        };
         if (begin_field_table("lim")) {
-            field_row("X");
-            if (ImGui::Checkbox("Auto##x", &st.xauto_local))
-                edit_box.update(idx, [&](AxesEdit& e){ e.xlim_auto = st.xauto_local; });
-            ImGui::BeginDisabled(st.xauto_local);
-            const float xspeed = limit_drag_speed(st.xmin_local, st.xmax_local);
-            field_row("min");
-            if (drag_double("##xmin", &st.xmin_local, xspeed))
-                edit_box.update(idx, [&](AxesEdit& e){ e.xmin = st.xmin_local; e.xlim_auto = false; });
-            field_row("max");
-            if (drag_double("##xmax", &st.xmax_local, xspeed))
-                edit_box.update(idx, [&](AxesEdit& e){ e.xmax = st.xmax_local; e.xlim_auto = false; });
-            ImGui::EndDisabled();
-
-            field_row("Y");
-            if (ImGui::Checkbox("Auto##y", &st.yauto_local))
-                edit_box.update(idx, [&](AxesEdit& e){ e.ylim_auto = st.yauto_local; });
-            ImGui::BeginDisabled(st.yauto_local);
-            const float yspeed = limit_drag_speed(st.ymin_local, st.ymax_local);
-            field_row("min");
-            if (drag_double("##ymin", &st.ymin_local, yspeed))
-                edit_box.update(idx, [&](AxesEdit& e){ e.ymin = st.ymin_local; e.ylim_auto = false; });
-            field_row("max");
-            if (drag_double("##ymax", &st.ymax_local, yspeed))
-                edit_box.update(idx, [&](AxesEdit& e){ e.ymax = st.ymax_local; e.ylim_auto = false; });
-            ImGui::EndDisabled();
+            for (const AxisLim& a : axes) {
+                ImGui::PushID(a.label);
+                // One row per axis: its Auto box, then low and high sharing
+                // what is left of the cell. Unlike 3D, 2D has always had the
+                // box -- a 2D axes goes back to auto from here, where a 3D one
+                // does it through Reset view.
+                field_row(a.label);
+                if (ImGui::Checkbox("Auto", a.autoscale))
+                    edit_box.update(idx, [&](AxesEdit& e){ e.*a.auto_field = *a.autoscale; });
+                ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+                ImGui::BeginDisabled(*a.autoscale);
+                const float speed = limit_drag_speed(*a.lo, *a.hi);
+                // The checkbox consumed field_row()'s fill width; ask again,
+                // or the split would divide the column's default item width.
+                ImGui::SetNextItemWidth(-FLT_MIN);
+                split_begin(2);
+                if (drag_double("##lo", a.lo, speed))
+                    edit_box.update(idx, [&](AxesEdit& e){ e.*a.lo_field = *a.lo; e.*a.auto_field = false; });
+                split_next();
+                if (drag_double("##hi", a.hi, speed))
+                    edit_box.update(idx, [&](AxesEdit& e){ e.*a.hi_field = *a.hi; e.*a.auto_field = false; });
+                split_end();
+                ImGui::EndDisabled();
+                ImGui::PopID();
+            }
             end_field_table();
         }
-    }
-
-    // ---- Ticks & labels -------------------------------------------------
-    if (section("Ticks & labels")) {
-        if (begin_field_table("tick")) {
-            field_row("Marks");
+        ImGui::SeparatorText("Ticks & labels");
+        // Mark over Label in one table, so the second pairs line up.
+        if (begin_field_table("tick", 3)) {
+            field_row("Mark");
             if (color_swatch("##tickcol", sty.tick_color)) push_style();
-            field_row("length");
-            if (drag_float("##ticklen", &sty.tick_length, 0.0f, 20.0f, 0.1f)) push_style();
-            field_row("width");
-            if (drag_float("##tickw", &sty.tick_linewidth, 0.5f, 6.0f, 0.02f)) push_style();
-
-            field_row("Labels");
+            field_next("Length");
+            if (drag_float("##ticklen", &sty.tick_length, 0.0f, 20.0f, 0.1f, "%.1f px")) push_style();
+            field_next("Width");
+            if (drag_float("##tickw", &sty.tick_linewidth, 0.5f, 6.0f, 0.02f, "%.2f px")) push_style();
+            field_row("Label");
             if (color_swatch("##labelcol", sty.label_color)) push_style();
-            field_row("size");
+            field_next("Size");
             if (drag_float("##labelsz", &sty.label_fontsize, 1.0f, 96.0f, 0.2f, "%.1f px")) push_style();
             end_field_table();
         }
 
-        ImGui::Spacing();
-        ImGui::TextDisabled("X override");
+        ImGui::TextDisabled("X ticks");
         if (draw_tick_table("xticks", st.xticks_scratch))
             edit_box.update(idx, [&](AxesEdit& e){ e.xticks_override = st.xticks_scratch; });
-        ImGui::TextDisabled("Y override");
+        ImGui::TextDisabled("Y ticks");
         if (draw_tick_table("yticks", st.yticks_scratch))
             edit_box.update(idx, [&](AxesEdit& e){ e.yticks_override = st.yticks_scratch; });
     }
 
-    // ---- Grid -----------------------------------------------------------
-    if (section("Grid")) {
-        if (ImGui::Checkbox("Enabled##grid", &st.grid_local))
-            edit_box.update(idx, [&](AxesEdit& e){ e.grid_enabled = st.grid_local; });
-        ImGui::BeginDisabled(!st.grid_local);
-        if (begin_field_table("grid")) {
-            field_row("Color");
-            if (color_swatch("##gridcol", st.grid_opts_local.color)) push_grid();
-            field_row("Width");
-            if (drag_float("##gridw", &st.grid_opts_local.linewidth, 0.1f, 6.0f, 0.02f)) push_grid();
-            field_row("Style");
-            if (linestyle_combo("##gridls", st.grid_opts_local.linestyle)) push_grid();
-            end_field_table();
-        }
-        ImGui::EndDisabled();
-    }
-
-    // ---- Axis frame -----------------------------------------------------
-    if (section("Axis frame")) {
-        if (begin_field_table("spine")) {
-            field_row("Color");
-            if (color_swatch("##spinecol", sty.spine_color)) push_style();
-            field_row("Width");
-            if (drag_float("##spinew", &sty.spine_linewidth, 0.5f, 6.0f, 0.02f)) push_style();
-            end_field_table();
-        }
-    }
-
-    // ---- Legend ---------------------------------------------------------
-    if (section("Legend")) {
-        if (ImGui::Checkbox("Show##legend", &st.legend_enabled_local))
-            edit_box.update(idx, [&](AxesEdit& e){ e.legend_enabled = st.legend_enabled_local; });
-        ImGui::BeginDisabled(!st.legend_enabled_local);
-        if (begin_field_table("legend")) {
-            field_row("Text");
-            if (color_swatch("##legtextcol", st.legend_local.text_color)) push_legend();
-            field_row("size");
-            if (drag_float("##legsz", &st.legend_local.fontsize, 1.0f, 96.0f, 0.2f, "%.1f px")) push_legend();
-            field_row("Font");
-            if (font_combo("##legfont", st.legend_local.font_path)) push_legend();
-            field_row("Offset x");
-            if (drag_float("##legox", &st.legend_local.offset_x, -400.0f, 400.0f, 0.5f, "%.0f px")) push_legend();
-            field_row("Offset y");
-            if (drag_float("##legoy", &st.legend_local.offset_y, -400.0f, 400.0f, 0.5f, "%.0f px")) push_legend();
-            end_field_table();
-        }
-        if (ImGui::Checkbox("Frame##legendframe", &st.legend_local.frameon)) push_legend();
-        ImGui::BeginDisabled(!st.legend_local.frameon);
-        if (begin_field_table("legendframe")) {
-            field_row("Fill");
-            if (color_swatch("##legfill", st.legend_local.frame_color)) push_legend();
-            field_row("Border");
-            if (color_swatch("##legborder", st.legend_local.border_color)) push_legend();
-            field_row("width");
-            if (drag_float("##legbw", &st.legend_local.border_linewidth, 0.0f, 6.0f, 0.02f)) push_legend();
-            end_field_table();
-        }
-        ImGui::EndDisabled();
-        ImGui::EndDisabled();
-    }
-
-    // ---- Colorbar -------------------------------------------------------
-    if (section("Colorbar")) {
-        // Whether a colorbar exists at all is a per-plot-object flag
-        // (HeatmapOptions/ScatterZOptions::colorbar), not something this panel
-        // can toggle — so say so rather than showing dead controls.
-        if (!find_colorbar_request(cur->snap))
-            ImGui::TextDisabled("No colorbar on this axis.");
-        if (begin_field_table("cbar")) {
-            field_row("Text");
-            if (color_swatch("##cbtextcol", st.colorbar_local.text_color)) push_colorbar();
-            field_row("size");
-            if (drag_float("##cbsz", &st.colorbar_local.fontsize, 1.0f, 96.0f, 0.2f, "%.1f px")) push_colorbar();
-            field_row("Font");
-            if (font_combo("##cbfont", st.colorbar_local.font_path)) push_colorbar();
-            field_row("Border");
-            if (color_swatch("##cbborder", st.colorbar_local.border_color)) push_colorbar();
-            field_row("width");
-            if (drag_float("##cbbw", &st.colorbar_local.border_linewidth, 0.0f, 6.0f, 0.02f)) push_colorbar();
-            end_field_table();
-        }
-    }
+    // ==== Legend & colorbar ===============================================
+    // One definition, shared with the 3D panel since step 11.2.
+    draw_legend_colorbar_group<AxesEdit>(
+        st, !find_colorbar_requests(*cur2d).empty(),
+        [&](auto&& fn){ edit_box.update(idx, fn); });
 
     ImGui::End();
 }
+
+namespace {
 
 // Top-of-window "File"/"View" menu. Must run before
 // ensure_layout()/DockSpaceOverViewport() — BeginMainMenuBar()
@@ -616,7 +1741,8 @@ void draw_menu_bar(const FigureSnapshot& fsnap, PanelState& st) {
                     const int lw = st.live_plot_w.load(std::memory_order_relaxed);
                     const int lh = st.live_plot_h.load(std::memory_order_relaxed);
                     if (lw > 0 && lh > 0) {
-                        const FigureLayout fl = compute_figure_layout(fsnap, lw, lh);
+                        const FigureLayout fl =
+                            compute_figure_layout(fsnap, *on_screen_measure(st, fsnap), lw, lh);
                         for (const auto& c : fl.cells) {
                             if (c.slot.index != st.selected_slot_index) continue;
                             st.resize_frame_w = static_cast<int>(std::lround(c.frame.w));
@@ -627,31 +1753,48 @@ void draw_menu_bar(const FigureSnapshot& fsnap, PanelState& st) {
                 }
                 st.resize_dialog_open = true;
             }
+            // A refit on demand: re-measure what navigation left frozen, the
+            // tick labels, without having to resize the window for it.
+            if (ImGui::MenuItem("Refit layout"))
+                st.layout.request_refit();
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("View")) {
-            ImGui::MenuItem("Control Panel", nullptr, &st.controls_visible);
+            ImGui::MenuItem("Cosmetic Panel", nullptr, &st.cosmetic_visible);
             // Turning Data on should bring it to the front of the shared tab
-            // bar; toggling Controls must not. ensure_layout() consumes and
+            // bar; toggling Cosmetic must not. ensure_layout() consumes and
             // clears the flag on its next rebuild.
             if (ImGui::MenuItem("Data Panel", nullptr, &st.data_visible))
                 st.focus_data_on_rebuild = st.data_visible;
             ImGui::EndMenu();
         }
         // The two interaction modes. They belong here rather than in the
-        // Controls panel because neither is a property of a figure or of the
+        // Cosmetic panel because neither is a property of a figure or of the
         // selected axes — they govern what the mouse does over the plot — and
-        // because Controls can be hidden, which used to take the only way of
+        // because Cosmetic can be hidden, which used to take the only way of
         // reaching them with it.
         if (ImGui::BeginMenu("Edit")) {
             ImGui::MenuItem("Navigate", nullptr, &st.navigate_enabled);
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Left-drag pans, scroll zooms at the cursor,\n"
-                                  "double-click resets — on the axes selected in Controls.");
+                                  "double-click resets — on the selected subplot.");
             ImGui::MenuItem("Hints", nullptr, &st.hints_enabled);
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Show a tooltip for the data point under the cursor.");
             ImGui::EndMenu();
+        }
+        // The subplot every panel edits. Here rather than in the panels
+        // (step 10.2) because it outlives either of them being hidden, which
+        // is why there used to be two copies. Clicking a subplot sets the
+        // same selection.
+        if (fsnap.axes.size() > 1) {
+            int sel = st.selected_slot_index;
+            ImGui::SetNextItemWidth(220.0f);
+            if (axes_selector("##axessel", fsnap, sel))
+                select_slot(st, fsnap, sel);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("The subplot the panels edit and Navigate moves.\n"
+                                  "Clicking a subplot selects it too.");
         }
         ImGui::EndMainMenuBar();
     }
@@ -678,7 +1821,8 @@ void size_mode_fields(const FigureSnapshot& fsnap, PanelState& st,
 
     if (mode == PanelState::SizeMode::PlotFrame) {
         if (*w > 0 && *h > 0) {
-            const LayoutSize s = figure_size_for_frame(fsnap, st.selected_slot_index,
+            const LayoutSize s = figure_size_for_frame(fsnap, *on_screen_measure(st, fsnap),
+                                                       st.selected_slot_index,
                                                        static_cast<float>(*w),
                                                        static_cast<float>(*h));
             ImGui::TextDisabled("Figure becomes %.0f x %.0f (axis %d)",
@@ -694,6 +1838,50 @@ void size_mode_fields(const FigureSnapshot& fsnap, PanelState& st,
     }
 }
 
+// Whether the typed filename asks for the vector path. The same extension test
+// the save site makes, and here so the dialog offers the bound that the save
+// will actually consult rather than both of them.
+bool save_path_is_svg(const char* path) {
+    const std::string s = path ? path : "";
+    const auto dot = s.rfind('.');
+    if (dot == std::string::npos) return false;
+    const std::string ext = s.substr(dot);
+    return ext == ".svg" || ext == ".SVG";
+}
+
+bool scene_has_3d(const FigureSnapshot& fsnap) {
+    for (const FigureAxesSnapshot& a : fsnap.axes)
+        if (a.snap3d()) return true;
+    return false;
+}
+
+// The modal a knowingly-wrong export raises. It is modal rather than a status
+// line because the file is already written: the user is about to go and look
+// at a picture that has geometry on the wrong side of other geometry, and the
+// one moment they can be told is now. The text is the exporter's own sentence,
+// which names the bound that bound and the number to beat.
+// An undocked window rather than a true modal, which is what every other
+// dialog here is -- a popup would have to be opened from inside the same ID
+// scope it is drawn in, and the save that raises this happens later in the
+// frame and outside every window. It still has to be dismissed by hand.
+void draw_save_warning(PanelState& st) {
+    if (st.save_warning.empty()) return;
+    st.save_warning_open = false;
+
+    ImGui::SetNextWindowSize(ImVec2(430, 0), ImGuiCond_FirstUseEver);
+    ImGui::Begin("Export warning", nullptr,
+                 ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_AlwaysAutoResize);
+    ImGui::TextWrapped("The file was written, but part of it is not in the "
+                       "right order.");
+    ImGui::Spacing();
+    ImGui::PushTextWrapPos(410.0f);
+    ImGui::TextUnformatted(st.save_warning.c_str());
+    ImGui::PopTextWrapPos();
+    ImGui::Spacing();
+    if (ImGui::Button("OK")) st.save_warning.clear();
+    ImGui::End();
+}
+
 void draw_save_dialog(const FigureSnapshot& fsnap, PanelState& st) {
     if (!st.save_dialog_open) return;
 
@@ -704,6 +1892,26 @@ void draw_save_dialog(const FigureSnapshot& fsnap, PanelState& st) {
     ImGui::InputText("File", st.save_path_buf, sizeof(st.save_path_buf));
     size_mode_fields(fsnap, st, st.save_size_mode, &st.save_width, &st.save_height,
                      "<=0 uses the Plot panel's current size.");
+
+    // The bound each format is allowed to give up at, shown only for the
+    // format the filename names and only when the figure has 3D in it -- these
+    // mean nothing for a 2D figure, and a control that cannot change the
+    // output is worse than no control. Both are "0 = automatic", so the
+    // default state of the dialog is the default behaviour.
+    if (scene_has_3d(fsnap)) {
+        ImGui::Separator();
+        if (save_path_is_svg(st.save_path_buf)) {
+            ImGui::InputInt("Max splits", &st.save_max_splits);
+            if (st.save_max_splits < 0) st.save_max_splits = 0;
+            ImGui::TextDisabled("0 = automatic (8 x polygons + 64).");
+            ImGui::TextDisabled("Raise if a save reports it gave up.");
+        } else {
+            ImGui::InputInt("Peel layers", &st.save_peel_layers);
+            st.save_peel_layers = std::clamp(st.save_peel_layers, 0, 64);
+            ImGui::TextDisabled("0 = automatic (8). Translucent layers a ray");
+            ImGui::TextDisabled("may cross before the rest is dropped.");
+        }
+    }
 
     if (ImGui::Button("Save")) {
         st.save_requested = true;
@@ -718,7 +1926,7 @@ void draw_save_dialog(const FigureSnapshot& fsnap, PanelState& st) {
 
 // Resizes the live window so the selected subplot's plot frame
 // comes out at the requested size — the figure size is derived, and the
-// window then grows by the menu bar and Controls column on top of that.
+// window then grows by the menu bar and Cosmetic column on top of that.
 void draw_resize_dialog(const FigureSnapshot& fsnap, PanelState& st) {
     if (!st.resize_dialog_open) return;
 
@@ -733,7 +1941,8 @@ void draw_resize_dialog(const FigureSnapshot& fsnap, PanelState& st) {
 
     ImGui::BeginDisabled(st.resize_frame_w <= 0 || st.resize_frame_h <= 0);
     if (ImGui::Button("Apply")) {
-        const LayoutSize s = figure_size_for_frame(fsnap, st.selected_slot_index,
+        const LayoutSize s = figure_size_for_frame(fsnap, *on_screen_measure(st, fsnap),
+                                                   st.selected_slot_index,
                                                    static_cast<float>(st.resize_frame_w),
                                                    static_cast<float>(st.resize_frame_h));
         st.pending_plot_w.store(static_cast<int>(std::lround(s.width)),
@@ -751,10 +1960,10 @@ void draw_resize_dialog(const FigureSnapshot& fsnap, PanelState& st) {
 }
 
 // Applies a pending plot-area size to the real window. The request names the
-// *plot* size, so whatever the menu bar and the Controls/Data column occupy is
+// *plot* size, so whatever the menu bar and the Cosmetic/Data column occupy is
 // measured off the current frame and added back; deriving that chrome from
 // panel_width and a menu-bar height would go stale the moment the user dragged
-// the dock splitter or hid Controls.
+// the dock splitter or hid Cosmetic.
 //
 // Only the window thread may call this, which is why the request is an atomic
 // this consumes rather than a direct call.
@@ -803,15 +2012,26 @@ void draw_widget_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
     draw_menu_bar(fsnap, st);
 
     const ImGuiID dockspace_id = ImGui::GetID("SextantDockspace");
-    ensure_layout(dockspace_id, opts.panel_width, st);
+    ensure_layout(dockspace_id,
+                  opts.panel_width * ImGui::GetStyle().FontScaleDpi, st);
     ImGui::DockSpaceOverViewport(dockspace_id);
 
     draw_plot_panel(ctx, nvg, data, plot_fbo, fsnap, edit_box, st, opts.supersample);
-    if (st.controls_visible)
-        draw_controls_panel(fsnap, edit_box, st);
+    if (st.cosmetic_visible)
+        draw_cosmetic_panel(fsnap, edit_box, st);
     if (st.data_visible)
         draw_data_panel(fsnap, edit_box, st);
+    // After both side panels have begun, so this outranks whichever of them
+    // was focused by appearing -- see ensure_layout().
+    if (st.pending_panel_focus) {
+        ImGui::SetWindowFocus(st.pending_panel_focus);
+        st.pending_panel_focus = nullptr;
+    }
     draw_save_dialog(fsnap, st);
+    // One frame behind the save that raises it -- the save is serviced below,
+    // after every panel has been drawn -- which is invisible and is why this
+    // reads the string rather than an edge.
+    draw_save_warning(st);
     draw_resize_dialog(fsnap, st);
 
     // After the plot panel has published this frame's live size, so the
@@ -825,14 +2045,18 @@ void draw_widget_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
     //
     // It exports `fsnap` -- the snapshot the render thread holds, already
     // patched with any panel edits -- so what is saved matches what is on
-    // screen without the caller thread having to refresh() first.
+    // screen without the caller thread having to refresh() first. And it is
+    // laid out with the window's measurements, at whatever size is asked for,
+    // so the file is not a refit of what is shown (v1.0 step 15.2).
     if (st.save_requested) {
         st.save_requested = false;
+        const auto on_screen = on_screen_measure(st, fsnap);
         int sw = st.save_width  > 0 ? st.save_width  : st.live_plot_w.load(std::memory_order_relaxed);
         int sh = st.save_height > 0 ? st.save_height : st.live_plot_h.load(std::memory_order_relaxed);
         if (st.save_size_mode == PanelState::SizeMode::PlotFrame
             && st.save_width > 0 && st.save_height > 0) {
-            const LayoutSize s = figure_size_for_frame(fsnap, st.selected_slot_index,
+            const LayoutSize s = figure_size_for_frame(fsnap, *on_screen,
+                                                       st.selected_slot_index,
                                                        static_cast<float>(st.save_width),
                                                        static_cast<float>(st.save_height));
             sw = static_cast<int>(std::lround(s.width));
@@ -842,10 +2066,24 @@ void draw_widget_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
             const std::string path = st.save_path_buf;
             const auto dot = path.rfind('.');
             const auto ext = (dot == std::string::npos) ? "" : path.substr(dot);
-            if (ext == ".svg" || ext == ".SVG")
-                export_figure_svg(fsnap, path, sw, sh);
-            else
-                export_figure_png(ctx, nvg, data, fsnap, path, sw, sh, opts.supersample);
+            if (ext == ".svg" || ext == ".SVG") {
+                SvgSaveReport report;
+                export_figure_svg(fsnap, path, sw, sh,
+                                  { .max_splits = static_cast<std::size_t>(
+                                        std::max(0, st.save_max_splits)) },
+                                  &report, on_screen.get());
+                // The one place the GUI can tell the user, and it has to be
+                // taken: the file is written either way, and the difference
+                // between an exact picture and one with geometry on the wrong
+                // side of other geometry is not visible in a file listing.
+                if (!report.scene_order_exact) {
+                    st.save_warning      = report.warning;
+                    st.save_warning_open = true;
+                }
+            } else {
+                export_figure_png(ctx, nvg, data, fsnap, path, sw, sh,
+                                  opts.supersample, st.save_peel_layers, on_screen.get());
+            }
         }
     }
 

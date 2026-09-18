@@ -10,7 +10,7 @@ All public symbols live in namespace `sextant`, behind one header:
 
 - [Two objects](#two-objects)
 - [Plot types](#plot-types) — [line](#line) · [scatter](#scatter) ·
-  [scatter_z](#scatter_z) · [bar](#bar) · [hist](#hist) · [heatmap](#heatmap)
+  [scatter_z](#scatter_z) · [bar](#bar) · [hist](#hist) · [heatmap](#heatmap) / [imshow](#heatmap)
 - [Error bars](#error-bars)
 - [Contours](#contours)
 - [Titles, legends and ticks](#titles-legends-and-ticks)
@@ -74,7 +74,7 @@ ax->line(t, volts, {.color = sextant::Color::Blue,
 
 `LineStyle::None` draws no stroke at all, and a series set to it also drops out of the legend. Dashing is honored in the window, in PNG and in SVG alike.
 
-There is no marker option — use `scatter()` on the same data for a marked series.
+Lines are the type that scales: a million points pans and zooms. There is no marker option — use `scatter()` on the same data for a marked series.
 
 ### scatter
 
@@ -125,7 +125,7 @@ ax->bar(months, sales, {.color = sextant::Color::Cyan,
 
 ### hist
 
-A histogram is a bar plot whose bars come from binning, so it takes both option:
+A histogram is a bar plot whose bars come from binning, so it takes both option structs:
 
 ```cpp
 Axes& hist(std::span<const double> data, int bins = 10,
@@ -138,23 +138,39 @@ ax->hist(samples, 40, {.color = sextant::Color::Green},
                       {.density = true});
 ```
 
-`BarOptions` says how the bars are *drawn*; `HistOptions` says how to binning (`density`, `cumulative`). Here `width` is read against the **bin** width.
+`BarOptions` says how the bars are *drawn*; `HistOptions` says what binning means (`density`, `cumulative`). Here `width` is read against the **bin** width.
 
 **One wart worth knowing.** `hist()`'s default argument raises `width` to `1.0` so bins touch. If you pass your own `BarOptions` you get `BarOptions`' own default of `0.8` back — and gapped bins read as a bar chart. Set `.width = 1.0f` yourself whenever you pass bar options to `hist()`.
+
+`hist()` is also the one place `BarOptions::errorbar` is ignored: a bin height is a count sextant derived, not something you measured.
 
 ### heatmap
 
 ```cpp
 Axes& heatmap(std::span<const float> data, int rows, int cols,
-              HeatmapOptions opts = {});
+              Range xrange, Range yrange, HeatmapOptions opts = {});
+
+Axes& imshow(std::span<const float> data, int rows, int cols,
+             HeatmapOptions opts = {});
 ```
 
 ```cpp
-ax->heatmap(field, rows, cols, {.vmin = 0.0f, .vmax = 1.0f,
-                                .colorbar = true});
+// Where the data lives in your own coordinates: a 60x40 grid over 400..700 nm.
+ax->heatmap(field, rows, cols, {400.0, 700.0}, {-1.0, 1.0},
+            {.vmin = 0.0f, .vmax = 1.0f, .colorbar = true})
+   .set_xtitle("wavelength (nm)");
+
+// Or, when the indices *are* the coordinates:
+ax->imshow(field, rows, cols, {.colorbar = true});
 ```
 
-`data` is **row-major**, `rows * cols` floats, indexed `row * cols + col`. The image occupies `[0, cols] x [0, rows]` in data space, so a cell's centre sits at `(col + 0.5, row + 0.5)`.
+`data` is **row-major**, `rows * cols` floats, indexed `row * cols + col`.
+
+`xrange` and `yrange` say where the image sits in data space. They are the **outer edges** of the mesh, not cell centres, so a cell is `(hi - lo) / count` across and a tick at 3 falls on the boundary between two cells. The mesh is uniform -- there is no per-cell coordinate vector. `imshow()` is the case `{0, cols}` by `{0, rows}`: one unit per cell, which is what `heatmap()` used to do on its own.
+
+A reversed range (`lo > hi`) mirrors that axis. A degenerate (`lo == hi`) or non-finite one throws.
+
+Hovering a cell reports its **row and column**, which under a real extent are deliberately not the numbers on the axes.
 
 `origin` decides which end row 0 draws at — `"lower"` (default) puts it at the bottom, `"upper"` at the top. The buffer layout does not change either way.
 
@@ -162,7 +178,7 @@ ax->heatmap(field, rows, cols, {.vmin = 0.0f, .vmax = 1.0f,
 
 ## Error bars
 
-An error bar decorates a series you already drew, and it it to be passed under series' options in `line`, `scatter`, `sactter_z` and `bar`. It draws two shapes, either omittable:
+An error bar decorates a series you already drew, so it lives in that series' options rather than in a call of its own. It is two shapes, either omittable:
 
 - a **capped whisker** from `ymin[i]` to `ymax[i]` — **absolute data coordinates**, not offsets, so a range need not be centred on the point. Leave one end empty for a one-sided whisker.
 - a **box** spanning `y[i] ± yvar[i]`, drawn exactly as given (not square-rooted), `boxwidth` pixels across.
@@ -201,7 +217,7 @@ Every non-empty vector must hold exactly one entry per point, or the call throws
 A heatmap can trace iso-lines through itself.
 
 ```cpp
-ax->heatmap(field, rows, cols, {
+ax->heatmap(field, rows, cols, {0.0, 10.0}, {-1.0, 1.0}, {
         .vmin = 0.0f, .vmax = 2.0f, .colorbar = true,
         .contours = {0.4, 0.8, 1.2, 1.6},
         .contour_color = {1.0f, 1.0f, 1.0f, 0.9f},
@@ -213,12 +229,11 @@ Levels are **z values in your data's own units** — the numbers the colorbar sh
 
 `contour_labels` writes each level onto its own line, rotated to follow it, with the line broken to make room. A line too short to break keeps the line and drops the label.
 
-Lines pass through **cell centres**, so a contour stops half a cell inside the image, and a heatmap smaller than 2×2 traces nothing. `origin` is honored.
+Lines pass through **cell centres**, so a contour stops half a cell inside the image, and a heatmap smaller than 2×2 traces nothing. The traced geometry is in data space, so it follows the extent you gave the heatmap. `origin` is honored.
 
 ---
-## Styling
 
-### Titles, legends and ticks/lables
+## Titles, legends and ticks
 
 ```cpp
 ax->set_title("Run 41", 18.0f)
@@ -246,18 +261,22 @@ ax->set_xticks(days, {"Mon", "Tue", "Wed", "Thu", "Fri"});
 ax->set_xticks(days);                // positions only, values as labels
 ```
 
-The positions have to be a named array or vector, not a braced list written in place: they arrive as `std::span<const double>`, and `std::span` gains a constructor from `std::initializer_list` only in C++26. The labels are a `std::vector<std::string>`, so those *can* be written as a braced list.
+The positions have to be a named array or vector, not a braced list written in place: they arrive as `std::span<const double>`, and `std::span` gains a constructor from `std::initializer_list` only in C++26. The labels are a `std::vector<std::string>`, so those *can* be written inline.
 
 `cla()` clears every plot object and resets the limits.
 
+> **Ordering gotcha.** `set_title(text, size)` stores its size in the axes
+> style, so a later `set_axes_style()` resets it. Call `set_axes_style()` first.
+
 ---
 
-### Colors
+## Styling
 
 Colours are plain `{r, g, b, a}` floats in 0..1, with named constants and two parsers:
 
 ```cpp
-sextant::Color::Blue;        // also Red Green Orange Purple Cyan Black White Gray
+sextant::Color::Blue;                        // also Red Green Orange Purple
+                                             // Cyan Black White Gray
 sextant::Color::from_hex(0x1f77b4);
 sextant::Color::from_name("orange");         // throws on an unknown name
 sextant::Color{0.2f, 0.4f, 0.9f, 0.5f};      // half-transparent blue
@@ -286,8 +305,6 @@ fig->set_suptitle_style({.fontsize = 26.0f, .align = sextant::HAlign::Left});
 
 `set_colorbar_style()` only styles a colorbar; one appears because a plot object asked for it via `HeatmapOptions::colorbar` or `ScatterZOptions::colorbar`. One colorbar is drawn per axes.
 
-**Ordering gotcha:** `set_axes_style()` overrides many axis data shipped in `AxesStyle` all together, which include size/colour of all kinds of title/label, ticks, axis line, etc. Granular controls is preferred called later, `set_[x|y]title()`, `set_[x|y]ticks`.
-
 ---
 
 ## Subplots
@@ -313,9 +330,41 @@ fig->set_margins({.left = 20.0f, .right = 20.0f,
 
 Mixing `axes()` and `add_subplot()` on one figure is not meaningful — pick one.
 
+### A 3D cell in the same grid
+
+`add_subplot3d()` puts an `Axes3D` in one cell. The grid rules are about the cell, not about what is in
+it, so the two kinds coexist freely — but they are *siblings*, not a hierarchy: an `Axes3D` is not an
+`Axes` and shares none of its plot methods.
+
+```cpp
+fig->add_subplot(1, 2, 1)->line(x, y).set_title("2D");
+
+fig->add_subplot3d(1, 2, 2)
+    ->set_title("3D")
+     .set_xlim(400.0, 700.0).set_xtitle("wavelength (nm)")
+     .set_ylim(-1.0, 1.0)   .set_ytitle("offset")
+     .set_zlim(0.0, 25.0)   .set_ztitle("counts")
+     .set_view(-55.0, 25.0);   // azimuth, elevation in degrees
+```
+
+Setting a limit changes the range the box **spans**, not its size: the box is a fixed-size normalized
+volume, so a new limit relabels that axis and remaps the data onto the same box. `set_box_aspect()` is
+where the proportions are chosen.
+
+There is no camera distance to set: each axis is normalized onto a box (`set_box_aspect()` chooses its
+proportions) whose projected silhouette is fitted to the cell every frame, so `set_view()` is a complete
+camera and the picture fills its cell at any angle. `Camera3D::zoom` scales that fit.
+
+Asking for a cell that already holds the other kind throws rather than replacing what is in it, and
+`axes()` will not hand back a 3D cell.
+
+**What it draws today** is the box — three axes with ticks, labels, titles, back panes and grid, in both
+PNG and SVG, under an orthographic camera. There is nothing *in* it yet: `bar3d`, 2D planes carrying
+heatmaps and the other plot kinds, perspective, and interactive navigation are the following steps.
+
 ---
 
-## Figure resize
+## Sizing a figure
 
 `FigureOptions::width`/`height` and `resize()` describe the **plot area** — what `savefig()` writes. An open window grows by whatever its menu bar and control panel occupy, so the plot lands on the size you asked for.
 
@@ -483,6 +532,12 @@ struct HistOptions {
     bool cumulative = false;
 };
 
+// The extent a heatmap is drawn over: outer edges of the mesh, not cell
+// centres. Reversed (lo > hi) mirrors that axis; lo == hi throws.
+struct Range {
+    double lo = 0.0, hi = 1.0;
+};
+
 struct HeatmapOptions {
     Colormap    cmap     = Colormap::Viridis;
     float       vmin     = 0.0f;
@@ -521,6 +576,7 @@ struct AxesStyle    { Color spine_color; float spine_linewidth = 1.0f;
                       Color title_color; float title_fontsize  = 18.0f;
                       Color xtitle_color; float xtitle_fontsize = 16.5f;
                       Color ytitle_color; float ytitle_fontsize = 16.5f;
+                      Color ztitle_color; float ztitle_fontsize = 16.5f;  // 3D only
                       std::string font_path; };
 
 struct LegendOptions { float offset_x = 10.0f, offset_y = 0.0f;

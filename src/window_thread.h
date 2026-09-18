@@ -16,6 +16,7 @@
 #include <vector>
 
 namespace sextant {
+struct FigureMeasure;
 
 // Owns the GLFW window + GL context on a background thread.
 // render_fn is called every frame; on_close is called once when the loop exits.
@@ -74,7 +75,9 @@ public:
     std::future<ExportResult> submit_png_export(const FigureSnapshot& snap,
                                                 std::string path,
                                                 int width, int height,
-                                                int supersample);
+                                                int supersample,
+                                                int peel_layers = 0,
+                                                const FigureMeasure* on_screen = nullptr);
 
 private:
     void thread_main();
@@ -88,8 +91,10 @@ private:
 
     struct ExportJob {
         const FigureSnapshot*      snap = nullptr;
+        const FigureMeasure*       on_screen = nullptr;   // borrowed, as `snap` is
         std::string                path;
         int                        width = 0, height = 0, supersample = 1;
+        int                        peel_layers = 0;
         std::promise<ExportResult> result;
     };
 

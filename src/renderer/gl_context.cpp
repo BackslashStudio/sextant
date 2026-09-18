@@ -58,6 +58,11 @@ GLContext::GLContext(GLContextOptions opts)
     glfwWindowHint(GLFW_VISIBLE,   opts.visible   ? GLFW_TRUE : GLFW_FALSE);
     glfwWindowHint(GLFW_RESIZABLE, opts.resizable ? GLFW_TRUE : GLFW_FALSE);
     glfwWindowHint(GLFW_STENCIL_BITS, 8);  // required by NanoVG
+    // Set unconditionally rather than only when true: window hints are global
+    // and sticky until the next glfwDefaultWindowHints(), so a live window
+    // leaving this on would scale the next headless export's framebuffer.
+    glfwWindowHint(GLFW_SCALE_TO_MONITOR,
+                   opts.scale_to_monitor ? GLFW_TRUE : GLFW_FALSE);
 
     window_ = glfwCreateWindow(opts.width, opts.height,
                                opts.title.c_str(), nullptr, nullptr);

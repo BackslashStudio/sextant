@@ -27,25 +27,21 @@ ImGuiPanelContext::ImGuiPanelContext(GLContext& ctx, const FigureOptions& opts) 
     // ctx_ regardless of how this thread got here.
     ImGui::SetCurrentContext(ctx_);
 
-    switch (opts.theme) {
-        case PanelTheme::Light:   ImGui::StyleColorsLight();   break;
-        case PanelTheme::Classic: ImGui::StyleColorsClassic(); break;
-        case PanelTheme::Dark:
-        default:                  ImGui::StyleColorsDark();    break;
-    }
+    theme_ = opts.theme;
 
     // DPI scale for the panel chrome, queried directly from GLFW rather than
-    // io.DisplayFramebufferScale (used for the plot FBO in panel.cpp), because
-    // that field is not populated until the first ImGui_ImplGlfw_NewFrame(),
-    // which has not happened yet. A one-time, construction-time measurement:
-    // it does not react to the window later moving to a different-DPI monitor.
+    // io.DisplayFramebufferScale, because that field is not populated until
+    // the first ImGui_ImplGlfw_NewFrame() -- and on Windows it is (1,1) at any
+    // DPI regardless, since GLFW screen coordinates there *are* device pixels.
+    // glfwGetWindowContentScale is the one query that answers 1.5 on a 150%
+    // display on every platform. Seeded here and re-checked every frame by
+    // sync_dpi_scale(), since a window opens on whichever monitor the OS
+    // chooses -- in practice the primary, which need not be the one the user
+    // ends up looking at it on.
     float xscale = 1.0f, yscale = 1.0f;
     glfwGetWindowContentScale(ctx.window(), &xscale, &yscale);
-    const float dpi_scale = xscale;
-
-    // Must run after StyleColorsX() above: each of those resets ImGuiStyle
-    // to its own unscaled baseline, so scaling first would be undone.
-    ImGui::GetStyle().ScaleAllSizes(dpi_scale);
+    dpi_scale_ = (xscale > 0.0f) ? xscale : 1.0f;
+    apply_panel_style(theme_, dpi_scale_);
 
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
@@ -63,17 +59,21 @@ ImGuiPanelContext::ImGuiPanelContext(GLContext& ctx, const FigureOptions& opts) 
     // discovers. See drag_double()/drag_float() in panel_widgets.h.
     io.ConfigDragClickToInputText = true;
 
-    // Bake the font at its final physical pixel size up front (crisp at any
-    // DPI) rather than leaving it at a fixed size and relying on
-    // io.FontGlobalScale, which is a blurry post-rasterization multiplier.
-    // Roboto-Medium replaces ImGui's default embedded font (ProggyClean),
-    // which is hand-tuned for ~13px and looks blocky once scaled up.
+    // Added at its *base* size, not pre-multiplied by the DPI scale. Since
+    // imgui 1.92 the atlas is dynamic -- the backend advertises
+    // ImGuiBackendFlags_RendererHasTextures and glyphs are rasterized on
+    // demand at style.FontSizeBase * FontScaleMain * FontScaleDpi -- so
+    // apply_panel_style()'s FontScaleDpi gives a crisp rasterization at whatever
+    // scale the current monitor wants, and can change it again when the window
+    // moves. Baking 13 * dpi at construction was the pre-1.92 way to get
+    // sharp text, and it is exactly what made the scale unchangeable
+    // afterwards. Roboto-Medium replaces imgui's default embedded font
+    // (ProggyClean), which is hand-tuned for ~13px and looks blocky scaled up.
     ImFontConfig font_cfg;
-    const float size_pixels = 13.0f * dpi_scale;
     io.Fonts->AddFontFromMemoryCompressedTTF(
         panel_font::k_roboto_medium_compressed_data,
         static_cast<int>(panel_font::k_roboto_medium_compressed_size),
-        size_pixels, &font_cfg);
+        13.0f, &font_cfg);
 
     // Install_callbacks=true is safe here: GLContext registers only
     // glfwSetFramebufferSizeCallback (see gl_context.cpp), so ImGui's
@@ -84,6 +84,37 @@ ImGuiPanelContext::ImGuiPanelContext(GLContext& ctx, const FigureOptions& opts) 
 
 void ImGuiPanelContext::make_current() const {
     ImGui::SetCurrentContext(ctx_);
+}
+
+void apply_panel_style(PanelTheme theme, float scale) {
+    // A fresh ImGuiStyle is imgui's own unscaled baseline. Rebuilding from it
+    // is what makes this idempotent: ScaleAllSizes() multiplies the style it
+    // is called on, and StyleColorsX() writes only Colors[], so re-theming the
+    // live style and scaling it again would compound 1.5 into 2.25.
+    ImGuiStyle s;
+    switch (theme) {
+        case PanelTheme::Light:   ImGui::StyleColorsLight(&s);   break;
+        case PanelTheme::Classic: ImGui::StyleColorsClassic(&s); break;
+        case PanelTheme::Dark:
+        default:                  ImGui::StyleColorsDark(&s);    break;
+    }
+    s.ScaleAllSizes(scale);   // padding, rounding, scrollbars, borders
+    s.FontScaleDpi = scale;   // text, re-rasterized rather than stretched
+    ImGui::GetStyle() = s;
+}
+
+void ImGuiPanelContext::sync_dpi_scale(const GLContext& ctx) {
+    float xscale = 1.0f, yscale = 1.0f;
+    glfwGetWindowContentScale(ctx.window(), &xscale, &yscale);
+    if (xscale <= 0.0f) return;
+
+    // Exact compare on purpose. Content scale is a value the platform hands
+    // back unchanged (1.0, 1.25, 1.5, 2.0), not something computed here, so it
+    // is either the same float as last frame or a different monitor's.
+    if (xscale == dpi_scale_) return;
+
+    dpi_scale_ = xscale;
+    apply_panel_style(theme_, dpi_scale_);
 }
 
 ImGuiPanelContext::~ImGuiPanelContext() {

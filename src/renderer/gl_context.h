@@ -18,6 +18,18 @@ struct GLContextOptions {
     // what makes end-to-end frame cost measurable — with vsync on, the GPU
     // half of a frame hides inside the swap wait (see FrameStats).
     bool        vsync     = true;
+
+    // GLFW_SCALE_TO_MONITOR: multiply the requested size by the content scale
+    // of the monitor the window opens on, and let the OS resize the window
+    // when it is dragged to a monitor of a different DPI -- so `width`/`height`
+    // describe a *physical* size rather than a device-pixel count, and a figure
+    // is the same size on a 4K 150% display as on a 1080p 100% one.
+    //
+    // Off by default, and deliberately not keyed off `visible`: a headless
+    // savefig() context must render exactly the pixel count the caller asked
+    // for, and inheriting this would silently scale every exported file by the
+    // primary monitor's DPI. Only WindowThread turns it on.
+    bool        scale_to_monitor = false;
 };
 
 // Owns a single GLFWwindow, GLAD function pointers, and NanoVG context.

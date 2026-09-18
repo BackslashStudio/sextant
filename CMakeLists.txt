@@ -114,9 +114,12 @@ set(SEXTANT_SOURCES
     src/font_discovery.cpp
     src/text_metrics.cpp
     src/axes.cpp
+    src/axes3d.cpp
+    src/plane2d.cpp
     src/style.cpp
     src/colormaps.cpp
     src/contour.cpp
+    src/delaunay.cpp
     src/window_thread.cpp
     src/renderer/gl_context.cpp
     src/renderer/nvg_renderer.cpp
@@ -124,6 +127,15 @@ set(SEXTANT_SOURCES
     src/renderer/fbo_readback.cpp
     src/renderer/plot_fbo.cpp
     src/renderer/figure_layout.cpp
+    src/renderer/box3d.cpp
+    src/renderer/bar3d.cpp
+    src/renderer/plane2d.cpp
+    src/renderer/surface.cpp
+    src/renderer/surface_tri.cpp
+    src/renderer/scatter3d.cpp
+    src/renderer/line3d.cpp
+    src/renderer/error_bar3d.cpp
+    src/renderer/painter3d.cpp
     src/output/png_writer.cpp
     src/output/svg_writer.cpp
     src/widgets/imgui_context.cpp
@@ -356,7 +368,38 @@ if(SEXTANT_BUILD_TESTS)
     # (text measurement, computed layout rects) is not reachable through the
     # public headers, and the SHARED target exports only SEXTANT_API symbols.
     if(SEXTANT_BUILD_STATIC)
-        add_executable(sextant_layout_test tests/layout_test/main.cpp)
+        # One translation unit per subject (see tests/layout_test/layout_test.h);
+        # main.cpp only calls them. It was a single 10k-line file until the v1.0
+        # deferred-plan cleanup. Listed rather than globbed, like SEXTANT_SOURCES.
+        add_executable(sextant_layout_test
+            tests/layout_test/main.cpp
+            tests/layout_test/common.cpp
+            tests/layout_test/text_metrics.cpp
+            tests/layout_test/layout.cpp
+            tests/layout_test/frame_size.cpp
+            tests/layout_test/placement.cpp
+            tests/layout_test/stored_layout.cpp
+            tests/layout_test/grid_ratios.cpp
+            tests/layout_test/errorbar2d.cpp
+            tests/layout_test/line2d.cpp
+            tests/layout_test/axis_position.cpp
+            tests/layout_test/errorbar3d.cpp
+            tests/layout_test/contour.cpp
+            tests/layout_test/heatmap.cpp
+            tests/layout_test/cell_shading.cpp
+            tests/layout_test/axes3d.cpp
+            tests/layout_test/camera3d.cpp
+            tests/layout_test/bar3d.cpp
+            tests/layout_test/surface3d.cpp
+            tests/layout_test/scatter3d.cpp
+            tests/layout_test/line3d.cpp
+            tests/layout_test/surface_tri.cpp
+            tests/layout_test/plane2d.cpp
+            tests/layout_test/plane2d_render.cpp
+            tests/layout_test/plane2d_panel.cpp
+            tests/layout_test/scene3d.cpp
+            tests/layout_test/scene3d_svg.cpp
+            tests/layout_test/panel.cpp)
         target_link_libraries(sextant_layout_test PRIVATE sextant_static)
         target_include_directories(sextant_layout_test PRIVATE
             ${CMAKE_SOURCE_DIR}/src
@@ -369,6 +412,22 @@ if(SEXTANT_BUILD_TESTS)
             # see a differently-configured imgui.h than sextant_static did.
             ${IMGUI_SOURCE_DIR})
         target_compile_definitions(sextant_layout_test PRIVATE
+            IMGUI_USER_CONFIG="widgets/sextant_imconfig.h")
+
+        # v1.0 deferred plan: why the gallery's sixth cell exhausts the split
+        # bound. Internal for the same reason layout_test is — it calls
+        # paint_order() directly and reads the PaintPolys back, and neither is
+        # reachable through the public headers. Not a test: it asserts nothing
+        # and prints a table.
+        add_executable(sextant_split_probe tests/split_probe/main.cpp)
+        target_link_libraries(sextant_split_probe PRIVATE sextant_static)
+        target_include_directories(sextant_split_probe PRIVATE
+            ${CMAKE_SOURCE_DIR}/src
+            ${CMAKE_SOURCE_DIR}/third_party/glad/include
+            ${CMAKE_SOURCE_DIR}/third_party/nanovg
+            ${CMAKE_SOURCE_DIR}/third_party/stb
+            ${IMGUI_SOURCE_DIR})
+        target_compile_definitions(sextant_split_probe PRIVATE
             IMGUI_USER_CONFIG="widgets/sextant_imconfig.h")
     endif()
 endif()

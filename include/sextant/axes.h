@@ -32,6 +32,19 @@ public:
     Axes& bar(std::span<const double> x, std::span<const double> height,
               BarOptions opts = {});
 
+    // The same four, with error bars. See ErrorBar -- in particular, write
+    // `err` with designated initializers, since a bare `{}` is ambiguous.
+    Axes& line(std::span<const double> x, std::span<const double> y,
+               const ErrorBar& err, LineOptions opts = {});
+    Axes& line(std::span<const double> y, const ErrorBar& err, LineOptions opts = {});
+    Axes& scatter(std::span<const double> x, std::span<const double> y,
+                  const ErrorBar& err, ScatterOptions opts = {});
+    Axes& scatter_z(std::span<const double> x, std::span<const double> y,
+                    std::span<const double> z, const ErrorBar& err,
+                    ScatterZOptions opts = {});
+    Axes& bar(std::span<const double> x, std::span<const double> height,
+              const ErrorBar& err, BarOptions opts = {});
+
     // Bins `data` into a bar plot, so it takes both option structs.
     // BarOptions::width is a fraction of the *bin* width here; the default
     // argument raises it to 1.0 so bins touch, which means passing your own
@@ -40,8 +53,19 @@ public:
                BarOptions bar_opts = {.width = 1.0f},
                HistOptions hist_opts = {});
 
+    // `data` is row-major, rows x cols, drawn as an evenly-spaced mesh over
+    // xrange x yrange in data space. Both ranges are cell *edges* (see
+    // Range), so cell size is the span divided by the count in that
+    // direction; the mesh is uniform, there is no per-cell coordinate.
+    // Throws if either range is non-finite or degenerate.
     Axes& heatmap(std::span<const float> data, int rows, int cols,
-                  HeatmapOptions opts = {});
+                  Range xrange, Range yrange, HeatmapOptions opts = {});
+
+    // heatmap() over the extent the indices themselves give -- x across
+    // [0, cols], y across [0, rows] -- so cells are one unit square and a
+    // tick at 3 sits on the boundary between column 2 and column 3.
+    Axes& imshow(std::span<const float> data, int rows, int cols,
+                 HeatmapOptions opts = {});
 
     // ----------------------------------------------------------------
     // Decoration
@@ -75,6 +99,9 @@ private:
     struct Impl;
     std::unique_ptr<Impl> d;
     friend class Figure;
+    // A Plane2D *holds* an Axes::Impl rather than being an Axes -- see
+    // memory/spec_3d.md §6. That is the whole of what it needs from here.
+    friend class Plane2D;
     explicit Axes();
 };
 
