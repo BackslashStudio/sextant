@@ -2,6 +2,8 @@
 // layout_test.h.
 #include "layout_test.h"
 
+#include "glyph_boxes.h"
+
 namespace lt {
     // text_metrics.cpp must reproduce fontstash's advance arithmetic exactly: every
     // string is measured both ways and must agree to the last bit (a tolerance
@@ -39,6 +41,8 @@ namespace lt {
                       const char* label) {
         std::printf("[%s]\n", label);
 
+        const GlyphBoxes glyphs(path.empty() ? sextant::pick_default_font()->path : path);
+
         check(sextant::text_metrics_font_loaded(path),
               std::string(label) + ": real glyph metrics in use (not the fallback estimate)");
 
@@ -46,9 +50,11 @@ namespace lt {
         float worst_delta = 0.0f;
         std::string worst_case;
 
-        // Split by size (see the assertion below).
-        float worst_overhang_small = 0.0f, worst_overhang_large = 0.0f;
-        std::string worst_overhang_case;
+        // Split by size (see the assertion below). "Excess" is NanoVG's ink
+        // past the advance minus the font's own.
+        float worst_excess_small = 0.0f, worst_excess_large = 0.0f;
+        float worst_font_overhang = 0.0f;
+        std::string worst_excess_case;
 
         for (float size: sample_sizes()) {
             nvgFontFaceId(vg, nvg_font);
@@ -74,20 +80,24 @@ namespace lt {
                     }
                 }
 
-                // Track how far the ink runs past the advance: up to ~2 px from
-                // NanoVG's quad inset. Below ~8 px glyphs overlap, so the bound is
-                // only asserted at layout sizes.
+                // Track how far NanoVG's ink runs past the advance beyond the
+                // font's own overhang: up to ~3 px from its quad inset. Below
+                // ~8 px glyphs overlap, so the bound is only asserted at layout
+                // sizes.
                 if (size >= 8.0f) {
                     float bounds[4] = {0, 0, 0, 0};
                     nvgTextBounds(vg, 0.0f, 0.0f, s.c_str(), nullptr, bounds);
-                    const float overhang = (bounds[2] - bounds[0]) - own_adv;
-                    float& worst = (size >= 32.0f) ? worst_overhang_large : worst_overhang_small;
-                    if (overhang > worst) {
-                        worst = overhang;
+                    const float font_overhang = glyphs.ink_overhang(path, size, s);
+                    worst_font_overhang = std::max(worst_font_overhang, font_overhang);
+                    const float excess = (bounds[2] - bounds[0]) - own_adv - font_overhang;
+                    float& worst = (size >= 32.0f) ? worst_excess_large : worst_excess_small;
+                    if (excess > worst) {
+                        worst = excess;
                         char buf[256];
-                        std::snprintf(buf, sizeof(buf), "\"%s\" @ %.3g px", s.c_str(),
-                                      static_cast<double>(size));
-                        worst_overhang_case = buf;
+                        std::snprintf(buf, sizeof(buf), "\"%s\" @ %.3g px, font's own %.0f px",
+                                      s.c_str(), static_cast<double>(size),
+                                      static_cast<double>(font_overhang));
+                        worst_excess_case = buf;
                     }
                 }
             }
@@ -100,16 +110,20 @@ namespace lt {
               (worst_case.empty() ? "none" : worst_case) + ")");
         std::printf("  %d string x size combinations, %d mismatched\n", total, worst_count);
 
-        // The overhang is a constant ~3 px at both size ranges (padding, not glyph
-        // overhang, which would scale with size).
-        check(worst_overhang_small <= 3.0f && worst_overhang_large <= 3.0f,
-              std::string(label) + ": ink overhang past the advance — 8-30 px: " +
-              std::to_string(worst_overhang_small) + ", >=32 px: " +
-              std::to_string(worst_overhang_large) + " (worst on " +
-              (worst_overhang_case.empty() ? "none" : worst_overhang_case) + ")");
-        std::printf("  ink overhang past advance: %.3f px at 8-30, %.3f px at >=32\n",
-                    static_cast<double>(worst_overhang_small),
-                    static_cast<double>(worst_overhang_large));
+        // What NanoVG adds is a constant ~3 px at both size ranges (padding; a
+        // measuring error would scale with size). The font's own overhang is
+        // taken out first: it is real ink, and some faces have plenty.
+        check(glyphs.ok(), std::string(label) + ": glyph boxes readable for the overhang check");
+        check(worst_excess_small <= 3.0f && worst_excess_large <= 3.0f,
+              std::string(label) + ": ink past the advance beyond the font's own — 8-30 px: " +
+              std::to_string(worst_excess_small) + ", >=32 px: " +
+              std::to_string(worst_excess_large) + " (worst on " +
+              (worst_excess_case.empty() ? "none" : worst_excess_case) + ")");
+        std::printf("  ink past advance beyond the font's own: %.3f px at 8-30, %.3f px at >=32"
+                    " (font's own up to %.0f px)\n",
+                    static_cast<double>(worst_excess_small),
+                    static_cast<double>(worst_excess_large),
+                    static_cast<double>(worst_font_overhang));
 
         // font_vmetrics() must reproduce nvgTextMetrics().
         for (float size: sample_sizes()) {

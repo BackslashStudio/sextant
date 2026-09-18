@@ -45,6 +45,11 @@ jobs:
       run:
         shell: bash
 
+    # Mesa's software rasteriser. On Windows it would otherwise pick its D3D12
+    # driver over WARP, which breaks depth peeling; Linux uses it already.
+    env:
+      GALLIUM_DRIVER: llvmpipe
+
     steps:
       - uses: actions/checkout@v7
 
@@ -142,6 +147,9 @@ jobs:
 
       # --- Tests ------------------------------------------------------------
 
+      # Logs need a login to read, so each test's output is also kept in the
+      # artifact and its failures copied to the run summary.
+
       # stdin from /dev/null: under xvfb basic_smoke sees DISPLAY and calls
       # show(true), whose ENTER prompt must not wait.
       - name: basic_smoke
@@ -150,7 +158,17 @@ jobs:
           cd out
           wrap=()
           if [ "$RUNNER_OS" = Linux ]; then wrap=(xvfb-run -a -s "-screen 0 1920x1080x24"); fi
-          "${wrap[@]}" ../build/sextant_smoke < /dev/null
+          status=0
+          "${wrap[@]}" ../build/sextant_smoke < /dev/null 2>&1 | tee basic_smoke.txt || status=$?
+          if [ $status -ne 0 ]; then
+            {
+              echo "### basic_smoke failed (exit $status) — ${{ matrix.name }}"
+              echo '```'
+              tail -n 40 basic_smoke.txt
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit $status
 
       - name: layout_test
         timeout-minutes: 20
@@ -158,7 +176,19 @@ jobs:
           cd out
           wrap=()
           if [ "$RUNNER_OS" = Linux ]; then wrap=(xvfb-run -a -s "-screen 0 1920x1080x24"); fi
-          "${wrap[@]}" ../build/sextant_layout_test
+          status=0
+          "${wrap[@]}" ../build/sextant_layout_test 2>&1 | tee layout_test.txt || status=$?
+          if [ $status -ne 0 ]; then
+            {
+              echo "### layout_test failed (exit $status) — ${{ matrix.name }}"
+              echo '```'
+              # Each FAIL under the [section] it belongs to, then the tally.
+              awk '/^\[/ { sec = $0 } /FAIL:/ { if (sec != last) { print sec; last = sec } print }' layout_test.txt
+              tail -n 1 layout_test.txt
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit $status
 
       - name: Upload outputs
         if: always()

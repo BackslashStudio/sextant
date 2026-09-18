@@ -2,13 +2,13 @@
 // no sextant. Asks for the context sextant needs (4.1 core, forward-compatible,
 // hidden window, main thread), prints the driver strings, and checks that a
 // clear into an FBO reads back. If 4.1 core is refused, reports the error and
-// the renderer a default context gets instead, then exits 1.
+// the renderer a default context gets instead, then exits 1. On macOS it also
+// tries a windowless CGL context (cgl_probe.cpp), which GLFW cannot create.
 #include <glad/glad.h>
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
 #include <cstdio>
-#include <cstdlib>
 
 namespace {
     void print_glfw_error(int code, const char* desc) {
@@ -91,55 +91,70 @@ namespace {
         }
         return glfwCreateWindow(64, 64, "sextant_gl_probe", nullptr, nullptr);
     }
+
+    // The GLFW window path sextant uses today. True if 4.1 core was granted
+    // and renders.
+    bool glfw_probe() {
+        std::printf("GLFW:        %s\n", glfwGetVersionString());
+
+        // Same platform choice as the library (src/renderer/gl_context.cpp).
+#if defined(__linux__)
+        glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
+#endif
+        if (!glfwInit()) {
+            std::printf("RESULT: glfwInit failed\n");
+            return false;
+        }
+        std::printf("platform:    %s\n", platform_name());
+
+        std::printf("\n-- GLFW, hidden window: 4.1 core, forward-compatible --\n");
+        GLFWwindow* window = make_window(true);
+        bool granted = window != nullptr;
+        if (!granted) {
+            std::printf("4.1 core context refused; falling back to a default context\n");
+            window = make_window(false);
+            if (!window) {
+                std::printf("\nRESULT: no OpenGL context at all\n");
+                glfwTerminate();
+                return false;
+            }
+        }
+
+        glfwMakeContextCurrent(window);
+        if (!gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress))) {
+            std::printf("\nRESULT: context created but GLAD could not load it\n");
+            glfwDestroyWindow(window);
+            glfwTerminate();
+            return false;
+        }
+        std::printf("GLAD:        %d.%d\n", GLVersion.major, GLVersion.minor);
+        print_context();
+
+        granted = granted && (GLVersion.major > 4 || (GLVersion.major == 4 && GLVersion.minor >= 1));
+        const bool renders = GLVersion.major >= 3 && fbo_readback_ok();
+
+        glfwMakeContextCurrent(nullptr);
+        glfwDestroyWindow(window);
+        glfwTerminate();
+
+        std::printf("\nRESULT: 4.1 core %s, rendering %s\n",
+                    granted ? "granted" : "NOT granted", renders ? "ok" : "FAILED");
+        return granted && renders;
+    }
 } // namespace
 
+#if defined(__APPLE__)
+bool cgl_probe(); // cgl_probe.cpp
+#endif
+
+// The exit code reflects the GLFW path only: that is what sextant needs today.
 int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     glfwSetErrorCallback(print_glfw_error);
     std::printf("=== sextant_gl_probe ===\n");
-    std::printf("GLFW:        %s\n", glfwGetVersionString());
-
-    // Same platform choice as the library (src/renderer/gl_context.cpp).
-#if defined(__linux__)
-    glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
+    const bool ok = glfw_probe();
+#if defined(__APPLE__)
+    cgl_probe();
 #endif
-    if (!glfwInit()) {
-        std::printf("RESULT: glfwInit failed\n");
-        return 1;
-    }
-    std::printf("platform:    %s\n", platform_name());
-
-    std::printf("\n-- requested: 4.1 core, forward-compatible --\n");
-    GLFWwindow* window = make_window(true);
-    bool granted = window != nullptr;
-    if (!granted) {
-        std::printf("4.1 core context refused; falling back to a default context\n");
-        window = make_window(false);
-        if (!window) {
-            std::printf("RESULT: no OpenGL context at all\n");
-            glfwTerminate();
-            return 1;
-        }
-    }
-
-    glfwMakeContextCurrent(window);
-    if (!gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress))) {
-        std::printf("RESULT: context created but GLAD could not load it\n");
-        glfwDestroyWindow(window);
-        glfwTerminate();
-        return 1;
-    }
-    std::printf("GLAD:        %d.%d\n", GLVersion.major, GLVersion.minor);
-    print_context();
-
-    granted = granted && (GLVersion.major > 4 || (GLVersion.major == 4 && GLVersion.minor >= 1));
-    const bool renders = GLVersion.major >= 3 && fbo_readback_ok();
-
-    glfwMakeContextCurrent(nullptr);
-    glfwDestroyWindow(window);
-    glfwTerminate();
-
-    std::printf("\nRESULT: 4.1 core %s, rendering %s\n",
-                granted ? "granted" : "NOT granted", renders ? "ok" : "FAILED");
-    return granted && renders ? 0 : 1;
+    return ok ? 0 : 1;
 }

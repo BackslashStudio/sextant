@@ -331,6 +331,11 @@ if(SEXTANT_BUILD_TESTS)
     add_executable(sextant_gl_probe tests/gl_probe/main.cpp ${GLAD_SOURCE})
     target_include_directories(sextant_gl_probe PRIVATE ${CMAKE_SOURCE_DIR}/third_party/glad/include)
     target_link_libraries(sextant_gl_probe PRIVATE glfw)
+    if(APPLE)
+        # Windowless CGL probe: reaches renderers GLFW's NSGL path cannot.
+        target_sources(sextant_gl_probe PRIVATE tests/gl_probe/cgl_probe.cpp)
+        target_link_libraries(sextant_gl_probe PRIVATE OpenGL::GL)
+    endif()
 
     # Internal layout checks: linked against sextant_static with src/ on the
     # include path, since what it checks isn't reachable through public headers.
@@ -341,6 +346,7 @@ if(SEXTANT_BUILD_TESTS)
             tests/layout_test/main.cpp
             tests/layout_test/common.cpp
             tests/layout_test/text_metrics.cpp
+            tests/layout_test/glyph_boxes.cpp
             tests/layout_test/layout.cpp
             tests/layout_test/frame_size.cpp
             tests/layout_test/placement.cpp
