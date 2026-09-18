@@ -10,6 +10,9 @@ if(CMAKE_HOST_WIN32 AND NOT DEFINED VCPKG_TARGET_TRIPLET)
 endif()
 
 project(sextant VERSION 0.3.0 LANGUAGES CXX C)
+if(APPLE)
+    enable_language(OBJCXX)   # tests/window_probe's NSPasteboard access
+endif()
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
@@ -351,6 +354,36 @@ if(SEXTANT_BUILD_TESTS)
         # Windowless CGL probe: the context headless export uses, without GLFW.
         target_sources(sextant_gl_probe PRIVATE tests/gl_probe/cgl_probe.cpp)
         target_link_libraries(sextant_gl_probe PRIVATE OpenGL::GL)
+    endif()
+
+    # Step 21.1's throwaway prototype of the macOS threading design: windows
+    # created and pumped on the main thread, each rendered on its own. Raw GLFW
+    # + GLAD + ImGui (its own copy, with the library's thread-local context
+    # config), not linked against sextant. imgui_impl_glfw.cpp is compiled for
+    # its key table only.
+    find_package(Threads REQUIRED)
+    add_executable(sextant_window_probe
+        tests/window_probe/main.cpp
+        ${GLAD_SOURCE}
+        ${IMGUI_SOURCE_DIR}/imgui.cpp
+        ${IMGUI_SOURCE_DIR}/imgui_draw.cpp
+        ${IMGUI_SOURCE_DIR}/imgui_tables.cpp
+        ${IMGUI_SOURCE_DIR}/imgui_widgets.cpp
+        ${IMGUI_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
+        ${IMGUI_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp)
+    target_include_directories(sextant_window_probe PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/third_party/glad/include
+        ${IMGUI_SOURCE_DIR})
+    target_compile_definitions(sextant_window_probe PRIVATE
+        IMGUI_IMPL_OPENGL_LOADER_CUSTOM
+        IMGUI_USER_CONFIG="widgets/sextant_imconfig.h")
+    target_link_libraries(sextant_window_probe PRIVATE glfw Threads::Threads)
+    if(APPLE)
+        target_sources(sextant_window_probe PRIVATE tests/window_probe/platform_macos.mm)
+        target_link_libraries(sextant_window_probe PRIVATE OpenGL::GL "-framework AppKit")
+    else()
+        target_sources(sextant_window_probe PRIVATE tests/window_probe/platform_other.cpp)
     endif()
 
     # Internal layout checks: linked against sextant_static with src/ on the

@@ -144,6 +144,7 @@ jobs:
           exit $status
 
       - name: Build
+        id: build
         run: cmake --build build
 
       # --- Tests ------------------------------------------------------------
@@ -171,7 +172,32 @@ jobs:
           fi
           exit $status
 
+      # Step 21.1's prototype of the macOS threading design; runs whatever the
+      # steps before it did. Exit 1 is a failed check, 2 the probe's own 120 s
+      # watchdog -- a deadlock. It overwrites the clipboard; on macOS it also
+      # saves a screenshot, window_probe.png.
+      - name: window_probe
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        timeout-minutes: 5
+        run: |
+          cd out
+          wrap=()
+          if [ "$RUNNER_OS" = Linux ]; then wrap=(xvfb-run -a -s "-screen 0 1920x1080x24"); fi
+          status=0
+          "${wrap[@]}" ../build/sextant_window_probe 2>&1 | tee window_probe.txt || status=$?
+          if [ $status -ne 0 ]; then
+            {
+              echo "### window_probe failed (exit $status) — ${{ matrix.name }}"
+              echo '```'
+              grep -E 'FAIL|TIMEOUT|GLFW error' window_probe.txt
+              tail -n 1 window_probe.txt
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit $status
+
       - name: layout_test
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         timeout-minutes: 20
         run: |
           cd out
