@@ -268,7 +268,7 @@ namespace lt {
         // --- The index extent (imshow()) vs an arbitrary one.
         render(snapshot_of(img, {0.0, C}, {0.0, R}), "heat_index");
         render(snapshot_of(img, {100.0, 400.0}, {-2.0, 2.0}), "heat_extent");
-        check(same_file("heat_index.png", "heat_extent.png"),
+        check(same_picture("heat_index.png", "heat_extent.png"),
               "an extent renders the index-space pixels exactly (PNG)");
         check(same_file("heat_index.svg", "heat_extent.svg"),
               "an extent renders the index-space pixels exactly (SVG)");
@@ -279,7 +279,11 @@ namespace lt {
         auto mirrored = [&](const std::string& a, const std::string& b,
                             const std::string& what) {
             const PngDiff d = png_diff(a, b);
-            check(d.px == 0 || d.residual == 0, what + " (PNG)");
+            // Where the renderer does not repeat itself, stray pixels off the
+            // seam are allowed up to same_picture()'s bound.
+            const bool noise_only = !renderer_repeats_exactly() && d.residual >= 0 &&
+                                    d.residual * 1000 <= W * H;
+            check(d.px == 0 || d.residual == 0 || noise_only, what + " (PNG)");
             if (d.px)
                 std::printf("    %s: %d px differ, %d off the seam, worst delta %d\n",
                             what.c_str(), d.px, d.residual, d.worst);

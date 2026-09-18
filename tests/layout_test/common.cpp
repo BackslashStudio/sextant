@@ -1,6 +1,8 @@
 // Builders shared by more than one subject file (see layout_test.h).
 #include "layout_test.h"
 
+#include <glad/glad.h>   // GL_RENDERER
+
 namespace lt {
     int g_checks = 0;
     int g_failures = 0;
@@ -91,6 +93,61 @@ namespace lt {
     }
 
     bool near_px(float a, float b, float tol) { return std::fabs(a - b) <= tol; }
+
+    const std::string& gl_renderer() {
+        static const std::string name = [] {
+            sextant::GLContext ctx({
+                .width = 16, .height = 16,
+                .title = "layout_test", .visible = false
+            });
+            const auto* r = glGetString(GL_RENDERER);
+            return std::string(r ? reinterpret_cast<const char *>(r) : "");
+        }();
+        return name;
+    }
+
+    bool renderer_repeats_exactly() { return gl_renderer() != "Apple Software Renderer"; }
+
+    PixelDiff png_pixel_diff(const std::string& a_png, const std::string& b_png) {
+        int aw = 0, ah = 0, bw = 0, bh = 0, comp = 0;
+        unsigned char* pa = stbi_load(a_png.c_str(), &aw, &ah, &comp, 4);
+        unsigned char* pb = stbi_load(b_png.c_str(), &bw, &bh, &comp, 4);
+        PixelDiff d;
+        if (pa && pb && aw == bw && ah == bh) {
+            d.px = 0;
+            d.w = aw;
+            d.h = ah;
+            for (std::size_t i = 0; i < static_cast<std::size_t>(aw) * ah; ++i) {
+                int m = 0;
+                for (std::size_t k = 0; k < 4; ++k)
+                    m = std::max(m, std::abs(int(pa[4 * i + k]) - int(pb[4 * i + k])));
+                if (m) {
+                    ++d.px;
+                    d.worst = std::max(d.worst, m);
+                }
+            }
+        }
+        if (pa) stbi_image_free(pa);
+        if (pb) stbi_image_free(pb);
+        return d;
+    }
+
+    bool same_picture(const std::string& a_png, const std::string& b_png) {
+        auto slurp = [](const std::string& p) {
+            std::ifstream f(p, std::ios::binary);
+            return std::string(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+        };
+        const std::string a = slurp(a_png);
+        if (!a.empty() && a == slurp(b_png)) return true;
+        if (renderer_repeats_exactly()) return false;
+        const PixelDiff d = png_pixel_diff(a_png, b_png);
+        if (d.px < 0) return false;
+        if (d.px) {
+            std::printf("    %s vs %s: %d px differ, worst delta %d (%s)\n", a_png.c_str(),
+                        b_png.c_str(), d.px, d.worst, gl_renderer().c_str());
+        }
+        return d.px * 1000 <= d.w * d.h && d.worst <= 8;
+    }
 
     // A plane carrying one heatmap, built directly.
     sextant::PlaneSnapshot make_plane(sextant::PlaneOrientation o, double offset,

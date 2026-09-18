@@ -470,7 +470,8 @@ namespace lt {
         };
         const std::string a = slurp("cam_a.png"), b = slurp("cam_b.png"), c = slurp("cam_c.png");
         check(!a.empty() && a != b, "3D edits: set_view() reaches the rendered pixels");
-        check(a == c, "3D edits: and returning to a camera returns to its picture exactly");
+        check(same_picture("cam_a.png", "cam_c.png"),
+              "3D edits: and returning to a camera returns to its picture exactly");
         check(ax->camera().azimuth == -60.0 && ax->camera().elevation == 30.0,
               "3D edits: camera() reads back what was set");
     }

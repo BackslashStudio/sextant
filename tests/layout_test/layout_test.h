@@ -96,6 +96,30 @@ namespace lt {
 
     bool near_px(float a, float b, float tol = 1e-3f);
 
+    // ---------------------------------------------------------------------------
+    // Comparing rendered pictures.
+    // ---------------------------------------------------------------------------
+
+    // GL_RENDERER of a hidden context, read once.
+    const std::string& gl_renderer();
+
+    // False on Apple's software renderer (the macOS CI runner), which does not
+    // repeat an export exactly (v1.0 step 21.1): a simple scene had 2 pixels off
+    // by one level between identical exports, a depth-peeled one hundreds.
+    bool renderer_repeats_exactly();
+
+    // Pixels differing between two PNG files and the largest channel delta
+    // among them; px is -1 if either is unreadable or the sizes differ.
+    struct PixelDiff {
+        int px = -1, worst = 0, w = 0, h = 0;
+    };
+    PixelDiff png_pixel_diff(const std::string& a_png, const std::string& b_png);
+
+    // Two PNG files show the same picture: byte-identical, or, where the
+    // renderer does not repeat itself, at most 0.1% of pixels off by at most 8
+    // levels -- a real change moves far more, or by far more.
+    bool same_picture(const std::string& a_png, const std::string& b_png);
+
     // A plane carrying one heatmap, built directly.
     sextant::PlaneSnapshot make_plane(sextant::PlaneOrientation o, double offset,
                                       std::vector<float> data, int rows, int cols,
