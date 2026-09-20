@@ -102,8 +102,11 @@ namespace {
         a->show(false);
         check(a->is_open(), "show() from the main thread opens a window");
 
-        pump_for(std::chrono::milliseconds(400));
-        check(a->frame_stats().frames > 0, "and its own thread is rendering frames");
+        // Waited for, not timed: a software renderer's first frame takes as long
+        // as it takes (shader compiles, the font atlas), and the claim here is
+        // that the frame arrives at all.
+        check(pump_until([&a] { return a->frame_stats().frames > 0; }, 60.0),
+              "and its own thread is rendering frames");
 
         // --- a window from a worker thread ------------------------------------
         // The case the whole broker exists for: the caller is not the thread
@@ -181,8 +184,9 @@ namespace {
         b->close();
         check(!b->is_open() && a->is_open(),
               "closing one window leaves the other one open");
-        pump_for(std::chrono::milliseconds(200));
-        check(a->frame_stats().frames > 0, "and the survivor is still rendering");
+        const unsigned long long before = a->frame_stats().frames;
+        check(pump_until([&a, before] { return a->frame_stats().frames > before; }, 60.0),
+              "and the survivor is still rendering");
 
         // The close comes from a thread that is not the pump, so its window is
         // handed back and destroyed at whatever poll comes next -- which is the

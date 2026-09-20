@@ -51,16 +51,24 @@ namespace lt {
         destroy_window(nullptr);
         check(live_window_count() == base, "broker: a window handed back twice is dropped");
 
-        // A worker thread, which is every thread that is not the main one.
-        std::thread([base] {
-            BrokeredWindow other = create_window({
+        // A window asked for by a thread that is not this one. Here that thread
+        // may make it itself; where windows belong to the main thread the
+        // request crosses over, and joining without pumping would be waiting on
+        // a window only this thread can make.
+        GLFWwindow* from_worker = nullptr;
+        std::atomic<bool> worker_done{false};
+        std::thread worker([&from_worker, &worker_done] {
+            from_worker = create_window({
                 .width = 120, .height = 90, .title = "broker worker", .visible = false
-            });
-            check(other.window != nullptr && live_window_count() == base + 1,
-                  "broker: a thread that may own windows makes one inline");
-            destroy_window(other.window);
-        }).join();
-        check(live_window_count() == base, "broker: and unmakes it the same way");
+            }).window;
+            worker_done.store(true);
+        });
+        if (pump_runs_here()) pump_until([&worker_done] { return worker_done.load(); }, 30.0);
+        worker.join();
+        check(from_worker != nullptr && live_window_count() == base + 1,
+              "broker: another thread's window is made -- inline, or by the pump for it");
+        destroy_window(from_worker);
+        check(live_window_count() == base, "broker: and unmade again");
 
         // What GLContext does with all of the above.
         {
@@ -80,22 +88,36 @@ namespace lt {
     void test_window_broker_pump() {
         std::printf("\n[window broker: the pump]\n");
 
-        check(!platform::windows_on_main_thread,
-              "broker: windows are not tied to the main thread on this platform");
-        check(platform::this_thread_owns_windows(),
-              "broker: so this thread may own one");
-        check(!pump_runs_here(), "broker: and nobody has to pump for it");
+        // Two platforms, two answers. Each check says which it expects rather
+        // than assuming the one it happens to be compiled on -- these are the
+        // `if`s the whole macOS path hangs off, so a test that only knows this
+        // side of them proves half of nothing.
+        const bool on_main = platform::windows_on_main_thread;
 
-        // Figure::poll_events() is this, and it is a no-op here -- from any
-        // thread, so a portable loop stays portable.
+        check(pump_runs_here() == on_main,
+              "broker: this thread is the pump exactly where windows belong to the main one");
+        check(platform::this_thread_owns_windows(),
+              "broker: and it may own a window either way, being the main one");
+
+        // Figure::poll_events() is pump_windows(0): nothing at all here, from
+        // any thread, so a portable loop stays portable; the pump there, which
+        // no other thread may call.
         Figure::poll_events();
         pump_windows(0.05);
-        std::thread([] {
-            check(platform::this_thread_owns_windows(),
-                  "broker: a worker thread may own windows here too");
-            Figure::poll_events();
-            check(true, "broker: and pumping from it is the same no-op");
+        bool worker_owns = false, polled = false, refused = false;
+        std::thread([&worker_owns, &polled, &refused] {
+            worker_owns = platform::this_thread_owns_windows();
+            try {
+                Figure::poll_events();
+                polled = true;
+            } catch (const std::logic_error&) {
+                refused = true;
+            }
         }).join();
+        check(worker_owns == !on_main,
+              "broker: a worker thread may own a window here, and may not there");
+        check((on_main ? refused : polled),
+              "broker: and pumping from it is the same no-op here, a refusal there");
 
         // Nothing is queued for a thread that serves its own requests inline.
         serve_broker_requests();
@@ -112,15 +134,18 @@ namespace lt {
         check(std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() >= 0.04,
               "broker: having waited for it");
 
-        // The render thread's context lock, which is nothing at all here.
+        // The render thread's context lock. Nothing at all here; there, this
+        // thread has no context current, so it has none to take either -- what
+        // is checked is that taking and dropping it is safe from a thread in
+        // that state, which is every thread but a live render loop.
         {
-            platform::GLContextLock a;
-            platform::GLContextLock b;
-            check(true, "broker: the context lock is a no-op where no resize can race a frame");
+            platform::GLContextLock lock;
+            check(true, "broker: the context lock is safe to take with no context current");
         }
 
         std::string text;
-        check(!platform::read_clipboard(text),
-              "broker: and the clipboard is GLFW's to read, not the platform's");
+        check(platform::read_clipboard(text) == on_main,
+              "broker: the clipboard is the platform's to read where it has a thread-safe one, "
+              "and GLFW's here");
     }
 } // namespace lt
