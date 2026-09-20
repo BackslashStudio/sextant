@@ -14,6 +14,18 @@
 #include <stdexcept>
 #include <iostream>
 
+// Sleep for `total` while the process's windows stay pumped. poll_events() is a
+// no-op on Windows and Linux, where each window thread polls its own events; a
+// wait written this way is already right where the events belong to the main
+// thread. Every wait below a live window uses it rather than a plain sleep.
+static void pump_for(std::chrono::milliseconds total) {
+    const auto deadline = std::chrono::steady_clock::now() + total;
+    while (std::chrono::steady_clock::now() < deadline) {
+        sextant::Figure::poll_events();
+        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+    }
+}
+
 // 1. Plot gallery — every basic plot type in one subplot grid.
 static void test_axes_gallery() {
     constexpr int N = 200;
@@ -1072,12 +1084,43 @@ static void test_show_nonblocking() {
     printf("[main] show(false) returned  is_open=%s\n", fig->is_open() ? "true" : "false");
 
     for (int i = 1; i <= 5; ++i) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(600));
+        pump_for(std::chrono::milliseconds(600));
         printf("[main] tick %d  is_open=%s\n", i, fig->is_open() ? "true" : "false");
     }
 
     fig->close();
     printf("[main] close() called  is_open=%s\n", fig->is_open() ? "true" : "false");
+}
+
+// 3b. wait_closed() and run() — waiting on the windows themselves, with no
+// console in it. Close the windows with their own buttons.
+static void test_wait_and_run() {
+    auto make = [](const char* title, double phase) {
+        constexpr int N = 100;
+        std::vector<double> x(N), y(N);
+        for (int i = 0; i < N; ++i) {
+            x[i] = i * 2.0 * M_PI / N;
+            y[i] = std::sin(x[i] + phase);
+        }
+        auto fig = sextant::Figure::create({.width = 600, .height = 400, .title = title});
+        fig->axes()->line(x, y, {.color = sextant::Color::Blue, .linewidth = 2.0f})
+                .set_title(title).grid();
+        return fig;
+    };
+
+    auto fig = make("wait_closed", 0.0);
+    fig->show(false);
+    printf("[main] close the window; wait_closed(2.0) reports every 2 s until you do\n");
+    while (!fig->wait_closed(2.0)) printf("[main] still open\n");
+    printf("[main] wait_closed() returned  is_open=%s\n", fig->is_open() ? "true" : "false");
+
+    auto a = make("run A", 0.6), b = make("run B", 1.2);
+    a->show(false);
+    b->show(false);
+    printf("[main] two windows open; run() returns when the last one closes\n");
+    sextant::Figure::run();
+    printf("[main] run() returned  A open=%s  B open=%s\n",
+           a->is_open() ? "true" : "false", b->is_open() ? "true" : "false");
 }
 
 // 4. refresh() before show() — must throw std::logic_error
@@ -1111,7 +1154,7 @@ static void test_live_refresh() {
     fig->show(false);
 
     for (int i = 0; i < 20; ++i) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        pump_for(std::chrono::milliseconds(50));
         ax->cla();
         std::vector<double> y(N);
         for (int j = 0; j < N; ++j) y[j] = std::sin(x[j] + i * 0.1);
@@ -1193,15 +1236,15 @@ static void test_frame_resize() {
     printf("[main] a 400x300 plot frame needs a %dx%d figure\n", a.width, a.height);
 
     fig->show(false);
-    std::this_thread::sleep_for(std::chrono::seconds(3));
+    pump_for(std::chrono::seconds(3));
 
     printf("[main] resizing so the plot frame is 400x300\n");
     fig->resize_to_frame(400, 300);
-    std::this_thread::sleep_for(std::chrono::seconds(3));
+    pump_for(std::chrono::seconds(3));
 
     printf("[main] resizing so the plot frame is 700x260\n");
     fig->resize_to_frame(700, 260);
-    std::this_thread::sleep_for(std::chrono::seconds(3));
+    pump_for(std::chrono::seconds(3));
 
     printf("[main] press ENTER to close\n");
     std::cin.get();
@@ -1808,6 +1851,7 @@ int main() {
     // test_savefig();
     // test_translucent3d();
     // test_show_nonblocking();
+    test_wait_and_run();
     // test_refresh_before_show();
     // test_live_refresh();
     // test_grid_toggle();

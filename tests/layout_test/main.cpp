@@ -193,6 +193,10 @@ int main() {
     test_cell_shading_cache();
     test_data_panel_shading();
 
+    // window_wait.cpp -- last, because it opens real windows
+    test_wait_closed();
+    test_run_until_closed();
+
     if (std::getenv("SEXTANT_POISON_GL")) {
         const PoisonCounts n = gl_poison_counts();
         std::printf("\npoisoned: %d textures, %d renderbuffers, %d buffers\n",

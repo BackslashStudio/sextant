@@ -130,12 +130,28 @@ namespace sextant {
 
         // Display. The window always runs on its own background thread.
         // pause: block the caller until ENTER is pressed on the console. The window
-        // closes when this Figure is destroyed or close() is called.
+        // closes when this Figure is destroyed or close() is called. Use
+        // wait_closed() to wait for the window itself, with no console in it.
         void show(bool pause = true);
 
         void close();
 
         bool is_open() const;
+
+        // Block until this figure's window has closed, or until timeout_s seconds
+        // have passed; a negative timeout waits forever. Returns true once closed
+        // (at once if the figure was never shown), false if the timeout ran out
+        // first. Callable from any thread, and from several at once.
+        bool wait_closed(double timeout_s = -1);
+
+        // Pump this process's window events once and return. A no-op on Windows
+        // and Linux, where every window pumps its own events on its own thread;
+        // call it in a loop that keeps a window up, so the loop stays portable.
+        static void poll_events();
+
+        // Block until every open figure in this process has closed. Returns at
+        // once when none is open.
+        static void run();
 
         // Publish the current Axes state to the render thread. Thread-safe. Throws
         // std::logic_error before show() or after the window closed.

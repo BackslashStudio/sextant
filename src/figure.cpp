@@ -2,6 +2,7 @@
 #include "axes_impl.h"
 #include "axes3d_impl.h"
 #include "window_thread.h"
+#include "window_registry.h"
 #include "snapshot_box.h"
 #include "edit_box.h"
 #include "figure_edits.h"
@@ -76,9 +77,20 @@ struct Figure::Impl {
     std::vector<Slot>             slots;
     std::unique_ptr<WindowThread> window_thread;
     std::atomic<bool>             open{false};
+
+    // Paired with the registry's count, once per show(): whichever of the
+    // window thread's close callback and close() gets here first does it.
+    std::atomic<bool>             registered{false};
     SnapshotBox                   snapshot_box;
     FigureEditBox                 edit_box;
     PanelState                    panel_state;
+
+    // Retire this figure's registration, from the window thread or the caller,
+    // whichever closes it first.
+    void mark_closed() {
+        open.store(false);
+        if (registered.exchange(false)) unregister_open_window();
+    }
 
     std::string     suptitle_text;
     SuptitleOptions suptitle_opts;
@@ -493,6 +505,11 @@ std::shared_ptr<Axes3D> Figure::add_subplot3d(SubplotSpan span) {
 // show
 // -------------------------------------------------------------------------
 void Figure::show(bool pause) {
+    // A second show() replaces the window. Tear the first one down here, so its
+    // close callback cannot land after the new window has opened and report the
+    // figure closed.
+    close();
+
     d->ensure_any_axes();
 
     // Publish the initial snapshot before the render loop starts.
@@ -506,12 +523,19 @@ void Figure::show(bool pause) {
         render_and_composite(ctx, nvg, data, plot_fbo, *snap, d->opts, d->edit_box, d->panel_state);
     };
 
-    d->open.store(true);
-    d->window_thread = std::make_unique<WindowThread>(
+    auto wt = std::make_unique<WindowThread>(
         d->opts,
         std::move(render_fn),
-        [this]{ d->open.store(false); }
+        [this]{ d->mark_closed(); }
     );
+
+    // Registered before the thread runs, so the close callback always has a
+    // registration to take back.
+    d->open.store(true);
+    d->registered.store(true);
+    register_open_window();
+
+    d->window_thread = std::move(wt);
     d->window_thread->start();  // blocks until window visible, then returns
 
     if (pause) {
@@ -525,14 +549,28 @@ void Figure::show(bool pause) {
 // -------------------------------------------------------------------------
 void Figure::close() {
     if (d->window_thread) {
-        d->window_thread->stop();
+        d->window_thread->stop();   // joins; the close callback has run by now
         d->window_thread.reset();
     }
-    d->open.store(false);
+    d->mark_closed();
 }
 
 bool Figure::is_open() const {
     return d->open.load();
+}
+
+bool Figure::wait_closed(double timeout_s) {
+    return wait_window_closed(d->open, timeout_s);
+}
+
+void Figure::poll_events() {
+    // Nothing to pump here: on Windows and Linux each window thread polls its
+    // own events inside its render loop. It exists so a caller's loop is
+    // already correct on a platform whose events belong to the main thread.
+}
+
+void Figure::run() {
+    wait_all_windows_closed(-1.0);
 }
 
 FrameStats Figure::frame_stats() const {

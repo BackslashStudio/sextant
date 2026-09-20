@@ -139,6 +139,7 @@ set(SEXTANT_SOURCES
     src/contour.cpp
     src/delaunay.cpp
     src/window_thread.cpp
+    src/window_registry.cpp
     src/renderer/gl_context.cpp
     src/renderer/nvg_renderer.cpp
     src/renderer/data_renderer.cpp
@@ -425,7 +426,8 @@ if(SEXTANT_BUILD_TESTS)
             tests/layout_test/plane2d_panel.cpp
             tests/layout_test/scene3d.cpp
             tests/layout_test/scene3d_svg.cpp
-            tests/layout_test/panel.cpp)
+            tests/layout_test/panel.cpp
+            tests/layout_test/window_wait.cpp)
         target_link_libraries(sextant_layout_test PRIVATE sextant_static)
         target_include_directories(sextant_layout_test PRIVATE
             ${CMAKE_SOURCE_DIR}/src

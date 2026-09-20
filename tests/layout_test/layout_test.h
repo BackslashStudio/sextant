@@ -439,4 +439,9 @@ namespace lt {
     void test_panel_axis_position_3d();
 
     void test_panel_dpi_scale();
+
+    // window_wait.cpp -- last: it opens real windows
+    void test_wait_closed();
+
+    void test_run_until_closed();
 } // namespace lt
