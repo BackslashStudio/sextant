@@ -2,11 +2,9 @@
 #include "../renderer/gl_context.h"
 #include "panel_font.h"
 #include "sextant/figure.h"
+#include "imgui_impl_sextant.h"
 #include <imgui.h>
-#include <backends/imgui_impl_glfw.h>
 #include <backends/imgui_impl_opengl3.h>
-#define GLFW_INCLUDE_NONE
-#include <GLFW/glfw3.h>
 
 // Storage for the thread-local context pointer declared in sextant_imconfig.h;
 // must be at global scope.
@@ -22,12 +20,11 @@ namespace sextant {
 
         theme_ = opts.theme;
 
-        // Chrome DPI scale from glfwGetWindowContentScale (io.DisplayFramebufferScale
+        // Chrome DPI scale from the window's content scale (io.DisplayFramebufferScale
         // is unset before the first NewFrame and 1 on Windows). Re-checked every
         // frame by sync_dpi_scale().
-        float xscale = 1.0f, yscale = 1.0f;
-        glfwGetWindowContentScale(ctx.window(), &xscale, &yscale);
-        dpi_scale_ = (xscale > 0.0f) ? xscale : 1.0f;
+        dpi_scale_ = ctx.link().content_scale();
+        if (dpi_scale_ <= 0.0f) dpi_scale_ = 1.0f;
         apply_panel_style(theme_, dpi_scale_);
 
         ImGuiIO& io = ImGui::GetIO();
@@ -48,9 +45,7 @@ namespace sextant {
             static_cast<int>(panel_font::k_roboto_medium_compressed_size),
             13.0f, &font_cfg);
 
-        // Safe to install callbacks: GLContext only registers the framebuffer
-        // size callback.
-        ImGui_ImplGlfw_InitForOpenGL(ctx.window(), true);
+        ImGui_ImplSextant_Init(ctx.link());
         ImGui_ImplOpenGL3_Init("#version 410"); // matches the GL 4.1 core context
     }
 
@@ -76,8 +71,7 @@ namespace sextant {
     }
 
     void ImGuiPanelContext::sync_dpi_scale(const GLContext& ctx) {
-        float xscale = 1.0f, yscale = 1.0f;
-        glfwGetWindowContentScale(ctx.window(), &xscale, &yscale);
+        const float xscale = ctx.link().content_scale();
         if (xscale <= 0.0f) return;
 
         // Exact compare: content scale comes from the platform unchanged.
@@ -91,7 +85,7 @@ namespace sextant {
         // Backend shutdowns use the current context, so select ours.
         ImGui::SetCurrentContext(ctx_);
         ImGui_ImplOpenGL3_Shutdown();
-        ImGui_ImplGlfw_Shutdown();
+        ImGui_ImplSextant_Shutdown();
         ImGui::DestroyContext(ctx_);
         ctx_ = nullptr;
     }

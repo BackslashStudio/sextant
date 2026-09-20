@@ -440,6 +440,11 @@ namespace lt {
 
     void test_panel_dpi_scale();
 
+    // window_input.cpp
+    void test_window_input_queue();
+
+    void test_window_input_requests();
+
     // window_wait.cpp -- last: it opens real windows
     void test_wait_closed();
 

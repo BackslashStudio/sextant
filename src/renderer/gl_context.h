@@ -1,4 +1,5 @@
 #pragma once
+#include "../window_link.h"
 #include <string>
 
 struct GLFWwindow;
@@ -37,16 +38,25 @@ namespace sextant {
         GLFWwindow* window() const { return window_; }
         NVGcontext* nvg() const { return nvg_; }
 
+        // This window's state mirror and its two queues: the pumping thread fills
+        // them in poll_events(), the render thread reads them.
+        WindowLink& link() { return link_; }
+        const WindowLink& link() const { return link_; }
+
         bool should_close() const;
 
+        // Pumps this window: GLFW events (whose callbacks fill the link's queues),
+        // then the state mirror, then what the render thread asked for. Pumping
+        // thread only -- on macOS that has to be the main thread.
         void poll_events();
 
         void swap_buffers();
 
         void make_current();
 
-        int width() const { return width_; }
-        int height() const { return height_; }
+        // The framebuffer, in pixels, as the last poll saw it.
+        int width() const { return link_.framebuffer_width(); }
+        int height() const { return link_.framebuffer_height(); }
 
         // NanoVG frame wrappers. w/h (logical pixels) override this context's size
         // for an offscreen target (<= 0: own size). pixel_ratio is the device-pixel
@@ -55,13 +65,9 @@ namespace sextant {
 
         void end_nvg_frame() const;
 
-        // Called by the framebuffer resize callback — do not call directly.
-        void on_resize(int w, int h);
-
     private:
         GLFWwindow* window_ = nullptr;
         NVGcontext* nvg_ = nullptr;
-        int width_ = 0;
-        int height_ = 0;
+        WindowLink  link_;
     };
 } // namespace sextant

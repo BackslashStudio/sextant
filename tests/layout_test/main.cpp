@@ -193,6 +193,10 @@ int main() {
     test_cell_shading_cache();
     test_data_panel_shading();
 
+    // window_input.cpp
+    test_window_input_queue();
+    test_window_input_requests();
+
     // window_wait.cpp -- last, because it opens real windows
     test_wait_closed();
     test_run_until_closed();

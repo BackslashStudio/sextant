@@ -105,7 +105,9 @@ set(IMGUI_SOURCES
     ${IMGUI_SOURCE_DIR}/imgui_tables.cpp
     ${IMGUI_SOURCE_DIR}/imgui_widgets.cpp
     ${IMGUI_SOURCE_DIR}/imgui_demo.cpp
-    ${IMGUI_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
+    # No imgui_impl_glfw: src/widgets/imgui_impl_sextant.cpp is the platform
+    # backend (v1.0 step 21.3). sextant_window_probe still compiles it, for its
+    # key table.
     ${IMGUI_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
 )
 
@@ -140,6 +142,7 @@ set(SEXTANT_SOURCES
     src/delaunay.cpp
     src/window_thread.cpp
     src/window_registry.cpp
+    src/window_link.cpp
     src/renderer/gl_context.cpp
     src/renderer/nvg_renderer.cpp
     src/renderer/data_renderer.cpp
@@ -158,6 +161,7 @@ set(SEXTANT_SOURCES
     src/output/png_writer.cpp
     src/output/svg_writer.cpp
     src/widgets/imgui_context.cpp
+    src/widgets/imgui_impl_sextant.cpp
     src/widgets/panel.cpp
     src/widgets/data_panel.cpp
 )
@@ -427,6 +431,7 @@ if(SEXTANT_BUILD_TESTS)
             tests/layout_test/scene3d.cpp
             tests/layout_test/scene3d_svg.cpp
             tests/layout_test/panel.cpp
+            tests/layout_test/window_input.cpp
             tests/layout_test/window_wait.cpp)
         target_link_libraries(sextant_layout_test PRIVATE sextant_static)
         target_include_directories(sextant_layout_test PRIVATE

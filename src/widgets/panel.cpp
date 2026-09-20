@@ -18,10 +18,9 @@
 #include "sextant/figure.h"
 #include <imgui.h>
 #include <imgui_internal.h>  // DockBuilder* — not part of ImGui's stable public API
-#include <backends/imgui_impl_glfw.h>
+#include "imgui_impl_sextant.h"
 #include <backends/imgui_impl_opengl3.h>
 #include <glad/glad.h>
-#include <GLFW/glfw3.h>
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
@@ -1709,7 +1708,8 @@ void draw_resize_dialog(const FigureSnapshot& fsnap, PanelState& st) {
 }
 
 // Applies a pending plot-area size to the window, adding the chrome measured
-// from the current frame. Window thread only (the request is an atomic).
+// from the current frame. Render thread only (the request is an atomic); the
+// window itself is resized by the pumping thread, from the link's queue.
 void apply_pending_resize(GLContext& ctx, PanelState& st) {
     const int want_w = st.pending_plot_w.load(std::memory_order_relaxed);
     const int want_h = st.pending_plot_h.load(std::memory_order_relaxed);
@@ -1727,16 +1727,15 @@ void apply_pending_resize(GLContext& ctx, PanelState& st) {
     const int target_fb_h = want_h + (ctx.height() - plot_h);
     if (target_fb_w <= 0 || target_fb_h <= 0) return;
 
-    // glfwSetWindowSize uses screen coordinates, not framebuffer pixels.
+    // A window is sized in screen coordinates, not framebuffer pixels.
     int win_w = 0, win_h = 0, fb_w = 0, fb_h = 0;
-    glfwGetWindowSize(ctx.window(), &win_w, &win_h);
-    glfwGetFramebufferSize(ctx.window(), &fb_w, &fb_h);
+    ctx.link().window_size(win_w, win_h);
+    ctx.link().framebuffer_size(fb_w, fb_h);
     const double sx = (fb_w > 0) ? static_cast<double>(win_w) / fb_w : 1.0;
     const double sy = (fb_h > 0) ? static_cast<double>(win_h) / fb_h : 1.0;
 
-    glfwSetWindowSize(ctx.window(),
-                      static_cast<int>(std::lround(target_fb_w * sx)),
-                      static_cast<int>(std::lround(target_fb_h * sy)));
+    ctx.link().post_resize(static_cast<int>(std::lround(target_fb_w * sx)),
+                           static_cast<int>(std::lround(target_fb_h * sy)));
 }
 
 } // namespace
@@ -1747,7 +1746,7 @@ void draw_widget_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
                        FigureEditBox& edit_box, PanelState& st)
 {
     ImGui_ImplOpenGL3_NewFrame();
-    ImGui_ImplGlfw_NewFrame();
+    ImGui_ImplSextant_NewFrame(ctx.link());
     ImGui::NewFrame();
 
     draw_menu_bar(fsnap, st);

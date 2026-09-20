@@ -114,7 +114,15 @@ namespace sextant {
 
         ready_.release(); // unblocks start() — window is now visible
 
-        while (!ctx.should_close() && !stop_requested_.load()) {
+        // poll -> requests -> replay -> render -> swap. The poll and the requests
+        // are GLContext::poll_events(); the replay is inside the frame, in
+        // ImGui_ImplSextant_NewFrame(). It is the order macOS needs, where the
+        // first half belongs to the main thread, and the one this loop already
+        // had -- the poll moved from after the swap to before the frame it feeds.
+        while (!stop_requested_.load()) {
+            ctx.poll_events();
+            if (ctx.should_close()) break;
+
             imgui_ctx.make_current(); // this thread's context, never a sibling's
             // Before the frame (and after make_current()), so a monitor change
             // applies to this frame.
@@ -140,8 +148,11 @@ namespace sextant {
             }
 
             ctx.swap_buffers();
-            ctx.poll_events();
         }
+
+        // One last pump, so a request the final frame posted (a clipboard write
+        // from a Ctrl+C, say) is not dropped on the way out.
+        ctx.poll_events();
 
         // Fulfil queued exports before the GL objects go out of scope.
         retire_pending_exports();

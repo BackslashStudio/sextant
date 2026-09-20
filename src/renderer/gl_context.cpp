@@ -28,14 +28,9 @@ namespace sextant {
             });
         }
 
-        void framebuffer_size_callback(GLFWwindow* window, int w, int h) {
-            auto* ctx = static_cast<GLContext *>(glfwGetWindowUserPointer(window));
-            ctx->on_resize(w, h);
-        }
     } // namespace
 
-    GLContext::GLContext(GLContextOptions opts)
-        : width_(opts.width), height_(opts.height) {
+    GLContext::GLContext(GLContextOptions opts) {
         ensure_glfw_init();
 
         // Also covers the window hints, which are global state.
@@ -57,8 +52,9 @@ namespace sextant {
         if (!window_)
             throw std::runtime_error("glfwCreateWindow failed");
 
-        glfwSetWindowUserPointer(window_, this);
-        glfwSetFramebufferSizeCallback(window_, framebuffer_size_callback);
+        // The link owns this window's callbacks and user pointer, and seeds its
+        // mirror from the window as created.
+        link_.attach(window_);
 
         glfwMakeContextCurrent(window_);
         glfwSwapInterval(opts.vsync ? 1 : 0);
@@ -75,8 +71,6 @@ namespace sextant {
         nvg_ = nvgCreateGL3(NVG_ANTIALIAS | NVG_STENCIL_STROKES);
         if (!nvg_)
             throw std::runtime_error("nvgCreateGL3 failed");
-
-        glfwGetFramebufferSize(window_, &width_, &height_);
     }
 
     GLContext::~GLContext() {
@@ -96,7 +90,9 @@ namespace sextant {
     }
 
     void GLContext::poll_events() {
-        glfwPollEvents();
+        glfwPollEvents();        // the link's callbacks run in here
+        link_.sync_state();
+        link_.service_requests();
     }
 
     void GLContext::swap_buffers() {
@@ -108,17 +104,12 @@ namespace sextant {
     }
 
     void GLContext::begin_nvg_frame(int w, int h, float pixel_ratio) const {
-        const float fw = w > 0 ? static_cast<float>(w) : static_cast<float>(width_);
-        const float fh = h > 0 ? static_cast<float>(h) : static_cast<float>(height_);
+        const float fw = w > 0 ? static_cast<float>(w) : static_cast<float>(width());
+        const float fh = h > 0 ? static_cast<float>(h) : static_cast<float>(height());
         nvgBeginFrame(nvg_, fw, fh, pixel_ratio > 0.0f ? pixel_ratio : 1.0f);
     }
 
     void GLContext::end_nvg_frame() const {
         nvgEndFrame(nvg_);
-    }
-
-    void GLContext::on_resize(int w, int h) {
-        width_ = w;
-        height_ = h;
     }
 } // namespace sextant
