@@ -126,11 +126,17 @@ namespace lt {
         h.link().post_event(button(1, true, ModCtrl | ModShift));
         h.frame();
         check(io.MouseDown[1], "input: a queued button press reaches ImGui");
-        check(io.KeyCtrl && io.KeyShift && !io.KeyAlt,
+        // ImGui swaps Cmd and Ctrl in AddKeyEvent() under ConfigMacOSXBehaviors
+        // (on by default there), which is what makes Cmd the shortcut key on
+        // that platform -- so the physical Ctrl the pump read arrives as Super.
+        // The backend feeds it the physical modifier either way, as
+        // imgui_impl_glfw did; which one ImGui files it under is ImGui's call.
+        const bool ctrl_arrived = io.ConfigMacOSXBehaviors ? io.KeySuper : io.KeyCtrl;
+        check(ctrl_arrived && io.KeyShift && !io.KeyAlt,
               "input: with the modifier mask the pump read off the keyboard");
         h.link().post_event(button(1, false, 0));
         h.frame();
-        check(!io.MouseDown[1] && !io.KeyCtrl,
+        check(!io.MouseDown[1] && !io.KeyCtrl && !io.KeySuper && !io.KeyShift,
               "input: and the release, with the modifiers let go");
 
         // The scroll wheel.
