@@ -1,5 +1,6 @@
 #pragma once
 #include "../window_link.h"
+#include <memory>
 #include <string>
 
 struct GLFWwindow;
@@ -22,8 +23,10 @@ namespace sextant {
         bool scale_to_monitor = false;
     };
 
-    // Owns a single GLFWwindow, GLAD function pointers, and NanoVG context.
-    // Must be created and used on the same thread (GLFW requirement).
+    // The render half of one window: its GL context, GLAD's function pointers
+    // and a NanoVG context, all made and used on the thread that will draw.
+    // The window itself comes from the broker (window_broker.h), which may be a
+    // different thread entirely -- on macOS it has to be.
     class GLContext {
     public:
         explicit GLContext(GLContextOptions opts);
@@ -40,14 +43,15 @@ namespace sextant {
 
         // This window's state mirror and its two queues: the pumping thread fills
         // them in poll_events(), the render thread reads them.
-        WindowLink& link() { return link_; }
-        const WindowLink& link() const { return link_; }
+        WindowLink& link() { return *link_; }
+        const WindowLink& link() const { return *link_; }
 
         bool should_close() const;
 
         // Pumps this window: GLFW events (whose callbacks fill the link's queues),
-        // then the state mirror, then what the render thread asked for. Pumping
-        // thread only -- on macOS that has to be the main thread.
+        // then the state mirror, then what the render thread asked for. Does
+        // nothing where one thread pumps every window -- there Figure's pump
+        // walks this link instead.
         void poll_events();
 
         void swap_buffers();
@@ -55,8 +59,8 @@ namespace sextant {
         void make_current();
 
         // The framebuffer, in pixels, as the last poll saw it.
-        int width() const { return link_.framebuffer_width(); }
-        int height() const { return link_.framebuffer_height(); }
+        int width() const { return link_->framebuffer_width(); }
+        int height() const { return link_->framebuffer_height(); }
 
         // NanoVG frame wrappers. w/h (logical pixels) override this context's size
         // for an offscreen target (<= 0: own size). pixel_ratio is the device-pixel
@@ -68,6 +72,9 @@ namespace sextant {
     private:
         GLFWwindow* window_ = nullptr;
         NVGcontext* nvg_ = nullptr;
-        WindowLink  link_;
+        // Shared with the broker, which keeps it alive until the window is
+        // really gone: a window's callbacks reach its link through the user
+        // pointer, and a destroy can be served after this object is long dead.
+        std::shared_ptr<WindowLink> link_;
     };
 } // namespace sextant

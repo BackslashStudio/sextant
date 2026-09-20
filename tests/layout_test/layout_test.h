@@ -440,6 +440,11 @@ namespace lt {
 
     void test_panel_dpi_scale();
 
+    // window_broker.cpp
+    void test_window_broker();
+
+    void test_window_broker_pump();
+
     // window_input.cpp
     void test_window_input_queue();
 

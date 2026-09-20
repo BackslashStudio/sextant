@@ -132,6 +132,11 @@ namespace sextant {
         // pause: block the caller until ENTER is pressed on the console. The window
         // closes when this Figure is destroyed or close() is called. Use
         // wait_closed() to wait for the window itself, with no console in it.
+        //
+        // On macOS, where the window's events belong to the main thread, a
+        // console read there would freeze the plot it just opened: called on the
+        // main thread, pause instead waits for the window to close (the same as
+        // wait_closed()) and keeps pumping while it does.
         void show(bool pause = true);
 
         void close();
@@ -147,6 +152,8 @@ namespace sextant {
         // Pump this process's window events once and return. A no-op on Windows
         // and Linux, where every window pumps its own events on its own thread;
         // call it in a loop that keeps a window up, so the loop stays portable.
+        // On macOS it is the pump, and has to be called on the main thread --
+        // anywhere else it throws std::logic_error.
         static void poll_events();
 
         // Block until every open figure in this process has closed. Returns at

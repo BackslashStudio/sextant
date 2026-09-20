@@ -1,6 +1,8 @@
 #include "window_thread.h"
 #include "figure_export.h"
 #include "widgets/imgui_context.h"
+#include "window_broker.h"
+#include "platform/platform.h"
 #include <chrono>
 #include <optional>
 #include <utility>
@@ -19,7 +21,15 @@ namespace sextant {
     void WindowThread::start() {
         running_.store(true);
         thread_ = std::thread([this] { thread_main(); });
-        ready_.acquire(); // blocks until window is visible
+
+        // The window is made by whichever thread may own one. Where that is this
+        // one, waiting here without pumping would be waiting on ourselves: the
+        // render thread has just asked us for the window.
+        if (pump_runs_here()) {
+            while (!ready_.try_acquire()) pump_windows(0.01);
+        } else {
+            ready_.acquire(); // blocks until window is visible
+        }
     }
 
     void WindowThread::stop() {
@@ -127,6 +137,12 @@ namespace sextant {
             // Before the frame (and after make_current()), so a monitor change
             // applies to this frame.
             imgui_ctx.sync_dpi_scale(ctx);
+
+            // Held across render and swap: the same lock the window system takes
+            // to resize this context's drawable from the pumping thread, so a
+            // resize lands between frames instead of inside one. Nothing to take
+            // where that cannot happen.
+            platform::GLContextLock gl_lock;
 
             // Time render work only; swap_buffers() blocks on vsync.
             const auto t0 = std::chrono::steady_clock::now();

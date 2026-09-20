@@ -3,6 +3,7 @@
 #include "axes3d_impl.h"
 #include "window_thread.h"
 #include "window_registry.h"
+#include "window_broker.h"
 #include "snapshot_box.h"
 #include "edit_box.h"
 #include "figure_edits.h"
@@ -539,8 +540,15 @@ void Figure::show(bool pause) {
     d->window_thread->start();  // blocks until window visible, then returns
 
     if (pause) {
-        std::cout << "Press ENTER to continue (the plot window stays open)..." << std::endl;
-        std::cin.get();
+        // Where this thread is the one pumping the window, a console read would
+        // starve it -- the plot would be up and frozen. So there the pause is
+        // the window's own: it lasts until the window closes.
+        if (pump_runs_here()) {
+            wait_closed();
+        } else {
+            std::cout << "Press ENTER to continue (the plot window stays open)..." << std::endl;
+            std::cin.get();
+        }
     }
 }
 
@@ -552,6 +560,10 @@ void Figure::close() {
         d->window_thread->stop();   // joins; the close callback has run by now
         d->window_thread.reset();
     }
+    // The render thread handed its window back on its way out. Where this
+    // thread is the one that unmakes windows, do it now rather than leave it on
+    // screen until whatever poll comes next.
+    serve_broker_requests();
     d->mark_closed();
 }
 
@@ -560,16 +572,26 @@ bool Figure::is_open() const {
 }
 
 bool Figure::wait_closed(double timeout_s) {
+    // On the thread that owns the windows there is nobody else to pump them:
+    // blocking here would freeze the very window we are waiting for.
+    if (pump_runs_here())
+        return pump_until([this] { return !d->open.load(); }, timeout_s);
     return wait_window_closed(d->open, timeout_s);
 }
 
 void Figure::poll_events() {
-    // Nothing to pump here: on Windows and Linux each window thread polls its
-    // own events inside its render loop. It exists so a caller's loop is
-    // already correct on a platform whose events belong to the main thread.
+    // Nothing to pump on Windows and Linux: each window thread polls its own
+    // events inside its render loop. It exists so a caller's loop is already
+    // correct on a platform whose events belong to the main thread -- where it
+    // is the pump, and throws if it is not called there.
+    pump_windows(0.0);
 }
 
 void Figure::run() {
+    if (pump_runs_here()) {
+        pump_until([] { return open_window_count() == 0; }, -1.0);
+        return;
+    }
     wait_all_windows_closed(-1.0);
 }
 

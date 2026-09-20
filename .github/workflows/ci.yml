@@ -172,10 +172,10 @@ jobs:
           fi
           exit $status
 
-      # Step 21.1's prototype of the macOS threading design; runs whatever the
-      # steps before it did. Exit 1 is a failed check, 2 the probe's own 120 s
-      # watchdog -- a deadlock. It overwrites the clipboard; on macOS it also
-      # saves a screenshot, window_probe.png.
+      # The threading design through the public API: figures shown from the main
+      # thread and from a worker, the main thread pumping, windows closed out of
+      # order. Exit 1 is a failed check, 2 the probe's own 120 s watchdog -- a
+      # deadlock. Writes window_probe.png.
       - name: window_probe
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         timeout-minutes: 5

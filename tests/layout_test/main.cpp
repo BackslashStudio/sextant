@@ -193,6 +193,10 @@ int main() {
     test_cell_shading_cache();
     test_data_panel_shading();
 
+    // window_broker.cpp
+    test_window_broker();
+    test_window_broker_pump();
+
     // window_input.cpp
     test_window_input_queue();
     test_window_input_requests();

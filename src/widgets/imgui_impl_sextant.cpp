@@ -1,5 +1,6 @@
 #include "imgui_impl_sextant.h"
 #include "../window_link.h"
+#include "../platform/platform.h"
 #include <imgui.h>
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>   // key constants, and the clipboard read below
@@ -243,13 +244,17 @@ namespace sextant {
         pio.Platform_SetClipboardTextFn = [](ImGuiContext*, const char* text) {
             if (Backend* b = backend()) b->link->post_clipboard(text ? text : "");
         };
-        // The one GLFW call left on the render thread. Harmless on Windows and
-        // X11; macOS will read NSPasteboard here instead.
+        // Read on the render thread, because a paste wants an answer this frame
+        // and not next poll. Where the platform has a thread-safe clipboard of
+        // its own (macOS: NSPasteboard) that is what answers; on Windows and X11
+        // it is the one GLFW call left off the pumping thread, and harmless.
         pio.Platform_GetClipboardTextFn = [](ImGuiContext*) -> const char* {
             Backend* b = backend();
             if (!b) return "";
-            const char* s = glfwGetClipboardString(nullptr);
-            b->clipboard = s ? s : "";
+            if (!platform::read_clipboard(b->clipboard)) {
+                const char* s = glfwGetClipboardString(nullptr);
+                b->clipboard = s ? s : "";
+            }
             return b->clipboard.c_str();
         };
     }

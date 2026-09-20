@@ -11,9 +11,9 @@ endif()
 
 project(sextant VERSION 0.3.0 LANGUAGES CXX C)
 if(APPLE)
-    # OBJCXX for tests/window_probe's NSPasteboard access. OBJC first: enabled
-    # alone, OBJCXX claims .m files too and compiles GLFW's Cocoa sources as
-    # Objective-C++, which they are not.
+    # OBJCXX for src/platform/macos/. OBJC first: enabled alone, OBJCXX claims
+    # .m files too and compiles GLFW's Cocoa sources as Objective-C++, which
+    # they are not.
     enable_language(OBJC)
     enable_language(OBJCXX)
 endif()
@@ -72,6 +72,16 @@ if(SEXTANT_FETCH_GLFW)
     FetchContent_MakeAvailable(glfw)
 else()
     find_package(glfw3 3.3 REQUIRED)
+    if(APPLE)
+        # A system GLFW carries neither patch, and both matter here: without the
+        # first, a Mac with no usable GPU gets no window at all; without the
+        # second, a resize can run [NSOpenGLContext update] in the middle of a
+        # frame. Buildable, not recommended.
+        message(WARNING
+            "SEXTANT_FETCH_GLFW=OFF on macOS: the patches in cmake/glfw/ are not "
+            "applied — no software-renderer fallback, and no lock around "
+            "[NSOpenGLContext update] while a window is resized.")
+    endif()
 endif()
 
 # FreeType
@@ -106,8 +116,7 @@ set(IMGUI_SOURCES
     ${IMGUI_SOURCE_DIR}/imgui_widgets.cpp
     ${IMGUI_SOURCE_DIR}/imgui_demo.cpp
     # No imgui_impl_glfw: src/widgets/imgui_impl_sextant.cpp is the platform
-    # backend (v1.0 step 21.3). sextant_window_probe still compiles it, for its
-    # key table.
+    # backend, and nothing in the tree compiles the GLFW one any more.
     ${IMGUI_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
 )
 
@@ -143,6 +152,7 @@ set(SEXTANT_SOURCES
     src/window_thread.cpp
     src/window_registry.cpp
     src/window_link.cpp
+    src/window_broker.cpp
     src/renderer/gl_context.cpp
     src/renderer/nvg_renderer.cpp
     src/renderer/data_renderer.cpp
@@ -165,6 +175,15 @@ set(SEXTANT_SOURCES
     src/widgets/panel.cpp
     src/widgets/data_panel.cpp
 )
+
+# The three things that differ on macOS -- which thread may own a window, the
+# render thread's context lock, and reading the clipboard off it. Kept to one
+# file so everything around it stays covered by the Windows and Linux suites.
+if(APPLE)
+    list(APPEND SEXTANT_SOURCES src/platform/macos/platform_macos.mm)
+else()
+    list(APPEND SEXTANT_SOURCES src/platform/platform_generic.cpp)
+endif()
 
 # Settings common to the SHARED and STATIC targets. link_scope: PRIVATE for
 # SHARED (deps are merged into sextant.dll), PUBLIC for STATIC (consumers must
@@ -208,6 +227,12 @@ function(sextant_configure_target target_name link_scope)
         PUBLIC  OpenGL::GL
         ${link_scope} glfw
     )
+
+    if(APPLE)
+        # NSPasteboard, for the clipboard read on the render thread. CGL, for
+        # the context lock, comes with OpenGL::GL.
+        target_link_libraries(${target_name} ${link_scope} "-framework AppKit")
+    endif()
 
     if(SEXTANT_USE_FREETYPE AND TARGET Freetype::Freetype)
         target_link_libraries(${target_name} ${link_scope} Freetype::Freetype)
@@ -365,35 +390,13 @@ if(SEXTANT_BUILD_TESTS)
         target_link_libraries(sextant_gl_probe PRIVATE OpenGL::GL)
     endif()
 
-    # Step 21.1's throwaway prototype of the macOS threading design: windows
-    # created and pumped on the main thread, each rendered on its own. Raw GLFW
-    # + GLAD + ImGui (its own copy, with the library's thread-local context
-    # config), not linked against sextant. imgui_impl_glfw.cpp is compiled for
-    # its key table only.
+    # The threading design driven through the public API: figures shown from
+    # the main thread and from a worker, the main thread pumping, windows closed
+    # out of order. Scripted with a watchdog, so a deadlock fails instead of
+    # hanging; --manual leaves two live windows to a person.
     find_package(Threads REQUIRED)
-    add_executable(sextant_window_probe
-        tests/window_probe/main.cpp
-        ${GLAD_SOURCE}
-        ${IMGUI_SOURCE_DIR}/imgui.cpp
-        ${IMGUI_SOURCE_DIR}/imgui_draw.cpp
-        ${IMGUI_SOURCE_DIR}/imgui_tables.cpp
-        ${IMGUI_SOURCE_DIR}/imgui_widgets.cpp
-        ${IMGUI_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
-        ${IMGUI_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp)
-    target_include_directories(sextant_window_probe PRIVATE
-        ${CMAKE_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/third_party/glad/include
-        ${IMGUI_SOURCE_DIR})
-    target_compile_definitions(sextant_window_probe PRIVATE
-        IMGUI_IMPL_OPENGL_LOADER_CUSTOM
-        IMGUI_USER_CONFIG="widgets/sextant_imconfig.h")
-    target_link_libraries(sextant_window_probe PRIVATE glfw Threads::Threads)
-    if(APPLE)
-        target_sources(sextant_window_probe PRIVATE tests/window_probe/platform_macos.mm)
-        target_link_libraries(sextant_window_probe PRIVATE OpenGL::GL "-framework AppKit")
-    else()
-        target_sources(sextant_window_probe PRIVATE tests/window_probe/platform_other.cpp)
-    endif()
+    add_executable(sextant_window_probe tests/window_probe/main.cpp)
+    target_link_libraries(sextant_window_probe PRIVATE sextant Threads::Threads)
 
     # Internal layout checks: linked against sextant_static with src/ on the
     # include path, since what it checks isn't reachable through public headers.
@@ -431,6 +434,7 @@ if(SEXTANT_BUILD_TESTS)
             tests/layout_test/scene3d.cpp
             tests/layout_test/scene3d_svg.cpp
             tests/layout_test/panel.cpp
+            tests/layout_test/window_broker.cpp
             tests/layout_test/window_input.cpp
             tests/layout_test/window_wait.cpp)
         target_link_libraries(sextant_layout_test PRIVATE sextant_static)

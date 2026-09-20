@@ -4,21 +4,12 @@
 // Part of sextant_layout_test; see layout_test.h.
 #include "layout_test.h"
 #include "window_registry.h"
+#include "platform/platform.h"
 
 namespace lt {
     using namespace sextant;
 
     namespace {
-        // Opening a window means show() creating one on its own thread, which is
-        // what does not hold on macOS until window creation moves to the main
-        // thread. Until then the checks that need a window are skipped there; the
-        // registry ones above them are not.
-#if defined(__APPLE__)
-        constexpr bool kCanOpenWindows = false;
-#else
-        constexpr bool kCanOpenWindows = true;
-#endif
-
         using Clock = std::chrono::steady_clock;
 
         double ms_since(Clock::time_point t0) {
@@ -65,11 +56,6 @@ namespace lt {
 
         check(open_window_count() == 0, "wait_closed: no window is open before the first show()");
         check(Figure::create()->wait_closed(), "wait_closed: a figure never shown is already closed");
-
-        if (!kCanOpenWindows) {
-            std::printf("  (skipped: show() opens its window off the main thread)\n");
-            return;
-        }
 
         auto fig = window_figure("wait_closed");
         fig->show(false);
@@ -124,16 +110,22 @@ namespace lt {
         Figure::run();
         check(ms_since(t0) < 200.0, "run: returns at once when no figure is open");
 
-        // A no-op on this platform, from a thread that is not the main one.
-        bool polled = false;
-        std::thread poller([&polled] { Figure::poll_events(); polled = true; });
+        // From a thread that is not the main one: nothing at all where every
+        // window pumps itself, and a refusal where the pump belongs to the main
+        // thread -- calling it elsewhere there would pump nobody's window.
+        bool polled = false, refused = false;
+        std::thread poller([&polled, &refused] {
+            try {
+                Figure::poll_events();
+                polled = true;
+            } catch (const std::logic_error&) {
+                refused = true;
+            }
+        });
         poller.join();
-        check(polled, "poll_events: a no-op on Windows and Linux, from any thread");
-
-        if (!kCanOpenWindows) {
-            std::printf("  (skipped: show() opens its window off the main thread)\n");
-            return;
-        }
+        check(platform::windows_on_main_thread ? refused : polled,
+              "poll_events: off the main thread, a no-op here and a refusal where "
+              "the pump lives on it");
 
         auto a = window_figure("run A");
         auto b = window_figure("run B");
