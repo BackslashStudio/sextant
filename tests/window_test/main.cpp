@@ -254,9 +254,9 @@ static void test_axes_gallery() {
                        })
             .set_title("Two colorbars").legend();
 
-    fig->show(true);
     fig->savefig("test_axes_gallery.png");
     fig->savefig("test_axes_gallery.svg");
+    fig->show(true);
     printf("Saved: test_axes_gallery.png, test_axes_gallery.svg\n");
 }
 
@@ -1838,10 +1838,10 @@ static void test_axis_position3d() {
 
 // -------------------------------------------------------------------------
 int main() {
-    test_axis_position3d();
+    // test_axis_position3d();
     // test_axis_position();
-    // test_axes_gallery();
-    // test_axes3d_gallery();
+    test_axes_gallery();
+    test_axes3d_gallery();
     // test_errorbar3d_gallery();
     // test_line3d_gallery();
     // test_surface_tri_gallery();
@@ -1851,7 +1851,7 @@ int main() {
     // test_savefig();
     // test_translucent3d();
     // test_show_nonblocking();
-    test_wait_and_run();
+    // test_wait_and_run();
     // test_refresh_before_show();
     // test_live_refresh();
     // test_grid_toggle();

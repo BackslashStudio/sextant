@@ -440,6 +440,11 @@ namespace lt {
 
     void test_panel_dpi_scale();
 
+    // headless_export.cpp
+    void test_headless_context();
+
+    void test_headless_export();
+
     // window_broker.cpp
     void test_window_broker();
 

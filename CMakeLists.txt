@@ -434,6 +434,7 @@ if(SEXTANT_BUILD_TESTS)
             tests/layout_test/scene3d.cpp
             tests/layout_test/scene3d_svg.cpp
             tests/layout_test/panel.cpp
+            tests/layout_test/headless_export.cpp
             tests/layout_test/window_broker.cpp
             tests/layout_test/window_input.cpp
             tests/layout_test/window_wait.cpp)

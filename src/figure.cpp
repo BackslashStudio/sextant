@@ -633,7 +633,8 @@ void Figure::savefig_png(std::string_view path, PngExportOptions opts, int w, in
     // Use the window's GL context if there is one, else a headless one.
     if (d->export_png_via_window(fsnap, path, w, h, opts.peel_layers, on_screen.get())) return;
 
-    GLContext    ctx({ .width=w, .height=h, .title="", .visible=false, .resizable=false });
+    GLContext    ctx({ .width=w, .height=h, .title="", .visible=false, .resizable=false,
+                       .headless=true });
     NvgRenderer  nvg(ctx.nvg());
     DataRenderer data;
     export_figure_png(ctx, nvg, data, fsnap, path, w, h, d->opts.supersample,
@@ -665,7 +666,8 @@ void Figure::savefig_png_live(std::string_view path, PngExportOptions opts,
     // called from any thread.
     if (d->export_png_via_window(fsnap, path, w, h, opts.peel_layers, on_screen.get())) return;
 
-    GLContext    ctx({ .width=w, .height=h, .title="", .visible=false, .resizable=false });
+    GLContext    ctx({ .width=w, .height=h, .title="", .visible=false, .resizable=false,
+                       .headless=true });
     NvgRenderer  nvg(ctx.nvg());
     DataRenderer data;
     export_figure_png(ctx, nvg, data, fsnap, path, w, h, d->opts.supersample,

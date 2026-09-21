@@ -193,6 +193,10 @@ int main() {
     test_cell_shading_cache();
     test_data_panel_shading();
 
+    // headless_export.cpp
+    test_headless_context();
+    test_headless_export();
+
     // window_broker.cpp
     test_window_broker();
     test_window_broker_pump();

@@ -1,8 +1,8 @@
 #pragma once
 #include <string>
 
-// The three things that differ on macOS, behind one header so nothing else has
-// to know which platform it is compiled for. The implementations live in
+// What differs on macOS, behind one header so nothing else has to know which
+// platform it is compiled for. The implementations live in
 // platform_generic.cpp and macos/platform_macos.mm.
 namespace sextant::platform {
     // True where the window system insists that windows are created, destroyed
@@ -43,4 +43,35 @@ namespace sextant::platform {
     // on macOS, where NSPasteboard is readable from any thread and GLFW's own
     // clipboard call is not. False elsewhere, where the caller should ask GLFW.
     bool read_clipboard(std::string& out);
+
+    // Whether this platform can make a GL context with no window, no window
+    // system and no particular thread -- what a headless savefig() wants, since
+    // here a window is the main thread's business and an export has no reason
+    // to be. False elsewhere, where a hidden window costs nothing because any
+    // thread may make one.
+    inline constexpr bool has_offscreen_gl =
+#if defined(__APPLE__)
+            true;
+#else
+            false;
+#endif
+
+    // One offscreen GL context. Opaque: what is inside it is the platform's.
+    struct OffscreenGL;
+
+    // Makes one and makes it current on the calling thread, which is then the
+    // only thread that uses it. Null where the platform has none, so the caller
+    // falls back to a hidden window; throws std::runtime_error where it has one
+    // and it failed.
+    OffscreenGL* create_offscreen_gl();
+
+    // Unmakes it, clearing it first if it is the calling thread's current one.
+    void destroy_offscreen_gl(OffscreenGL* c);
+
+    void make_offscreen_gl_current(OffscreenGL* c);
+
+    // One GL entry point by name, without GLFW -- what GLAD is loaded with on
+    // the offscreen path, where glfwInit() has not necessarily happened and on
+    // this platform could not happen off the main thread anyway.
+    void* offscreen_gl_proc_address(const char* name);
 } // namespace sextant::platform

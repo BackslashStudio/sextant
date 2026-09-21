@@ -88,6 +88,41 @@ namespace {
     // The script
     // -------------------------------------------------------------------------
     void run_checks() {
+        // --- a file, with nothing open and nobody pumping ----------------------
+        // An export needs a GL context, not a window. This is first, before
+        // anything has asked for a window at all, and the main thread does
+        // nothing for it but wait: where a window belongs to the main thread,
+        // asking for one here would queue a request to a thread that is about
+        // to block on the join, and the watchdog would be what ended the run.
+        std::printf("[probe] savefig() from a worker thread, nothing open\n");
+        {
+            auto h = make_figure("probe headless", 400, 300);
+            std::atomic<bool> saved{false};
+            std::string err;
+            std::thread saver([&h, &saved, &err] {
+                try {
+                    h->savefig_png("window_probe_headless.png", {}, 400, 300);
+                } catch (const std::exception& e) {
+                    err = e.what();
+                }
+                saved.store(true);
+            });
+            const auto until = Clock::now() + std::chrono::seconds(30);
+            while (!saved.load() && Clock::now() < until)
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            const bool unassisted = saved.load();
+            if (!unassisted) pump_until([&saved] { return saved.load(); }, 30.0);
+            saver.join();
+            check(unassisted && err.empty(),
+                  "savefig() with nothing open is served on the thread that asked, "
+                  "whichever thread that is");
+            std::error_code ec;
+            check(std::filesystem::exists("window_probe_headless.png", ec) &&
+                  std::filesystem::file_size("window_probe_headless.png", ec) > 1000,
+                  "and wrote a file with something in it");
+            check(!h->is_open(), "without opening a window");
+        }
+
         std::printf("[probe] nothing open yet\n");
         const auto t0 = Clock::now();
         Figure::run();
