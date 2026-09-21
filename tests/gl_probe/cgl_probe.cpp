@@ -4,7 +4,6 @@
 // all; CGL can still reach the Apple Software Renderer. Asks for 4.1 core twice
 // -- any renderer, then accelerated only -- and reports which one each attempt
 // got and whether it renders.
-#define GL_SILENCE_DEPRECATION
 #include <OpenGL/OpenGL.h>
 #include <OpenGL/CGLRenderers.h>
 #include <OpenGL/gl3.h>

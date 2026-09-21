@@ -20,10 +20,11 @@ namespace sextant {
 
         theme_ = opts.theme;
 
-        // Chrome DPI scale from the window's content scale (io.DisplayFramebufferScale
-        // is unset before the first NewFrame and 1 on Windows). Re-checked every
-        // frame by sync_dpi_scale().
-        dpi_scale_ = ctx.link().content_scale();
+        // Only the part of the content scale the framebuffer is not already
+        // providing -- read from the link, not from io.DisplayFramebufferScale,
+        // which is unset before the first NewFrame. Re-checked every frame by
+        // sync_dpi_scale().
+        dpi_scale_ = ctx.link().chrome_scale();
         if (dpi_scale_ <= 0.0f) dpi_scale_ = 1.0f;
         apply_panel_style(theme_, dpi_scale_);
 
@@ -71,13 +72,14 @@ namespace sextant {
     }
 
     void ImGuiPanelContext::sync_dpi_scale(const GLContext& ctx) {
-        const float xscale = ctx.link().content_scale();
-        if (xscale <= 0.0f) return;
+        const float want = ctx.link().chrome_scale();
+        if (want <= 0.0f) return;
 
-        // Exact compare: content scale comes from the platform unchanged.
-        if (xscale == dpi_scale_) return;
+        // Exact compare: both terms come from the platform unchanged, so a
+        // window that has not moved monitors gives the same float every frame.
+        if (want == dpi_scale_) return;
 
-        dpi_scale_ = xscale;
+        dpi_scale_ = want;
         apply_panel_style(theme_, dpi_scale_);
     }
 

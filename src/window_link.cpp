@@ -139,6 +139,27 @@ namespace sextant {
         sync_state();
     }
 
+    float WindowLink::framebuffer_scale() const {
+#if defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+        // X11 (what ensure_glfw_init() pins) reports a framebuffer in window
+        // coordinates, so the ratio is 1 by construction -- imgui_impl_glfw
+        // makes the same exception, since it is Wayland that scales.
+        return 1.0f;
+#else
+        int ww = 0, wh = 0, fw = 0, fh = 0;
+        window_size(ww, wh);
+        framebuffer_size(fw, fh);
+        (void) wh;
+        (void) fh;
+        if (ww <= 0 || fw <= 0) return 1.0f;
+        return static_cast<float>(fw) / static_cast<float>(ww);
+#endif
+    }
+
+    float WindowLink::chrome_scale() const {
+        return chrome_scale_from(content_scale(), framebuffer_scale());
+    }
+
     void WindowLink::sync_state() {
         if (!window_) return;
         int w = 0, h = 0;

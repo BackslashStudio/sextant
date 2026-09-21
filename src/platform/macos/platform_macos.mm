@@ -1,7 +1,3 @@
-// CGL is deprecated as of 10.14 and is still the only GL there is on this
-// platform; step 21.6 sets this for every translation unit.
-#define GL_SILENCE_DEPRECATION
-
 #include "../platform.h"
 
 #include <dlfcn.h>

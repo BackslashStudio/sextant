@@ -33,7 +33,9 @@ namespace sextant {
         // content scale. Call once per frame before NewFrame().
         void sync_dpi_scale(const GLContext& ctx);
 
-        // The chrome scale (1.0 = 100%); window-pixel sizes must multiply by it.
+        // The chrome scale (1.0 = 100%): `WindowLink::chrome_scale()`, not the
+        // raw content scale -- on a platform that scales the framebuffer
+        // instead of the window, the scaling is already done (v1.0 step 21.6).
         float dpi_scale() const { return dpi_scale_; }
 
     private:

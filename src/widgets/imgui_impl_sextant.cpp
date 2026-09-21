@@ -268,16 +268,13 @@ namespace sextant {
         link.window_size(ww, wh);
         link.framebuffer_size(fw, fh);
         io.DisplaySize = ImVec2(static_cast<float>(ww), static_cast<float>(wh));
-#if defined(__linux__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
-        // X11 (what ensure_glfw_init() pins) reports a framebuffer in window
-        // coordinates, so the ratio is 1 by construction -- imgui_impl_glfw makes
-        // the same exception, since it is Wayland that scales.
-        io.DisplayFramebufferScale = ImVec2(1.0f, 1.0f);
-#else
-        io.DisplayFramebufferScale = ImVec2(
-            ww > 0 ? static_cast<float>(fw) / static_cast<float>(ww) : 1.0f,
-            wh > 0 ? static_cast<float>(fh) / static_cast<float>(wh) : 1.0f);
-#endif
+        (void) fw;
+        (void) fh;
+        // One ratio for both axes, and the same one the chrome is scaled by:
+        // see WindowLink::framebuffer_scale(). ImGui rasterizes glyphs at this
+        // density, so it is what keeps panel text sharp on a Retina Mac.
+        const float fb_scale = link.framebuffer_scale();
+        io.DisplayFramebufferScale = ImVec2(fb_scale, fb_scale);
 
         // steady_clock rather than glfwGetTime(), which is neither this thread's
         // to read on macOS nor guaranteed to move forward.

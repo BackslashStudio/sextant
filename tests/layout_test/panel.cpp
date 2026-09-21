@@ -1,6 +1,7 @@
 // The panels: Cosmetic's groups, duplicate ids, selection, tabs. Part of
 // sextant_layout_test; see layout_test.h.
 #include "layout_test.h"
+#include "window_link.h"
 
 namespace lt {
     // The Cosmetic panel in a null-backend ImGui frame: a 3D slot must seed the
@@ -813,6 +814,43 @@ namespace lt {
                     static_cast<double>(at_1x[0]), static_cast<double>(at_15x[0]),
                     static_cast<double>(at_1x[8]), static_cast<double>(at_15x[8]),
                     static_cast<double>(at_1x[3]), static_cast<double>(at_15x[3]));
+
+        // ---- Which scale the chrome is styled at (v1.0 step 21.6).
+        // Two platforms put the display's scale in different places, and the
+        // panel must be scaled by it exactly once. As arithmetic, so the macOS
+        // answer is checked here rather than assumed.
+        check(chrome_scale_from(1.0f, 1.0f) == 1.0f,
+              "dpi: a 100% display with no framebuffer scaling styles at 1.0");
+        check(chrome_scale_from(1.5f, 1.0f) == 1.5f,
+              "dpi: a 150% Windows display scales the window, so the chrome takes all of it");
+        check(chrome_scale_from(2.0f, 2.0f) == 1.0f,
+              "dpi: a Retina Mac scales the framebuffer instead, so the chrome takes none "
+              "of it -- scaling by the content scale as well drew the panel 2x too big");
+        check(chrome_scale_from(2.0f, 1.0f) == 2.0f,
+              "dpi: and a 200% display that does not scale its framebuffer still takes all of it");
+        check(chrome_scale_from(0.0f, 1.0f) == 1.0f && chrome_scale_from(1.5f, 0.0f) == 1.5f,
+              "dpi: a scale nobody reported reads as 1");
+
+        // The live link, and the half this platform owes. Both answers stated:
+        // where the framebuffer carries no scaling the chrome scale *is* the
+        // content scale, and where it carries all of it the chrome scale is 1.
+        {
+            GLContext gl({.width = 200, .height = 150, .title = "layout_test", .visible = false});
+            const WindowLink& link = gl.link();
+            check(link.chrome_scale() ==
+                  chrome_scale_from(link.content_scale(), link.framebuffer_scale()),
+                  "dpi: a window's chrome scale is that arithmetic over its own mirror");
+            const bool fb_scales = link.framebuffer_scale() != 1.0f;
+            check(fb_scales
+                      ? link.chrome_scale() < link.content_scale()
+                      : link.chrome_scale() == link.content_scale(),
+                  "dpi: which is the content scale where the framebuffer is not scaled, "
+                  "and less than it where it is");
+            std::printf("  content %g, framebuffer %g -> chrome %g\n",
+                        static_cast<double>(link.content_scale()),
+                        static_cast<double>(link.framebuffer_scale()),
+                        static_cast<double>(link.chrome_scale()));
+        }
 
         ImGui::DestroyContext(ctx);
         ImGui::SetCurrentContext(nullptr);

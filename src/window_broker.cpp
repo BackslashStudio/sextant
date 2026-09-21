@@ -100,6 +100,12 @@ namespace sextant {
                 glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
                 glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
                 glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+                // macOS offers forward-compatible core contexts and nothing
+                // else. GLFW 3.4's NSGL backend makes one whether or not this
+                // is asked for, but 3.3 -- which find_package(glfw3 3.3) still
+                // accepts under SEXTANT_FETCH_GLFW=OFF -- refuses without it.
+                // Harmless everywhere: the library uses no removed entry point.
+                glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
                 glfwWindowHint(GLFW_VISIBLE, spec.visible ? GLFW_TRUE : GLFW_FALSE);
                 glfwWindowHint(GLFW_RESIZABLE, spec.resizable ? GLFW_TRUE : GLFW_FALSE);
                 glfwWindowHint(GLFW_STENCIL_BITS, 8); // required by NanoVG

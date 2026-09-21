@@ -51,6 +51,20 @@ namespace sextant {
         ResizeNESW, ResizeNWSE, Hand, NotAllowed, Count
     };
 
+    // The chrome scale as arithmetic, apart from any window, so both platforms'
+    // answers can be checked from either (v1.0 step 21.6). `content` is the
+    // monitor's content scale, `framebuffer` the framebuffer pixels per window
+    // coordinate. Windows puts the whole scale in the first and leaves the
+    // second at 1; macOS puts it in the second, so the panel is styled at its
+    // base size and ImGui rasterizes glyphs at the framebuffer's density.
+    // Scaling by the content scale on *both* would draw the panel at the square
+    // of it -- twice too big on a Retina Mac, which is the bug this replaces.
+    constexpr float chrome_scale_from(float content, float framebuffer) {
+        if (content <= 0.0f) return 1.0f;
+        if (framebuffer <= 0.0f) return content;
+        return content / framebuffer;
+    }
+
     class WindowLink {
     public:
         WindowLink() = default;
@@ -104,6 +118,18 @@ namespace sextant {
         int framebuffer_height() const { return fb_.second(); }
 
         float content_scale() const { return scale_.load(std::memory_order_relaxed); }
+
+        // Framebuffer pixels per window coordinate -- 2 on a Retina Mac, 1
+        // where the two are the same unit. One rule, because the chrome scale
+        // and ImGui's DisplayFramebufferScale have to agree or the panel is
+        // drawn at the square of the scale (v1.0 step 21.6).
+        float framebuffer_scale() const;
+
+        // The part of the content scale the framebuffer is *not* already
+        // providing, which is what the panel style and font are scaled by:
+        // 1.5 on a 150% Windows display, 1.0 on a Retina Mac, where the 2x is
+        // the framebuffer's. See chrome_scale_from().
+        float chrome_scale() const;
 
         bool focused() const { return focused_.load(std::memory_order_relaxed); }
 

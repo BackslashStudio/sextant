@@ -120,7 +120,9 @@ jobs:
                    "-DCMAKE_EXE_LINKER_FLAGS=${{ matrix.stdlib }}"
                    "-DCMAKE_SHARED_LINKER_FLAGS=${{ matrix.stdlib }}")
           fi
-          cmake "${args[@]}"
+          # Kept, so the macOS dylib check can read what was decided about
+          # linking FreeType and libpng statically rather than guess.
+          cmake "${args[@]}" 2>&1 | tee configure.txt
 
       # gl_probe needs only GLFW, so it is built and run before the library:
       # it reports the runner's OpenGL even where sextant does not build.
@@ -146,6 +148,31 @@ jobs:
       - name: Build
         id: build
         run: cmake --build build
+
+      # SEXTANT_MACOS_STATIC_DEPS (v1.0 step 21.6): where configure said it took
+      # the static link line, libsextant.dylib must name no FreeType or libpng
+      # dylib — a copy of it has to run on a Mac that has never seen brew. Where
+      # configure said it stayed shared, this reports and does not fail: falling
+      # back is the documented behaviour, not a broken build.
+      - name: No Homebrew dylibs in libsextant (macOS)
+        if: ${{ !cancelled() && runner.os == 'macOS' && steps.build.outcome == 'success' }}
+        run: |
+          otool -L build/libsextant.dylib | tee otool.txt
+          linked=$(grep -E '(freetype|libpng|brotli|bz2)' otool.txt || true)
+          static_ft=$(grep -c 'FreeType linked statically' configure.txt || true)
+          static_png=$(grep -c 'libpng linked statically' configure.txt || true)
+          {
+            echo "### libsextant.dylib — ${{ matrix.name }}"
+            echo '```'
+            grep -E '(linked statically|stays shared)' configure.txt || echo "(no static-deps decision logged)"
+            echo "dylib dependencies matching freetype/png/brotli/bz2:"
+            echo "${linked:-(none)}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$linked" ] && { [ "$static_ft" != 0 ] || [ "$static_png" != 0 ]; }; then
+            echo "configure took the static link line and the dylib still depends on it"
+            exit 1
+          fi
 
       # --- Tests ------------------------------------------------------------
 
@@ -257,4 +284,6 @@ jobs:
             out/*.svg
             out/*.txt
             out/poisoned/layout_test.txt
+            configure.txt
+            otool.txt
           if-no-files-found: ignore
