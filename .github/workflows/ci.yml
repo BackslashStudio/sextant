@@ -19,7 +19,9 @@ jobs:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
-    # macOS is expected to fail until the port lands; it runs for the log.
+    # `experimental: true` lets a platform being brought up run for the log
+    # without failing the workflow. None is today: macOS stopped being one at
+    # v1.0 step 21.6, and every job here is a gate.
     continue-on-error: ${{ matrix.experimental }}
     strategy:
       fail-fast: false
@@ -40,7 +42,7 @@ jobs:
             stdlib: -stdlib=libc++
           - name: macOS arm64
             os: macos-15
-            experimental: true
+            experimental: false
 
     defaults:
       run:
@@ -150,27 +152,31 @@ jobs:
         run: cmake --build build
 
       # SEXTANT_MACOS_STATIC_DEPS (v1.0 step 21.6): where configure said it took
-      # the static link line, libsextant.dylib must name no FreeType or libpng
-      # dylib — a copy of it has to run on a Mac that has never seen brew. Where
+      # the static link line, libsextant.dylib must depend on nothing outside
+      # the SDK — a copy of it has to run on a Mac that has never seen brew.
+      # /usr/lib and /System are the SDK, and libz and libbz2 live there and are
+      # meant to be linked from there; @rpath is the library itself. Where
       # configure said it stayed shared, this reports and does not fail: falling
       # back is the documented behaviour, not a broken build.
-      - name: No Homebrew dylibs in libsextant (macOS)
+      - name: No non-SDK dylibs in libsextant (macOS)
         if: ${{ !cancelled() && runner.os == 'macOS' && steps.build.outcome == 'success' }}
         run: |
           otool -L build/libsextant.dylib | tee otool.txt
-          linked=$(grep -E '(freetype|libpng|brotli|bz2)' otool.txt || true)
+          outside=$(awk '/^\t/ { print $1 }' otool.txt \
+                    | grep -vE '^(/usr/lib/|/System/|@rpath/)' || true)
           static_ft=$(grep -c 'FreeType linked statically' configure.txt || true)
           static_png=$(grep -c 'libpng linked statically' configure.txt || true)
           {
             echo "### libsextant.dylib — ${{ matrix.name }}"
             echo '```'
             grep -E '(linked statically|stays shared)' configure.txt || echo "(no static-deps decision logged)"
-            echo "dylib dependencies matching freetype/png/brotli/bz2:"
-            echo "${linked:-(none)}"
+            echo "dylib dependencies outside the SDK:"
+            echo "${outside:-(none)}"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-          if [ -n "$linked" ] && { [ "$static_ft" != 0 ] || [ "$static_png" != 0 ]; }; then
-            echo "configure took the static link line and the dylib still depends on it"
+          if [ -n "$outside" ] && { [ "$static_ft" != 0 ] || [ "$static_png" != 0 ]; }; then
+            echo "configure took the static link line and the dylib still depends on:"
+            echo "$outside"
             exit 1
           fi
 
@@ -182,6 +188,9 @@ jobs:
       # stdin from /dev/null: under xvfb basic_smoke sees DISPLAY and calls
       # show(true), whose ENTER prompt must not wait.
       - name: basic_smoke
+        # The same guard its two siblings carry: a failure in a step that is not
+        # a test — the dylib check above — must not silently skip a test.
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         timeout-minutes: 5
         run: |
           cd out
