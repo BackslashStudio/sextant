@@ -317,7 +317,7 @@ void main() {
 in vec2 vUV;
 in vec4 vColor;
 uniform int  uMarker;
-out vec4 FragColor;
+layout(location = 0) out vec4 FragColor;
 PEEL
 void main() {
     bool inside = true;
@@ -719,7 +719,7 @@ in float vShadeT;
 uniform sampler2D uCmap;
 uniform int  uColormapped;
 uniform vec3 uShade;
-out vec4 FragColor;
+layout(location = 0) out vec4 FragColor;
 PEEL
 void main() {
     peel_or_discard(gl_FragCoord.z);
@@ -765,7 +765,7 @@ void main() {
 in vec4  vColor;
 in float vShadeT;
 uniform vec3 uShade;
-out vec4 FragColor;
+layout(location = 0) out vec4 FragColor;
 PEEL
 void main() {
     peel_or_discard(gl_FragCoord.z);
@@ -778,19 +778,25 @@ void main() {
     // Depth peeling
     // ---------------------------------------------------------------------------
     // The peel test, pasted into the in-scene fragment shaders by the PEEL token:
-    //   - `z <= prev` drops what earlier passes peeled (`<=`: the winner was
-    //     written at exactly that depth). Exactly coplanar primitives share a
-    //     layer and the farther is lost.
+    //   - `z <= prev` drops what earlier passes peeled (`<=`: the winner wrote
+    //     exactly this z). Exactly coplanar primitives share a layer and the
+    //     farther is lost.
     //   - `z >= opaque` drops what the opaque phase covers (its depth is a copy).
+    // `prev` is the z the winner wrote to an R32F target, not read back from the
+    // depth buffer: Apple GPUs emulate DEPTH24_STENCIL8, the value read back can
+    // fall just below the fragment's own z, and the same layer then passes the
+    // test on every pass (v1.0 step 22.3). Same float out, same float in.
     // texelFetch: the targets match the plot rect at framebuffer resolution.
     // gl_FragCoord.z includes polygon offset, so offset wireframes peel once.
     static constexpr char k_peel_test[] = R"(
+layout(location = 1) out float PeelZ;
 uniform sampler2D uPrevDepth;
 uniform sampler2D uOpaqueDepth;
 void peel_or_discard(float z) {
     ivec2 pc = ivec2(gl_FragCoord.xy);
     if (z <= texelFetch(uPrevDepth,   pc, 0).r) discard;
     if (z >= texelFetch(uOpaqueDepth, pc, 0).r) discard;
+    PeelZ = z;
 }
 )";
 
@@ -800,7 +806,7 @@ void peel_or_discard(float z) {
 #version 410 core
 in float vShade;
 uniform vec4 uColor;
-out vec4 FragColor;
+layout(location = 0) out vec4 FragColor;
 PEEL
 void main() {
     peel_or_discard(gl_FragCoord.z);
@@ -811,7 +817,7 @@ void main() {
     static constexpr char k_peel_surface_frag[] = R"(
 #version 410 core
 in vec4 vColor;
-out vec4 FragColor;
+layout(location = 0) out vec4 FragColor;
 PEEL
 void main() {
     peel_or_discard(gl_FragCoord.z);
@@ -827,7 +833,7 @@ in float vValue;
 in float vShade;
 uniform sampler2D uCmap;
 uniform int  uColormapped;
-out vec4 FragColor;
+layout(location = 0) out vec4 FragColor;
 PEEL
 void main() {
     peel_or_discard(gl_FragCoord.z);
@@ -845,7 +851,7 @@ void main() {
 in vec2 vTC;
 uniform sampler2D uTex;
 uniform float uAlpha;
-out vec4 FragColor;
+layout(location = 0) out vec4 FragColor;
 PEEL
 void main() {
     vec4 c = texture(uTex, vTC);
@@ -859,7 +865,7 @@ void main() {
     static constexpr char k_peel_flat_frag[] = R"(
 #version 410 core
 uniform vec4 uColor;
-out vec4 FragColor;
+layout(location = 0) out vec4 FragColor;
 PEEL
 void main() {
     peel_or_discard(gl_FragCoord.z);
@@ -1693,6 +1699,7 @@ void main() {
         if (peel_.accum_tex) glDeleteTextures(1, &peel_.accum_tex);
         if (peel_.opaque_tex) glDeleteTextures(1, &peel_.opaque_tex);
         if (peel_.depth_tex[0]) glDeleteTextures(2, peel_.depth_tex);
+        if (peel_.z_tex[0]) glDeleteTextures(2, peel_.z_tex);
         if (peel_.query) glDeleteQueries(1, &peel_.query);
 
         if (bar3d_vao_) glDeleteVertexArrays(1, &bar3d_vao_);
@@ -2845,6 +2852,7 @@ void main() {
         if (peel_.accum_tex) glDeleteTextures(1, &peel_.accum_tex);
         if (peel_.opaque_tex) glDeleteTextures(1, &peel_.opaque_tex);
         if (peel_.depth_tex[0]) glDeleteTextures(2, peel_.depth_tex);
+        if (peel_.z_tex[0]) glDeleteTextures(2, peel_.z_tex);
         peel_ = PeelTargets{};
         peel_.query = query;
         if (!peel_.query) glGenQueries(1, &peel_.query);
@@ -2871,11 +2879,23 @@ void main() {
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE);
         };
 
+        auto make_z = [&](unsigned int& t) {
+            glGenTextures(1, &t);
+            glBindTexture(GL_TEXTURE_2D, t);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, w, h, 0, GL_RED, GL_FLOAT, nullptr);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        };
+
         make_color(peel_.layer_tex);
         make_color(peel_.accum_tex);
         make_depth(peel_.opaque_tex);
         make_depth(peel_.depth_tex[0]);
         make_depth(peel_.depth_tex[1]);
+        make_z(peel_.z_tex[0]);
+        make_z(peel_.z_tex[1]);
         glBindTexture(GL_TEXTURE_2D, 0);
 
         int prev_fbo = 0;
@@ -2893,8 +2913,15 @@ void main() {
                                        GL_TEXTURE_2D, depth, 0);
             ok = ok && glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
         };
-        // The depth attachment is re-pointed every pass.
+        // The depth attachment and the z attachment are re-pointed every pass.
         attach(peel_.fbo, peel_.layer_tex, peel_.depth_tex[0]);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D,
+                               peel_.z_tex[0], 0);
+        {
+            const GLenum bufs[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+            glDrawBuffers(2, bufs);
+        }
+        ok = ok && glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
         attach(peel_.accum_fbo, peel_.accum_tex, 0);
         attach(peel_.copy_fbo, 0, peel_.opaque_tex);
         glBindFramebuffer(GL_FRAMEBUFFER, static_cast<unsigned int>(prev_fbo));
@@ -2971,13 +2998,13 @@ void main() {
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
 
-        // Pass 0's "already peeled" depth rejects nothing.
+        // Pass 0's "already peeled" z rejects nothing.
+        const float z_none[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+        const float z_far[4] = {1.0f, 0.0f, 0.0f, 0.0f};
         glBindFramebuffer(GL_FRAMEBUFFER, peel_.fbo);
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
-                               GL_TEXTURE_2D, peel_.depth_tex[1], 0);
-        glClearDepth(0.0);
-        glClear(GL_DEPTH_BUFFER_BIT);
-        glClearDepth(1.0);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1,
+                               GL_TEXTURE_2D, peel_.z_tex[1], 0);
+        glClearBufferfv(GL_COLOR, 1, z_none);
 
         int cur = 0;
         int peeled = 0;
@@ -2986,6 +3013,8 @@ void main() {
             glBindFramebuffer(GL_FRAMEBUFFER, peel_.fbo);
             glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
                                    GL_TEXTURE_2D, peel_.depth_tex[cur], 0);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1,
+                                   GL_TEXTURE_2D, peel_.z_tex[cur], 0);
             // Shift the viewport by the rect origin so geometry lands in the peel
             // target, keeping clip_matrix() and the buffers unchanged.
             glViewport(-ox, -oy, fb_w, fb_h);
@@ -2993,9 +3022,11 @@ void main() {
             glDepthMask(GL_TRUE);
             glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+            // A pixel this pass leaves empty has nothing left behind it.
+            glClearBufferfv(GL_COLOR, 1, z_far);
 
             glActiveTexture(GL_TEXTURE1);
-            glBindTexture(GL_TEXTURE_2D, peel_.depth_tex[prev]);
+            glBindTexture(GL_TEXTURE_2D, peel_.z_tex[prev]);
             glActiveTexture(GL_TEXTURE2);
             glBindTexture(GL_TEXTURE_2D, peel_.opaque_tex);
             glActiveTexture(GL_TEXTURE0);

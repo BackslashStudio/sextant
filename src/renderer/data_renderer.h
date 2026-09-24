@@ -520,12 +520,15 @@ private:
     // GL_DEPTH24_STENCIL8 format, required for the blit). Colour targets are
     // RGBA16F: premultiplied low-alpha layers and multiplied transmittance
     // need the precision.
+    // `z_tex` (R32F) holds each pass's winning gl_FragCoord.z exactly; the next
+    // pass tests against it rather than reading the depth buffer back.
     struct PeelTargets {
-        unsigned int fbo = 0;         // colour = layer, depth = depth_tex[cur]
+        unsigned int fbo = 0;         // colour = layer + z_tex[cur], depth = depth_tex[cur]
         unsigned int accum_fbo = 0;   // colour = accum
         unsigned int copy_fbo = 0;    // depth = opaque_tex; the blit's target
         unsigned int layer_tex = 0, accum_tex = 0, opaque_tex = 0;
         unsigned int depth_tex[2]{ 0, 0 };
+        unsigned int z_tex[2]{ 0, 0 };
         unsigned int query = 0;       // GL_ANY_SAMPLES_PASSED, the early-out
         int  w = 0, h = 0;
         // True while drawing a peel pass: scissor to the peel target, no

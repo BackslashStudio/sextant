@@ -479,13 +479,28 @@ namespace lt {
                   "peel option (noisy renderer): twelve layers is what a sheet through a bar "
                   "grid needs, up to noise");
         } else if (peeling) {
+            // A renderer that repeats itself exactly may still round a layer
+            // differently with the pass count: the Apple M2 differs by one level
+            // in a few dozen pixels between 12 and 32 layers (v1.0 step 22.3),
+            // where a missing layer moves thousands by up to 14.
+            auto same = [&](const std::string& x, const std::string& y,
+                            const char* xs, const char* ys) {
+                if (x == y) return true;
+                const PixelDiff d = png_pixel_diff(std::string(xs) + ".png",
+                                                   std::string(ys) + ".png");
+                std::printf("  %s vs %s: %d px differ, worst %d (%s)\n", xs, ys, d.px,
+                            d.worst, gl_renderer().c_str());
+                return d.px >= 0 && d.worst <= 1;
+            };
             check(b2 == b, "peel option: the same export twice is byte-identical");
-            check(a != b,
+            check(!same(a, b, "peel_opt_deep_4", "peel_opt_deep_32"),
                   "peel option: raising the count changes a scene that needs more layers");
-            check(c == d,
-                  "peel option: and changes nothing in a scene that does not");
-            check(e == b,
-                  "peel option: twelve layers is what a sheet through a bar grid needs");
+            check(same(c, d, "peel_opt_shallow_auto", "peel_opt_shallow_32"),
+                  "peel option: and changes nothing in a scene that does not "
+                  "(up to one level of rounding)");
+            check(same(e, b, "peel_opt_deep_12", "peel_opt_deep_32"),
+                  "peel option: twelve layers is what a sheet through a bar grid needs "
+                  "(up to one level of rounding)");
         } else {
             // With peeling off, the override must not re-enable it.
             check(b2 == b, "peel option (control): the same export twice is byte-identical");

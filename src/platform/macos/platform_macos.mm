@@ -1,10 +1,12 @@
 #include "../platform.h"
 
+#include <chrono>
 #include <dlfcn.h>
 #include <initializer_list>
 #include <pthread.h>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <OpenGL/OpenGL.h>
 #import <AppKit/AppKit.h>
 
@@ -19,7 +21,16 @@ namespace sextant::platform {
     }
 
     void unlock_current_gl_context() {
-        if (CGLContextObj ctx = CGLGetCurrentContext()) CGLUnlockContext(ctx);
+        CGLContextObj ctx = CGLGetCurrentContext();
+        if (!ctx) return;
+        CGLUnlockContext(ctx);
+        // The lock is not fair, and the next frame would take it again within
+        // microseconds. The main thread waits on it to move or resize the window
+        // -- GLFW's patched update, and AppKit's own layer display during a live
+        // resize -- and would wait for seconds (the beachball). A short gap after
+        // the swap lets a waiter in; with no waiter it costs nothing a vsynced
+        // frame would notice.
+        std::this_thread::sleep_for(std::chrono::microseconds(200));
     }
 
     // NSPasteboard is documented thread-safe, so the render thread reads it
