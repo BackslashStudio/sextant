@@ -41,7 +41,8 @@ namespace sextant {
     WindowThread::submit_png_export(const FigureSnapshot& snap, std::string path,
                                     int width, int height, int supersample,
                                     int peel_layers,
-                                    const FigureMeasure* on_screen) {
+                                    const FigureMeasure* on_screen,
+                                    float scale) {
         ExportJob job;
         job.snap = &snap;
         job.on_screen = on_screen;
@@ -50,6 +51,7 @@ namespace sextant {
         job.height = height;
         job.supersample = supersample;
         job.peel_layers = peel_layers;
+        job.scale = scale;
         auto fut = job.result.get_future();
 
         // A submit from the loop thread would wait on itself; report un-serviced.
@@ -78,7 +80,7 @@ namespace sextant {
             try {
                 export_figure_png(ctx, nvg, data, *job.snap, job.path,
                                   job.width, job.height, job.supersample,
-                                  job.peel_layers, job.on_screen);
+                                  job.peel_layers, job.on_screen, job.scale);
             } catch (...) {
                 r.error = std::current_exception();
             }

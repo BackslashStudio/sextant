@@ -238,17 +238,27 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
     ImGui::Begin("Plot", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
     ImGui::PopStyleVar();
 
-    // GetContentRegionAvail() is logical, not framebuffer pixels: render at the
-    // physical size but display at the logical size.
+    // Three units meet here. ImGui's are window coordinates (points on macOS);
+    // the FBO is framebuffer pixels (ImGui units x DisplayFramebufferScale);
+    // the plot is laid out in logical pixels (framebuffer pixels / the
+    // display's content scale), so a font size looks the same on every display
+    // and only the sharpness changes. `to_plot` takes ImGui units to plot ones.
     const ImVec2 avail = ImGui::GetContentRegionAvail();
-    const ImVec2 fb_scale = ImGui::GetIO().DisplayFramebufferScale;
-    const int render_w = std::max(1, static_cast<int>(avail.x * fb_scale.x));
-    const int render_h = std::max(1, static_cast<int>(avail.y * fb_scale.y));
+    const float fb_scale = ImGui::GetIO().DisplayFramebufferScale.x;
+    const float display_scale = std::max(ctx.link().content_scale(), 0.01f);
+    const float to_plot = fb_scale / display_scale;
+    const int fb_w = std::max(1, static_cast<int>(avail.x * fb_scale));
+    const int fb_h = std::max(1, static_cast<int>(avail.y * fb_scale));
+    const int render_w = std::max(1, static_cast<int>(std::lround(fb_w / display_scale)));
+    const int render_h = std::max(1, static_cast<int>(std::lround(fb_h / display_scale)));
     st.live_plot_w.store(render_w, std::memory_order_relaxed);
     st.live_plot_h.store(render_h, std::memory_order_relaxed);
-    // The FBO is supersample times larger; render_w/render_h and the layout
-    // stay at display size.
-    plot_fbo.ensure_size(render_w, render_h, supersample);
+    st.live_plot_fb_w.store(fb_w, std::memory_order_relaxed);
+    st.live_plot_fb_h.store(fb_h, std::memory_order_relaxed);
+    // The FBO is framebuffer-sized, times the supersample factor; the layout
+    // stays logical.
+    plot_fbo.ensure_size(fb_w, fb_h, supersample);
+    const float pixel_ratio = display_scale * static_cast<float>(plot_fbo.supersample());
 
     // From stored measurements, re-measured on layout generation, size change
     // or File > Refit layout.
@@ -257,7 +267,7 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
     std::vector<AxesLayout> layout;
     plot_fbo.bind();
     render_frame(ctx, nvg, data, fsnap, render_w, render_h,
-                 plot_fbo.supersample(), &layout, &fl);
+                 pixel_ratio, &layout, &fl);
     plot_fbo.unbind();
 
     // Store the resolved auto limits for the Cosmetic panel.
@@ -295,8 +305,8 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
     {
         const ImGuiIO& io = ImGui::GetIO();
         PlotPointer in;
-        in.x = (io.MousePos.x - image_pos.x) * fb_scale.x;
-        in.y = (io.MousePos.y - image_pos.y) * fb_scale.y;
+        in.x = (io.MousePos.x - image_pos.x) * to_plot;
+        in.y = (io.MousePos.y - image_pos.y) * to_plot;
         in.hovered        = in_hovered;
         in.active         = ImGui::IsItemActive();
         in.pressed        = ImGui::IsItemActivated();
@@ -308,7 +318,7 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
         // Grid boundary dragging first; what it owns doesn't select or
         // navigate.
         GridDragOut grid = update_grid_drag(st, fsnap, fl, render_w, render_h, in,
-                                            4.0f * fb_scale.x);
+                                            4.0f * to_plot);
         if (grid.col_ratios || grid.row_ratios)
             edit_box.update_figure([&](FigureEdits& f) {
                 if (grid.col_ratios) f.col_ratios = std::move(*grid.col_ratios);
@@ -327,10 +337,10 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
     if (fsnap.axes.size() > 1) {
         for (const AxesLayout& al : layout) {
             if (al.slot.index != st.selected_slot_index) continue;
-            const ImVec2 p0(image_pos.x + al.cell.x / fb_scale.x + 1.0f,
-                            image_pos.y + al.cell.y / fb_scale.y + 1.0f);
-            const ImVec2 p1(image_pos.x + (al.cell.x + al.cell.w) / fb_scale.x - 1.0f,
-                            image_pos.y + (al.cell.y + al.cell.h) / fb_scale.y - 1.0f);
+            const ImVec2 p0(image_pos.x + al.cell.x / to_plot + 1.0f,
+                            image_pos.y + al.cell.y / to_plot + 1.0f);
+            const ImVec2 p1(image_pos.x + (al.cell.x + al.cell.w) / to_plot - 1.0f,
+                            image_pos.y + (al.cell.y + al.cell.h) / to_plot - 1.0f);
             ImVec4 accent = ImGui::GetStyleColorVec4(ImGuiCol_CheckMark);
             accent.w *= 0.75f;
             ImGui::GetWindowDrawList()->AddRect(p0, p1, ImGui::GetColorU32(accent),
@@ -343,8 +353,8 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
     // already-rendered texture in a new NanoVG frame.
     if (st.hints_enabled && in_hovered) {
         const ImGuiIO& io = ImGui::GetIO();
-        const float cursor_x = (io.MousePos.x - image_pos.x) * fb_scale.x;
-        const float cursor_y = (io.MousePos.y - image_pos.y) * fb_scale.y;
+        const float cursor_x = (io.MousePos.x - image_pos.x) * to_plot;
+        const float cursor_y = (io.MousePos.y - image_pos.y) * to_plot;
         if (const AxesLayout* cell = find_hint_cell(layout, cursor_x, cursor_y)) {
             const FigureAxesSnapshot* fa = nullptr;
             for (const auto& a : fsnap.axes)
@@ -364,8 +374,7 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
             if (hint) {
                 plot_fbo.bind();
                 glViewport(0, 0, plot_fbo.render_width(), plot_fbo.render_height());
-                ctx.begin_nvg_frame(render_w, render_h,
-                                    static_cast<float>(plot_fbo.supersample()));
+                ctx.begin_nvg_frame(render_w, render_h, pixel_ratio);
                 nvg.draw_hint(render_w, render_h, hint->anchor_x, hint->anchor_y, hint->text);
                 ctx.end_nvg_frame();
                 plot_fbo.unbind();
@@ -391,8 +400,8 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
             bool moved = false;
 
             if (gate.drag && (io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f)) {
-                cam = orbit_camera(cam, io.MouseDelta.x * fb_scale.x,
-                                        io.MouseDelta.y * fb_scale.y);
+                cam = orbit_camera(cam, io.MouseDelta.x * to_plot,
+                                        io.MouseDelta.y * to_plot);
                 moved = true;
             }
 
@@ -440,7 +449,7 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
 
             if (gate.drag && (io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f)) {
                 const auto lim = pan_limits(cur->tr,
-                    io.MouseDelta.x * fb_scale.x, io.MouseDelta.y * fb_scale.y);
+                    io.MouseDelta.x * to_plot, io.MouseDelta.y * to_plot);
                 st.xmin_local = lim.xmin; st.xmax_local = lim.xmax;
                 st.ymin_local = lim.ymin; st.ymax_local = lim.ymax;
                 st.xauto_local = st.yauto_local = false;
@@ -451,8 +460,8 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
             }
 
             if (gate.wheel && io.MouseWheel != 0.0f) {
-                const float cursor_x = (io.MousePos.x - image_pos.x) * fb_scale.x;
-                const float cursor_y = (io.MousePos.y - image_pos.y) * fb_scale.y;
+                const float cursor_x = (io.MousePos.x - image_pos.x) * to_plot;
+                const float cursor_y = (io.MousePos.y - image_pos.y) * to_plot;
                 const float factor = std::pow(0.9f, io.MouseWheel);
                 const auto lim = zoom_limits(cur->tr, cursor_x, cursor_y, factor);
                 st.xmin_local = lim.xmin; st.xmax_local = lim.xmax;
@@ -1723,8 +1732,15 @@ void apply_pending_resize(GLContext& ctx, PanelState& st) {
     st.pending_plot_w.store(0, std::memory_order_relaxed);
     st.pending_plot_h.store(0, std::memory_order_relaxed);
 
-    const int target_fb_w = want_w + (ctx.width()  - plot_w);
-    const int target_fb_h = want_h + (ctx.height() - plot_h);
+    // The request is logical; the window chrome around the plot is measured in
+    // framebuffer pixels, so the plot goes through the display scale first.
+    const int plot_fb_w = st.live_plot_fb_w.load(std::memory_order_relaxed);
+    const int plot_fb_h = st.live_plot_fb_h.load(std::memory_order_relaxed);
+    const float display_scale = std::max(ctx.link().content_scale(), 0.01f);
+    const int target_fb_w = static_cast<int>(std::lround(want_w * display_scale))
+                            + (ctx.width()  - plot_fb_w);
+    const int target_fb_h = static_cast<int>(std::lround(want_h * display_scale))
+                            + (ctx.height() - plot_fb_h);
     if (target_fb_w <= 0 || target_fb_h <= 0) return;
 
     // A window is sized in screen coordinates, not framebuffer pixels.
@@ -1807,8 +1823,11 @@ void draw_widget_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
                     st.save_warning_open = true;
                 }
             } else {
+                // At the figure's dpi (1x by default), not the display's: a
+                // file is the same on every machine.
                 export_figure_png(ctx, nvg, data, fsnap, path, sw, sh,
-                                  opts.supersample, st.save_peel_layers, on_screen.get());
+                                  opts.supersample, st.save_peel_layers, on_screen.get(),
+                                  opts.dpi / 96.0f);
             }
         }
     }

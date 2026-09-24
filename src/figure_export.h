@@ -13,11 +13,14 @@ struct FigureMeasure;
 // context (safe mid-frame in a live window; never touches the default
 // framebuffer). `supersample` matches on-screen antialiasing. `peel_layers`
 // (0 = unchanged) is restored afterwards, since `data` may be the window's.
+// `scale` (dpi / 96) multiplies the output pixels, not the layout: the file is
+// round(width * scale) x round(height * scale).
 void export_figure_png(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
                        const FigureSnapshot& fsnap, std::string_view path,
                        int width, int height, int supersample = 1,
                        int peel_layers = 0,
-                       const FigureMeasure* on_screen = nullptr);
+                       const FigureMeasure* on_screen = nullptr,
+                       float scale = 1.0f);
 
 // `on_screen` (LayoutStore::load()) keeps an open window's measured layout;
 // null lays the figure out afresh.

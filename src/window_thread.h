@@ -65,7 +65,8 @@ public:
                                                 int width, int height,
                                                 int supersample,
                                                 int peel_layers = 0,
-                                                const FigureMeasure* on_screen = nullptr);
+                                                const FigureMeasure* on_screen = nullptr,
+                                                float scale = 1.0f);
 
 private:
     void thread_main();
@@ -81,6 +82,7 @@ private:
         std::string                path;
         int                        width = 0, height = 0, supersample = 1;
         int                        peel_layers = 0;
+        float                      scale = 1.0f;          // dpi / 96
         std::promise<ExportResult> result;
     };
 

@@ -18,7 +18,13 @@ namespace sextant {
         std::string title = "sextant";
         bool resizable = true;
 
-        // Currently unused; panel HiDPI scaling comes from the OS.
+        // Every size in this library -- width/height, font sizes, line widths,
+        // marker sizes, margins -- is a logical pixel, 1/96 inch. The window
+        // draws them at the display's scale (sharper on a Retina or 150%
+        // display, laid out the same). A PNG is written at dpi / 96 output pixels
+        // per logical pixel: 96 (the default) gives an 800x600 file for an
+        // 800x600 figure on every machine, 192 twice that. Default for
+        // PngExportOptions::dpi; must be finite and positive.
         float dpi = 96.0f;
 
         // Gap in pixels between subplot cells (a cell includes its decorations).
@@ -96,6 +102,11 @@ namespace sextant {
         // Depth-peeling layers, 1..64; 0 = 8. Each extra layer costs one geometry
         // pass, but only where a ray crosses that many translucent surfaces.
         int peel_layers = 0;
+
+        // Output resolution for this file; 0 = FigureOptions::dpi. The layout is
+        // the same at any dpi; only the pixel count scales (192 = 2x). Must be
+        // 0 or finite and positive.
+        float dpi = 0.0f;
     };
 
     class SEXTANT_API Figure {
@@ -134,9 +145,10 @@ namespace sextant {
         // wait_closed() to wait for the window itself, with no console in it.
         //
         // On macOS, where the window's events belong to the main thread, a
-        // console read there would freeze the plot it just opened: called on the
-        // main thread, pause instead waits for the window to close (the same as
-        // wait_closed()) and keeps pumping while it does.
+        // blocking console read there would freeze the plot it just opened:
+        // called on the main thread, pause keeps pumping the window while it
+        // waits for ENTER. Closing the window does not end the wait, as on
+        // every other platform.
         void show(bool pause = true);
 
         void close();

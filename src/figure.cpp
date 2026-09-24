@@ -15,9 +15,11 @@
 #include "renderer/data_renderer.h"
 #include "renderer/figure_layout.h"
 #include "renderer/plot_fbo.h"
+#include "platform/platform.h"
 #include <glad/glad.h>
 #include <algorithm>
 #include <iostream>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -441,19 +443,31 @@ struct Figure::Impl {
     // Blocks until serviced; renders the caller's own fresh snapshot.
     bool export_png_via_window(const FigureSnapshot& fsnap, std::string_view path,
                                int w, int h, int peel_layers = 0,
-                               const FigureMeasure* on_screen = nullptr) {
+                               const FigureMeasure* on_screen = nullptr,
+                               float scale = 1.0f) {
         if (!open.load() || !window_thread) return false;
         auto fut = window_thread->submit_png_export(fsnap, std::string(path),
                                                     w, h, opts.supersample,
-                                                    peel_layers, on_screen);
+                                                    peel_layers, on_screen, scale);
         WindowThread::ExportResult r = fut.get();
         if (!r.serviced) return false;
         if (r.error) std::rethrow_exception(r.error);
         return true;
     }
+
+    // Output pixels per logical pixel for one PNG: its own dpi, else the
+    // figure's, over 96.
+    float png_scale(const PngExportOptions& o) const {
+        if (!std::isfinite(o.dpi) || o.dpi < 0.0f)
+            throw std::invalid_argument("savefig_png: PngExportOptions::dpi must be 0 "
+                                        "(the figure's) or finite and positive");
+        return (o.dpi > 0.0f ? o.dpi : opts.dpi) / 96.0f;
+    }
 };
 
 Figure::Figure(FigureOptions opts) : d(std::make_unique<Impl>()) {
+    if (!std::isfinite(opts.dpi) || opts.dpi <= 0.0f)
+        throw std::invalid_argument("Figure: FigureOptions::dpi must be finite and positive");
     d->opts = std::move(opts);
         // Normalize supersample once here.
     d->opts.supersample = std::clamp(d->opts.supersample, 1, kMaxSupersample);
@@ -540,13 +554,17 @@ void Figure::show(bool pause) {
     d->window_thread->start();  // blocks until window visible, then returns
 
     if (pause) {
-        // Where this thread is the one pumping the window, a console read would
-        // starve it -- the plot would be up and frozen. So there the pause is
-        // the window's own: it lasts until the window closes.
+        std::cout << "Press ENTER to continue (the plot window stays open)..." << std::endl;
         if (pump_runs_here()) {
-            wait_closed();
+            // A blocking console read here would starve the window this thread
+            // pumps. So pump, and read only once a line (or EOF) is waiting --
+            // then the read is whole: a terminal hands over the line at once.
+            pump_until([] {
+                if (!platform::console_input_ready()) return false;
+                std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                return true;
+            }, -1.0);
         } else {
-            std::cout << "Press ENTER to continue (the plot window stays open)..." << std::endl;
             std::cin.get();
         }
     }
@@ -626,19 +644,21 @@ void Figure::savefig_png(std::string_view path, PngExportOptions opts, int w, in
     if (w <= 0) w = d->opts.width;
     if (h <= 0) h = d->opts.height;
 
+    const float scale = d->png_scale(opts);
     d->ensure_any_axes();
     const FigureSnapshot fsnap = d->build_figure_snapshot();
     const auto on_screen = d->on_screen_measure();
 
     // Use the window's GL context if there is one, else a headless one.
-    if (d->export_png_via_window(fsnap, path, w, h, opts.peel_layers, on_screen.get())) return;
+    if (d->export_png_via_window(fsnap, path, w, h, opts.peel_layers, on_screen.get(),
+                                 scale)) return;
 
     GLContext    ctx({ .width=w, .height=h, .title="", .visible=false, .resizable=false,
                        .headless=true });
     NvgRenderer  nvg(ctx.nvg());
     DataRenderer data;
     export_figure_png(ctx, nvg, data, fsnap, path, w, h, d->opts.supersample,
-                      opts.peel_layers, on_screen.get());
+                      opts.peel_layers, on_screen.get(), scale);
 }
 
 SvgSaveReport Figure::savefig_svg(std::string_view path, SvgExportOptions opts,
@@ -657,6 +677,7 @@ SvgSaveReport Figure::savefig_svg(std::string_view path, SvgExportOptions opts,
 
 void Figure::savefig_png_live(std::string_view path, PngExportOptions opts,
                               int w, int h) {
+    const float scale = d->png_scale(opts);
     d->ensure_any_axes();
     d->resolve_live_save_size(*this, w, h);
     const FigureSnapshot fsnap = d->build_figure_snapshot();
@@ -664,14 +685,15 @@ void Figure::savefig_png_live(std::string_view path, PngExportOptions opts,
 
     // Normally routed to the window thread; the headless fallback lets this be
     // called from any thread.
-    if (d->export_png_via_window(fsnap, path, w, h, opts.peel_layers, on_screen.get())) return;
+    if (d->export_png_via_window(fsnap, path, w, h, opts.peel_layers, on_screen.get(),
+                                 scale)) return;
 
     GLContext    ctx({ .width=w, .height=h, .title="", .visible=false, .resizable=false,
                        .headless=true });
     NvgRenderer  nvg(ctx.nvg());
     DataRenderer data;
     export_figure_png(ctx, nvg, data, fsnap, path, w, h, d->opts.supersample,
-                      opts.peel_layers, on_screen.get());
+                      opts.peel_layers, on_screen.get(), scale);
 }
 
 SvgSaveReport Figure::savefig_svg_live(std::string_view path, SvgExportOptions opts,

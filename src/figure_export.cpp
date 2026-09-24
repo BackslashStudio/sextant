@@ -11,6 +11,7 @@
 #include "output/png_writer.h"
 #include "output/svg_writer.h"
 #include <algorithm>
+#include <cmath>
 
 namespace sextant {
 
@@ -37,18 +38,22 @@ FigureLayout layout_for_export(const FigureSnapshot& fsnap, const FigureMeasure*
 void export_figure_png(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
                        const FigureSnapshot& fsnap, std::string_view path,
                        int width, int height, int supersample, int peel_layers,
-                       const FigureMeasure* on_screen) {
+                       const FigureMeasure* on_screen, float scale) {
     const PeelLayerScope peel(data, peel_layers);
-    FboReadback fbo(width, height, supersample);
+    if (!(std::isfinite(scale) && scale > 0.0f)) scale = 1.0f;
+    const int out_w = std::max(1, static_cast<int>(std::lround(width * scale)));
+    const int out_h = std::max(1, static_cast<int>(std::lround(height * scale)));
+    FboReadback fbo(out_w, out_h, supersample);
     fbo.bind();
     // width/height stay logical; render_frame scales the viewport and
     // read_pixels() filters back down.
     const FigureLayout layout = layout_for_export(fsnap, on_screen, width, height);
-    render_frame(ctx, nvg, data, fsnap, width, height, fbo.supersample(), nullptr, &layout);
+    render_frame(ctx, nvg, data, fsnap, width, height,
+                 scale * static_cast<float>(fbo.supersample()), nullptr, &layout);
     auto pixels = fbo.read_pixels();
     fbo.unbind();
 
-    write_png(path, width, height, pixels);
+    write_png(path, out_w, out_h, pixels);
 }
 
 void export_figure_svg(const FigureSnapshot& fsnap, std::string_view path,

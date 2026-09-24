@@ -182,15 +182,21 @@ namespace sextant {
         int resize_frame_w = 0;
         int resize_frame_h = 0;
 
-        // Requested plot size in physical pixels (> 0 = pending). Written from any
+        // Requested plot size in logical pixels (> 0 = pending). Written from any
         // thread (Figure::resize()) or the dialog; applied in draw_widget_panel().
         std::atomic<int> pending_plot_w{0};
         std::atomic<int> pending_plot_h{0};
 
-        // The plot's last rendered size in physical pixels. Exception: read from
-        // any thread by savefig_png()/savefig_svg().
+        // The plot's last laid-out size in logical pixels -- what the layout,
+        // the panels and a save see. Exception: read from any thread by
+        // savefig_png()/savefig_svg().
         std::atomic<int> live_plot_w{0};
         std::atomic<int> live_plot_h{0};
+
+        // The same plot in framebuffer pixels (logical x display scale), for
+        // the one thing that has to add window chrome to it: a resize.
+        std::atomic<int> live_plot_fb_w{0};
+        std::atomic<int> live_plot_fb_h{0};
 
         // The window's stored layout. fit() is render-thread only; load() is read
         // from any thread (savefig(), size_for_frame()) and by all panels.

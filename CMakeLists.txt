@@ -93,95 +93,86 @@ else()
     endif()
 endif()
 
-# macOS: link FreeType and libpng into the library instead of depending on
-# Homebrew dylibs at run time — the bargain the Windows static-md triplet makes.
-# A static libfreetype needs brotli/bz2/zlib behind it, so this is only taken
-# when pkg-config can hand over the whole `--static` line; without that it stays
-# shared rather than failing at link time. Never a reason a build cannot
-# configure. (v1.0 step 21.6)
+# macOS: FreeType and libpng built from source into libsextant.dylib, instead
+# of depending on Homebrew dylibs at run time -- the bargain the Windows
+# static-md triplet makes. From source rather than Homebrew's archives, which
+# are built for the machine they were bottled on (macOS 27 on one, 15 on CI):
+# linked into a library that claims CMAKE_OSX_DEPLOYMENT_TARGET, they would not
+# honour it. Built here they follow the deployment target and the
+# architectures, universal2 included. zlib comes from the SDK, as every Mac has
+# it; FreeType's optional codecs (brotli, bzip2, png, harfbuzz) are off -- the
+# fonts sextant loads need none of them. The SHARED target only: sextant_static's
+# consumers resolve these themselves. (v1.0 steps 21.6, 22.6)
 set(SEXTANT_MACOS_STATIC_DEPS_DEFAULT OFF)
 if(APPLE)
     set(SEXTANT_MACOS_STATIC_DEPS_DEFAULT ON)
 endif()
-option(SEXTANT_MACOS_STATIC_DEPS "Link FreeType/libpng statically on macOS"
+option(SEXTANT_MACOS_STATIC_DEPS
+       "Build FreeType/libpng from source into libsextant.dylib on macOS"
        ${SEXTANT_MACOS_STATIC_DEPS_DEFAULT})
 
-# macOS ld has no -Bstatic, so an archive is linked only when it is named by
-# full path: pkg-config's own `-lfreetype` would quietly pick the dylib sitting
-# next to it. This turns each library name off a `--static` line into that
-# archive's path where Homebrew has one, and leaves the rest as plain flags --
-# z and bz2 come from the SDK as dylibs, which every Mac has.
-# `found_primary` says whether the library this line is *for* really resolved to
-# an archive; without that there is nothing static about the result.
-function(sextant_static_link_line out_line out_found_primary prefix primary)
-    set(line "")
-    set(found_primary OFF)
-    set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")  # function-scoped
-    foreach(name IN LISTS ${prefix}_STATIC_LIBRARIES)
-        set(cache_var SEXTANT_STATIC_LIB_${name})
-        find_library(${cache_var} NAMES ${name}
-                     HINTS ${${prefix}_STATIC_LIBRARY_DIRS} NO_DEFAULT_PATH)
-        mark_as_advanced(${cache_var})
-        if(${cache_var})
-            list(APPEND line ${${cache_var}})
-            if(name STREQUAL primary)
-                set(found_primary ON)
-            endif()
-        else()
-            list(APPEND line "-l${name}")
-        endif()
-    endforeach()
-    set(${out_line} "${line}" PARENT_SCOPE)
-    set(${out_found_primary} ${found_primary} PARENT_SCOPE)
-endfunction()
-
-set(SEXTANT_STATIC_FT_FLAGS "")
-set(SEXTANT_STATIC_PNG_FLAGS "")
+set(SEXTANT_FT_BUNDLED OFF)
+set(SEXTANT_PNG_BUNDLED OFF)
 if(APPLE AND SEXTANT_MACOS_STATIC_DEPS)
-    find_package(PkgConfig QUIET)
-    if(PkgConfig_FOUND)
-        # `<PREFIX>_STATIC_LIBRARIES` is the --static line's library names: the
-        # library itself plus its Libs.private (brotlidec, bz2, z, png).
-        if(SEXTANT_USE_FREETYPE)
-            pkg_check_modules(FT2 QUIET freetype2)
-            if(FT2_FOUND)
-                sextant_static_link_line(SEXTANT_FT_LINE SEXTANT_FT_IS_STATIC FT2 freetype)
-            endif()
-        endif()
-        if(SEXTANT_USE_LIBPNG)
-            pkg_check_modules(LIBPNG QUIET libpng16)
-            if(LIBPNG_FOUND)
-                sextant_static_link_line(SEXTANT_PNG_LINE SEXTANT_PNG_IS_STATIC LIBPNG png16)
-            endif()
-        endif()
+    include(FetchContent)
+    set(_sextant_saved_shared ${BUILD_SHARED_LIBS})
+    set(BUILD_SHARED_LIBS OFF)
+    set(SKIP_INSTALL_ALL ON)  # neither is installed; both live inside the dylib
+
+    if(SEXTANT_USE_FREETYPE)
+        set(FT_DISABLE_ZLIB     ON CACHE BOOL "" FORCE)  # FreeType's own copy
+        set(FT_DISABLE_BZIP2    ON CACHE BOOL "" FORCE)
+        set(FT_DISABLE_PNG      ON CACHE BOOL "" FORCE)
+        set(FT_DISABLE_HARFBUZZ ON CACHE BOOL "" FORCE)
+        set(FT_DISABLE_BROTLI   ON CACHE BOOL "" FORCE)
+        FetchContent_Declare(
+            sextant_freetype
+            GIT_REPOSITORY https://github.com/freetype/freetype.git
+            GIT_TAG        VER-2-14-3
+            GIT_SHALLOW    TRUE
+        )
+        FetchContent_MakeAvailable(sextant_freetype)
+        set(SEXTANT_FT_BUNDLED ON)
+        message(STATUS "FreeType built from source into libsextant.dylib (2.14.3)")
     endif()
+
+    if(SEXTANT_USE_LIBPNG)
+        set(PNG_SHARED    OFF CACHE BOOL "" FORCE)
+        set(PNG_STATIC    ON  CACHE BOOL "" FORCE)
+        set(PNG_FRAMEWORK OFF CACHE BOOL "" FORCE)
+        set(PNG_TESTS     OFF CACHE BOOL "" FORCE)
+        set(PNG_TOOLS     OFF CACHE BOOL "" FORCE)
+        FetchContent_Declare(
+            sextant_libpng
+            GIT_REPOSITORY https://github.com/pnggroup/libpng.git
+            GIT_TAG        v1.6.58
+            GIT_SHALLOW    TRUE
+        )
+        FetchContent_MakeAvailable(sextant_libpng)
+        set(SEXTANT_PNG_BUNDLED ON)
+        message(STATUS "libpng built from source into libsextant.dylib (1.6.58)")
+    endif()
+
+    unset(SKIP_INSTALL_ALL)
+    set(BUILD_SHARED_LIBS ${_sextant_saved_shared})
 endif()
 
-# FreeType
+# FreeType, for everything the bundled copy does not serve (sextant_static,
+# and every target off macOS).
 if(SEXTANT_USE_FREETYPE)
     find_package(Freetype QUIET)
-    if(NOT Freetype_FOUND)
+    if(NOT Freetype_FOUND AND NOT SEXTANT_FT_BUNDLED)
         message(WARNING "FreeType not found — falling back to stb_truetype")
         set(SEXTANT_USE_FREETYPE OFF)
-    elseif(SEXTANT_FT_IS_STATIC)
-        set(SEXTANT_STATIC_FT_FLAGS ${SEXTANT_FT_LINE})
-        message(STATUS "FreeType linked statically: ${SEXTANT_STATIC_FT_FLAGS}")
-    elseif(APPLE AND SEXTANT_MACOS_STATIC_DEPS)
-        message(STATUS "FreeType stays shared: no libfreetype.a where pkg-config points")
     endif()
 endif()
 
 # libpng
 if(SEXTANT_USE_LIBPNG)
     find_package(PNG QUIET)
-    if(NOT PNG_FOUND)
+    if(NOT PNG_FOUND AND NOT SEXTANT_PNG_BUNDLED)
         message(WARNING "libpng not found — falling back to stb_image_write")
         set(SEXTANT_USE_LIBPNG OFF)
-    elseif(SEXTANT_PNG_IS_STATIC)
-        set(SEXTANT_STATIC_PNG_FLAGS ${SEXTANT_PNG_LINE})
-        message(STATUS "libpng linked statically: ${SEXTANT_STATIC_PNG_FLAGS}")
-    elseif(APPLE AND SEXTANT_MACOS_STATIC_DEPS)
-        message(STATUS "libpng stays shared: no libpng16.a where pkg-config points")
     endif()
 endif()
 
@@ -321,37 +312,45 @@ function(sextant_configure_target target_name link_scope)
         target_compile_definitions(${target_name} PRIVATE GL_SILENCE_DEPRECATION)
     endif()
 
-    # The static link lines go to the SHARED target only: a self-contained
+    # The bundled builds go to the SHARED target only: a self-contained
     # sextant.dylib is the whole point, while sextant_static's consumers resolve
-    # FreeType and libpng themselves (see cmake/sextantConfig.cmake.in) and
-    # would only inherit raw -L/-l flags from someone else's Homebrew prefix.
+    # FreeType and libpng themselves (see cmake/sextantConfig.cmake.in). Each
+    # target gets its compile definitions only with a library actually linked,
+    # so one without falls back to stb on its own.
     get_target_property(_sextant_target_type ${target_name} TYPE)
-    set(_use_static_deps OFF)
+    set(_use_bundled OFF)
     if(_sextant_target_type STREQUAL "SHARED_LIBRARY")
-        set(_use_static_deps ON)
+        set(_use_bundled ON)
     endif()
 
-    if(SEXTANT_USE_FREETYPE AND TARGET Freetype::Freetype)
-        if(_use_static_deps AND SEXTANT_STATIC_FT_FLAGS)
-            # Headers still come from find_package; only the link line changes.
-            target_include_directories(${target_name} PRIVATE ${FREETYPE_INCLUDE_DIRS})
-            target_link_libraries(${target_name} ${link_scope} ${SEXTANT_STATIC_FT_FLAGS})
-        else()
+    if(SEXTANT_USE_FREETYPE)
+        set(_ft_linked ON)
+        if(_use_bundled AND SEXTANT_FT_BUNDLED)
+            target_link_libraries(${target_name} PRIVATE freetype)
+        elseif(TARGET Freetype::Freetype)
             target_link_libraries(${target_name} ${link_scope} Freetype::Freetype)
+        else()
+            set(_ft_linked OFF)
         endif()
-        # FONS_USE_FREETYPE switches nanovg's fontstash.h from stb_truetype to
-        # FreeType (SEXTANT_USE_FREETYPE alone changes nothing in the sources).
-        target_compile_definitions(${target_name} PRIVATE SEXTANT_USE_FREETYPE FONS_USE_FREETYPE)
+        if(_ft_linked)
+            # FONS_USE_FREETYPE switches nanovg's fontstash.h from stb_truetype to
+            # FreeType (SEXTANT_USE_FREETYPE alone changes nothing in the sources).
+            target_compile_definitions(${target_name} PRIVATE SEXTANT_USE_FREETYPE FONS_USE_FREETYPE)
+        endif()
     endif()
 
-    if(SEXTANT_USE_LIBPNG AND TARGET PNG::PNG)
-        if(_use_static_deps AND SEXTANT_STATIC_PNG_FLAGS)
-            target_include_directories(${target_name} PRIVATE ${PNG_INCLUDE_DIRS})
-            target_link_libraries(${target_name} ${link_scope} ${SEXTANT_STATIC_PNG_FLAGS})
-        else()
+    if(SEXTANT_USE_LIBPNG)
+        set(_png_linked ON)
+        if(_use_bundled AND SEXTANT_PNG_BUNDLED)
+            target_link_libraries(${target_name} PRIVATE png_static)
+        elseif(TARGET PNG::PNG)
             target_link_libraries(${target_name} ${link_scope} PNG::PNG)
+        else()
+            set(_png_linked OFF)
         endif()
-        target_compile_definitions(${target_name} PRIVATE SEXTANT_USE_LIBPNG)
+        if(_png_linked)
+            target_compile_definitions(${target_name} PRIVATE SEXTANT_USE_LIBPNG)
+        endif()
     endif()
 
     # Hide non-API symbols by default on GCC/Clang

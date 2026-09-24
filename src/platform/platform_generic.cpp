@@ -15,6 +15,8 @@ namespace sextant::platform {
 
     bool read_clipboard(std::string&) { return false; }
 
+    bool console_input_ready() { return false; }
+
     OffscreenGL* create_offscreen_gl() { return nullptr; }
 
     void destroy_offscreen_gl(OffscreenGL*) {

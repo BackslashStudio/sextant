@@ -147,38 +147,53 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           exit $status
 
+      # Kept for the macOS check below, which reads the linker's warnings.
       - name: Build
         id: build
-        run: cmake --build build
+        run: cmake --build build 2>&1 | tee build.txt
 
-      # SEXTANT_MACOS_STATIC_DEPS (v1.0 step 21.6): where configure said it took
-      # the static link line, libsextant.dylib must depend on nothing outside
-      # the SDK — a copy of it has to run on a Mac that has never seen brew.
-      # /usr/lib and /System are the SDK, and libz and libbz2 live there and are
-      # meant to be linked from there; @rpath is the library itself. Where
-      # configure said it stayed shared, this reports and does not fail: falling
-      # back is the documented behaviour, not a broken build.
-      - name: No non-SDK dylibs in libsextant (macOS)
+      # SEXTANT_MACOS_STATIC_DEPS (v1.0 steps 21.6, 22.6): FreeType and libpng
+      # are built from source into libsextant.dylib, so it must depend on
+      # nothing outside the SDK -- a copy of it has to run on a Mac that has
+      # never seen brew. /usr/lib and /System are the SDK (libz lives there and
+      # is meant to be linked from there); @rpath is the library itself. And
+      # nothing linked into it may be built for a newer macOS than the one it
+      # claims: that is what Homebrew's archives did, and ld only warns.
+      - name: libsextant.dylib is self-contained and honours its deployment target (macOS)
         if: ${{ !cancelled() && runner.os == 'macOS' && steps.build.outcome == 'success' }}
         run: |
           otool -L build/libsextant.dylib | tee otool.txt
           outside=$(awk '/^\t/ { print $1 }' otool.txt \
                     | grep -vE '^(/usr/lib/|/System/|@rpath/)' || true)
-          static_ft=$(grep -c 'FreeType linked statically' configure.txt || true)
-          static_png=$(grep -c 'libpng linked statically' configure.txt || true)
+          bundled=$(grep -c 'built from source into libsextant.dylib' configure.txt || true)
+          minos=$(otool -l build/libsextant.dylib | awk '/LC_BUILD_VERSION/ { f = 1 } f && /minos/ { print $2; exit }')
+          # Only the library's own link line: ld prints the output it is
+          # linking before its warnings, and tests may link Homebrew's dylibs.
+          newer=$(awk '/Linking .* libsextant/ { on = 1; next } /^\[[0-9]+\/[0-9]+\]/ { on = 0 } on' build.txt \
+                  | grep -E 'built for newer' || true)
           {
             echo "### libsextant.dylib — ${{ matrix.name }}"
             echo '```'
-            grep -E '(linked statically|stays shared)' configure.txt || echo "(no static-deps decision logged)"
+            grep -E 'built from source into libsextant.dylib' configure.txt || echo "(nothing bundled)"
+            echo "minos: ${minos:-?}"
             echo "dylib dependencies outside the SDK:"
             echo "${outside:-(none)}"
+            echo "objects built for a newer macOS than minos:"
+            echo "${newer:-(none)}"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-          if [ -n "$outside" ] && { [ "$static_ft" != 0 ] || [ "$static_png" != 0 ]; }; then
-            echo "configure took the static link line and the dylib still depends on:"
+          status=0
+          if [ -n "$outside" ] && [ "$bundled" != 0 ]; then
+            echo "FreeType/libpng were bundled and the dylib still depends on:"
             echo "$outside"
-            exit 1
+            status=1
           fi
+          if [ -n "$newer" ]; then
+            echo "libsextant.dylib links objects built for a newer macOS than it claims:"
+            echo "$newer"
+            status=1
+          fi
+          exit $status
 
       # --- Tests ------------------------------------------------------------
 

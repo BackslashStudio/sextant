@@ -3196,7 +3196,8 @@ void main() {
     void DataRenderer::render_plane_raster(const PlaneSnapshot& pl, int plane_index,
                                            const PlaneRaster& raster,
                                            PlaneRasterCache& c) {
-        const int ss = static_cast<int>(std::lround(pixel_ratio_ > 0.0f ? pixel_ratio_ : 1.0f));
+        // Rounded up: a fractional display scale (1.5) must not lose resolution.
+        const int ss = static_cast<int>(std::ceil(pixel_ratio_ > 0.0f ? pixel_ratio_ - 1e-3f : 1.0f));
         const int rw = std::max(1, raster.w * std::max(1, ss));
         const int rh = std::max(1, raster.h * std::max(1, ss));
 

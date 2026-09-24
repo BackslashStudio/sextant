@@ -5,7 +5,7 @@
 #include "renderer/data_renderer.h"
 #include "renderer/figure_layout.h"
 #include "renderer/box3d.h"
-#include <sextant/figure.h>   // kMaxSupersample
+#include <cmath>
 #include <glad/glad.h>
 #include <algorithm>
 #include <vector>
@@ -16,22 +16,23 @@ namespace sextant {
 // and two NanoVG frames total (the grid is looped inside each).
 void render_frame(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
                   const FigureSnapshot& fsnap, int target_w, int target_h,
-                  int supersample, std::vector<AxesLayout>* out_layout,
+                  float pixel_ratio, std::vector<AxesLayout>* out_layout,
                   const FigureLayout* given)
 {
     const int iw = target_w > 0 ? target_w : ctx.width();
     const int ih = target_h > 0 ? target_h : ctx.height();
 
     // Layout stays in logical pixels; only the viewport and device-pixel ratio
-    // know about supersampling.
-    const int ss = std::clamp(supersample, 1, kMaxSupersample);
-    glViewport(0, 0, iw * ss, ih * ss);
+    // know about the display scale and supersampling.
+    const float ratio = std::isfinite(pixel_ratio) && pixel_ratio > 0.0f ? pixel_ratio : 1.0f;
+    glViewport(0, 0, static_cast<int>(std::lround(iw * ratio)),
+               static_cast<int>(std::lround(ih * ratio)));
     glClearColor(0.93f, 0.93f, 0.93f, 1.0f);
     // Always clear depth too (the targets already have a depth attachment).
     glClear(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     // Pixel-sized GL state (scissor, line widths) is scaled by hand.
-    data.set_pixel_ratio(static_cast<float>(ss));
+    data.set_pixel_ratio(ratio);
 
     // Figure geometry, shared with the SVG path.
     const FigureLayout fresh  = given ? FigureLayout{} : compute_figure_layout(fsnap, iw, ih);
@@ -47,7 +48,7 @@ void render_frame(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
                                       layout.cells[i].box3d->zticks);
 
     // Pass 1 — NanoVG: backgrounds (3D: back panes and their grid).
-    ctx.begin_nvg_frame(iw, ih, static_cast<float>(ss));
+    ctx.begin_nvg_frame(iw, ih, ratio);
     for (std::size_t i = 0; i < layout.cells.size(); ++i) {
         const auto& c = layout.cells[i];
         if (const RenderSnapshot3D* s3 = fsnap.axes[i].snap3d())
@@ -92,7 +93,7 @@ void render_frame(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
     }
 
     // Pass 3 — NanoVG: borders, ticks, labels, legend, colorbar, suptitle.
-    ctx.begin_nvg_frame(iw, ih, static_cast<float>(ss));
+    ctx.begin_nvg_frame(iw, ih, ratio);
     for (std::size_t i = 0; i < layout.cells.size(); ++i) {
         const auto& c = layout.cells[i];
         if (const RenderSnapshot3D* s3 = fsnap.axes[i].snap3d()) {

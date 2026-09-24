@@ -445,6 +445,9 @@ namespace lt {
 
     void test_headless_export();
 
+    // PNG dpi: output pixels scale, the layout does not.
+    void test_png_dpi();
+
     // window_broker.cpp
     void test_window_broker();
 

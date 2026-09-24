@@ -3,7 +3,9 @@
 #include <chrono>
 #include <dlfcn.h>
 #include <initializer_list>
+#include <poll.h>
 #include <pthread.h>
+#include <unistd.h>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -31,6 +33,12 @@ namespace sextant::platform {
         // the swap lets a waiter in; with no waiter it costs nothing a vsynced
         // frame would notice.
         std::this_thread::sleep_for(std::chrono::microseconds(200));
+    }
+
+    bool console_input_ready() {
+        pollfd p{STDIN_FILENO, POLLIN, 0};
+        // POLLHUP/POLLNVAL too: a closed or absent stdin reads EOF at once.
+        return poll(&p, 1, 0) > 0 && (p.revents & (POLLIN | POLLHUP | POLLNVAL)) != 0;
     }
 
     // NSPasteboard is documented thread-safe, so the render thread reads it

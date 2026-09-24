@@ -196,6 +196,7 @@ int main() {
     // headless_export.cpp
     test_headless_context();
     test_headless_export();
+    test_png_dpi();
 
     // window_broker.cpp
     test_window_broker();
