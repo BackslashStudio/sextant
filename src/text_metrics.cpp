@@ -5,6 +5,11 @@
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "stb_truetype.h"
 
+#ifdef FONS_USE_FREETYPE
+#include <ft2build.h>
+#include FT_FREETYPE_H   // FREETYPE_MAJOR/MINOR: see uses_typo_metrics()
+#endif
+
 #include "text_metrics.h"
 #include "font_discovery.h"
 
@@ -73,6 +78,24 @@ short quantize_isize(float px_size) {
     return static_cast<short>(px_size * 10.0f);
 }
 
+// Which vertical metrics fontstash reads. Its stb backend takes `hhea`
+// (stbtt_GetFontVMetrics). Its FreeType backend takes face->ascender/descender/
+// height, which FreeType >= 2.10 fills from the OS/2 sTypo* fields when the font
+// sets USE_TYPO_METRICS (fsSelection bit 7), else from `hhea` (sfobjs.c).
+// FreeType also falls back to OS/2 when `hhea` ascent and descent are both
+// zero; stb does not, and such fonts are not handled here.
+bool uses_typo_metrics([[maybe_unused]] const stbtt_fontinfo& info) {
+#if defined(FONS_USE_FREETYPE) && \
+    (FREETYPE_MAJOR > 2 || (FREETYPE_MAJOR == 2 && FREETYPE_MINOR >= 10))
+    const stbtt_uint32 os2 = stbtt__find_table(info.data, static_cast<stbtt_uint32>(info.fontstart), "OS/2");
+    if (!os2) return false;
+    const stbtt_uint8* fs_selection = info.data + os2 + 62;
+    return (fs_selection[1] & 0x80) != 0;   // big-endian u16, bit 7 in the low byte
+#else
+    return false;
+#endif
+}
+
 // Caller must hold g_mutex. Unusable fonts are cached with ok=false.
 LoadedFont& get_font(const std::string& path) {
     if (auto it = g_fonts.find(path); it != g_fonts.end()) return it->second;
@@ -100,7 +123,9 @@ LoadedFont& get_font(const std::string& path) {
     }
 
     int ascent = 0, descent = 0, line_gap = 0;
-    stbtt_GetFontVMetrics(&f.info, &ascent, &descent, &line_gap);
+    if (!uses_typo_metrics(f.info) ||
+        !stbtt_GetFontVMetricsOS2(&f.info, &ascent, &descent, &line_gap))
+        stbtt_GetFontVMetrics(&f.info, &ascent, &descent, &line_gap);
     ascent += line_gap;
     const float fh = static_cast<float>(ascent - descent);
     if (fh <= 0.0f) {

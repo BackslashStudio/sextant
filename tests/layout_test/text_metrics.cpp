@@ -188,6 +188,32 @@ namespace lt {
         } else {
             std::printf("(only one font on this system — explicit-path case skipped)\n");
         }
+
+        // A face whose OS/2 sets USE_TYPO_METRICS with sTypo* splitting ascent/
+        // descent unlike `hhea`: FreeType builds of fontstash follow sTypo*, stb
+        // builds follow `hhea`. Liberation Sans Narrow ships in the Linux CI
+        // runner's fonts-liberation.
+        static constexpr std::string_view typo_fonts[] = {
+            "LiberationSansNarrow-Regular.ttf", "Lato-Regular.ttf", "LatoWeb-Regular.ttf",
+        };
+        const sextant::FontEntry* typo = nullptr;
+        for (std::string_view want: typo_fonts) {
+            for (const auto& f: fonts)
+                if (std::filesystem::path(f.path).filename().string() == want) {
+                    typo = &f;
+                    break;
+                }
+            if (typo) break;
+        }
+
+        if (typo) {
+            const int font_typo = nvgCreateFont(vg, typo->path.c_str(), typo->path.c_str());
+            check(font_typo != -1, "USE_TYPO_METRICS font loaded into NanoVG");
+            if (font_typo != -1)
+                compare_font(vg, font_typo, typo->path, (typo->name + " (USE_TYPO_METRICS)").c_str());
+        } else {
+            std::printf("(no USE_TYPO_METRICS font with diverging tables found — case skipped)\n");
+        }
     }
 
     // An unloadable font path falls back to a per-character estimate.
