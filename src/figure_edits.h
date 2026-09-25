@@ -438,6 +438,10 @@ void apply_plot_data_op(T& t, const PlotCellEdit& e) {
             return;
         }
         case PlotKind::Bar3D:
+        case PlotKind::Surface:
+        case PlotKind::Scatter3D:
+        case PlotKind::Line3D:
+        case PlotKind::SurfaceTri:
             // 3D-native; see apply_axes3d_data_op().
             return;
     }
@@ -540,6 +544,12 @@ void apply_plot_data_op(T& t, const PlotRowEdit& e) {
         case PlotKind::Heatmap:
         case PlotKind::Bar3D:
             // Not point-addressable; MatrixLineEdit handles these.
+            break;
+        case PlotKind::Surface:
+        case PlotKind::Scatter3D:
+        case PlotKind::Line3D:
+        case PlotKind::SurfaceTri:
+            // 3D-native; see apply_axes3d_data_op().
             break;
     }
 }
