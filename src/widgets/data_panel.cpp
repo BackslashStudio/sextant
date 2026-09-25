@@ -1328,8 +1328,10 @@ namespace sextant {
                 const std::string name = t.plane_index >= 0
                                              ? "P" + std::to_string(t.plane_index) + " " + t.label
                                              : t.label;
-                // "##i" keeps same-labelled plots distinct.
-                const std::string tab = name + "##" + std::to_string(i);
+                // "###i": the ID is the index alone, so it survives a rename (the
+                // name is the label; with "##" each keystroke in the Name field
+                // re-IDs the tab and its widgets, dropping the field's focus).
+                const std::string tab = name + "###" + std::to_string(i);
                 if (ImGui::BeginTabItem(tab.c_str())) {
                     if (!t.group.empty()) {
                         ImGui::TextDisabled("%s", t.group.c_str());
