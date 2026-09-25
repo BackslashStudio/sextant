@@ -3,12 +3,22 @@
 // read-back conversions here, the set_*_data() bodies in each source file.
 #include "sextant/axes3d.h"
 #include "plot_objects.h"
+#include <algorithm>
 #include <cstddef>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 namespace sextant::read_back {
+    // A set_*_data() span, owned by the plot object from here on.
+    template <typename T>
+    std::vector<T> own(std::span<const T> s) { return std::vector<T>(s.begin(), s.end()); }
+
+    // Whether a stored axis still holds exactly these values.
+    template <typename T>
+    bool same(const std::vector<T>& a, std::span<const T> b) { return std::ranges::equal(a, b); }
+
     // The i-th object of a kind; `who` names the getter or setter in the error.
     template <typename V>
     auto at(V& v, std::size_t i, const char* who) -> decltype(v[i]) {

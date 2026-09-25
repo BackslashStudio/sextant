@@ -79,11 +79,16 @@ struct Axes::Impl {
 
     // set_*_data() for Axes and Plane2D: replace object i's data, validated as
     // when it was plotted. `who` names the caller.
-    void set_line_data(std::size_t i, const LineData& v, const char* who);
-    void set_scatter_data(std::size_t i, const ScatterData& v, const char* who);
-    void set_scatter_z_data(std::size_t i, const ScatterZData& v, const char* who);
-    void set_bar_data(std::size_t i, const BarData& v, const char* who);
-    void set_heatmap_data(std::size_t i, const HeatmapData& v, const char* who);
+    void set_line_data(std::size_t i, std::span<const double> x, std::span<const double> y,
+                       const char* who);
+    void set_scatter_data(std::size_t i, std::span<const double> x, std::span<const double> y,
+                          const char* who);
+    void set_scatter_z_data(std::size_t i, std::span<const double> x, std::span<const double> y,
+                            std::span<const double> z, const char* who);
+    void set_bar_data(std::size_t i, std::span<const double> x, std::span<const double> height,
+                      const char* who);
+    void set_heatmap_data(std::size_t i, std::span<const double> data, int rows, int cols,
+                          Range xrange, Range yrange, const char* who);
 };
 
 } // namespace sextant

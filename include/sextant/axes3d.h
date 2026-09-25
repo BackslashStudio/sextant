@@ -473,13 +473,26 @@ namespace sextant {
         // Replace object i's data, as Axes::set_line_data() and its siblings.
         Plane2D& set_line_data(std::size_t i, const LineData& data);
 
+        Plane2D& set_line_data(std::size_t i, std::span<const double> x, std::span<const double> y);
+
         Plane2D& set_scatter_data(std::size_t i, const ScatterData& data);
+
+        Plane2D& set_scatter_data(std::size_t i, std::span<const double> x, std::span<const double> y);
 
         Plane2D& set_scatter_z_data(std::size_t i, const ScatterZData& data);
 
+        Plane2D& set_scatter_z_data(std::size_t i, std::span<const double> x,
+                                    std::span<const double> y, std::span<const double> z);
+
         Plane2D& set_bar_data(std::size_t i, const BarData& data);
 
+        Plane2D& set_bar_data(std::size_t i, std::span<const double> x,
+                              std::span<const double> height);
+
         Plane2D& set_heatmap_data(std::size_t i, const HeatmapData& data);
+
+        Plane2D& set_heatmap_data(std::size_t i, std::span<const double> data, int rows, int cols,
+                                  Range xrange, Range yrange);
 
     private:
         struct Impl;
@@ -719,15 +732,55 @@ namespace sextant {
         // kept while the point count or grid shape is unchanged. A bar
         // footprint is kept unless its u or v changes. set_surface_tri_data()
         // takes the topology as given and never re-triangulates.
+        //
+        // Each also takes its data as spans, in the plotting call's argument
+        // order (see Axes::set_line_data()). As with the plotting calls, the
+        // overload without `bottoms` stands every bar on Bar3DOptions::bottom,
+        // and the one without `colors` makes the object flat-coloured.
         Axes3D& set_bar3d_data(std::size_t i, const Bar3DData& data);
+
+        Axes3D& set_bar3d_data(std::size_t i, PlaneOrientation orient,
+                               std::span<const double> u, std::span<const double> v,
+                               std::span<const double> heights);
+
+        Axes3D& set_bar3d_data(std::size_t i, PlaneOrientation orient,
+                               std::span<const double> u, std::span<const double> v,
+                               std::span<const double> heights, std::span<const double> bottoms);
 
         Axes3D& set_surface_data(std::size_t i, const SurfaceData& data);
 
+        Axes3D& set_surface_data(std::size_t i, PlaneOrientation orient,
+                                 std::span<const double> u, std::span<const double> v,
+                                 std::span<const double> heights);
+
         Axes3D& set_surface_tri_data(std::size_t i, const SurfaceTriData& data);
+
+        Axes3D& set_surface_tri_data(std::size_t i, std::span<const double> x,
+                                     std::span<const double> y, std::span<const double> z,
+                                     std::span<const std::uint32_t> tri);
+
+        Axes3D& set_surface_tri_data(std::size_t i, std::span<const double> x,
+                                     std::span<const double> y, std::span<const double> z,
+                                     std::span<const std::uint32_t> tri,
+                                     std::span<const double> colors);
 
         Axes3D& set_scatter3d_data(std::size_t i, const Scatter3DData& data);
 
+        Axes3D& set_scatter3d_data(std::size_t i, std::span<const double> x,
+                                   std::span<const double> y, std::span<const double> z);
+
+        Axes3D& set_scatter3d_data(std::size_t i, std::span<const double> x,
+                                   std::span<const double> y, std::span<const double> z,
+                                   std::span<const double> colors);
+
         Axes3D& set_line3d_data(std::size_t i, const Line3DData& data);
+
+        Axes3D& set_line3d_data(std::size_t i, std::span<const double> x,
+                                std::span<const double> y, std::span<const double> z);
+
+        Axes3D& set_line3d_data(std::size_t i, std::span<const double> x,
+                                std::span<const double> y, std::span<const double> z,
+                                std::span<const double> colors);
 
     private:
         struct Impl;

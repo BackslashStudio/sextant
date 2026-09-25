@@ -1,6 +1,7 @@
 #pragma once
 // The limits an axes is drawn with: explicit ones, or the padded auto scale of
-// its data. One definition for layout and for Axes::xlim()/Axes3D::xlim().
+// its data (heatmap extents unpadded, see AutoAxis). One definition for layout
+// and for Axes::xlim()/Axes3D::xlim().
 #include "axis_placement.h"
 #include "coord_transform.h"
 #include "coord_transform3d.h"
@@ -19,23 +20,17 @@ namespace sextant {
     inline ResolvedLimits resolve_limits(const RenderSnapshot& snap) {
         ResolvedLimits r{snap.xmin, snap.xmax, snap.ymin, snap.ymax};
         if (snap.xlim_auto || snap.ylim_auto) {
-            // Unpadded, so an origin pin is folded in before padding (otherwise
-            // it would land exactly on the frame edge and read as Low). Identical
-            // result when no pin is set.
+            // An origin pin is folded in before padding, as data (otherwise it
+            // would land exactly on the frame edge and read as Low), after the
+            // axis is settled: with no data it widens 0..1.
             const auto& st = snap.axes_style;
-            auto b = auto_scale(snap.all(), 0.0);
-            widen_for_origin(st.origin_x, snap.xlim_auto, b.xmin, b.xmax);
-            widen_for_origin(st.origin_y, snap.ylim_auto, b.ymin, b.ymax);
-            const double dx = (b.xmax - b.xmin) * kAutoScalePad;
-            const double dy = (b.ymax - b.ymin) * kAutoScalePad;
-            if (snap.xlim_auto) {
-                r.xmin = b.xmin - dx;
-                r.xmax = b.xmax + dx;
-            }
-            if (snap.ylim_auto) {
-                r.ymin = b.ymin - dy;
-                r.ymax = b.ymax + dy;
-            }
+            AutoBounds b = auto_bounds(snap.all());
+            settle_axis(b.x);
+            settle_axis(b.y);
+            widen_for_origin(st.origin_x, snap.xlim_auto, b.x.loose.lo, b.x.loose.hi);
+            widen_for_origin(st.origin_y, snap.ylim_auto, b.y.loose.lo, b.y.loose.hi);
+            if (snap.xlim_auto) pad_axis(b.x, kAutoScalePad, r.xmin, r.xmax);
+            if (snap.ylim_auto) pad_axis(b.y, kAutoScalePad, r.ymin, r.ymax);
         }
         return r;
     }
@@ -50,15 +45,15 @@ namespace sextant {
                         !snap.scatter3d.empty() || !snap.lines3d.empty() ||
                         !snap.surface_tri.empty();
         for (const auto& pl: snap.planes) has_data = has_data || plane_has_data(pl);
-        // Fold origin pins into unpadded auto bounds, then pad (as in 2D). The
-        // unpadded call is only made when a pin exists.
+        // Origin pins on automatic axes are folded in before padding, as data
+        // (as in 2D).
         const auto& st = snap.axes_style;
-        const bool pinned = st.origin_x || st.origin_y || st.origin_z;
-        bool scaled = false;
         if (has_data && (snap.xlim_auto || snap.ylim_auto || snap.zlim_auto)) {
             const DataBounds3D b = auto_scale3d(snap.bars3d, snap.planes, snap.surfaces, snap.scatter3d,
-                                                snap.lines3d, snap.surface_tri,
-                                                pinned ? 0.0 : kAutoScalePad);
+                                                snap.lines3d, snap.surface_tri, kAutoScalePad,
+                                                {snap.xlim_auto ? st.origin_x : std::nullopt,
+                                                 snap.ylim_auto ? st.origin_y : std::nullopt,
+                                                 snap.zlim_auto ? st.origin_z : std::nullopt});
             if (snap.xlim_auto) {
                 xmin = b.xmin;
                 xmax = b.xmax;
@@ -71,26 +66,25 @@ namespace sextant {
                 zmin = b.zmin;
                 zmax = b.zmax;
             }
-            scaled = true;
-        }
-        if (pinned) {
-            struct AutoAxis {
+        } else if (st.origin_x || st.origin_y || st.origin_z) {
+            // No data: the declared limits, widened to a pin on an automatic
+            // axis and padded.
+            struct PinnedAxis {
                 bool automatic;
                 const std::optional<double>* pin;
                 double* lo;
                 double* hi;
             };
-            const AutoAxis ax[3] = {
+            const PinnedAxis ax[3] = {
                 {snap.xlim_auto, &st.origin_x, &xmin, &xmax},
                 {snap.ylim_auto, &st.origin_y, &ymin, &ymax},
                 {snap.zlim_auto, &st.origin_z, &zmin, &zmax},
             };
-            for (const AutoAxis& a: ax) {
+            for (const PinnedAxis& a: ax) {
                 // Fixed limits are never widened or padded (the pin is clamped
                 // instead); an axes with no data keeps 0..1 unless the pin is on
                 // this axis.
-                if (!a.automatic) continue;
-                if (!scaled && !a.pin->has_value()) continue;
+                if (!a.automatic || !a.pin->has_value()) continue;
                 widen_for_origin(*a.pin, true, *a.lo, *a.hi);
                 const double d = (*a.hi - *a.lo) * kAutoScalePad;
                 *a.lo -= d;

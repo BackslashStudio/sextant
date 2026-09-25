@@ -134,23 +134,49 @@ namespace sextant {
     }
 
     Plane2D& Plane2D::set_line_data(std::size_t i, const LineData& data) {
-        d->sheet.set_line_data(i, data, "Plane2D::set_line_data");
+        d->sheet.set_line_data(i, data.x, data.y, "Plane2D::set_line_data");
+        return *this;
+    }
+    Plane2D& Plane2D::set_line_data(std::size_t i, std::span<const double> x,
+                                    std::span<const double> y) {
+        d->sheet.set_line_data(i, x, y, "Plane2D::set_line_data");
         return *this;
     }
     Plane2D& Plane2D::set_scatter_data(std::size_t i, const ScatterData& data) {
-        d->sheet.set_scatter_data(i, data, "Plane2D::set_scatter_data");
+        d->sheet.set_scatter_data(i, data.x, data.y, "Plane2D::set_scatter_data");
+        return *this;
+    }
+    Plane2D& Plane2D::set_scatter_data(std::size_t i, std::span<const double> x,
+                                       std::span<const double> y) {
+        d->sheet.set_scatter_data(i, x, y, "Plane2D::set_scatter_data");
         return *this;
     }
     Plane2D& Plane2D::set_scatter_z_data(std::size_t i, const ScatterZData& data) {
-        d->sheet.set_scatter_z_data(i, data, "Plane2D::set_scatter_z_data");
+        d->sheet.set_scatter_z_data(i, data.x, data.y, data.z, "Plane2D::set_scatter_z_data");
+        return *this;
+    }
+    Plane2D& Plane2D::set_scatter_z_data(std::size_t i, std::span<const double> x,
+                                         std::span<const double> y, std::span<const double> z) {
+        d->sheet.set_scatter_z_data(i, x, y, z, "Plane2D::set_scatter_z_data");
         return *this;
     }
     Plane2D& Plane2D::set_bar_data(std::size_t i, const BarData& data) {
-        d->sheet.set_bar_data(i, data, "Plane2D::set_bar_data");
+        d->sheet.set_bar_data(i, data.x, data.height, "Plane2D::set_bar_data");
+        return *this;
+    }
+    Plane2D& Plane2D::set_bar_data(std::size_t i, std::span<const double> x,
+                                   std::span<const double> height) {
+        d->sheet.set_bar_data(i, x, height, "Plane2D::set_bar_data");
         return *this;
     }
     Plane2D& Plane2D::set_heatmap_data(std::size_t i, const HeatmapData& data) {
-        d->sheet.set_heatmap_data(i, data, "Plane2D::set_heatmap_data");
+        d->sheet.set_heatmap_data(i, data.data, data.rows, data.cols, data.xrange, data.yrange,
+                                  "Plane2D::set_heatmap_data");
+        return *this;
+    }
+    Plane2D& Plane2D::set_heatmap_data(std::size_t i, std::span<const double> data, int rows,
+                                       int cols, Range xrange, Range yrange) {
+        d->sheet.set_heatmap_data(i, data, rows, cols, xrange, yrange, "Plane2D::set_heatmap_data");
         return *this;
     }
 } // namespace sextant

@@ -96,6 +96,10 @@ int main() {
     test_contour_cache();
     test_heatmap_extent();
     test_heatmap_extent_render();
+    test_heatmap_limits();
+
+    // color.cpp
+    test_color_from_hex();
 
     // axes3d.cpp / camera3d.cpp
     test_axes3d_projection();

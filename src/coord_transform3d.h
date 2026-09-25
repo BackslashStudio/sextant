@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <optional>
 #include <vector>
 
 namespace sextant {
@@ -92,13 +93,17 @@ namespace sextant {
         return p.opts.visible && plane_has_data(p);
     }
 
+    // `pins` (origin pins, per box axis) are folded in before padding, like data.
+    // Heatmaps on planes are not padded along their plane's two axes; see
+    // AutoAxis.
     inline DataBounds3D auto_scale3d(const std::vector<Bar3DPlot>& bars,
                                      const std::vector<PlaneSnapshot>& planes,
                                      const std::vector<SurfacePlot>& surfaces,
                                      const std::vector<Scatter3DPlot>& points,
                                      const std::vector<Line3DPlot>& lines,
                                      const std::vector<SurfaceTriPlot>& meshes,
-                                     double pad = 0.05) {
+                                     double pad = kAutoScalePad,
+                                     const std::array<std::optional<double>, 3>& pins = {}) {
         double lo[3] = {
             std::numeric_limits<double>::max(),
             std::numeric_limits<double>::max(),
@@ -210,36 +215,32 @@ namespace sextant {
             }
         }
 
-        // A plane's 2D extent lands on the two axes it spans and its offset on the
-        // third. Unpadded here; the final pass pads once.
+        AutoAxis axes[3];
+        for (int a = 0; a < 3; ++a) axes[a].loose = {lo[a], hi[a]};
+
+        // A plane's 2D extent lands on the two axes it spans (its heatmaps
+        // unpadded, the rest padded) and its offset on the third. The final
+        // pass pads once.
         for (const PlaneSnapshot& p: planes) {
             if (!plane_has_data(p)) continue;
             const Axis3Map m = axis_map(p.orient);
-            const DataBounds b = auto_scale(p.sheet.all(), 0.0);
-            lo[m.u] = std::min(lo[m.u], b.xmin);
-            hi[m.u] = std::max(hi[m.u], b.xmax);
-            lo[m.v] = std::min(lo[m.v], b.ymin);
-            hi[m.v] = std::max(hi[m.v], b.ymax);
-            lo[m.h] = std::min(lo[m.h], p.offset);
-            hi[m.h] = std::max(hi[m.h], p.offset);
+            const AutoBounds b = auto_bounds(p.sheet.all());
+            axes[m.u].loose.add(b.x.loose);
+            axes[m.u].tight.add(b.x.tight);
+            axes[m.v].loose.add(b.y.loose);
+            axes[m.v].tight.add(b.y.tight);
+            axes[m.h].loose.add(p.offset);
         }
 
         DataBounds3D out;
         double* omin[3] = {&out.xmin, &out.ymin, &out.zmin};
         double* omax[3] = {&out.xmax, &out.ymax, &out.zmax};
         for (int a = 0; a < 3; ++a) {
-            double l = lo[a], h = hi[a];
-            if (l > h) {
-                l = 0.0;
-                h = 1.0;
-            } // nothing on this axis at all
-            if (l == h) {
-                l -= 0.5;
-                h += 0.5;
-            } // a single plane of bars
-            const double d = (h - l) * pad;
-            *omin[a] = l - d;
-            *omax[a] = h + d;
+            // Settled first (a single plane of bars spans +-0.5), so a pin
+            // widens a usable range.
+            settle_axis(axes[a]);
+            if (pins[a]) axes[a].loose.add(*pins[a]);
+            pad_axis(axes[a], pad, *omin[a], *omax[a]);
         }
         return out;
     }

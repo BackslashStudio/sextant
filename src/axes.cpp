@@ -365,74 +365,102 @@ HeatmapData Axes::heatmap_data(std::size_t i) const {
 
 // set_*_data(): find object i, validate the new data as plotting it would, then
 // swap it in. Nothing changes if either throws.
-void Axes::Impl::set_line_data(std::size_t i, const LineData& v, const char* who) {
+void Axes::Impl::set_line_data(std::size_t i, std::span<const double> x, std::span<const double> y,
+                               const char* who) {
     LinePlot& p = read_back::at(lines, i, who);
-    if (v.x.size() != v.y.size())
+    if (x.size() != y.size())
         throw std::invalid_argument(std::string(who) + ": x and y must have the same length");
-    read_back::keep_aligned(p, v.x.size() == p.x.size());
-    p.x = v.x;
-    p.y = v.y;
+    read_back::keep_aligned(p, x.size() == p.x.size());
+    p.x = read_back::own(x);
+    p.y = read_back::own(y);
 }
 
-void Axes::Impl::set_scatter_data(std::size_t i, const ScatterData& v, const char* who) {
+void Axes::Impl::set_scatter_data(std::size_t i, std::span<const double> x, std::span<const double> y,
+                                  const char* who) {
     ScatterPlot& p = read_back::at(scatters, i, who);
-    if (v.x.size() != v.y.size())
+    if (x.size() != y.size())
         throw std::invalid_argument(std::string(who) + ": x and y must have the same length");
-    read_back::keep_aligned(p, v.x.size() == p.x.size());
-    p.x = v.x;
-    p.y = v.y;
+    read_back::keep_aligned(p, x.size() == p.x.size());
+    p.x = read_back::own(x);
+    p.y = read_back::own(y);
 }
 
-void Axes::Impl::set_scatter_z_data(std::size_t i, const ScatterZData& v, const char* who) {
+void Axes::Impl::set_scatter_z_data(std::size_t i, std::span<const double> x, std::span<const double> y,
+                                    std::span<const double> z, const char* who) {
     ScatterZPlot& p = read_back::at(scatter_z, i, who);
-    if (v.x.size() != v.y.size() || v.x.size() != v.z.size())
+    if (x.size() != y.size() || x.size() != z.size())
         throw std::invalid_argument(std::string(who) + ": x, y, and z must have the same length");
-    read_back::keep_aligned(p, v.x.size() == p.x.size());
-    p.x = v.x;
-    p.y = v.y;
-    p.z = v.z;
+    read_back::keep_aligned(p, x.size() == p.x.size());
+    p.x = read_back::own(x);
+    p.y = read_back::own(y);
+    p.z = read_back::own(z);
 }
 
-void Axes::Impl::set_bar_data(std::size_t i, const BarData& v, const char* who) {
+void Axes::Impl::set_bar_data(std::size_t i, std::span<const double> x, std::span<const double> height,
+                              const char* who) {
     BarPlot& p = read_back::at(bars, i, who);
-    if (v.x.size() != v.height.size())
+    if (x.size() != height.size())
         throw std::invalid_argument(std::string(who) + ": x and height must have the same length");
     // The width stays (the panel may have set it) unless the bars moved.
-    if (p.centers.get() != v.x) p.bar_width = bar_width_for(v.x, p.opts);
-    read_back::keep_aligned(p, v.x.size() == p.centers.size());
-    p.centers = v.x;
-    p.heights = v.height;
+    if (!read_back::same(p.centers.get(), x)) p.bar_width = bar_width_for(x, p.opts);
+    read_back::keep_aligned(p, x.size() == p.centers.size());
+    p.centers = read_back::own(x);
+    p.heights = read_back::own(height);
 }
 
-void Axes::Impl::set_heatmap_data(std::size_t i, const HeatmapData& v, const char* who) {
+void Axes::Impl::set_heatmap_data(std::size_t i, std::span<const double> data, int rows, int cols,
+                                  Range xrange, Range yrange, const char* who) {
     HeatmapPlot& p = read_back::at(heatmaps, i, who);
-    std::vector<float> cells = heatmap_cells(v.data, v.rows, v.cols, v.xrange, v.yrange, who);
-    read_back::keep_aligned(p, v.rows == p.rows && v.cols == p.cols);
+    std::vector<float> cells = heatmap_cells(data, rows, cols, xrange, yrange, who);
+    read_back::keep_aligned(p, rows == p.rows && cols == p.cols);
     p.data = std::move(cells);
-    p.rows = v.rows;
-    p.cols = v.cols;
-    p.xrange = v.xrange;
-    p.yrange = v.yrange;
+    p.rows = rows;
+    p.cols = cols;
+    p.xrange = xrange;
+    p.yrange = yrange;
 }
 
 Axes& Axes::set_line_data(std::size_t i, const LineData& data) {
-    d->set_line_data(i, data, "set_line_data");
+    d->set_line_data(i, data.x, data.y, "set_line_data");
+    return *this;
+}
+Axes& Axes::set_line_data(std::size_t i, std::span<const double> x, std::span<const double> y) {
+    d->set_line_data(i, x, y, "set_line_data");
     return *this;
 }
 Axes& Axes::set_scatter_data(std::size_t i, const ScatterData& data) {
-    d->set_scatter_data(i, data, "set_scatter_data");
+    d->set_scatter_data(i, data.x, data.y, "set_scatter_data");
+    return *this;
+}
+Axes& Axes::set_scatter_data(std::size_t i, std::span<const double> x, std::span<const double> y) {
+    d->set_scatter_data(i, x, y, "set_scatter_data");
     return *this;
 }
 Axes& Axes::set_scatter_z_data(std::size_t i, const ScatterZData& data) {
-    d->set_scatter_z_data(i, data, "set_scatter_z_data");
+    d->set_scatter_z_data(i, data.x, data.y, data.z, "set_scatter_z_data");
+    return *this;
+}
+Axes& Axes::set_scatter_z_data(std::size_t i, std::span<const double> x, std::span<const double> y,
+                               std::span<const double> z) {
+    d->set_scatter_z_data(i, x, y, z, "set_scatter_z_data");
     return *this;
 }
 Axes& Axes::set_bar_data(std::size_t i, const BarData& data) {
-    d->set_bar_data(i, data, "set_bar_data");
+    d->set_bar_data(i, data.x, data.height, "set_bar_data");
+    return *this;
+}
+Axes& Axes::set_bar_data(std::size_t i, std::span<const double> x, std::span<const double> height) {
+    d->set_bar_data(i, x, height, "set_bar_data");
     return *this;
 }
 Axes& Axes::set_heatmap_data(std::size_t i, const HeatmapData& data) {
-    d->set_heatmap_data(i, data, "set_heatmap_data");
+    d->set_heatmap_data(i, data.data, data.rows, data.cols, data.xrange, data.yrange,
+                        "set_heatmap_data");
+    return *this;
+}
+Axes& Axes::set_heatmap_data(std::size_t i, std::span<const double> data, int rows, int cols,
+                             Range xrange, Range yrange) {
+    d->set_heatmap_data(i, data, rows, cols, xrange, yrange, "set_heatmap_data");
     return *this;
 }
 

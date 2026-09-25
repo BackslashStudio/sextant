@@ -307,4 +307,92 @@ namespace lt {
         check(d.px > 500 && d.worst > 32,
               "the mirrored render is a visibly different picture from the upright one");
     }
+    // Automatic limits: a heatmap's extent is not padded, everything else is
+    // (by 5% of the whole range), so an image meets the frame edge.
+    void test_heatmap_limits() {
+        std::printf("\n[heatmap limits: no padding]\n");
+        using sextant::Range;
+        auto near = [](Range r, double lo, double hi) {
+            return std::fabs(r.lo - lo) < 1e-9 && std::fabs(r.hi - hi) < 1e-9;
+        };
+        const std::vector<double> cells(4 * 6, 0.5);
+        const double pad = sextant::kAutoScalePad;
+
+        {
+            auto fig = sextant::Figure::create();
+            auto ax = fig->axes();
+            ax->heatmap(cells, 4, 6, {100.0, 400.0}, {-2.0, 2.0});
+            check(near(ax->xlim(), 100.0, 400.0) && near(ax->ylim(), -2.0, 2.0),
+                  "a heatmap alone: the limits are its extent exactly");
+        }
+        {
+            auto fig = sextant::Figure::create();
+            auto ax = fig->axes();
+            ax->imshow(cells, 4, 6);
+            check(near(ax->xlim(), 0.0, 6.0) && near(ax->ylim(), 0.0, 4.0),
+                  "imshow: the limits are the index extent");
+        }
+        {
+            auto fig = sextant::Figure::create();
+            auto ax = fig->axes();
+            ax->heatmap(cells, 4, 6, {10.0, 0.0}, {3.0, -1.0});
+            check(near(ax->xlim(), 0.0, 10.0) && near(ax->ylim(), -1.0, 3.0),
+                  "a mirrored heatmap: still its extent, low to high");
+        }
+        {
+            // A line inside the image adds nothing: its padding stays inside.
+            auto fig = sextant::Figure::create();
+            auto ax = fig->axes();
+            const std::vector<double> x{2.0, 8.0}, y{1.0, 3.0};
+            ax->heatmap(cells, 4, 6, {0.0, 10.0}, {0.0, 4.0}).line(x, y);
+            check(near(ax->xlim(), 0.0, 10.0) && near(ax->ylim(), 0.0, 4.0),
+                  "a line inside the image: the limits are the image's");
+        }
+        {
+            // A line past the image's right edge is padded on that side only, by
+            // 5% of the whole range; the left side stays on the image edge.
+            auto fig = sextant::Figure::create();
+            auto ax = fig->axes();
+            const std::vector<double> x{5.0, 20.0}, y{1.0, 3.0};
+            ax->heatmap(cells, 4, 6, {0.0, 10.0}, {0.0, 4.0}).line(x, y);
+            check(near(ax->xlim(), 0.0, 20.0 + 20.0 * pad),
+                  "a line past the image: padded on its side, flush on the image's");
+        }
+        {
+            // Without a heatmap nothing changes: the plain padded range.
+            auto fig = sextant::Figure::create();
+            auto ax = fig->axes();
+            const std::vector<double> x{0.0, 10.0}, y{0.0, 4.0};
+            ax->line(x, y);
+            check(near(ax->xlim(), -10.0 * pad, 10.0 + 10.0 * pad),
+                  "no heatmap: data padded as before");
+        }
+        {
+            // An origin pin outside the image counts as data and is padded.
+            auto fig = sextant::Figure::create();
+            auto ax = fig->axes();
+            ax->heatmap(cells, 4, 6, {1.0, 11.0}, {1.0, 5.0})
+                .set_axes_style({.origin_x = -9.0});
+            // origin_x (where the y axis crosses) widens x to [-9, 11], range 20.
+            check(near(ax->xlim(), -9.0 - 20.0 * pad, 11.0) && near(ax->ylim(), 1.0, 5.0),
+                  "an origin pin past the image: padded on its side only");
+        }
+        {
+            // In 3D, a plane's heatmap is unpadded along the plane's two axes; its
+            // offset alone is a single value on the third (+-0.5, padded).
+            auto fig = sextant::Figure::create();
+            auto ax = fig->add_subplot3d(1, 1, 1);
+            ax->plane(sextant::PlaneOrientation::XY, 2.0)->heatmap(cells, 4, 6, {0.0, 6.0}, {-1.0, 3.0});
+            check(near(ax->xlim(), 0.0, 6.0) && near(ax->ylim(), -1.0, 3.0),
+                  "3d: a plane heatmap fills its two axes exactly");
+            check(near(ax->zlim(), 1.5 - pad, 2.5 + pad), "3d: the offset axis is padded as before");
+            // A surface beyond the image pads its own side.
+            // Its x is 2..8, so its padding (0.4) clears the image on the right
+            // and stays inside it on the left.
+            const std::vector<double> u{2.0, 8.0}, v{0.0, 1.0}, h{0.0, 1.0, 2.0, 3.0};
+            ax->surface(sextant::PlaneOrientation::XY, u, v, h);
+            check(near(ax->xlim(), 0.0, 8.0 + 8.0 * pad),
+                  "3d: a surface past the image is padded on its side only");
+        }
+    }
 } // namespace lt

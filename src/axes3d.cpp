@@ -578,69 +578,114 @@ namespace sextant {
 
     // set_*_data(): find object i, validate as plotting would, then swap the data
     // in; nothing changes if either throws (as Axes::Impl::set_line_data()).
-    Axes3D& Axes3D::set_bar3d_data(std::size_t i, const Bar3DData& v) {
+    Axes3D& Axes3D::set_bar3d_data(std::size_t i, PlaneOrientation orient,
+                                   std::span<const double> u, std::span<const double> v,
+                                   std::span<const double> heights,
+                                   std::span<const double> bottoms) {
         const char* who = "Axes3D::set_bar3d_data";
         Bar3DPlot& p = read_back::at(d->bars3d, i, who);
-        check_bar3d(who, v.u, v.v, v.heights, v.bottoms);
+        check_bar3d(who, u, v, heights, bottoms);
         // A footprint stays (the panel may have set it) unless its axis moved.
-        if (p.u.get() != v.u) p.u_width = grid_spacing(v.u) * std::max(0.0f, p.opts.width);
-        if (p.v.get() != v.v) p.v_width = grid_spacing(v.v) * std::max(0.0f, p.opts.depth);
-        read_back::keep_aligned(p, v.u.size() == p.u.size() && v.v.size() == p.v.size());
-        p.orient = v.orient;
-        p.u = v.u;
-        p.v = v.v;
-        p.heights = v.heights;
-        p.bottoms = v.bottoms;
+        if (!read_back::same(p.u.get(), u)) p.u_width = grid_spacing(u) * std::max(0.0f, p.opts.width);
+        if (!read_back::same(p.v.get(), v)) p.v_width = grid_spacing(v) * std::max(0.0f, p.opts.depth);
+        read_back::keep_aligned(p, u.size() == p.u.size() && v.size() == p.v.size());
+        p.orient = orient;
+        p.u = read_back::own(u);
+        p.v = read_back::own(v);
+        p.heights = read_back::own(heights);
+        p.bottoms = read_back::own(bottoms);
         return *this;
     }
+    Axes3D& Axes3D::set_bar3d_data(std::size_t i, PlaneOrientation orient,
+                                   std::span<const double> u, std::span<const double> v,
+                                   std::span<const double> heights) {
+        return set_bar3d_data(i, orient, u, v, heights, {});
+    }
+    Axes3D& Axes3D::set_bar3d_data(std::size_t i, const Bar3DData& v) {
+        return set_bar3d_data(i, v.orient, v.u, v.v, v.heights, v.bottoms);
+    }
 
-    Axes3D& Axes3D::set_surface_data(std::size_t i, const SurfaceData& v) {
+    Axes3D& Axes3D::set_surface_data(std::size_t i, PlaneOrientation orient,
+                                     std::span<const double> u, std::span<const double> v,
+                                     std::span<const double> heights) {
         const char* who = "Axes3D::set_surface_data";
         SurfacePlot& p = read_back::at(d->surfaces, i, who);
-        check_surface(who, v.u, v.v, v.heights);
-        read_back::keep_aligned(p, v.u.size() == p.u.size() && v.v.size() == p.v.size());
-        p.orient = v.orient;
-        p.u = v.u;
-        p.v = v.v;
-        p.heights = v.heights;
+        check_surface(who, u, v, heights);
+        read_back::keep_aligned(p, u.size() == p.u.size() && v.size() == p.v.size());
+        p.orient = orient;
+        p.u = read_back::own(u);
+        p.v = read_back::own(v);
+        p.heights = read_back::own(heights);
         return *this;
     }
+    Axes3D& Axes3D::set_surface_data(std::size_t i, const SurfaceData& v) {
+        return set_surface_data(i, v.orient, v.u, v.v, v.heights);
+    }
 
-    Axes3D& Axes3D::set_surface_tri_data(std::size_t i, const SurfaceTriData& v) {
+    Axes3D& Axes3D::set_surface_tri_data(std::size_t i, std::span<const double> x,
+                                         std::span<const double> y, std::span<const double> z,
+                                         std::span<const std::uint32_t> tri,
+                                         std::span<const double> colors) {
         const char* who = "Axes3D::set_surface_tri_data";
         SurfaceTriPlot& p = read_back::at(d->surface_tri, i, who);
-        check_mesh_vertices(who, v.x, v.y, v.z, v.colors);
-        check_tri(who, v.tri, v.x.size());
-        read_back::keep_aligned(p, v.x.size() == p.x.size());
-        p.x = v.x;
-        p.y = v.y;
-        p.z = v.z;
-        p.tri = v.tri;
-        p.colors = v.colors;
+        check_mesh_vertices(who, x, y, z, colors);
+        check_tri(who, tri, x.size());
+        read_back::keep_aligned(p, x.size() == p.x.size());
+        p.x = read_back::own(x);
+        p.y = read_back::own(y);
+        p.z = read_back::own(z);
+        p.tri = read_back::own(tri);
+        p.colors = read_back::own(colors);
         return *this;
     }
+    Axes3D& Axes3D::set_surface_tri_data(std::size_t i, std::span<const double> x,
+                                         std::span<const double> y, std::span<const double> z,
+                                         std::span<const std::uint32_t> tri) {
+        return set_surface_tri_data(i, x, y, z, tri, {});
+    }
+    Axes3D& Axes3D::set_surface_tri_data(std::size_t i, const SurfaceTriData& v) {
+        return set_surface_tri_data(i, v.x, v.y, v.z, v.tri, v.colors);
+    }
 
-    Axes3D& Axes3D::set_scatter3d_data(std::size_t i, const Scatter3DData& v) {
+    Axes3D& Axes3D::set_scatter3d_data(std::size_t i, std::span<const double> x,
+                                       std::span<const double> y, std::span<const double> z,
+                                       std::span<const double> colors) {
         const char* who = "Axes3D::set_scatter3d_data";
         Scatter3DPlot& p = read_back::at(d->scatter3d, i, who);
-        check_points3d(who, v.x, v.y, v.z, v.colors, kScatter3DRule);
-        read_back::keep_aligned(p, v.x.size() == p.x.size());
-        p.x = v.x;
-        p.y = v.y;
-        p.z = v.z;
-        p.colors = v.colors;
+        check_points3d(who, x, y, z, colors, kScatter3DRule);
+        read_back::keep_aligned(p, x.size() == p.x.size());
+        p.x = read_back::own(x);
+        p.y = read_back::own(y);
+        p.z = read_back::own(z);
+        p.colors = read_back::own(colors);
         return *this;
     }
+    Axes3D& Axes3D::set_scatter3d_data(std::size_t i, std::span<const double> x,
+                                       std::span<const double> y, std::span<const double> z) {
+        return set_scatter3d_data(i, x, y, z, {});
+    }
+    Axes3D& Axes3D::set_scatter3d_data(std::size_t i, const Scatter3DData& v) {
+        return set_scatter3d_data(i, v.x, v.y, v.z, v.colors);
+    }
 
-    Axes3D& Axes3D::set_line3d_data(std::size_t i, const Line3DData& v) {
+    Axes3D& Axes3D::set_line3d_data(std::size_t i, std::span<const double> x,
+                                    std::span<const double> y, std::span<const double> z,
+                                    std::span<const double> colors) {
         const char* who = "Axes3D::set_line3d_data";
         Line3DPlot& p = read_back::at(d->lines3d, i, who);
-        check_points3d(who, v.x, v.y, v.z, v.colors, kLine3DRule);
-        read_back::keep_aligned(p, v.x.size() == p.x.size());
-        p.x = v.x;
-        p.y = v.y;
-        p.z = v.z;
-        p.colors = v.colors;
+        check_points3d(who, x, y, z, colors, kLine3DRule);
+        read_back::keep_aligned(p, x.size() == p.x.size());
+        p.x = read_back::own(x);
+        p.y = read_back::own(y);
+        p.z = read_back::own(z);
+        p.colors = read_back::own(colors);
         return *this;
+    }
+    Axes3D& Axes3D::set_line3d_data(std::size_t i, std::span<const double> x,
+                                    std::span<const double> y, std::span<const double> z) {
+        return set_line3d_data(i, x, y, z, {});
+    }
+    Axes3D& Axes3D::set_line3d_data(std::size_t i, const Line3DData& v) {
+        return set_line3d_data(i, v.x, v.y, v.z, v.colors);
     }
 } // namespace sextant

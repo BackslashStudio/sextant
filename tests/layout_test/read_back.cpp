@@ -316,6 +316,17 @@ namespace lt {
               && throws_out_of_range([&] { ax->set_heatmap_data(0, {}); }),
               "2d: an index past the count throws out_of_range");
 
+        // The span overload: a slice of a caller's buffer, as a matrix column.
+        const double buf[] = {0.0, 1.0, 2.0, 30.0, 40.0, 50.0};
+        const std::span<const double> all(buf);
+        ax->set_line_data(0, all.first(3), all.last(3));
+        check(ax->line_data(0).x == x && ax->line_data(0).y == std::vector<double>{30.0, 40.0, 50.0},
+              "2d: set_line_data from spans copies the slices in");
+        check(throws_invalid([&] { ax->set_line_data(0, all.first(2), all.last(3)); })
+              && ax->line_data(0).y == std::vector<double>{30.0, 40.0, 50.0}
+              && throws_out_of_range([&] { ax->set_line_data(1, all.first(3), all.last(3)); }),
+              "2d: the span overload validates as the LineData one");
+
         ax->scatter(x, y).scatter_z(x, y, y).bar(x, y);
         ax->set_scatter_data(0, {{4.0}, {5.0}});
         ax->set_scatter_z_data(0, {{4.0}, {5.0}, {6.0}});
@@ -327,6 +338,21 @@ namespace lt {
         check(throws_invalid([&] { ax->set_scatter_z_data(0, {{1.0}, {1.0}, {}}); })
               && throws_invalid([&] { ax->set_bar_data(0, {{1.0}, {}}); }),
               "2d: each kind validates its lengths");
+
+        // Span overloads of the other kinds, from slices of one buffer.
+        ax->set_scatter_data(0, all.first(3), all.last(3));
+        ax->set_scatter_z_data(0, all.first(3), all.first(3), all.last(3));
+        ax->set_bar_data(0, all.first(2), all.last(2));
+        check(ax->scatter_data(0).y == std::vector<double>{30.0, 40.0, 50.0}
+              && ax->scatter_z_data(0).z == std::vector<double>{30.0, 40.0, 50.0}
+              && ax->bar_data(0).x == std::vector<double>{0.0, 1.0}
+              && ax->bar_data(0).height == std::vector<double>{40.0, 50.0},
+              "2d: scatter, scatter_z and bar data from spans");
+        check(throws_invalid([&] { ax->set_scatter_data(0, all.first(2), all.last(3)); })
+              && throws_invalid([&] { ax->set_scatter_z_data(0, all.first(3), all.first(3), all.last(2)); })
+              && throws_invalid([&] { ax->set_bar_data(0, all.first(1), all.last(2)); })
+              && ax->bar_data(0).x == std::vector<double>{0.0, 1.0},
+              "2d: the span overloads validate their lengths and change nothing");
 
         const std::vector<double> cells{1.0, 2.0, 3.0, 4.0};
         ax->imshow(cells, 2, 2);
@@ -345,6 +371,13 @@ namespace lt {
         h.yrange = {1.0, 1.0};
         check(throws_invalid([&] { ax->set_heatmap_data(0, h); }),
               "2d: a degenerate heatmap range throws, as heatmap() does");
+        ax->set_heatmap_data(0, all, 3, 2, {0.0, 2.0}, {0.0, 3.0});
+        check(ax->heatmap_data(0).rows == 3 && ax->heatmap_data(0).data[3] == 30.0
+              && ax->heatmap_data(0).yrange.hi == 3.0,
+              "2d: heatmap data from a span, in heatmap()'s argument order");
+        check(throws_invalid([&] { ax->set_heatmap_data(0, all, 4, 2, {0.0, 2.0}, {0.0, 3.0}); })
+              && ax->heatmap_data(0).rows == 3,
+              "2d: a span too small for rows x cols throws and changes nothing");
 
         auto fig3 = Figure::create();
         auto plane = fig3->add_subplot3d(1, 1, 1)->plane(PlaneOrientation::XY, 0.0);
@@ -352,8 +385,19 @@ namespace lt {
         plane->set_line_data(0, {{7.0, 8.0}, {9.0, 10.0}});
         check(plane->line_data(0).x == std::vector<double>{7.0, 8.0},
               "plane: set_line_data replaces a plane's line");
+        plane->set_line_data(0, all.first(3), all.last(3));
+        check(plane->line_data(0).y == std::vector<double>{30.0, 40.0, 50.0},
+              "plane: set_line_data from spans");
         check(throws_out_of_range([&] { plane->set_bar_data(0, {}); }),
               "plane: an index past the count throws out_of_range");
+        plane->scatter(x, y).scatter_z(x, y, y).bar(x, y).imshow(cells, 2, 2);
+        plane->set_scatter_data(0, all.first(3), all.last(3))
+                .set_scatter_z_data(0, all.first(3), all.first(3), all.last(3))
+                .set_bar_data(0, all.first(3), all.last(3))
+                .set_heatmap_data(0, all, 2, 3, {0.0, 3.0}, {0.0, 2.0});
+        check(plane->scatter_data(0).y[0] == 30.0 && plane->scatter_z_data(0).z[2] == 50.0
+              && plane->bar_data(0).height[1] == 40.0 && plane->heatmap_data(0).cols == 3,
+              "plane: every set_*_data span overload");
     }
 
     void test_set_data_3d() {
@@ -411,6 +455,50 @@ namespace lt {
               "3d: non-finite values throw");
         check(throws_out_of_range([&] { ax->set_surface_data(1, s); }),
               "3d: an index past the count throws out_of_range");
+
+        // Span overloads, from slices of one buffer.
+        const double buf[] = {0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 7.0, 8.0, 9.0};
+        const std::span<const double> all(buf);
+        const auto sx = all.first(3), sy = all.subspan(3, 3), sz = all.last(3);
+        ax->set_bar3d_data(0, PlaneOrientation::ZX, u, v, all.last(6));
+        check(ax->bar3d_data(0).heights[0] == 0.0 && ax->bar3d_data(0).heights[5] == 9.0
+              && ax->bar3d_data(0).orient == PlaneOrientation::ZX && ax->bar3d_data(0).bottoms.empty(),
+              "3d: bar3d data from spans; no bottoms means none");
+        ax->set_bar3d_data(0, PlaneOrientation::XY, u, v, hs, all.first(6));
+        check(ax->bar3d_data(0).bottoms.size() == 6, "3d: bar3d bottoms from a span");
+        ax->set_surface_data(0, PlaneOrientation::YZ, u, v, all.last(6));
+        check(ax->surface_data(0).heights[5] == 9.0 && ax->surface_data(0).orient == PlaneOrientation::YZ,
+              "3d: surface data from spans");
+        check(throws_invalid([&] { ax->set_surface_data(0, PlaneOrientation::XY, u, v, all.last(5)); })
+              && ax->surface_data(0).heights[5] == 9.0,
+              "3d: a surface span of the wrong size throws and changes nothing");
+
+        ax->set_surface_tri_data(0, sx, sy, sz, tri, all.last(3));
+        check(ax->surface_tri_data(0).z == std::vector<double>{7.0, 8.0, 9.0},
+              "3d: surface_tri data from spans");
+        check(ax->surface_tri_data(0).colors.size() == 3, "3d: surface_tri colors from a span");
+        ax->set_surface_tri_data(0, sx, sy, sz, tri);
+        check(ax->surface_tri_data(0).colors.empty(),
+              "3d: surface_tri from spans without colors is flat, as surface_tri() plots it");
+        const std::uint32_t bad_tri[] = {0, 1, 3};
+        check(throws_invalid([&] { ax->set_surface_tri_data(0, sx, sy, sz, bad_tri); }),
+              "3d: a span tri index past the vertex count throws");
+
+        ax->set_scatter3d_data(0, sx, sy, sz, all.first(3));
+        check(ax->scatter3d_data(0).z == std::vector<double>{7.0, 8.0, 9.0}
+              && ax->scatter3d_data(0).colors.size() == 3,
+              "3d: scatter3d data and colors from spans");
+        ax->set_scatter3d_data(0, sx, sy, sz);
+        check(ax->scatter3d_data(0).colors.empty(), "3d: scatter3d from spans without colors is flat");
+        ax->set_line3d_data(0, sx, sy, sz, all.last(3));
+        check(ax->line3d_data(0).x == std::vector<double>{0.0, 1.0, 0.0}
+              && ax->line3d_data(0).colors.size() == 3,
+              "3d: line3d data and colors from spans");
+        check(throws_invalid([&] { ax->set_line3d_data(0, sx, sy, all.last(2)); })
+              && ax->line3d_data(0).colors.size() == 3,
+              "3d: line3d spans of mismatched length throw and change nothing");
+        ax->set_line3d_data(0, sx, sy, sz);
+        check(ax->line3d_data(0).colors.empty(), "3d: line3d from spans without colors is flat");
     }
 
     // What set_*_data() keeps: error bars and hint_labels while the count is

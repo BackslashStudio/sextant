@@ -71,11 +71,67 @@ namespace sextant {
         double xmin, xmax, ymin, ymax;
     };
 
-    // Padding around automatic limits, as a fraction of the range. resolve_limits()
-    // pads by hand with the same value.
+    // Padding around automatic limits, as a fraction of the range.
     inline constexpr double kAutoScalePad = 0.05;
 
-    inline DataBounds auto_scale(const AllPlotData& all, double pad = kAutoScalePad) {
+    // An unpadded interval on one axis; empty until something is added.
+    struct AxisSpan {
+        double lo = std::numeric_limits<double>::max();
+        double hi = -std::numeric_limits<double>::max();
+
+        bool empty() const { return lo > hi; }
+
+        void add(double v) {
+            lo = std::min(lo, v);
+            hi = std::max(hi, v);
+        }
+
+        void add(const AxisSpan& s) {
+            lo = std::min(lo, s.lo);
+            hi = std::max(hi, s.hi);
+        }
+    };
+
+    // Automatic bounds of one axis, in two parts. `loose` (points, lines, bars,
+    // error bars, an origin pin) is padded; `tight` (heatmap extents) is not,
+    // so an image meets the frame edge, as matplotlib's imshow does.
+    struct AutoAxis {
+        AxisSpan loose, tight;
+
+        bool empty() const { return loose.empty() && tight.empty(); }
+    };
+
+    // Give an axis a usable range: nothing at all reads as 0..1 and a single
+    // value as +-0.5 around it, both as loose (padded) data. Idempotent.
+    inline void settle_axis(AutoAxis& a) {
+        AxisSpan whole = a.loose;
+        whole.add(a.tight);
+        if (whole.empty()) a.loose = {0.0, 1.0};
+        else if (whole.lo == whole.hi) a.loose = {whole.lo - 0.5, whole.hi + 0.5};
+    }
+
+    // The padded interval, after settle_axis(). The pad distance is `pad` times
+    // the whole range (both parts), applied to `loose` only, then `tight` is
+    // added as it is -- so without a heatmap this is the plain padded range, and
+    // with only heatmaps it is their exact extent.
+    inline void pad_axis(AutoAxis a, double pad, double& lo, double& hi) {
+        settle_axis(a);
+        AxisSpan whole = a.loose;
+        whole.add(a.tight);
+        const double d = (whole.hi - whole.lo) * pad;
+        AxisSpan out;
+        if (!a.loose.empty()) out = {a.loose.lo - d, a.loose.hi + d};
+        out.add(a.tight);
+        lo = out.lo;
+        hi = out.hi;
+    }
+
+    struct AutoBounds {
+        AutoAxis x, y;
+    };
+
+    // Unpadded bounds of every plot object, split as AutoAxis describes.
+    inline AutoBounds auto_bounds(const AllPlotData& all) {
         double xlo = std::numeric_limits<double>::max();
         double xhi = -std::numeric_limits<double>::max();
         double ylo = std::numeric_limits<double>::max();
@@ -145,34 +201,26 @@ namespace sextant {
             // Error bars hang off the tip (heights), not the baseline.
             grow_err(bp.centers, bp.heights, bp.err);
         }
+        AutoBounds b;
+        b.x.loose = {xlo, xhi};
+        b.y.loose = {ylo, yhi};
         for (const auto& hp: all.heatmaps) {
-            // The heatmap's extent; either range may be reversed.
-            xlo = std::min({xlo, hp.xrange.lo, hp.xrange.hi});
-            xhi = std::max({xhi, hp.xrange.lo, hp.xrange.hi});
-            ylo = std::min({ylo, hp.yrange.lo, hp.yrange.hi});
-            yhi = std::max({yhi, hp.yrange.lo, hp.yrange.hi});
+            // The heatmap's extent, unpadded; either range may be reversed.
+            b.x.tight.add(hp.xrange.lo);
+            b.x.tight.add(hp.xrange.hi);
+            b.y.tight.add(hp.yrange.lo);
+            b.y.tight.add(hp.yrange.hi);
         }
+        return b;
+    }
 
-        if (xlo > xhi) {
-            xlo = 0;
-            xhi = 1;
-        }
-        if (ylo > yhi) {
-            ylo = 0;
-            yhi = 1;
-        }
-        if (xlo == xhi) {
-            xlo -= 0.5;
-            xhi += 0.5;
-        }
-        if (ylo == yhi) {
-            ylo -= 0.5;
-            yhi += 0.5;
-        }
-
-        const double dx = (xhi - xlo) * pad;
-        const double dy = (yhi - ylo) * pad;
-        return {xlo - dx, xhi + dx, ylo - dy, yhi + dy};
+    // Padded automatic bounds: auto_bounds() through pad_axis().
+    inline DataBounds auto_scale(const AllPlotData& all, double pad = kAutoScalePad) {
+        const AutoBounds b = auto_bounds(all);
+        DataBounds r{};
+        pad_axis(b.x, pad, r.xmin, r.xmax);
+        pad_axis(b.y, pad, r.ymin, r.ymax);
+        return r;
     }
 
     // -------------------------------------------------------------------------

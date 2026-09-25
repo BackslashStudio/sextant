@@ -148,15 +148,31 @@ namespace sextant {
         // std::invalid_argument for bad data; either way nothing changes.
         Axes& set_line_data(std::size_t i, const LineData& data);
 
+        // Each also takes its data as spans, in the plotting call's argument
+        // order: pass a caller's own arrays (an arma::vec, a column of a
+        // matrix) without building the struct. Same checks and behaviour.
+        Axes& set_line_data(std::size_t i, std::span<const double> x, std::span<const double> y);
+
         Axes& set_scatter_data(std::size_t i, const ScatterData& data);
 
+        Axes& set_scatter_data(std::size_t i, std::span<const double> x, std::span<const double> y);
+
         Axes& set_scatter_z_data(std::size_t i, const ScatterZData& data);
+
+        Axes& set_scatter_z_data(std::size_t i, std::span<const double> x, std::span<const double> y,
+                                 std::span<const double> z);
 
         // The bar width is kept unless x changes; then it is re-derived from
         // the spacing, as bar() does.
         Axes& set_bar_data(std::size_t i, const BarData& data);
 
+        Axes& set_bar_data(std::size_t i, std::span<const double> x, std::span<const double> height);
+
         Axes& set_heatmap_data(std::size_t i, const HeatmapData& data);
+
+        // As heatmap() takes it: row-major rows x cols over xrange x yrange.
+        Axes& set_heatmap_data(std::size_t i, std::span<const double> data, int rows, int cols,
+                               Range xrange, Range yrange);
 
     private:
         struct Impl;

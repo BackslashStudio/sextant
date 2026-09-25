@@ -274,6 +274,11 @@ namespace lt {
 
     void test_heatmap_extent_render();
 
+    void test_heatmap_limits();
+
+    // color.cpp
+    void test_color_from_hex();
+
     // axes3d.cpp
     void test_axes3d_projection();
 

@@ -19,8 +19,8 @@ const Color Color::Gray   = {0.500f, 0.500f, 0.500f, 1.0f};
 Color Color::from_hex(uint32_t hex) {
     const bool has_alpha = hex > 0xFFFFFF;
     const uint8_t r = (hex >> (has_alpha ? 24 : 16)) & 0xFF;
-    const uint8_t g = (hex >> (has_alpha ?  8 :  8)) & 0xFF;
-    const uint8_t b = (hex >> (has_alpha ? 16 :  0)) & 0xFF;
+    const uint8_t g = (hex >> (has_alpha ? 16 :  8)) & 0xFF;
+    const uint8_t b = (hex >> (has_alpha ?  8 :  0)) & 0xFF;
     const uint8_t a = has_alpha ? (hex & 0xFF) : 0xFF;
     return {r / 255.0f, g / 255.0f, b / 255.0f, a / 255.0f};
 }

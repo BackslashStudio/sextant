@@ -528,6 +528,7 @@ if(SEXTANT_BUILD_TESTS)
             tests/layout_test/errorbar3d.cpp
             tests/layout_test/contour.cpp
             tests/layout_test/heatmap.cpp
+            tests/layout_test/color.cpp
             tests/layout_test/cell_shading.cpp
             tests/layout_test/axes3d.cpp
             tests/layout_test/camera3d.cpp
