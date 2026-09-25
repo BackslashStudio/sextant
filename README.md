@@ -1,6 +1,6 @@
 <p align="center">
   <picture>
-    <img src="doc/icons/sextant-logo.svg" alt="sextant" height="96">
+    <img src="doc/icons/sextant-banner.svg" alt="sextant" height="96">
     <source media="(prefers-color-scheme: dark)" srcset="doc/icons/sextant-logo-dark.svg">
   </picture>
 </p>
