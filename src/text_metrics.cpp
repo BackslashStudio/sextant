@@ -1,7 +1,7 @@
-// STB_TRUETYPE_STATIC is required: without FreeType, nanovg's fontstash.h
+// STBTT_STATIC is required: without FreeType, nanovg's fontstash.h
 // already defines the stb_truetype implementation, so an external-linkage copy
 // here would collide at link time.
-#define STB_TRUETYPE_STATIC
+#define STBTT_STATIC
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "stb_truetype.h"
 
