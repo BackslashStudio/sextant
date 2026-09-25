@@ -213,7 +213,8 @@ namespace sextant {
 
     // One entry per Colormap value: a new colormap only needs its name added.
     inline bool colormap_combo(const char* label, Colormap& c) {
-        static const char* kNames[] = {"Viridis"};
+        static const char* kNames[] = {"Viridis", "Plasma", "Inferno", "Magma",
+                                       "Cividis", "Turbo",  "Coolwarm", "Gray"};
         int cur = static_cast<int>(c);
         if (ImGui::Combo(label, &cur, kNames, IM_ARRAYSIZE(kNames))) {
             c = static_cast<Colormap>(cur);

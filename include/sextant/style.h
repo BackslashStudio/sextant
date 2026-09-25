@@ -32,7 +32,9 @@ namespace sextant {
 
     enum class MarkerStyle { None, Circle, Square, Triangle, Cross, Plus, Diamond };
 
-    enum class Colormap { Viridis };
+    // Sequential: Viridis (default), Plasma, Inferno, Magma, Cividis (colorblind-safe),
+    // Turbo (rainbow-like, not perceptually uniform), Gray. Diverging: Coolwarm.
+    enum class Colormap { Viridis, Plasma, Inferno, Magma, Cividis, Turbo, Coolwarm, Gray };
 
     // Error-bar whisker end: `Flat` crossbar ("to here") or `Arrow` head pointing
     // away from the point ("at least this far"). Shared by 2D and 3D.

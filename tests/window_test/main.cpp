@@ -241,14 +241,14 @@ static void test_axes_gallery() {
             .set_title("scatter_z").legend().grid();
 
     // Two colour scales on one axes: each gets its own bar, sized for its own
-    // numbers.
+    // numbers, in two different colormaps (Gray field, Plasma markers).
     fig->add_subplot(3, 4, 12)
             ->imshow(gauss, R, C, {
-                         .vmin = 0.0f, .vmax = 1.0f,
+                         .cmap = sextant::Colormap::Gray, .vmin = 0.0f, .vmax = 1.0f,
                          .colorbar = true, .name = "field"
                      })
             .scatter_z(ring_x, ring_y, ring_z, {
-                           .size = 22.0f, .marker = sextant::MarkerStyle::Square,
+                           .cmap = sextant::Colormap::Plasma, .size = 22.0f, .marker = sextant::MarkerStyle::Square,
                            .vmin = 0.0f, .vmax = static_cast<float>(2.0 * M_PI),
                            .colorbar = true, .name = "phase"
                        })
@@ -357,11 +357,13 @@ static void test_axes3d_gallery() {
             .set_view(-55.0, 25.0)
             .legend();
 
-    // 2 — surface colored by height, with a named colorbar.
+    // 2 — surface colored by height through the diverging Coolwarm, with a
+    // named colorbar.
     fig->add_subplot3d(2, 4, 2)
             ->surface(sextant::PlaneOrientation::XY, su, sv, ripple,
                       {
-                          .colormap = true, .colorbar = true, .name = "amplitude",
+                          .colormap = true, .cmap = sextant::Colormap::Coolwarm,
+                          .colorbar = true, .name = "amplitude",
                           .shading = 0.35f
                       })
             .set_title("surface")
@@ -379,7 +381,7 @@ static void test_axes3d_gallery() {
             .set_xtitle("x").set_ytitle("y").set_ztitle("z")
             .set_view(-40.0, 22.0);
 
-    // 4 — Plane2D carrying a heatmap; its colorbar is beside the cell.
+    // 4 — Plane2D carrying Inferno heatmaps; the colorbar is beside the cell.
     {
         auto ax = fig->add_subplot3d(2, 4, 4);
         ax->set_title("Plane2D — slices")
@@ -388,11 +390,13 @@ static void test_axes3d_gallery() {
                 .set_view(-60.0, 20.0);
         ax->plane(sextant::PlaneOrientation::XY, 0.2)
                 ->heatmap(field, R, C, {0.0, 6.0}, {0.0, 6.0},
-                          {.vmin = 0.0f, .vmax = 1.0f, .colorbar = true, .name = "intensity"});
+                          {.cmap = sextant::Colormap::Inferno, .vmin = 0.0f, .vmax = 1.0f,
+                           .colorbar = true, .name = "intensity"});
         // Two more translucent slices, stacked.
         for (double z: {1.4, 2.6})
             ax->plane(sextant::PlaneOrientation::XY, z, {.alpha = 0.55f})
-                    ->heatmap(field, R, C, {0.0, 6.0}, {0.0, 6.0}, {.vmin = 0.0f, .vmax = 1.0f});
+                    ->heatmap(field, R, C, {0.0, 6.0}, {0.0, 6.0},
+                              {.cmap = sextant::Colormap::Inferno, .vmin = 0.0f, .vmax = 1.0f});
     }
 
     // 5 — a plane carrying every 2D kind, with a legend.
@@ -446,7 +450,7 @@ static void test_axes3d_gallery() {
         ax->scatter3d(cx3, cy3, cz3, cval,
                       {
                           .size = 30.0f, .marker = sextant::MarkerStyle::Circle,
-                          .colorbar = true, .name = "energy"
+                          .cmap = sextant::Colormap::Cividis, .colorbar = true, .name = "energy"
                       });
         ax->legend();
     }
@@ -765,7 +769,8 @@ static void test_surface_tri_gallery() {
                 .set_xtitle("x").set_ytitle("y").set_ztitle("z")
                 .set_view(-58.0, 26.0);
         ax->surface_tri(x, y, z, sextant::PlaneOrientation::XY, c,
-                        {.colorbar = true, .name = "height", .shading = 0.35f});
+                        {.cmap = sextant::Colormap::Turbo, .colorbar = true, .name = "height",
+                         .shading = 0.35f});
     }
 
     // ---- 2. A coarse dome with a color ramp diagonal to the triangulation.
@@ -797,7 +802,8 @@ static void test_surface_tri_gallery() {
                 .set_xtitle("x").set_ytitle("y").set_ztitle("z")
                 .set_view(-40.0, 30.0);
         ax->surface_tri(x, y, z, tri, c,
-                        {.colorbar = true, .name = "x + y", .shading = 0.85f});
+                        {.cmap = sextant::Colormap::Magma, .colorbar = true, .name = "x + y",
+                         .shading = 0.85f});
     }
 
     // ---- 3. A Mobius strip. Wireframe on.
@@ -1839,9 +1845,9 @@ static void test_axis_position3d() {
 int main() {
     // test_axis_position3d();
     // test_axis_position();
-    // test_axes_gallery();
+    test_axes_gallery();
     test_axes3d_gallery();
-    test_errorbar3d_gallery();
+    // test_errorbar3d_gallery();
     // test_line3d_gallery();
     // test_surface_tri_gallery();
     // test_subplot_spans();
