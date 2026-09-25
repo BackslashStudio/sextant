@@ -379,8 +379,8 @@ namespace lt {
         auto build = [&](bool visible) {
             auto fig = Figure::create({.width = W, .height = H, .supersample = 1});
             auto ax = fig->add_subplot3d(1, 1, 1);
-            std::vector<float> field(16);
-            for (int i = 0; i < 16; ++i) field[i] = static_cast<float>(i) / 15.0f;
+            std::vector<double> field(16);
+            for (int i = 0; i < 16; ++i) field[i] = static_cast<double>(i) / 15.0;
             ax->plane(PlaneOrientation::XY, 6.0, {.alpha = 1.0f, .visible = visible})
                     ->heatmap(field, 4, 4, {0.0, 4.0}, {0.0, 4.0}, {.colorbar = true});
             return fig;

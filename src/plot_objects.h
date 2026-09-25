@@ -21,6 +21,10 @@ enum class PlotKind { Line, Scatter, Bar, Heatmap, ScatterZ, Bar3D, Surface, Sca
                       SurfaceTri };
 
 // Bulk data below is CowVec so snapshot copies share buffers (see cow_vec.h).
+// Every plot object carries a `data_stamp`, as TitleStamps does for titles:
+// plotting it and each set_*_data() take a fresh next_snapshot_generation(), so
+// a Data-panel op recorded over an older copy is dropped rather than replayed
+// onto the caller's newer data.
 
 // Resolved error-bar distances at one point, each >= 0; 0 = nothing that side.
 struct ErrOffsets {
@@ -88,6 +92,7 @@ struct LinePlot {
     CowVec<double> x, y;
     ErrorBarData   err;
     LineOptions    opts;
+    unsigned long long data_stamp = 0;
 
     std::size_t count() const { return x.size(); }
 
@@ -108,6 +113,7 @@ struct ScatterPlot {
     CowVec<double> x, y;
     ErrorBarData   err;
     ScatterOptions opts;
+    unsigned long long data_stamp = 0;
 };
 
 // bar_width is in data units, already resolved (spacing x width fraction for
@@ -118,6 +124,7 @@ struct BarPlot {
     double         bar_width = 1.0;
     ErrorBarData   err;
     BarOptions     opts;
+    unsigned long long data_stamp = 0;
 };
 
 // Row-major rows x cols values, mapped through vmin/vmax and the colormap. The
@@ -129,6 +136,7 @@ struct HeatmapPlot {
     int            rows = 0, cols = 0;
     Range          xrange{ 0.0, 1.0 }, yrange{ 0.0, 1.0 };
     HeatmapOptions opts;
+    unsigned long long data_stamp = 0;
 
     double cell_w() const { return cols > 0 ? (xrange.hi - xrange.lo) / cols : 0.0; }
     double cell_h() const { return rows > 0 ? (yrange.hi - yrange.lo) / rows : 0.0; }
@@ -153,6 +161,7 @@ struct ScatterZPlot {
     CowVec<double>  x, y, z;
     ErrorBarData    err;
     ScatterZOptions opts;
+    unsigned long long data_stamp = 0;
 };
 
 // Box axis index (into x, y, z) of each grid direction, for every consumer to
@@ -178,6 +187,7 @@ struct Bar3DPlot {
     double         u_width = 1.0, v_width = 1.0;
     PlaneOrientation orient = PlaneOrientation::XY;
     Bar3DOptions   opts;
+    unsigned long long data_stamp = 0;
 
     std::size_t count() const { return u.size() * v.size(); }
     std::size_t index_of(std::size_t i, std::size_t j) const { return i * v.size() + j; }
@@ -200,6 +210,7 @@ struct SurfacePlot {
     CowVec<double> heights;
     PlaneOrientation orient = PlaneOrientation::XY;
     SurfaceOptions opts;
+    unsigned long long data_stamp = 0;
 
     std::size_t count() const { return u.size() * v.size(); }
     std::size_t index_of(std::size_t i, std::size_t j) const { return i * v.size() + j; }
@@ -238,6 +249,7 @@ struct SurfaceTriPlot {
     CowVec<std::uint32_t> tri;
     CowVec<double> colors;
     SurfaceTriOptions opts;
+    unsigned long long data_stamp = 0;
 
     std::size_t count() const { return x.size(); }               // vertices
     std::size_t face_count() const { return tri.size() / 3; }
@@ -290,6 +302,7 @@ struct Scatter3DPlot {
     CowVec<double> colors;
     ErrorBar3DData err;
     Scatter3DOptions opts;
+    unsigned long long data_stamp = 0;
 
     std::size_t count() const { return x.size(); }
     bool colormapped() const { return !colors.empty(); }
@@ -321,6 +334,7 @@ struct Line3DPlot {
     CowVec<double> colors;
     ErrorBar3DData err;
     Line3DOptions opts;
+    unsigned long long data_stamp = 0;
 
     std::size_t count() const { return x.size(); }
     bool colormapped() const { return !colors.empty(); }
@@ -366,6 +380,62 @@ struct AllPlotData {
     const std::vector<ScatterZPlot>& scatter_z;
 };
 
+// Caller-side stamps of an axes' titles: each set_*title() takes a fresh
+// next_snapshot_generation(), 0 = never set (or cleared by cla()). A panel
+// title edit carries the stamps of the snapshot it was typed over and is
+// applied only to a title not set since, so a stale edit never overwrites a
+// newer set_*title().
+struct TitleStamps {
+    unsigned long long title = 0, xtitle = 0, ytitle = 0, ztitle = 0;
+
+    // For edits built without a snapshot (tests): applies over anything.
+    static constexpr TitleStamps any() {
+        constexpr auto m = ~0ull;
+        return { m, m, m, m };
+    }
+};
+
+// The same, for the axis limits: set_xlim()/set_ylim()/set_zlim() stamp their
+// axis, cla() resets. Pan/zoom and the Limits fields record the stamps of the
+// snapshot they worked over, so the view survives refresh() until the program
+// sets that axis itself.
+struct LimitStamps {
+    unsigned long long x = 0, y = 0, z = 0;
+
+    static constexpr LimitStamps any() {
+        constexpr auto m = ~0ull;
+        return { m, m, m };
+    }
+};
+
+// The same, for the setter groups that have no stamp of their own: each setter
+// stamps its group (grid() -> grid, set_axes_style() -> style, ...), cla()
+// resets them. `cleared` is the exception: cla() gives it a fresh stamp, and an
+// edit addressed to a plot object by index (its appearance) records it, so
+// after a cla() and re-plot it cannot land on whatever took that index.
+struct StyleStamps {
+    unsigned long long style = 0, grid = 0, legend = 0, colorbar = 0;
+    unsigned long long xticks = 0, yticks = 0, zticks = 0;
+    unsigned long long box = 0, aspect = 0;   // 3D only
+    unsigned long long cleared = 0;
+
+    static constexpr StyleStamps any() {
+        constexpr auto m = ~0ull;
+        return { m, m, m, m, m, m, m, m, m, m };
+    }
+};
+
+// Figure-level: suptitle() -> suptitle (its text), set_suptitle_style() and
+// suptitle()'s font size -> suptitle_style, set_margins() -> margins.
+struct FigureStamps {
+    unsigned long long suptitle = 0, suptitle_style = 0, margins = 0;
+
+    static constexpr FigureStamps any() {
+        constexpr auto m = ~0ull;
+        return { m, m, m };
+    }
+};
+
 // Everything the render thread needs from Axes::Impl: decoration and limits
 // copied, plot data shared via CowVec. Built by Axes::Impl::build_snapshot().
 struct RenderSnapshot {
@@ -377,6 +447,7 @@ struct RenderSnapshot {
 
     // Font sizes live in axes_style.
     std::string title, xtitle, ytitle;
+    TitleStamps title_stamps;
 
     bool          grid_enabled   = false;
     GridOptions   grid_opts;
@@ -387,6 +458,8 @@ struct RenderSnapshot {
 
     double xmin = 0, xmax = 1, ymin = 0, ymax = 1;
     bool   xlim_auto = true, ylim_auto = true;
+    LimitStamps limit_stamps;
+    StyleStamps style_stamps;
 
     // Explicit ticks; absent = generate_ticks().
     std::optional<std::vector<Tick>> xticks_override, yticks_override;
@@ -402,6 +475,9 @@ struct PlaneSnapshot {
     // Position along the plane's normal axis, in data units.
     double           offset = 0.0;
     Plane2DOptions   opts;
+    // Set when the plane is made and by set_offset()/set_alpha(); a plane edit
+    // records it (as StyleStamps).
+    unsigned long long placement_stamp = 0;
     RenderSnapshot   sheet;
 };
 
@@ -418,6 +494,7 @@ struct RenderSnapshot3D {
 
     // Font sizes live in axes_style.
     std::string title, xtitle, ytitle, ztitle;
+    TitleStamps title_stamps;
 
     // On by default, unlike 2D.
     bool        grid_enabled = true;
@@ -434,11 +511,16 @@ struct RenderSnapshot3D {
     Box3DStyle  box_style;
     BoxAspect   aspect;
     Camera3D    camera;
+    // As TitleStamps, for the camera: set_camera()/set_view()/set_projection()/
+    // set_fov() take a fresh stamp, cla() resets it to 0.
+    unsigned long long camera_stamp = 0;
     // What a double-click restores (the reset runs on the render thread).
     Camera3D    default_camera;
 
     double xmin = 0, xmax = 1, ymin = 0, ymax = 1, zmin = 0, zmax = 1;
     bool   xlim_auto = true, ylim_auto = true, zlim_auto = true;
+    LimitStamps limit_stamps;
+    StyleStamps style_stamps;
 
     std::optional<std::vector<Tick>> xticks_override, yticks_override, zticks_override;
 
@@ -513,6 +595,7 @@ struct FigureSnapshot {
     // Figure-level title.
     std::string suptitle;
     SuptitleOptions suptitle_opts;
+    FigureStamps stamps;
 };
 
 // One plot object's colorbar: the scale it explains and its name.

@@ -23,6 +23,7 @@ namespace sextant {
 
         // Font sizes live in axes_style, as in Axes::Impl.
         std::string title, xtitle, ytitle, ztitle;
+        TitleStamps title_stamps;
 
         bool grid_enabled = true;
         GridOptions grid_opts;
@@ -34,11 +35,14 @@ namespace sextant {
         BoxAspect aspect;
 
         Camera3D camera;
+        unsigned long long camera_stamp = 0;
         // What a double-click restores; unaffected by navigation and set_camera().
         Camera3D default_camera;
 
         double xmin = 0, xmax = 1, ymin = 0, ymax = 1, zmin = 0, zmax = 1;
         bool xlim_auto = true, ylim_auto = true, zlim_auto = true;
+        LimitStamps limit_stamps;
+        StyleStamps style_stamps;
 
         std::optional<std::vector<Tick>> xticks_override, yticks_override, zticks_override;
 
@@ -60,6 +64,7 @@ namespace sextant {
             s.xtitle = xtitle;
             s.ytitle = ytitle;
             s.ztitle = ztitle;
+            s.title_stamps = title_stamps;
             s.grid_enabled = grid_enabled;
             s.grid_opts = grid_opts;
             s.legend_enabled = legend_enabled;
@@ -69,6 +74,7 @@ namespace sextant {
             s.box_style = box_style;
             s.aspect = aspect;
             s.camera = camera;
+            s.camera_stamp = camera_stamp;
             s.default_camera = default_camera;
             s.xmin = xmin;
             s.xmax = xmax;
@@ -79,6 +85,8 @@ namespace sextant {
             s.xlim_auto = xlim_auto;
             s.ylim_auto = ylim_auto;
             s.zlim_auto = zlim_auto;
+            s.limit_stamps = limit_stamps;
+            s.style_stamps = style_stamps;
             s.xticks_override = xticks_override;
             s.yticks_override = yticks_override;
             s.zticks_override = zticks_override;

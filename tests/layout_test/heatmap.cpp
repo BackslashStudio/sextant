@@ -133,7 +133,7 @@ namespace lt {
 
         // --- imshow() is heatmap() at the index extent; indivisible ranges throw.
         {
-            const std::vector<float> data(25, 0.0f);
+            const std::vector<double> data(25, 0.0);
             auto fig = sextant::Figure::create({.width = 400, .height = 300});
             bool threw_degenerate = false, threw_nonfinite = false, imshow_ok = true;
             try { fig->axes()->heatmap(data, 5, 5, {1.0, 1.0}, {0.0, 5.0}); } catch (const std::invalid_argument&) {

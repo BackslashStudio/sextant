@@ -266,27 +266,50 @@ namespace {
     // -------------------------------------------------------------------------
     void run_manual() {
         std::printf(
-            "[probe] two live windows. Drag-resize both (watch for flicker or a\n"
-            "        torn frame), click and type in the panels, copy and paste,\n"
-            "        move the pointer in and out. Close both to finish.\n");
+            "[probe] two live windows, A in 2D and B in 3D, both refreshed every\n"
+            "        frame. Drag-resize both (watch for flicker or a torn frame),\n"
+            "        pan/zoom A, orbit B, edit in the panels (styles, grid, legend,\n"
+            "        ticks, the plane) and check the edits hold. Close both to finish.\n");
 
-        auto a = make_figure("probe A -- drag me", 640, 480);
-        auto b = make_figure("probe B -- and me", 560, 420);
+        // A is 2D, B is 3D: a surface on the axes and a line on a plane below it,
+        // so panel edits of both kinds (and of a plane) meet a refresh() every frame.
+        auto a = make_figure("probe A -- 2D, drag me", 640, 480);
+        auto b = Figure::create({.width = 560, .height = 420, .title = "probe B -- 3D, and me"});
+        auto ax3 = b->add_subplot3d(1, 1, 1);
+        const std::vector<double> u = ramp(24), v = ramp(24);
+        auto surface_heights = [&u, &v](int i) {
+            std::vector<double> h(u.size() * v.size());
+            for (size_t r = 0; r < u.size(); ++r)
+                for (size_t c = 0; c < v.size(); ++c)
+                    h[r * v.size() + c] = std::sin(u[r] + i * 0.08) * std::cos(v[c]);
+            return h;
+        };
+        ax3->surface(sextant::PlaneOrientation::XY, u, v, surface_heights(0));
+        ax3->set_title("probe B -- 3D");
+        auto floor = ax3->plane(sextant::PlaneOrientation::XY, -1.5);
+        floor->line(u, u, {.color = sextant::Color::Red, .linewidth = 2.0f});
         a->show(false);
         b->show(false);
 
-        // A trace that moves every frame: a still picture hides a torn one.
         const std::vector<double> x = ramp(80);
+        // Data that moves every frame: a still picture hides a torn one.
+        // set_*_data() keeps the view and every panel edit, so pan/zoom, orbit
+        // and cosmetic changes on the moving plots hold.
         for (int i = 0; a->is_open() || b->is_open(); ++i) {
             pump_for(std::chrono::milliseconds(16));
             std::vector<double> y(x.size());
             for (size_t j = 0; j < x.size(); ++j) y[j] = std::sin(x[j] + i * 0.08);
-            for (const auto& fig: {a, b}) {
-                if (!fig->is_open()) continue;
-                auto ax = fig->axes();
-                ax->cla();
-                ax->line(x, y, {.color = sextant::Color::Red, .linewidth = 2.0f});
-                fig->refresh();
+            if (a->is_open()) {
+                a->axes()->set_line_data(0, {x, y});
+                a->refresh();
+            }
+            if (b->is_open()) {
+                // Across the middle of the floor, over the surface's own x range.
+                std::vector<double> fy(u.size());
+                for (size_t j = 0; j < u.size(); ++j) fy[j] = 3.0 + std::sin(u[j] * 2.0 + i * 0.08);
+                floor->set_line_data(0, {u, fy});
+                ax3->set_surface_data(0, {sextant::PlaneOrientation::XY, u, v, surface_heights(i)});
+                b->refresh();
             }
         }
         std::printf("[probe] both windows closed\n");

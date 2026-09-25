@@ -14,12 +14,14 @@ namespace sextant {
         PlaneOrientation orient = PlaneOrientation::XY;
         double offset = 0.0;
         Plane2DOptions opts;
+        unsigned long long placement_stamp = 0;   // see PlaneSnapshot
 
         PlaneSnapshot build_snapshot() const {
             PlaneSnapshot p;
             p.orient = orient;
             p.offset = offset;
             p.opts = opts;
+            p.placement_stamp = placement_stamp;
             p.sheet = sheet.build_snapshot();
             return p;
         }

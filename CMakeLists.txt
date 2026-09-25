@@ -545,6 +545,7 @@ if(SEXTANT_BUILD_TESTS)
             tests/layout_test/headless_export.cpp
             tests/layout_test/window_broker.cpp
             tests/layout_test/window_input.cpp
+            tests/layout_test/read_back.cpp
             tests/layout_test/window_wait.cpp)
         target_link_libraries(sextant_layout_test PRIVATE sextant_static)
         target_include_directories(sextant_layout_test PRIVATE

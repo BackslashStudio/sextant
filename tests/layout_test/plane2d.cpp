@@ -20,7 +20,7 @@ namespace lt {
         check(pl->orientation() == PlaneOrientation::XY && pl->offset() == 0.5,
               "plane: with the orientation and offset it was asked for");
 
-        const std::vector<float> d(12, 0.5f);
+        const std::vector<double> d(12, 0.5);
         pl->heatmap(d, 3, 4, {400.0, 700.0}, {-1.0, 1.0});
 
         // cla() drops the plane's data, not its placement.
@@ -444,7 +444,7 @@ namespace lt {
         auto fig = Figure::create({.width = W, .height = H});
         auto ax3 = fig->add_subplot3d(1, 1, 1);
         ax3->plane(PlaneOrientation::XY, 0.0)
-                ->heatmap(std::vector<float>(4, 0.5f), 2, 2, {0.0, 1.0}, {0.0, 1.0}, cb);
+                ->heatmap(std::vector<double>(4, 0.5), 2, 2, {0.0, 1.0}, {0.0, 1.0}, cb);
         ax3->set_colorbar_style(big);
         fig->savefig("axes3d_colorbar_style.svg");
         std::ifstream sf("axes3d_colorbar_style.svg", std::ios::binary);

@@ -71,12 +71,12 @@ static void test_axes_gallery() {
     for (auto& v: cum_data) v = edist(rng);
 
     constexpr int R = 48, C = 48;
-    std::vector<float> gauss(R * C), checker(R * C);
+    std::vector<double> gauss(R * C), checker(R * C);
     for (int r = 0; r < R; ++r)
         for (int c = 0; c < C; ++c) {
             double dr = (r - R / 2.0) / (R / 6.0), dc = (c - C / 2.0) / (C / 6.0);
-            gauss[r * C + c] = static_cast<float>(std::exp(-(dr * dr + dc * dc)));
-            checker[r * C + c] = static_cast<float>((r + c) % 2);
+            gauss[r * C + c] = std::exp(-(dr * dr + dc * dc));
+            checker[r * C + c] = static_cast<double>((r + c) % 2);
         }
 
     std::vector<double> pcurve_x(N), pcurve_y(N), ppts_x, ppts_y;
@@ -286,11 +286,11 @@ static void test_axes3d_gallery() {
         }
 
     constexpr int R = 24, C = 24;
-    std::vector<float> field(R * C);
+    std::vector<double> field(R * C);
     for (int r = 0; r < R; ++r)
         for (int c = 0; c < C; ++c) {
             const double dr = (r - R / 2.0) / (R / 3.0), dc = (c - C / 2.0) / (C / 3.0);
-            field[r * C + c] = static_cast<float>(std::exp(-(dr * dr + dc * dc)));
+            field[r * C + c] = std::exp(-(dr * dr + dc * dc));
         }
 
     constexpr int L = 60;
@@ -914,13 +914,13 @@ static void test_translucent3d() {
     // A field for the planes, so crossing contents visibly change over.
     constexpr int NX = 40, NY = 40;
     auto slice_at = [&](double z) {
-        std::vector<float> m(static_cast<std::size_t>(NY) * NX);
+        std::vector<double> m(static_cast<std::size_t>(NY) * NX);
         for (int r = 0; r < NY; ++r)
             for (int c = 0; c < NX; ++c) {
                 const double x = -3.0 + 6.0 * c / (NX - 1);
                 const double y = -3.0 + 6.0 * r / (NY - 1);
                 m[static_cast<std::size_t>(r) * NX + c] =
-                        static_cast<float>(std::sin(x + z) * std::cos(y - z));
+                        std::sin(x + z) * std::cos(y - z);
             }
         return m;
     };
@@ -1033,11 +1033,11 @@ static void test_savefig() {
     const std::vector<double> sales = {42, 55, 61, 49, 78, 83};
 
     constexpr int R = 24, C = 24;
-    std::vector<float> gauss(R * C);
+    std::vector<double> gauss(R * C);
     for (int r = 0; r < R; ++r)
         for (int c = 0; c < C; ++c) {
             double dr = (r - R / 2.0) / (R / 6.0), dc = (c - C / 2.0) / (C / 6.0);
-            gauss[r * C + c] = static_cast<float>(std::exp(-(dr * dr + dc * dc)));
+            gauss[r * C + c] = std::exp(-(dr * dr + dc * dc));
         }
 
     auto fig = sextant::Figure::create({.width = 1400, .height = 480, .title = "Headless export"});
@@ -1153,12 +1153,12 @@ static void test_live_refresh() {
 
     fig->show(false);
 
+    // set_line_data() keeps the title and any pan/zoom, which cla() would reset.
     for (int i = 0; i < 20; ++i) {
         pump_for(std::chrono::milliseconds(50));
-        ax->cla();
         std::vector<double> y(N);
         for (int j = 0; j < N; ++j) y[j] = std::sin(x[j] + i * 0.1);
-        ax->line(x, y, {.color = sextant::Color::Red, .linewidth = 2.0f});
+        ax->set_line_data(0, {x, y});
         fig->refresh();
     }
 
@@ -1289,11 +1289,10 @@ static void test_subplot_spans() {
     }
 
     constexpr int R = 30, C = 90;
-    std::vector<float> field(R * C);
+    std::vector<double> field(R * C);
     for (int r = 0; r < R; ++r)
         for (int c = 0; c < C; ++c)
-            field[r * C + c] = static_cast<float>(
-                0.5 + 0.5 * std::sin(c * 0.12) * std::cos(r * 0.25));
+            field[r * C + c] = 0.5 + 0.5 * std::sin(c * 0.12) * std::cos(r * 0.25);
 
     constexpr int SU = 21, SV = 21;
     std::vector<double> su(SU), sv(SV), sz(SU * SV);
@@ -1414,10 +1413,10 @@ static void test_mouse_hint() {
     }
 
     constexpr int ROWS = 8, COLS = 12;
-    std::vector<float> img(ROWS * COLS);
+    std::vector<double> img(ROWS * COLS);
     for (int r = 0; r < ROWS; ++r)
         for (int c = 0; c < COLS; ++c)
-            img[r * COLS + c] = static_cast<float>(r * COLS + c) / static_cast<float>(ROWS * COLS);
+            img[r * COLS + c] = static_cast<double>(r * COLS + c) / static_cast<double>(ROWS * COLS);
 
     // Every point here has its own label (only two do on the line above).
     const std::vector<double> store_x = {1, 2, 3, 4, 5, 6, 7, 8};
@@ -1454,10 +1453,10 @@ static void test_mouse_hint() {
     bar_hints[0] = "Corner bar";
 
     constexpr int PR = 10, PC = 10;
-    std::vector<float> sheet(PR * PC);
+    std::vector<double> sheet(PR * PC);
     for (int r = 0; r < PR; ++r)
         for (int c = 0; c < PC; ++c)
-            sheet[r * PC + c] = static_cast<float>(r + c) / static_cast<float>(PR + PC);
+            sheet[r * PC + c] = static_cast<double>(r + c) / static_cast<double>(PR + PC);
 
     auto fig = sextant::Figure::create({.width = 2400, .height = 500, .title = "Mouse hint"});
     fig->add_subplot(1, 5, 1)
@@ -1526,10 +1525,10 @@ static void test_data_panel() {
     }
 
     constexpr int ROWS = 8, COLS = 6;
-    std::vector<float> img(ROWS * COLS);
+    std::vector<double> img(ROWS * COLS);
     for (int r = 0; r < ROWS; ++r)
         for (int c = 0; c < COLS; ++c)
-            img[r * COLS + c] = static_cast<float>(r * COLS + c) / static_cast<float>(ROWS * COLS);
+            img[r * COLS + c] = static_cast<double>(r * COLS + c) / static_cast<double>(ROWS * COLS);
 
     auto fig = sextant::Figure::create({.width = 1400, .height = 800, .title = "Data panel"});
     fig->add_subplot(2, 2, 1)
@@ -1550,10 +1549,10 @@ static void test_data_panel() {
     // Wider than one table: exercises column paging. Both Data panels are open
     // at once.
     constexpr int WROWS = 12, WCOLS = 600;
-    std::vector<float> wide(WROWS * WCOLS);
+    std::vector<double> wide(WROWS * WCOLS);
     for (int r = 0; r < WROWS; ++r)
         for (int c = 0; c < WCOLS; ++c)
-            wide[r * WCOLS + c] = static_cast<float>(c) / static_cast<float>(WCOLS);
+            wide[r * WCOLS + c] = static_cast<double>(c) / static_cast<double>(WCOLS);
 
     auto fig2 = sextant::Figure::create({.width = 1400, .height = 700, .title = "Data panel: wide heatmap"});
     fig2->axes()->imshow(wide, WROWS, WCOLS, {.colorbar = true}).set_title("Heatmap 12x600");
@@ -1573,10 +1572,10 @@ static void test_data_panel() {
         }
 
     constexpr int PR = 6, PC = 8;
-    std::vector<float> sheet(PR * PC);
+    std::vector<double> sheet(PR * PC);
     for (int r = 0; r < PR; ++r)
         for (int c = 0; c < PC; ++c)
-            sheet[r * PC + c] = static_cast<float>(r * PC + c) / static_cast<float>(PR * PC);
+            sheet[r * PC + c] = static_cast<double>(r * PC + c) / static_cast<double>(PR * PC);
 
     auto fig3 = sextant::Figure::create({.width = 1400, .height = 800, .title = "Data panel: bar3d"});
     auto ax3 = fig3->add_subplot3d(1, 1, 1);
@@ -1602,10 +1601,10 @@ static void test_style_options() {
         y[i] = std::sin(x[i]);
     }
     constexpr int R = 16, C = 16;
-    std::vector<float> heat(R * C);
+    std::vector<double> heat(R * C);
     for (int r = 0; r < R; ++r)
         for (int c = 0; c < C; ++c)
-            heat[r * C + c] = static_cast<float>(r + c) / static_cast<float>(R + C - 2);
+            heat[r * C + c] = static_cast<double>(r + c) / static_cast<double>(R + C - 2);
 
     auto render = [&](bool styled, const std::string& stem) {
         // Supersample=1, so the raster output isn't box-filtered.

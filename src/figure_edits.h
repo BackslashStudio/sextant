@@ -2,9 +2,11 @@
 #include "sextant/style.h"
 #include "plot_objects.h"
 #include "tick.h"
+#include <algorithm>
 #include <cstddef>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -22,6 +24,9 @@ struct PlotCellEdit {
     std::size_t element;
     double      value;
     int         plane_index = -1;
+    // The data_stamp of the plot as the panel showed it; the op is dropped if
+    // the plot has been re-plotted or set_*_data()'d since. Every op has one.
+    unsigned long long seen = ~0ull;
 };
 
 // Insert or remove one point, moving every parallel array of the plot (x/y/z,
@@ -35,6 +40,7 @@ struct PlotRowEdit {
     // row-1, or zero-filled at row 0. Remove: the index to erase.
     std::size_t row        = 0;
     int         plane_index = -1;   // see PlotCellEdit
+    unsigned long long seen = ~0ull;   // see PlotCellEdit
 };
 
 // Appearance of one 2D plot object, from its Data-panel tab. Addressed like a
@@ -45,6 +51,9 @@ struct PlotStyleEdit {
     int plane_index = -1;
     std::variant<LineOptions, ScatterOptions, BarOptions,
                  HeatmapOptions, ScatterZOptions> opts;
+    // The `cleared` stamp of the axes or plane sheet it was made on (see
+    // StyleStamps); filled in by FigureEditBox.
+    unsigned long long seen = ~0ull;
 };
 
 // Insert or remove a whole row/column of a heatmap (or a bar3d/surface grid,
@@ -62,6 +71,7 @@ struct MatrixLineEdit {
     int         plane_index = -1;   // see PlotCellEdit
     // Defaults to Heatmap.
     PlotKind    kind       = PlotKind::Heatmap;
+    unsigned long long seen = ~0ull;   // see PlotCellEdit
 };
 
 // A plot's bar width (a per-plot scalar), journaled like other data. For
@@ -72,6 +82,7 @@ struct BarWidthEdit {
     int    plane_index = -1;   // see PlotCellEdit
     PlotKind kind      = PlotKind::Bar;
     int    column      = 0;    // Bar3D: 0 = along u, 1 = along v
+    unsigned long long seen = ~0ull;   // see PlotCellEdit
 };
 
 // One op in a plot's edit stream. Order matters: indices refer to the arrays
@@ -83,12 +94,124 @@ inline int plot_op_plane(const PlotDataOp& op) {
     return std::visit([](const auto& o) { return o.plane_index; }, op);
 }
 
+// Titles typed in the panel, each with the stamp it was typed over. The
+// journal's per-slot record; AxesEdit/AxesEdit3D carry the same members.
+struct TitleEdits {
+    std::optional<std::string> title, xtitle, ytitle, ztitle;
+    TitleStamps title_seen = TitleStamps::any();
+
+    bool empty() const { return !title && !xtitle && !ytitle && !ztitle; }
+};
+
+// Latest value wins, per field, keeping each text with its own stamp.
+template <typename E>
+void merge_title_edits(TitleEdits& dst, const E& e) {
+    auto one = [](std::optional<std::string>& text, unsigned long long& seen,
+                  const std::optional<std::string>& v, unsigned long long v_seen) {
+        if (v) { text = v; seen = v_seen; }
+    };
+    one(dst.title,  dst.title_seen.title,  e.title,  e.title_seen.title);
+    one(dst.xtitle, dst.title_seen.xtitle, e.xtitle, e.title_seen.xtitle);
+    one(dst.ytitle, dst.title_seen.ytitle, e.ytitle, e.title_seen.ytitle);
+    if constexpr (requires { e.ztitle; })
+        one(dst.ztitle, dst.title_seen.ztitle, e.ztitle, e.title_seen.ztitle);
+}
+
+// Applies each title `e` carries unless dst's was set after the snapshot it was
+// typed over. For Axes::Impl, Axes3D::Impl and both snapshot kinds.
+template <typename T, typename E>
+void apply_title_edits(T& dst, const E& e) {
+    auto one = [](std::string& text, unsigned long long have,
+                  const std::optional<std::string>& v, unsigned long long seen) {
+        if (v && have <= seen) text = *v;
+    };
+    one(dst.title,  dst.title_stamps.title,  e.title,  e.title_seen.title);
+    one(dst.xtitle, dst.title_stamps.xtitle, e.xtitle, e.title_seen.xtitle);
+    one(dst.ytitle, dst.title_stamps.ytitle, e.ytitle, e.title_seen.ytitle);
+    if constexpr (requires { dst.ztitle; e.ztitle; })
+        one(dst.ztitle, dst.title_stamps.ztitle, e.ztitle, e.title_seen.ztitle);
+}
+
+// Limits from pan/zoom or the Limits fields, per axis with the stamp they were
+// made over. The journal's per-slot record, like TitleEdits; AxesEdit/AxesEdit3D
+// carry the same members.
+struct LimitEdits {
+    std::optional<bool>   xlim_auto, ylim_auto, zlim_auto;
+    std::optional<double> xmin, xmax, ymin, ymax, zmin, zmax;
+    LimitStamps lim_seen = LimitStamps::any();
+
+    bool empty() const {
+        return !xlim_auto && !ylim_auto && !zlim_auto && !xmin && !xmax
+               && !ymin && !ymax && !zmin && !zmax;
+    }
+};
+
+namespace edits_detail {
+
+// One axis of a limit edit: its auto flag and bounds.
+template <typename B, typename D>
+struct LimitAxis { B& autoscale; D& lo; D& hi; };
+
+} // namespace edits_detail
+
+// Latest value wins, per field; an axis takes the stamp of its latest edit.
+template <typename E>
+void merge_limit_edits(LimitEdits& dst, const E& e) {
+    using edits_detail::LimitAxis;
+    using OB = std::optional<bool>;
+    using OD = std::optional<double>;
+    auto one = [](LimitAxis<OB, OD> d, unsigned long long& seen,
+                  LimitAxis<const OB, const OD> v, unsigned long long v_seen) {
+        if (!v.autoscale && !v.lo && !v.hi) return;
+        if (v.autoscale) d.autoscale = v.autoscale;
+        if (v.lo) d.lo = v.lo;
+        if (v.hi) d.hi = v.hi;
+        seen = v_seen;
+    };
+    one({dst.xlim_auto, dst.xmin, dst.xmax}, dst.lim_seen.x,
+        {e.xlim_auto, e.xmin, e.xmax}, e.lim_seen.x);
+    one({dst.ylim_auto, dst.ymin, dst.ymax}, dst.lim_seen.y,
+        {e.ylim_auto, e.ymin, e.ymax}, e.lim_seen.y);
+    if constexpr (requires { e.zmin; })
+        one({dst.zlim_auto, dst.zmin, dst.zmax}, dst.lim_seen.z,
+            {e.zlim_auto, e.zmin, e.zmax}, e.lim_seen.z);
+}
+
+// Applies each axis `e` carries unless dst's was set after the snapshot it was
+// made over, as apply_title_edits().
+template <typename T, typename E>
+void apply_limit_edits(T& dst, const E& e) {
+    using edits_detail::LimitAxis;
+    using OB = const std::optional<bool>;
+    using OD = const std::optional<double>;
+    auto one = [](LimitAxis<bool, double> d, unsigned long long have,
+                  LimitAxis<OB, OD> v, unsigned long long seen) {
+        if (have > seen) return;
+        if (v.autoscale) d.autoscale = *v.autoscale;
+        if (v.lo) d.lo = *v.lo;
+        if (v.hi) d.hi = *v.hi;
+    };
+    one({dst.xlim_auto, dst.xmin, dst.xmax}, dst.limit_stamps.x,
+        {e.xlim_auto, e.xmin, e.xmax}, e.lim_seen.x);
+    one({dst.ylim_auto, dst.ymin, dst.ymax}, dst.limit_stamps.y,
+        {e.ylim_auto, e.ymin, e.ymax}, e.lim_seen.y);
+    if constexpr (requires { dst.zmin; e.zmin; })
+        one({dst.zlim_auto, dst.zmin, dst.zmax}, dst.limit_stamps.z,
+            {e.zlim_auto, e.zmin, e.zmax}, e.lim_seen.z);
+}
+
 // One axes slot's pending panel edits; absent = untouched. For the tick
 // overrides, an empty inner vector means "revert to auto ticks".
 struct AxesEdit {
     std::optional<std::string> title, xtitle, ytitle;
+    // The stamps of the snapshot the titles were typed over (see TitleStamps).
+    TitleStamps title_seen = TitleStamps::any();
     std::optional<bool>   xlim_auto, ylim_auto, grid_enabled;
     std::optional<double> xmin, xmax, ymin, ymax;
+    // The stamps of the snapshot pan/zoom or the Limits fields worked over.
+    LimitStamps lim_seen = LimitStamps::any();
+    // The style stamps of the snapshot the panel drew; filled in by FigureEditBox.
+    StyleStamps style_seen = StyleStamps::any();
     std::optional<std::vector<Tick>> xticks_override, yticks_override;
     std::optional<AxesStyle> axes_style;
 
@@ -108,9 +231,12 @@ struct AxesEdit {
 // The 3D counterpart of AxesEdit. plot_ops name their plane via plane_index.
 struct AxesEdit3D {
     std::optional<std::string> title, xtitle, ytitle, ztitle;
+    TitleStamps title_seen = TitleStamps::any();
     std::optional<bool>   xlim_auto, ylim_auto, zlim_auto, grid_enabled;
     std::optional<double> xmin, xmax, ymin, ymax, zmin, zmax;
+    LimitStamps lim_seen = LimitStamps::any();
     std::optional<std::vector<Tick>> xticks_override, yticks_override, zticks_override;
+    StyleStamps style_seen = StyleStamps::any();   // as in AxesEdit
 
     std::optional<AxesStyle>   axes_style;
     std::optional<GridOptions> grid_opts;
@@ -123,6 +249,8 @@ struct AxesEdit3D {
     // Camera edits go through here (not PanelState) so a dragged view survives
     // refresh().
     std::optional<Camera3D>   camera;
+    // The camera_stamp of the snapshot it was navigated from (see TitleStamps).
+    unsigned long long camera_seen = ~0ull;
     std::optional<Box3DStyle> box_style;
     std::optional<BoxAspect>  aspect;
 
@@ -134,16 +262,19 @@ struct AxesEdit3D {
         std::optional<double>           offset;
         // Whole options struct.
         std::optional<Plane2DOptions>   opts;
+        // The plane's placement_stamp; filled in by FigureEditBox.
+        unsigned long long seen = ~0ull;
     };
     std::vector<PlaneEdit> planes;
 
     // Appearance of the axes' own 3D objects, positional. apply_axes3d_edit()
     // preserves `hint_labels`, which are data edited elsewhere.
-    struct Bar3DEdit   { int plot_index = 0; std::optional<Bar3DOptions>   opts; };
-    struct SurfaceEdit { int plot_index = 0; std::optional<SurfaceOptions> opts; };
-    struct Scatter3DEdit { int plot_index = 0; std::optional<Scatter3DOptions> opts; };
-    struct Line3DEdit  { int plot_index = 0; std::optional<Line3DOptions>  opts; };
-    struct SurfaceTriEdit { int plot_index = 0; std::optional<SurfaceTriOptions> opts; };
+    // `seen` is the axes' `cleared` stamp, as PlotStyleEdit's.
+    struct Bar3DEdit   { int plot_index = 0; std::optional<Bar3DOptions>   opts; unsigned long long seen = ~0ull; };
+    struct SurfaceEdit { int plot_index = 0; std::optional<SurfaceOptions> opts; unsigned long long seen = ~0ull; };
+    struct Scatter3DEdit { int plot_index = 0; std::optional<Scatter3DOptions> opts; unsigned long long seen = ~0ull; };
+    struct Line3DEdit  { int plot_index = 0; std::optional<Line3DOptions>  opts; unsigned long long seen = ~0ull; };
+    struct SurfaceTriEdit { int plot_index = 0; std::optional<SurfaceTriOptions> opts; unsigned long long seen = ~0ull; };
     std::vector<Bar3DEdit>     bars3d;
     std::vector<SurfaceEdit>   surfaces;
     std::vector<Scatter3DEdit> scatter3d;
@@ -174,6 +305,9 @@ struct FigureEdits {
     // Grid weights from dragging or the Layout fields; journaled, so a drag
     // survives refresh().
     std::optional<std::vector<float>> col_ratios, row_ratios;
+
+    // The figure stamps of the snapshot the panel drew; filled in by FigureEditBox.
+    FigureStamps fig_seen = FigureStamps::any();
 
     // Must list every field above: a missing one is silently dropped when it
     // arrives without a per-axes edit.
@@ -210,15 +344,38 @@ inline bool is_navigation_only(const FigureEdits& f) {
     return true;
 }
 
-// Data ops already applied to the published snapshot, for the caller thread to
-// replay onto Axes::Impl. Also the grid ratios.
+// Panel edits already applied to the published snapshot, for the caller thread
+// to replay onto Axes::Impl and Figure::Impl: data ops in order, everything else
+// as its latest value.
 struct PlotDataJournal {
     std::vector<std::pair<int, std::vector<PlotDataOp>>> per_axes;
+
+    // Titles as last typed, per slot (latest value only).
+    std::vector<std::pair<int, TitleEdits>> titles;
+
+    // Limits as last navigated or typed, per slot (latest value only).
+    std::vector<std::pair<int, LimitEdits>> limits;
+
+    // A 3D slot's camera as last navigated, with the stamp it was navigated from.
+    struct CameraEdit { Camera3D camera; unsigned long long seen = ~0ull; };
+    std::vector<std::pair<int, CameraEdit>> cameras;
 
     // Grid weights as last dragged (latest value only).
     std::optional<std::vector<float>> col_ratios, row_ratios;
 
-    bool empty() const { return per_axes.empty() && !col_ratios && !row_ratios; }
+    // Every other edit, latest value per field (merge_style_edits()): styles,
+    // grid, legend, colorbar, ticks, plot appearance, and in 3D the box, aspect,
+    // planes and objects. Titles, limits, camera and plot_ops stay empty here.
+    std::vector<std::pair<int, AxesEdit>>   styles;
+    std::vector<std::pair<int, AxesEdit3D>> styles3d;
+    // Figure-level: suptitle, its style, margins and gaps (per_axes unused).
+    FigureEdits figure;
+
+    bool empty() const {
+        return per_axes.empty() && titles.empty() && limits.empty() && cameras.empty()
+               && !col_ratios && !row_ratios && styles.empty() && styles3d.empty()
+               && figure.empty();
+    }
 };
 
 // ---------------------------------------------------------------------------
@@ -237,6 +394,10 @@ namespace edits_detail {
 template <class T> std::vector<T>& mut_ref(CowVec<T>& v)      { return v.mut(); }
 template <class T> std::vector<T>& mut_ref(std::vector<T>& v) { return v; }
 
+// False for an op recorded over an older copy of the plot (PlotCellEdit::seen).
+template <class P, class E>
+bool op_current(const P& p, const E& e) { return p.data_stamp <= e.seen; }
+
 } // namespace edits_detail
 
 template <class T>
@@ -248,25 +409,25 @@ void apply_plot_data_op(T& t, const PlotCellEdit& e) {
     const std::size_t pi = static_cast<std::size_t>(e.plot_index);
     switch (e.kind) {
         case PlotKind::Line:
-            if (pi >= t.lines.size()) return;
+            if (pi >= t.lines.size() || !edits_detail::op_current(t.lines[pi], e)) return;
             put(e.column == 0 ? t.lines[pi].x : t.lines[pi].y, e.element, e.value);
             return;
         case PlotKind::Scatter:
-            if (pi >= t.scatters.size()) return;
+            if (pi >= t.scatters.size() || !edits_detail::op_current(t.scatters[pi], e)) return;
             put(e.column == 0 ? t.scatters[pi].x : t.scatters[pi].y, e.element, e.value);
             return;
         case PlotKind::Bar:
-            if (pi >= t.bars.size()) return;
+            if (pi >= t.bars.size() || !edits_detail::op_current(t.bars[pi], e)) return;
             put(e.column == 0 ? t.bars[pi].centers : t.bars[pi].heights, e.element, e.value);
             return;
         case PlotKind::ScatterZ: {
-            if (pi >= t.scatter_z.size()) return;
+            if (pi >= t.scatter_z.size() || !edits_detail::op_current(t.scatter_z[pi], e)) return;
             auto& sp = t.scatter_z[pi];
             put(e.column == 0 ? sp.x : (e.column == 1 ? sp.y : sp.z), e.element, e.value);
             return;
         }
         case PlotKind::Heatmap: {
-            if (pi >= t.heatmaps.size()) return;
+            if (pi >= t.heatmaps.size() || !edits_detail::op_current(t.heatmaps[pi], e)) return;
             auto& hp = t.heatmaps[pi];
             // Re-check the shape; it may have changed since the panel saw it.
             if (hp.rows <= 0 || hp.cols <= 0) return;
@@ -286,7 +447,8 @@ template <class T>
 void apply_plot_data_op(T& t, const BarWidthEdit& e) {
     if (e.kind != PlotKind::Bar || e.plot_index < 0) return;
     const std::size_t pi = static_cast<std::size_t>(e.plot_index);
-    if (pi < t.bars.size()) t.bars[pi].bar_width = e.width;
+    if (pi < t.bars.size() && edits_detail::op_current(t.bars[pi], e))
+        t.bars[pi].bar_width = e.width;
 }
 
 namespace edits_detail {
@@ -344,7 +506,7 @@ void apply_plot_data_op(T& t, const PlotRowEdit& e) {
 
     switch (e.kind) {
         case PlotKind::Line:
-            if (pi < t.lines.size()) {
+            if (pi < t.lines.size() && edits_detail::op_current(t.lines[pi], e)) {
                 auto& lp = t.lines[pi];
                 required(lp.x, lp.y);
                 labels(lp.opts.hint_labels);
@@ -352,7 +514,7 @@ void apply_plot_data_op(T& t, const PlotRowEdit& e) {
             }
             break;
         case PlotKind::Scatter:
-            if (pi < t.scatters.size()) {
+            if (pi < t.scatters.size() && edits_detail::op_current(t.scatters[pi], e)) {
                 auto& sp = t.scatters[pi];
                 required(sp.x, sp.y);
                 labels(sp.opts.hint_labels);
@@ -360,7 +522,7 @@ void apply_plot_data_op(T& t, const PlotRowEdit& e) {
             }
             break;
         case PlotKind::Bar:
-            if (pi < t.bars.size()) {
+            if (pi < t.bars.size() && edits_detail::op_current(t.bars[pi], e)) {
                 auto& bp = t.bars[pi];
                 required(bp.centers, bp.heights);
                 labels(bp.opts.hint_labels);
@@ -368,7 +530,7 @@ void apply_plot_data_op(T& t, const PlotRowEdit& e) {
             }
             break;
         case PlotKind::ScatterZ:
-            if (pi < t.scatter_z.size()) {
+            if (pi < t.scatter_z.size() && edits_detail::op_current(t.scatter_z[pi], e)) {
                 auto& sp = t.scatter_z[pi];
                 required(sp.x, sp.y, sp.z);
                 labels(sp.opts.hint_labels);
@@ -436,7 +598,7 @@ template <class T>
 void apply_plot_data_op(T& t, const MatrixLineEdit& e) {
     if (e.kind != PlotKind::Heatmap || e.plot_index < 0) return;
     const std::size_t pi = static_cast<std::size_t>(e.plot_index);
-    if (pi >= t.heatmaps.size()) return;
+    if (pi >= t.heatmaps.size() || !edits_detail::op_current(t.heatmaps[pi], e)) return;
     auto& hp = t.heatmaps[pi];
     if (hp.rows <= 0 || hp.cols <= 0) return;
 
@@ -493,7 +655,7 @@ void apply_axes3d_data_op(T& t, const PlotCellEdit& e) {
     const std::size_t pi = static_cast<std::size_t>(e.plot_index);
     using edits_detail::put_cell;
     if (e.kind == PlotKind::Bar3D) {
-        if (pi >= t.bars3d.size()) return;
+        if (pi >= t.bars3d.size() || !edits_detail::op_current(t.bars3d[pi], e)) return;
         auto& b = t.bars3d[pi];
         switch (e.column) {
             case 0: put_cell(b.u, e.element, e.value);       return;
@@ -504,7 +666,7 @@ void apply_axes3d_data_op(T& t, const PlotCellEdit& e) {
         }
     }
     if (e.kind == PlotKind::Surface) {
-        if (pi >= t.surfaces.size()) return;
+        if (pi >= t.surfaces.size() || !edits_detail::op_current(t.surfaces[pi], e)) return;
         auto& s = t.surfaces[pi];
         switch (e.column) {
             case 0: put_cell(s.u, e.element, e.value);       return;
@@ -516,7 +678,7 @@ void apply_axes3d_data_op(T& t, const PlotCellEdit& e) {
     // Scatter3D: x, y, z, colors (`element` is the point index; colors is empty
     // for a flat series).
     if (e.kind == PlotKind::Scatter3D) {
-        if (pi >= t.scatter3d.size()) return;
+        if (pi >= t.scatter3d.size() || !edits_detail::op_current(t.scatter3d[pi], e)) return;
         auto& s = t.scatter3d[pi];
         switch (e.column) {
             case 0: put_cell(s.x, e.element, e.value);      return;
@@ -528,7 +690,7 @@ void apply_axes3d_data_op(T& t, const PlotCellEdit& e) {
     }
     // Line3D: same columns as Scatter3D.
     if (e.kind == PlotKind::Line3D) {
-        if (pi >= t.lines3d.size()) return;
+        if (pi >= t.lines3d.size() || !edits_detail::op_current(t.lines3d[pi], e)) return;
         auto& l = t.lines3d[pi];
         switch (e.column) {
             case 0: put_cell(l.x, e.element, e.value);      return;
@@ -541,7 +703,7 @@ void apply_axes3d_data_op(T& t, const PlotCellEdit& e) {
     // SurfaceTri: same columns (vertex index). Topology is not editable, and
     // editing a vertex does not re-triangulate.
     if (e.kind == PlotKind::SurfaceTri) {
-        if (pi >= t.surface_tri.size()) return;
+        if (pi >= t.surface_tri.size() || !edits_detail::op_current(t.surface_tri[pi], e)) return;
         auto& m = t.surface_tri[pi];
         switch (e.column) {
             case 0: put_cell(m.x, e.element, e.value);      return;
@@ -557,7 +719,7 @@ template <class T>
 void apply_axes3d_data_op(T& t, const BarWidthEdit& e) {
     if (e.kind != PlotKind::Bar3D || e.plot_index < 0) return;
     const std::size_t pi = static_cast<std::size_t>(e.plot_index);
-    if (pi >= t.bars3d.size()) return;
+    if (pi >= t.bars3d.size() || !edits_detail::op_current(t.bars3d[pi], e)) return;
     if (e.column == 0)      t.bars3d[pi].u_width = e.width;
     else if (e.column == 1) t.bars3d[pi].v_width = e.width;
 }
@@ -601,14 +763,14 @@ void apply_axes3d_data_op(T& t, const MatrixLineEdit& e) {
     if (e.plot_index < 0) return;
     const std::size_t pi = static_cast<std::size_t>(e.plot_index);
     if (e.kind == PlotKind::Bar3D) {
-        if (pi >= t.bars3d.size()) return;
+        if (pi >= t.bars3d.size() || !edits_detail::op_current(t.bars3d[pi], e)) return;
         auto& b = t.bars3d[pi];
         edits_detail::grid_line_apply(b.u, b.v, b.heights, b.bottoms,
                                       b.opts.hint_labels, e);
         return;
     }
     if (e.kind == PlotKind::Surface) {
-        if (pi >= t.surfaces.size()) return;
+        if (pi >= t.surfaces.size() || !edits_detail::op_current(t.surfaces[pi], e)) return;
         auto& s = t.surfaces[pi];
         // No second matrix: pass an empty one.
         CowVec<double> none;
@@ -665,6 +827,8 @@ void assign_plot_opts(Vec& v, int idx, const Opts& o) {
 // The variant alternative picks the vector.
 template <class T>
 void apply_plot_style_edit(T& t, const PlotStyleEdit& e) {
+    // Made before a cla() of this axes or plane: its index may name another object.
+    if (t.style_stamps.cleared > e.seen) return;
     if (const auto* o = std::get_if<LineOptions>(&e.opts))          assign_plot_opts(t.lines,     e.plot_index, *o);
     else if (const auto* o = std::get_if<ScatterOptions>(&e.opts))  assign_plot_opts(t.scatters,  e.plot_index, *o);
     else if (const auto* o = std::get_if<BarOptions>(&e.opts))      assign_plot_opts(t.bars,      e.plot_index, *o);
@@ -692,39 +856,56 @@ void apply_plot_style_edits(T& t, const std::vector<PlotStyleEdit>& es) {
     }
 }
 
+// The setter-group edits shared by 2D and 3D axes (and in 3D the box and
+// aspect), each group applied unless its setter ran after the snapshot the
+// panel drew (StyleStamps). For Axes::Impl, Axes3D::Impl and both snapshots.
+template <typename T, typename E>
+void apply_style_edits(T& dst, const E& e) {
+    const StyleStamps& have = dst.style_stamps;
+    const StyleStamps& seen = e.style_seen;
+    // Empty = back to auto; absent = unchanged.
+    auto ticks = [](auto& d, const std::optional<std::vector<Tick>>& v) {
+        if (v) d = v->empty() ? std::nullopt : std::optional(*v);
+    };
+    if (have.grid <= seen.grid) {
+        if (e.grid_enabled) dst.grid_enabled = *e.grid_enabled;
+        if (e.grid_opts)    dst.grid_opts    = *e.grid_opts;
+    }
+    if (e.axes_style && have.style <= seen.style) dst.axes_style = *e.axes_style;
+    if (have.legend <= seen.legend) {
+        if (e.legend_enabled) dst.legend_enabled = *e.legend_enabled;
+        if (e.legend_opts)    dst.legend_opts    = *e.legend_opts;
+    }
+    if (e.colorbar_opts && have.colorbar <= seen.colorbar) dst.colorbar_opts = *e.colorbar_opts;
+    if (have.xticks <= seen.xticks) ticks(dst.xticks_override, e.xticks_override);
+    if (have.yticks <= seen.yticks) ticks(dst.yticks_override, e.yticks_override);
+    if constexpr (requires { dst.zticks_override; e.zticks_override; })
+        if (have.zticks <= seen.zticks) ticks(dst.zticks_override, e.zticks_override);
+    if constexpr (requires { dst.box_style; e.box_style; }) {
+        if (e.box_style && have.box <= seen.box)    dst.box_style = *e.box_style;
+        if (e.aspect && have.aspect <= seen.aspect) dst.aspect    = *e.aspect;
+    }
+}
+
+// Apply a 2D edit to Axes::Impl (caller thread) or RenderSnapshot (render
+// thread), as apply_axes3d_edit() does for 3D.
+template <typename T>
+void apply_axes_edit(T& dst, const AxesEdit& e) {
+    apply_title_edits(dst, e);
+    apply_limit_edits(dst, e);
+    apply_style_edits(dst, e);
+    apply_plot_data_ops(dst, e.plot_ops);
+    apply_plot_style_edits(dst, e.plot_styles);
+}
+
 // Apply a 3D edit to Axes3D::Impl (caller thread) or RenderSnapshot3D (render
 // thread); one template so both paths stay identical.
 template <typename T>
 void apply_axes3d_edit(T& dst, const AxesEdit3D& e) {
-    if (e.title)  dst.title  = *e.title;
-    if (e.xtitle) dst.xtitle = *e.xtitle;
-    if (e.ytitle) dst.ytitle = *e.ytitle;
-    if (e.ztitle) dst.ztitle = *e.ztitle;
-    if (e.xlim_auto) dst.xlim_auto = *e.xlim_auto;
-    if (e.ylim_auto) dst.ylim_auto = *e.ylim_auto;
-    if (e.zlim_auto) dst.zlim_auto = *e.zlim_auto;
-    if (e.xmin) dst.xmin = *e.xmin;   if (e.xmax) dst.xmax = *e.xmax;
-    if (e.ymin) dst.ymin = *e.ymin;   if (e.ymax) dst.ymax = *e.ymax;
-    if (e.zmin) dst.zmin = *e.zmin;   if (e.zmax) dst.zmax = *e.zmax;
-    if (e.grid_enabled) dst.grid_enabled = *e.grid_enabled;
-    if (e.grid_opts)    dst.grid_opts    = *e.grid_opts;
-    if (e.axes_style)   dst.axes_style   = *e.axes_style;
-    if (e.legend_enabled) dst.legend_enabled = *e.legend_enabled;
-    if (e.legend_opts)    dst.legend_opts    = *e.legend_opts;
-    if (e.colorbar_opts)  dst.colorbar_opts  = *e.colorbar_opts;
-    if (e.camera)       dst.camera       = *e.camera;
-    if (e.box_style)    dst.box_style    = *e.box_style;
-    if (e.aspect)       dst.aspect       = *e.aspect;
-    // Empty = back to auto; absent = unchanged.
-    if (e.xticks_override)
-        dst.xticks_override = e.xticks_override->empty()
-            ? std::nullopt : std::optional(*e.xticks_override);
-    if (e.yticks_override)
-        dst.yticks_override = e.yticks_override->empty()
-            ? std::nullopt : std::optional(*e.yticks_override);
-    if (e.zticks_override)
-        dst.zticks_override = e.zticks_override->empty()
-            ? std::nullopt : std::optional(*e.zticks_override);
+    apply_title_edits(dst, e);
+    apply_limit_edits(dst, e);
+    apply_style_edits(dst, e);
+    if (e.camera && dst.camera_stamp <= e.camera_seen) dst.camera = *e.camera;
 
     // Planes: re-validated, stale indices skipped.
     apply_plot_style_edits(dst, e.plot_styles);
@@ -734,53 +915,139 @@ void apply_axes3d_edit(T& dst, const AxesEdit3D& e) {
         const std::size_t pi = static_cast<std::size_t>(pe.plane_index);
         if (pi >= dst.plane_count()) continue;
         auto& p = dst.plane_at(pi);
+        // A setter (or a new plane at this index) since the panel drew wins.
+        if (p.placement_stamp > pe.seen) continue;
         if (pe.orient) p.orient = *pe.orient;
         if (pe.offset) p.offset = *pe.offset;
         if (pe.opts)   p.opts   = *pe.opts;
     }
 
-    // The axes' own 3D objects; `hint_labels` is kept (it is data).
-    for (const auto& be : e.bars3d) {
-        if (be.plot_index < 0 || !be.opts) continue;
-        const std::size_t bi = static_cast<std::size_t>(be.plot_index);
-        if (bi >= dst.bars3d.size()) continue;
-        auto labels = std::move(dst.bars3d[bi].opts.hint_labels);
-        dst.bars3d[bi].opts = *be.opts;
-        dst.bars3d[bi].opts.hint_labels = std::move(labels);
-    }
-    for (const auto& se : e.surfaces) {
-        if (se.plot_index < 0 || !se.opts) continue;
-        const std::size_t si = static_cast<std::size_t>(se.plot_index);
-        if (si >= dst.surfaces.size()) continue;
-        auto labels = std::move(dst.surfaces[si].opts.hint_labels);
-        dst.surfaces[si].opts = *se.opts;
-        dst.surfaces[si].opts.hint_labels = std::move(labels);
-    }
-    for (const auto& ce : e.scatter3d) {
-        if (ce.plot_index < 0 || !ce.opts) continue;
-        const std::size_t ci = static_cast<std::size_t>(ce.plot_index);
-        if (ci >= dst.scatter3d.size()) continue;
-        auto labels = std::move(dst.scatter3d[ci].opts.hint_labels);
-        dst.scatter3d[ci].opts = *ce.opts;
-        dst.scatter3d[ci].opts.hint_labels = std::move(labels);
-    }
-    for (const auto& le : e.lines3d) {
-        if (le.plot_index < 0 || !le.opts) continue;
-        const std::size_t li = static_cast<std::size_t>(le.plot_index);
-        if (li >= dst.lines3d.size()) continue;
-        auto labels = std::move(dst.lines3d[li].opts.hint_labels);
-        dst.lines3d[li].opts = *le.opts;
-        dst.lines3d[li].opts.hint_labels = std::move(labels);
-    }
-    for (const auto& me : e.surface_tri) {
-        if (me.plot_index < 0 || !me.opts) continue;
-        const std::size_t mi = static_cast<std::size_t>(me.plot_index);
-        if (mi >= dst.surface_tri.size()) continue;
-        auto labels = std::move(dst.surface_tri[mi].opts.hint_labels);
-        dst.surface_tri[mi].opts = *me.opts;
-        dst.surface_tri[mi].opts.hint_labels = std::move(labels);
-    }
+    // The axes' own 3D objects; `hint_labels` is kept (it is data). An edit made
+    // before a cla() is dropped, as for plot_styles.
+    auto objects = [&dst](auto& plots, const auto& edits) {
+        for (const auto& oe : edits) {
+            if (oe.plot_index < 0 || !oe.opts || dst.style_stamps.cleared > oe.seen) continue;
+            const std::size_t i = static_cast<std::size_t>(oe.plot_index);
+            if (i >= plots.size()) continue;
+            auto labels = std::move(plots[i].opts.hint_labels);
+            plots[i].opts = *oe.opts;
+            plots[i].opts.hint_labels = std::move(labels);
+        }
+    };
+    objects(dst.bars3d, e.bars3d);
+    objects(dst.surfaces, e.surfaces);
+    objects(dst.scatter3d, e.scatter3d);
+    objects(dst.lines3d, e.lines3d);
+    objects(dst.surface_tri, e.surface_tri);
     apply_plot_data_ops(dst, e.plot_ops);
+}
+
+// ---------------------------------------------------------------------------
+// The journal's style lane: every edit without a lane of its own, as its
+// latest value. Each setter group keeps the recorded stamp of the edit that
+// last set it; entries addressed to a plane or object keep their own.
+// ---------------------------------------------------------------------------
+
+namespace edits_detail {
+
+template <class V>
+void take_latest(std::optional<V>& d, const std::optional<V>& s,
+                 unsigned long long& d_seen, unsigned long long s_seen) {
+    if (s) { d = s; d_seen = s_seen; }
+}
+
+// Replace the entry with the same key, else append.
+template <class Vec, class Key>
+void upsert(Vec& dst, const typename Vec::value_type& v, Key key) {
+    for (auto& d : dst)
+        if (key(d) == key(v)) { d = v; return; }
+    dst.push_back(v);
+}
+
+} // namespace edits_detail
+
+// Titles, limits, the camera and plot_ops have lanes of their own and are
+// not copied.
+template <class E>
+void merge_style_edits(E& dst, const E& src) {
+    using edits_detail::take_latest;
+    using edits_detail::upsert;
+    StyleStamps& ds = dst.style_seen;
+    const StyleStamps& ss = src.style_seen;
+    take_latest(dst.grid_enabled, src.grid_enabled, ds.grid, ss.grid);
+    take_latest(dst.grid_opts, src.grid_opts, ds.grid, ss.grid);
+    take_latest(dst.axes_style, src.axes_style, ds.style, ss.style);
+    take_latest(dst.legend_enabled, src.legend_enabled, ds.legend, ss.legend);
+    take_latest(dst.legend_opts, src.legend_opts, ds.legend, ss.legend);
+    take_latest(dst.colorbar_opts, src.colorbar_opts, ds.colorbar, ss.colorbar);
+    take_latest(dst.xticks_override, src.xticks_override, ds.xticks, ss.xticks);
+    take_latest(dst.yticks_override, src.yticks_override, ds.yticks, ss.yticks);
+    for (const PlotStyleEdit& s : src.plot_styles)
+        upsert(dst.plot_styles, s, [](const PlotStyleEdit& p) {
+            return std::tuple(p.plane_index, p.plot_index, p.opts.index());
+        });
+    if constexpr (requires { src.box_style; }) {
+        take_latest(dst.zticks_override, src.zticks_override, ds.zticks, ss.zticks);
+        take_latest(dst.box_style, src.box_style, ds.box, ss.box);
+        take_latest(dst.aspect, src.aspect, ds.aspect, ss.aspect);
+        for (const auto& pe : src.planes) {
+            auto it = std::find_if(dst.planes.begin(), dst.planes.end(),
+                                   [&](const auto& d) { return d.plane_index == pe.plane_index; });
+            if (it == dst.planes.end()) { dst.planes.push_back(pe); continue; }
+            if (pe.orient) it->orient = pe.orient;
+            if (pe.offset) it->offset = pe.offset;
+            if (pe.opts)   it->opts   = pe.opts;
+            it->seen = pe.seen;
+        }
+        auto by_index = [](const auto& o) { return o.plot_index; };
+        for (const auto& o : src.bars3d)      upsert(dst.bars3d, o, by_index);
+        for (const auto& o : src.surfaces)    upsert(dst.surfaces, o, by_index);
+        for (const auto& o : src.scatter3d)   upsert(dst.scatter3d, o, by_index);
+        for (const auto& o : src.lines3d)     upsert(dst.lines3d, o, by_index);
+        for (const auto& o : src.surface_tri) upsert(dst.surface_tri, o, by_index);
+    }
+}
+
+// True if `e` carries nothing merge_style_edits() would copy.
+template <class E>
+bool style_edits_empty(const E& e) {
+    bool empty = !e.grid_enabled && !e.grid_opts && !e.axes_style && !e.legend_enabled
+                 && !e.legend_opts && !e.colorbar_opts && !e.xticks_override
+                 && !e.yticks_override && e.plot_styles.empty();
+    if constexpr (requires { e.box_style; })
+        empty = empty && !e.zticks_override && !e.box_style && !e.aspect && e.planes.empty()
+                && e.bars3d.empty() && e.surfaces.empty() && e.scatter3d.empty()
+                && e.lines3d.empty() && e.surface_tri.empty();
+    return empty;
+}
+
+// The figure-level fields the same way (grid ratios have their own lane).
+inline void merge_figure_edits(FigureEdits& dst, const FigureEdits& src) {
+    using edits_detail::take_latest;
+    FigureStamps& ds = dst.fig_seen;
+    const FigureStamps& ss = src.fig_seen;
+    take_latest(dst.suptitle, src.suptitle, ds.suptitle, ss.suptitle);
+    take_latest(dst.suptitle_opts, src.suptitle_opts, ds.suptitle_style, ss.suptitle_style);
+    take_latest(dst.margins, src.margins, ds.margins, ss.margins);
+    // No setter writes the gaps after create(), so they need no stamp.
+    if (src.col_gap) dst.col_gap = src.col_gap;
+    if (src.row_gap) dst.row_gap = src.row_gap;
+}
+
+// Applies the figure-level fields to Figure::Impl's (or a FigureSnapshot's)
+// members, each unless its setter ran after the snapshot the panel drew.
+// `have` is the destination's FigureStamps.
+template <class Suptitle, class Opts, class Margins, class Gap>
+void apply_figure_edits(const FigureEdits& e, const FigureStamps& have,
+                        Suptitle& suptitle, Opts& suptitle_opts, Margins& margins,
+                        Gap& col_gap, Gap& row_gap) {
+    const FigureStamps& seen = e.fig_seen;
+    if (e.suptitle && have.suptitle <= seen.suptitle) suptitle = *e.suptitle;
+    if (e.suptitle_opts && have.suptitle_style <= seen.suptitle_style)
+        suptitle_opts = *e.suptitle_opts;
+    if (e.margins && have.margins <= seen.margins) margins = *e.margins;
+    if (e.col_gap) col_gap = *e.col_gap;
+    if (e.row_gap) row_gap = *e.row_gap;
 }
 
 } // namespace sextant

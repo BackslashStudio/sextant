@@ -206,6 +206,18 @@ int main() {
     test_window_input_queue();
     test_window_input_requests();
 
+    // read_back.cpp
+    test_read_back_2d();
+    test_read_back_3d();
+    test_title_journal();
+    test_camera_journal();
+    test_set_data_2d();
+    test_set_data_3d();
+    test_set_data_keep_aligned();
+    test_data_op_stamps();
+    test_limit_journal();
+    test_style_journal();
+
     // window_wait.cpp -- last, because it opens real windows
     test_wait_closed();
     test_run_until_closed();

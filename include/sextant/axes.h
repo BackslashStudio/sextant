@@ -57,12 +57,12 @@ namespace sextant {
         // `data` is row-major rows x cols, drawn as a uniform mesh over
         // xrange x yrange (cell edges, see Range). Throws if either range is
         // non-finite or degenerate.
-        Axes& heatmap(std::span<const float> data, int rows, int cols,
+        Axes& heatmap(std::span<const double> data, int rows, int cols,
                       Range xrange, Range yrange, HeatmapOptions opts = {});
 
         // heatmap() over x in [0, cols], y in [0, rows]: unit cells, so tick 3 is
         // the boundary between columns 2 and 3.
-        Axes& imshow(std::span<const float> data, int rows, int cols,
+        Axes& imshow(std::span<const double> data, int rows, int cols,
                      HeatmapOptions opts = {});
 
         // ----------------------------------------------------------------
@@ -99,6 +99,64 @@ namespace sextant {
 
         // Clear all plot objects and reset limits.
         Axes& cla();
+
+        // ----------------------------------------------------------------
+        // Read-back
+        // ----------------------------------------------------------------
+        // What this axes holds now: the caller's own calls, plus panel edits to
+        // titles, limits (pan/zoom included) and plot data once Figure::refresh()
+        // has folded them in. Other panel edits are live preview and not reflected.
+        std::string title() const;
+
+        std::string xtitle() const;
+
+        std::string ytitle() const;
+
+        // The limits as drawn: set_xlim()'s, or the auto scale of the data.
+        Range xlim() const;
+
+        Range ylim() const;
+
+        // Plot objects of each kind, in the order they were added. `*_data(i)`
+        // returns a copy and throws std::out_of_range for i >= `*_count()`.
+        std::size_t line_count() const;
+        LineData line_data(std::size_t i) const;
+
+        std::size_t scatter_count() const;
+        ScatterData scatter_data(std::size_t i) const;
+
+        std::size_t scatter_z_count() const;
+        ScatterZData scatter_z_data(std::size_t i) const;
+
+        // bar() and hist() alike.
+        std::size_t bar_count() const;
+        BarData bar_data(std::size_t i) const;
+
+        // heatmap() and imshow() alike.
+        std::size_t heatmap_count() const;
+        HeatmapData heatmap_data(std::size_t i) const;
+
+        // ----------------------------------------------------------------
+        // Updating plotted data
+        // ----------------------------------------------------------------
+        // Replace object i's data in place, keeping its options and the rest
+        // of the axes, which cla() would reset: the way to animate a plot, with
+        // Figure::refresh() after. Takes what `*_data(i)` returns, validated as
+        // the plotting call would. Error bars and hint_labels stay while the
+        // point count (a heatmap's rows and cols) is unchanged and are dropped
+        // otherwise. Throws std::out_of_range for i >= `*_count()` and
+        // std::invalid_argument for bad data; either way nothing changes.
+        Axes& set_line_data(std::size_t i, const LineData& data);
+
+        Axes& set_scatter_data(std::size_t i, const ScatterData& data);
+
+        Axes& set_scatter_z_data(std::size_t i, const ScatterZData& data);
+
+        // The bar width is kept unless x changes; then it is re-derived from
+        // the spacing, as bar() does.
+        Axes& set_bar_data(std::size_t i, const BarData& data);
+
+        Axes& set_heatmap_data(std::size_t i, const HeatmapData& data);
 
     private:
         struct Impl;

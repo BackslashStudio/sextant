@@ -351,6 +351,39 @@ namespace sextant {
         float margin = 0.12f;
     };
 
+    // Read-back copies of the 3D kinds, as LineData is for 2D.
+    struct Bar3DData {
+        PlaneOrientation orient = PlaneOrientation::XY;
+        std::vector<double> u, v, heights;
+        // Empty = every bar stands on Bar3DOptions::bottom.
+        std::vector<double> bottoms;
+    };
+
+    struct SurfaceData {
+        PlaneOrientation orient = PlaneOrientation::XY;
+        std::vector<double> u, v, heights;
+    };
+
+    struct SurfaceTriData {
+        std::vector<double> x, y, z;
+        // As passed, or the Delaunay triangulation derived from an orientation.
+        std::vector<std::uint32_t> tri;
+        // Empty for a flat mesh.
+        std::vector<double> colors;
+    };
+
+    struct Scatter3DData {
+        std::vector<double> x, y, z;
+        // Empty for a flat series.
+        std::vector<double> colors;
+    };
+
+    struct Line3DData {
+        std::vector<double> x, y, z;
+        // Empty for a flat path.
+        std::vector<double> colors;
+    };
+
     // A 2D plane in the 3D scene: one of the three orientations, at an offset along
     // its normal, carrying the 2D plot kinds. In-plane coordinates are the parent's
     // data coordinates (a plane at XY, offset 0.5 spans x and y at z = 0.5), and
@@ -397,11 +430,11 @@ namespace sextant {
 
         // Ranges are the mesh's outer edges, as in 2D; reversed mirrors, degenerate
         // throws. Contours keep a fixed width on screen.
-        Plane2D& heatmap(std::span<const float> data, int rows, int cols,
+        Plane2D& heatmap(std::span<const double> data, int rows, int cols,
                          Range xrange, Range yrange, HeatmapOptions opts = {});
 
         // heatmap() over the index extent, as Axes::imshow().
-        Plane2D& imshow(std::span<const float> data, int rows, int cols,
+        Plane2D& imshow(std::span<const double> data, int rows, int cols,
                         HeatmapOptions opts = {});
 
         // Position along the plane's normal axis, in data units.
@@ -415,6 +448,38 @@ namespace sextant {
         PlaneOrientation orientation() const;
 
         double offset() const;
+
+        // Read-back of the plane's own objects, as on Axes (limits and titles
+        // are the parent's).
+        // Plot objects of each kind, in the order they were added. `*_data(i)`
+        // returns a copy and throws std::out_of_range for i >= `*_count()`.
+        std::size_t line_count() const;
+        LineData line_data(std::size_t i) const;
+
+        std::size_t scatter_count() const;
+        ScatterData scatter_data(std::size_t i) const;
+
+        std::size_t scatter_z_count() const;
+        ScatterZData scatter_z_data(std::size_t i) const;
+
+        // bar() and hist() alike.
+        std::size_t bar_count() const;
+        BarData bar_data(std::size_t i) const;
+
+        // heatmap() and imshow() alike.
+        std::size_t heatmap_count() const;
+        HeatmapData heatmap_data(std::size_t i) const;
+
+        // Replace object i's data, as Axes::set_line_data() and its siblings.
+        Plane2D& set_line_data(std::size_t i, const LineData& data);
+
+        Plane2D& set_scatter_data(std::size_t i, const ScatterData& data);
+
+        Plane2D& set_scatter_z_data(std::size_t i, const ScatterZData& data);
+
+        Plane2D& set_bar_data(std::size_t i, const BarData& data);
+
+        Plane2D& set_heatmap_data(std::size_t i, const HeatmapData& data);
 
     private:
         struct Impl;
@@ -593,6 +658,8 @@ namespace sextant {
 
         Axes3D& set_camera(Camera3D cam);
 
+        // Includes navigation in the window once Figure::refresh() has folded it
+        // in, unless a camera setter was called after it.
         Camera3D camera() const;
 
         // Projection mode and perspective field of view (clamped to [5, 120]).
@@ -605,6 +672,62 @@ namespace sextant {
         Axes3D& set_default_camera(Camera3D cam);
 
         Axes3D& cla();
+
+        // ----------------------------------------------------------------
+        // Read-back
+        // ----------------------------------------------------------------
+        // As on Axes: the caller's calls plus panel edits to titles, limits and
+        // plot data once Figure::refresh() has folded them in.
+        std::string title() const;
+
+        std::string xtitle() const;
+
+        std::string ytitle() const;
+
+        std::string ztitle() const;
+
+        // The limits as drawn: set_xlim()'s, or the auto scale of the data.
+        Range xlim() const;
+
+        Range ylim() const;
+
+        Range zlim() const;
+
+        // The axes' own objects in the order they were added; a plane's are
+        // read from the Plane2D. `*_data(i)` throws std::out_of_range for
+        // i >= `*_count()`.
+        std::size_t bar3d_count() const;
+        Bar3DData bar3d_data(std::size_t i) const;
+
+        std::size_t surface_count() const;
+        SurfaceData surface_data(std::size_t i) const;
+
+        std::size_t surface_tri_count() const;
+        SurfaceTriData surface_tri_data(std::size_t i) const;
+
+        std::size_t scatter3d_count() const;
+        Scatter3DData scatter3d_data(std::size_t i) const;
+
+        std::size_t line3d_count() const;
+        Line3DData line3d_data(std::size_t i) const;
+
+        // ----------------------------------------------------------------
+        // Updating plotted data
+        // ----------------------------------------------------------------
+        // Replace object i's data, as Axes::set_line_data() and its siblings:
+        // validated as the plotting call would, hint_labels (and error bars)
+        // kept while the point count or grid shape is unchanged. A bar
+        // footprint is kept unless its u or v changes. set_surface_tri_data()
+        // takes the topology as given and never re-triangulates.
+        Axes3D& set_bar3d_data(std::size_t i, const Bar3DData& data);
+
+        Axes3D& set_surface_data(std::size_t i, const SurfaceData& data);
+
+        Axes3D& set_surface_tri_data(std::size_t i, const SurfaceTriData& data);
+
+        Axes3D& set_scatter3d_data(std::size_t i, const Scatter3DData& data);
+
+        Axes3D& set_line3d_data(std::size_t i, const Line3DData& data);
 
     private:
         struct Impl;

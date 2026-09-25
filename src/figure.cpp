@@ -97,6 +97,8 @@ struct Figure::Impl {
 
     std::string     suptitle_text;
     SuptitleOptions suptitle_opts;
+    // Stamped by the figure-level setters (see FigureStamps).
+    FigureStamps    stamps;
 
     // Grid weights from set_col/row_ratios() and dragged boundaries. Empty = equal.
     std::vector<float> col_ratios, row_ratios;
@@ -240,6 +242,7 @@ struct Figure::Impl {
         fs.row_ratios    = row_ratios;
         fs.suptitle      = suptitle_text;
         fs.suptitle_opts = suptitle_opts;
+        fs.stamps        = stamps;
         fs.axes.reserve(slots.size());
         for (const auto& s : slots) {
             const AxesSlot slot{ s.rows, s.cols, s.index, s.last };
@@ -279,6 +282,12 @@ struct Figure::Impl {
         if (rows && g.rows > 0 && fits(*rows, g.rows)) row_ratios = *rows;
     }
 
+    // The figure-level fields of a drained or journaled edit, onto Figure::Impl.
+    void apply_figure_level(const FigureEdits& e) {
+        apply_figure_edits(e, stamps, suptitle_text, suptitle_opts, opts.margins,
+                           opts.subplot_col_gap, opts.subplot_row_gap);
+    }
+
     // Caller thread: drain panel edits into live Axes::Impl, then publish a
     // fresh snapshot.
     void apply_edits_and_publish() {
@@ -291,55 +300,46 @@ struct Figure::Impl {
                 else if (Axes3D::Impl* d3 = find_slot_impl3d(idx))
                     apply_plot_data_ops(*d3, ops);   // routed to the named plane
             }
+            for (const auto& [idx, t] : journal->titles) {
+                if (Axes::Impl* d2 = find_slot_impl(idx))
+                    apply_title_edits(*d2, t);
+                else if (Axes3D::Impl* d3 = find_slot_impl3d(idx))
+                    apply_title_edits(*d3, t);
+            }
+            for (const auto& [idx, l] : journal->limits) {
+                if (Axes::Impl* d2 = find_slot_impl(idx))
+                    apply_limit_edits(*d2, l);
+                else if (Axes3D::Impl* d3 = find_slot_impl3d(idx))
+                    apply_limit_edits(*d3, l);
+            }
+            for (const auto& [idx, c] : journal->cameras)
+                if (Axes3D::Impl* d3 = find_slot_impl3d(idx))
+                    if (d3->camera_stamp <= c.seen) d3->camera = c.camera;
+            // The style lane holds no titles, limits, camera or ops, so the
+            // whole-edit appliers apply just its styles.
+            for (const auto& [idx, e] : journal->styles)
+                if (Axes::Impl* d2 = find_slot_impl(idx)) apply_axes_edit(*d2, e);
+            for (const auto& [idx, e] : journal->styles3d)
+                if (Axes3D::Impl* d3 = find_slot_impl3d(idx)) apply_axes3d_edit(*d3, e);
+            apply_figure_level(journal->figure);
             fold_ratios(journal->col_ratios, journal->row_ratios);
         }
 
         if (auto edits = edit_box.load_and_clear()) {
-            for (const auto& [idx, e] : edits->per_axes) {
-                Axes::Impl* dp = find_slot_impl(idx);
-                if (!dp) continue;
-                auto& d2 = *dp;
-                if (e.title)  d2.title  = *e.title;
-                if (e.xtitle) d2.xtitle = *e.xtitle;
-                if (e.ytitle) d2.ytitle = *e.ytitle;
-                if (e.xlim_auto) d2.xlim_auto = *e.xlim_auto;
-                if (e.xmin) d2.xmin = *e.xmin;
-                if (e.xmax) d2.xmax = *e.xmax;
-                if (e.ylim_auto) d2.ylim_auto = *e.ylim_auto;
-                if (e.ymin) d2.ymin = *e.ymin;
-                if (e.ymax) d2.ymax = *e.ymax;
-                if (e.grid_enabled) d2.grid_enabled = *e.grid_enabled;
-                if (e.grid_opts) d2.grid_opts = *e.grid_opts;
-                if (e.legend_enabled) d2.legend_enabled = *e.legend_enabled;
-                if (e.legend_opts) d2.legend_opts = *e.legend_opts;
-                if (e.colorbar_opts) d2.colorbar_opts = *e.colorbar_opts;
-                if (e.axes_style) d2.axes_style = *e.axes_style;
-                if (e.xticks_override)
-                    d2.xticks_override = e.xticks_override->empty()
-                        ? std::nullopt : std::optional(*e.xticks_override);
-                if (e.yticks_override)
-                    d2.yticks_override = e.yticks_override->empty()
-                        ? std::nullopt : std::optional(*e.yticks_override);
-                apply_plot_data_ops(d2, e.plot_ops);
-                apply_plot_style_edits(d2, e.plot_styles);
-            }
+            for (const auto& [idx, e] : edits->per_axes)
+                if (Axes::Impl* d2 = find_slot_impl(idx)) apply_axes_edit(*d2, e);
             for (const auto& [idx, e] : edits->per_axes3d)
-                if (Axes3D::Impl* d3 = find_slot_impl3d(idx))
-                    apply_axes3d_edit(*d3, e);
+                if (Axes3D::Impl* d3 = find_slot_impl3d(idx)) apply_axes3d_edit(*d3, e);
             // Figure-level, outside the per-axes loop.
-            if (edits->suptitle)      suptitle_text = *edits->suptitle;
-            if (edits->suptitle_opts) suptitle_opts = *edits->suptitle_opts;
-            if (edits->margins)       opts.margins = *edits->margins;
-            if (edits->col_gap)       opts.subplot_col_gap = *edits->col_gap;
-            if (edits->row_gap)       opts.subplot_row_gap = *edits->row_gap;
+            apply_figure_level(*edits);
             fold_ratios(edits->col_ratios, edits->row_ratios);
         }
         snapshot_box.store(std::make_shared<const FigureSnapshot>(build_figure_snapshot()));
     }
 
     // Render-thread counterpart: never touches live Axes::Impl. Patches a copy
-    // of the published snapshot and republishes it. Data ops are journaled for
-    // the caller thread to replay; everything else is live preview only.
+    // of the published snapshot and republishes it. Every edit is also
+    // journaled for the caller thread to replay, so it survives refresh().
     void apply_panel_edits_to_snapshot() {
         auto edits = edit_box.load_and_clear_journaled();
         if (!edits) return;
@@ -366,30 +366,7 @@ struct Figure::Impl {
                 if (fa.slot.index != idx) continue;
                 RenderSnapshot* sp = fa.snap2d();
                 if (!sp) break;   // a 3D slot is addressed on the other lane
-                auto& s = *sp;
-                if (e.title)  s.title  = *e.title;
-                if (e.xtitle) s.xtitle = *e.xtitle;
-                if (e.ytitle) s.ytitle = *e.ytitle;
-                if (e.xlim_auto) s.xlim_auto = *e.xlim_auto;
-                if (e.xmin) s.xmin = *e.xmin;
-                if (e.xmax) s.xmax = *e.xmax;
-                if (e.ylim_auto) s.ylim_auto = *e.ylim_auto;
-                if (e.ymin) s.ymin = *e.ymin;
-                if (e.ymax) s.ymax = *e.ymax;
-                if (e.grid_enabled) s.grid_enabled = *e.grid_enabled;
-                if (e.grid_opts) s.grid_opts = *e.grid_opts;
-                if (e.legend_enabled) s.legend_enabled = *e.legend_enabled;
-                if (e.legend_opts) s.legend_opts = *e.legend_opts;
-                if (e.colorbar_opts) s.colorbar_opts = *e.colorbar_opts;
-                if (e.axes_style) s.axes_style = *e.axes_style;
-                if (e.xticks_override)
-                    s.xticks_override = e.xticks_override->empty()
-                        ? std::nullopt : std::optional(*e.xticks_override);
-                if (e.yticks_override)
-                    s.yticks_override = e.yticks_override->empty()
-                        ? std::nullopt : std::optional(*e.yticks_override);
-                apply_plot_data_ops(s, e.plot_ops);
-                apply_plot_style_edits(s, e.plot_styles);
+                apply_axes_edit(*sp, e);
                 break;
             }
         }
@@ -403,11 +380,8 @@ struct Figure::Impl {
         }
         // Figure-level edits, patched on the snapshot (also applied in
         // apply_edits_and_publish()) so they take effect without refresh().
-        if (edits->suptitle)      next->suptitle      = *edits->suptitle;
-        if (edits->suptitle_opts) next->suptitle_opts = *edits->suptitle_opts;
-        if (edits->margins)       next->margins       = *edits->margins;
-        if (edits->col_gap)       next->col_gap       = *edits->col_gap;
-        if (edits->row_gap)       next->row_gap       = *edits->row_gap;
+        apply_figure_edits(*edits, next->stamps, next->suptitle, next->suptitle_opts,
+                           next->margins, next->col_gap, next->row_gap);
         if (edits->col_ratios)    next->col_ratios    = *edits->col_ratios;
         if (edits->row_ratios)    next->row_ratios    = *edits->row_ratios;
         snapshot_box.store(std::move(next));
@@ -535,6 +509,8 @@ void Figure::show(bool pause) {
     auto render_fn = [this](GLContext& ctx, NvgRenderer& nvg, DataRenderer& data, PlotFbo& plot_fbo) {
         d->apply_panel_edits_to_snapshot();
         auto snap = d->snapshot_box.load();  // loaded ONCE, reused for both draws below
+        // Panel edits pushed this frame record this snapshot's stamps.
+        d->edit_box.set_drawn(snap);
         render_and_composite(ctx, nvg, data, plot_fbo, *snap, d->opts, d->edit_box, d->panel_state);
     };
 
@@ -708,7 +684,10 @@ SvgSaveReport Figure::savefig_svg_live(std::string_view path, SvgExportOptions o
     return report;
 }
 
-void Figure::set_margins(FigureMargins m) { d->opts.margins = m; }
+void Figure::set_margins(FigureMargins m) {
+    d->opts.margins = m;
+    d->stamps.margins = next_snapshot_generation();
+}
 
 void Figure::set_col_ratios(std::vector<float> ratios) {
     Impl::check_ratios("Figure::set_col_ratios", ratios, d->grid_shape().cols, "columns");
@@ -759,7 +738,11 @@ void Figure::resize_to_frame(int frame_w, int frame_h, int slot_index) {
 void Figure::suptitle(std::string_view text, float fontsize) {
     d->suptitle_text = text;
     d->suptitle_opts.fontsize = fontsize;
+    d->stamps.suptitle = d->stamps.suptitle_style = next_snapshot_generation();
 }
-void Figure::set_suptitle_style(SuptitleOptions opts) { d->suptitle_opts = opts; }
+void Figure::set_suptitle_style(SuptitleOptions opts) {
+    d->suptitle_opts = opts;
+    d->stamps.suptitle_style = next_snapshot_generation();
+}
 
 } // namespace sextant

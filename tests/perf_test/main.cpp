@@ -170,12 +170,12 @@ namespace {
         return s;
     }
 
-    std::vector<float> make_matrix(int rows, int cols) {
-        std::vector<float> m(static_cast<std::size_t>(rows) * cols);
+    std::vector<double> make_matrix(int rows, int cols) {
+        std::vector<double> m(static_cast<std::size_t>(rows) * cols);
         for (int r = 0; r < rows; ++r)
             for (int c = 0; c < cols; ++c)
                 m[static_cast<std::size_t>(r) * cols + c] =
-                        static_cast<float>(std::sin(r * 0.05) * std::cos(c * 0.05));
+                        std::sin(r * 0.05) * std::cos(c * 0.05);
         return m;
     }
 
@@ -383,7 +383,7 @@ namespace {
                     "----------", "----------");
         const int dims[][2] = {{64, 64}, {256, 256}, {1024, 1024}, {2048, 2048}};
         for (const auto& d: dims) {
-            const std::vector<float> m = make_matrix(d[0], d[1]);
+            const std::vector<double> m = make_matrix(d[0], d[1]);
             for (int ss: {1, 2}) {
                 auto fig = sextant::Figure::create(perf_opts("perf heatmap", ss));
                 fig->axes()->imshow(m, d[0], d[1]);
@@ -458,13 +458,13 @@ namespace {
             return h;
         };
         auto slice = [](int rows, int cols, double phase) {
-            std::vector<float> m(static_cast<std::size_t>(rows) * cols);
+            std::vector<double> m(static_cast<std::size_t>(rows) * cols);
             for (int r = 0; r < rows; ++r)
                 for (int c = 0; c < cols; ++c) {
                     const double x = -4.0 + 8.0 * c / (cols - 1);
                     const double y = -4.0 + 8.0 * r / (rows - 1);
                     m[static_cast<std::size_t>(r) * cols + c] =
-                            static_cast<float>(std::sin(x + phase) * std::cos(y - phase));
+                            std::sin(x + phase) * std::cos(y - phase);
                 }
             return m;
         };
@@ -526,7 +526,7 @@ namespace {
         std::printf("%-8s %10s %12s %12s %12s\n",
                     "--------", "----------", "------------", "------------", "------------"); {
             constexpr int R = 64, C = 64;
-            std::vector<std::vector<float>> fields;
+            std::vector<std::vector<double>> fields;
             for (int k = 0; k < 24; ++k) fields.push_back(slice(R, C, 0.3 * k));
             auto build = [&](int planes, float alpha) {
                 auto fig = fig_at(900, 700, 2);
@@ -724,11 +724,11 @@ namespace {
             return h;
         };
         auto slice = [](int rows, int cols) {
-            std::vector<float> m(static_cast<std::size_t>(rows) * cols);
+            std::vector<double> m(static_cast<std::size_t>(rows) * cols);
             for (int r = 0; r < rows; ++r)
                 for (int c = 0; c < cols; ++c)
                     m[static_cast<std::size_t>(r) * cols + c] =
-                            static_cast<float>(std::sin(0.3 * c) * std::cos(0.3 * r));
+                            std::sin(0.3 * c) * std::cos(0.3 * r);
             return m;
         };
 
@@ -805,13 +805,13 @@ namespace {
                     midway[k] = -1.5 + 0.5 * ripple[k];
                 }
             auto slice_at = [&](double z) {
-                std::vector<float> m(static_cast<std::size_t>(NY) * NX);
+                std::vector<double> m(static_cast<std::size_t>(NY) * NX);
                 for (int r = 0; r < NY; ++r)
                     for (int c = 0; c < NX; ++c) {
                         const double x = -3.0 + 6.0 * c / (NX - 1);
                         const double y = -3.0 + 6.0 * r / (NY - 1);
                         m[static_cast<std::size_t>(r) * NX + c] =
-                                static_cast<float>(std::sin(x + z) * std::cos(y - z));
+                                std::sin(x + z) * std::cos(y - z);
                     }
                 return m;
             };
@@ -1081,7 +1081,7 @@ namespace {
 
         char title[128];
         if (kind == "heatmap") {
-            const std::vector<float> m = make_matrix(static_cast<int>(rows), static_cast<int>(cols));
+            const std::vector<double> m = make_matrix(static_cast<int>(rows), static_cast<int>(cols));
             ax->imshow(m, static_cast<int>(rows), static_cast<int>(cols));
             std::snprintf(title, sizeof(title), "heatmap %zux%zu, supersample %zu", rows, cols, ss);
         } else {

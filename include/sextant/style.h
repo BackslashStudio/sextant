@@ -361,4 +361,32 @@ namespace sextant {
         float top = 10.0f;
         float bottom = 10.0f;
     };
+
+    // Read-back: copies of one plot object's data as its axes holds it now (see
+    // Axes::line_data()). Fields are named after the arguments that made it.
+    struct LineData {
+        // line(y) stored x as 0, 1, 2, ...
+        std::vector<double> x, y;
+    };
+
+    struct ScatterData {
+        std::vector<double> x, y;
+    };
+
+    struct ScatterZData {
+        std::vector<double> x, y, z;
+    };
+
+    // Also what hist() made: bin centers and (possibly normalised) counts.
+    struct BarData {
+        std::vector<double> x, height;
+    };
+
+    // Row-major rows x cols, as passed. Values are stored in single precision,
+    // so they come back rounded to float.
+    struct HeatmapData {
+        std::vector<double> data;
+        int rows = 0, cols = 0;
+        Range xrange, yrange;
+    };
 } // namespace sextant

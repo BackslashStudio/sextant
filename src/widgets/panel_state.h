@@ -95,6 +95,9 @@ namespace sextant {
         bool grid_local = false;
         bool xauto_local = true, yauto_local = true;
         double xmin_local = 0, xmax_local = 1, ymin_local = 0, ymax_local = 1;
+        // The snapshot limit_stamps the limits were seeded from; an axis whose
+        // stamp changes was set by the program, so it is re-seeded.
+        LimitStamps limit_stamps_local;
         std::vector<Tick> xticks_scratch, yticks_scratch;
 
         // Live values for the optional origin_x/origin_y drag boxes; also restores
@@ -117,6 +120,9 @@ namespace sextant {
         bool zauto_local = true;
         std::vector<Tick> zticks_scratch;
         Camera3D camera_local;
+        // The snapshot camera_stamp camera_local was seeded from; a new one means
+        // the program set the camera, so camera_local is re-seeded.
+        unsigned long long camera_stamp_local = 0;
         Box3DStyle box3d_local;
         BoxAspect aspect_local;
 

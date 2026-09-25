@@ -458,6 +458,27 @@ namespace lt {
 
     void test_window_input_requests();
 
+    // read_back.cpp
+    void test_read_back_2d();
+
+    void test_read_back_3d();
+
+    void test_title_journal();
+
+    void test_camera_journal();
+
+    void test_set_data_2d();
+
+    void test_set_data_3d();
+
+    void test_set_data_keep_aligned();
+
+    void test_data_op_stamps();
+
+    void test_limit_journal();
+
+    void test_style_journal();
+
     // window_wait.cpp -- last: it opens real windows
     void test_wait_closed();
 

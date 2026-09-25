@@ -603,9 +603,9 @@ namespace lt {
                           .bottom = -1.0
                       });
             // A heatmap on the plane (an empty plane emits nothing to order).
-            std::vector<float> m(16 * 16);
+            std::vector<double> m(16 * 16);
             for (std::size_t k = 0; k < m.size(); ++k)
-                m[k] = static_cast<float>(std::sin(0.4 * static_cast<double>(k)));
+                m[k] = std::sin(0.4 * static_cast<double>(k));
             ax->plane(PlaneOrientation::YZ, 0.0, {.alpha = 0.6f})
                     ->heatmap(m, 16, 16, {-3.0, 3.0}, {-1.0, 1.2});
             return fig;

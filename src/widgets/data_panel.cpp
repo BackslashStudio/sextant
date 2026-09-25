@@ -1285,14 +1285,19 @@ namespace sextant {
         // One op sink per table. The lane depends on the slot's kind, not the
         // plane index (a 3D axes' own objects use plane -1 too).
         const bool is3d = (cur3d != nullptr);
-        auto sink_for = [&edit_box, idx, is3d](int plane_index) -> OpSink {
+        auto sink_for = [&edit_box, idx, is3d](const PlotDataTable& t) -> OpSink {
+            const unsigned long long seen = t.data_stamp;
             if (!is3d)
-                return [&edit_box, idx](PlotDataOp op) {
+                return [&edit_box, idx, seen](PlotDataOp op) {
+                    std::visit([seen](auto& o) { o.seen = seen; }, op);
                     edit_box.update(idx, [&](AxesEdit& e) { e.plot_ops.push_back(std::move(op)); });
                 };
-            return [&edit_box, idx, plane_index](PlotDataOp op) {
-                // The plane index is stamped here, in one place.
-                std::visit([plane_index](auto& o) { o.plane_index = plane_index; }, op);
+            return [&edit_box, idx, plane_index = t.plane_index, seen](PlotDataOp op) {
+                // The plane index and stamp are set here, in one place.
+                std::visit([plane_index, seen](auto& o) {
+                    o.plane_index = plane_index;
+                    o.seen = seen;
+                }, op);
                 edit_box.update3d(idx, [&](AxesEdit3D& e) { e.plot_ops.push_back(std::move(op)); });
             };
         };
@@ -1352,7 +1357,7 @@ namespace sextant {
                                            : nullptr);
                         if (sheet) draw_plot_appearance(st, *sheet, t, edit_box, idx, is3d);
                     }
-                    const OpSink sink = sink_for(t.plane_index);
+                    const OpSink sink = sink_for(t);
                     if (t.mesh) draw_mesh_topology(t);
                     if (t.is_grid())
                         draw_grid_table(t, fmt, idx, fsnap.data_generation, sink, st);

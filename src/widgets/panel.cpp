@@ -48,6 +48,7 @@ void sync_from_snapshot(PanelState& st, int slot_index, const RenderSnapshot& sn
     st.grid_local  = sn.grid_enabled;
     st.xauto_local = sn.xlim_auto; st.xmin_local = sn.xmin; st.xmax_local = sn.xmax;
     st.yauto_local = sn.ylim_auto; st.ymin_local = sn.ymin; st.ymax_local = sn.ymax;
+    st.limit_stamps_local = sn.limit_stamps;
     st.xticks_scratch = sn.xticks_override.value_or(std::vector<Tick>{});
     st.yticks_scratch = sn.yticks_override.value_or(std::vector<Tick>{});
     st.axes_style_local = sn.axes_style;
@@ -99,6 +100,7 @@ void sync_from_snapshot(PanelState& st, int slot_index, const RenderSnapshot3D& 
     st.xauto_local = sn.xlim_auto; st.xmin_local = sn.xmin; st.xmax_local = sn.xmax;
     st.yauto_local = sn.ylim_auto; st.ymin_local = sn.ymin; st.ymax_local = sn.ymax;
     st.zauto_local = sn.zlim_auto; st.zmin_local = sn.zmin; st.zmax_local = sn.zmax;
+    st.limit_stamps_local = sn.limit_stamps;
     st.xticks_scratch = sn.xticks_override.value_or(std::vector<Tick>{});
     st.yticks_scratch = sn.yticks_override.value_or(std::vector<Tick>{});
     st.zticks_scratch = sn.zticks_override.value_or(std::vector<Tick>{});
@@ -111,6 +113,7 @@ void sync_from_snapshot(PanelState& st, int slot_index, const RenderSnapshot3D& 
     st.legend_local     = sn.legend_opts;
     st.colorbar_local   = sn.colorbar_opts;
     st.camera_local     = sn.camera;
+    st.camera_stamp_local = sn.camera_stamp;
     st.box3d_local      = sn.box_style;
     st.aspect_local     = sn.aspect;
     sync_planes(st, sn);
@@ -387,11 +390,15 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
         for (const auto& al : layout)
             if (al.slot.index == st.selected_slot_index) { cur = &al; break; }
 
-        // A 3D slot navigates its camera. Both kinds push through
-        // FigureEditBox, so the view survives refresh().
+        // A 3D slot navigates its camera, a 2D slot its limits. Both push
+        // through FigureEditBox with the stamps they worked over, so the view
+        // survives refresh() until the program sets it.
         const RenderSnapshot3D* sel3d = nullptr;
+        const RenderSnapshot*   sel2d = nullptr;
         for (const auto& a : fsnap.axes)
-            if (a.slot.index == st.selected_slot_index) { sel3d = a.snap3d(); break; }
+            if (a.slot.index == st.selected_slot_index) {
+                sel3d = a.snap3d(); sel2d = a.snap2d(); break;
+            }
 
         if (cur && sel3d) {
             const ImGuiIO& io = ImGui::GetIO();
@@ -441,10 +448,14 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
 
             if (moved) {
                 st.camera_local = cam;
-                edit_box.update3d(idx, [&](AxesEdit3D& e) { e.camera = cam; });
+                edit_box.update3d(idx, [&](AxesEdit3D& e) {
+                    e.camera = cam;
+                    e.camera_seen = sel3d->camera_stamp;
+                });
             }
-        } else if (cur) {
+        } else if (cur && sel2d) {
             const ImGuiIO& io = ImGui::GetIO();
+            const LimitStamps seen = sel2d->limit_stamps;
             const int idx = cur->slot.index;
 
             if (gate.drag && (io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f)) {
@@ -456,6 +467,7 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
                 edit_box.update(idx, [&](AxesEdit& e) {
                     e.xmin = lim.xmin; e.xmax = lim.xmax; e.xlim_auto = false;
                     e.ymin = lim.ymin; e.ymax = lim.ymax; e.ylim_auto = false;
+                    e.lim_seen = seen;
                 });
             }
 
@@ -470,6 +482,7 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
                 edit_box.update(idx, [&](AxesEdit& e) {
                     e.xmin = lim.xmin; e.xmax = lim.xmax; e.xlim_auto = false;
                     e.ymin = lim.ymin; e.ymax = lim.ymax; e.ylim_auto = false;
+                    e.lim_seen = seen;
                 });
             }
 
@@ -477,6 +490,7 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
                 st.xauto_local = st.yauto_local = true;
                 edit_box.update(idx, [&](AxesEdit& e) {
                     e.xlim_auto = true; e.ylim_auto = true;
+                    e.lim_seen = seen;
                 });
             }
         }
@@ -723,7 +737,10 @@ void draw_cosmetic_3d(PanelState& st, const RenderSnapshot3D& sn,
     auto push_style  = [&]{ edit_box.update3d(idx, [&](AxesEdit3D& e){ e.axes_style = sty; }); };
     auto push_grid   = [&]{ edit_box.update3d(idx, [&](AxesEdit3D& e){ e.grid_opts  = st.grid_opts_local; }); };
     auto push_camera = [&]{ st.camera_local = clamp_camera(st.camera_local);
-                            edit_box.update3d(idx, [&](AxesEdit3D& e){ e.camera = st.camera_local; }); };
+                            edit_box.update3d(idx, [&](AxesEdit3D& e){
+                                e.camera = st.camera_local;
+                                e.camera_seen = sn.camera_stamp;
+                            }); };
     auto push_box    = [&]{ edit_box.update3d(idx, [&](AxesEdit3D& e){ e.box_style = st.box3d_local; }); };
     // Clamped: Axes3D::set_box_aspect() rejects non-positive sides.
     auto push_aspect = [&]{
@@ -772,7 +789,10 @@ void draw_cosmetic_3d(PanelState& st, const RenderSnapshot3D& sn,
             ImGui::TextDisabled("Wider fov = closer camera. The box fills the cell either way.");
         if (ImGui::SmallButton("Reset view")) {
             st.camera_local = sn.default_camera;
-            edit_box.update3d(idx, [&](AxesEdit3D& e){ e.camera = st.camera_local; });
+            edit_box.update3d(idx, [&](AxesEdit3D& e){
+                e.camera = st.camera_local;
+                e.camera_seen = sn.camera_stamp;
+            });
         }
         ImGui::SameLine();
         ImGui::TextDisabled("(or double-click the plot)");
@@ -832,16 +852,17 @@ void draw_cosmetic_3d(PanelState& st, const RenderSnapshot3D& sn,
             const char* label; const char* id;
             char* buf; std::size_t cap;
             std::optional<std::string> AxesEdit3D::*text;
+            unsigned long long TitleStamps::*stamp;
             Color* color; float* size;
         };
         const TitleUi titles[4] = {
-            { "Title",   "title",  st.title_buf,  sizeof(st.title_buf),  &AxesEdit3D::title,
+            { "Title",   "title",  st.title_buf,  sizeof(st.title_buf),  &AxesEdit3D::title, &TitleStamps::title,
               &sty.title_color,  &sty.title_fontsize },
-            { "X title", "xtitle", st.xtitle_buf, sizeof(st.xtitle_buf), &AxesEdit3D::xtitle,
+            { "X title", "xtitle", st.xtitle_buf, sizeof(st.xtitle_buf), &AxesEdit3D::xtitle, &TitleStamps::xtitle,
               &sty.xtitle_color, &sty.xtitle_fontsize },
-            { "Y title", "ytitle", st.ytitle_buf, sizeof(st.ytitle_buf), &AxesEdit3D::ytitle,
+            { "Y title", "ytitle", st.ytitle_buf, sizeof(st.ytitle_buf), &AxesEdit3D::ytitle, &TitleStamps::ytitle,
               &sty.ytitle_color, &sty.ytitle_fontsize },
-            { "Z title", "ztitle", st.ztitle_buf, sizeof(st.ztitle_buf), &AxesEdit3D::ztitle,
+            { "Z title", "ztitle", st.ztitle_buf, sizeof(st.ztitle_buf), &AxesEdit3D::ztitle, &TitleStamps::ztitle,
               &sty.ztitle_color, &sty.ztitle_fontsize },
         };
         for (const TitleUi& t : titles) {
@@ -849,7 +870,10 @@ void draw_cosmetic_3d(PanelState& st, const RenderSnapshot3D& sn,
             if (begin_field_table("text")) {
                 field_row(t.label);
                 if (ImGui::InputText("##text", t.buf, t.cap))
-                    edit_box.update3d(idx, [&](AxesEdit3D& e){ e.*t.text = std::string(t.buf); });
+                    edit_box.update3d(idx, [&](AxesEdit3D& e){
+                        e.*t.text = std::string(t.buf);
+                        e.title_seen.*t.stamp = sn.title_stamps.*t.stamp;
+                    });
                 end_field_table();
             }
             if (begin_field_table("style", 2)) {
@@ -982,6 +1006,7 @@ void draw_cosmetic_3d(PanelState& st, const RenderSnapshot3D& sn,
                         e.*a.lo_field = *a.lo;
                         e.*a.hi_field = *a.hi;
                         e.*a.auto_field = false;
+                        e.lim_seen = sn.limit_stamps;
                     });
                 };
                 // Drag fields (Ctrl+click types an exact value).
@@ -1059,6 +1084,28 @@ const AxesLayout* find_cell_at(const std::vector<AxesLayout>& layout, float x, f
     return nullptr;
 }
 
+namespace {
+
+// An axis the program set since the limits were seeded (its stamp moved)
+// re-seeds from the snapshot, so the Limits fields show what is drawn.
+template <typename Snap>
+void follow_program_limits(PanelState& st, const Snap& sn) {
+    LimitStamps& have = st.limit_stamps_local;
+    if (have.x != sn.limit_stamps.x) {
+        st.xauto_local = sn.xlim_auto; st.xmin_local = sn.xmin; st.xmax_local = sn.xmax;
+    }
+    if (have.y != sn.limit_stamps.y) {
+        st.yauto_local = sn.ylim_auto; st.ymin_local = sn.ymin; st.ymax_local = sn.ymax;
+    }
+    if constexpr (requires { sn.zmin; })
+        if (have.z != sn.limit_stamps.z) {
+            st.zauto_local = sn.zlim_auto; st.zmin_local = sn.zmin; st.zmax_local = sn.zmax;
+        }
+    have = sn.limit_stamps;
+}
+
+} // namespace
+
 int sync_selected_slot(PanelState& st, const FigureSnapshot& fsnap) {
     if (fsnap.axes.empty()) return -1;
     const FigureAxesSnapshot* fa = axes_for_slot(fsnap, st.selected_slot_index);
@@ -1068,7 +1115,16 @@ int sync_selected_slot(PanelState& st, const FigureSnapshot& fsnap) {
     if (st.last_synced_slot != fa->slot.index) {
         std::visit([&](const auto& sn) { sync_from_snapshot(st, fa->slot.index, sn); },
                    fa->snap);
-    } else if (const RenderSnapshot3D* sn = fa->snap3d()) {
+        return fa->slot.index;
+    }
+    std::visit([&](const auto& sn) { follow_program_limits(st, sn); }, fa->snap);
+    if (const RenderSnapshot3D* sn = fa->snap3d()) {
+        // The program set the camera since it was seeded: follow it, or the next
+        // drag would start from a view no longer on screen.
+        if (st.camera_stamp_local != sn->camera_stamp) {
+            st.camera_local = sn->camera;
+            st.camera_stamp_local = sn->camera_stamp;
+        }
         // Object count changed: re-seed the lists (indices shifted). Done here
         // so it happens even with the Cosmetic panel hidden.
         if (st.planes_local.size() != sn->planes.size())
@@ -1309,14 +1365,15 @@ void draw_cosmetic_panel(const FigureSnapshot& fsnap, FigureEditBox& edit_box, P
             const char* label; const char* id;
             char* buf; std::size_t cap;
             std::optional<std::string> AxesEdit::*text;
+            unsigned long long TitleStamps::*stamp;
             Color* color; float* size;
         };
         const TitleUi titles[3] = {
-            { "Title",   "title",  st.title_buf,  sizeof(st.title_buf),  &AxesEdit::title,
+            { "Title",   "title",  st.title_buf,  sizeof(st.title_buf),  &AxesEdit::title, &TitleStamps::title,
               &sty.title_color,  &sty.title_fontsize },
-            { "X title", "xtitle", st.xtitle_buf, sizeof(st.xtitle_buf), &AxesEdit::xtitle,
+            { "X title", "xtitle", st.xtitle_buf, sizeof(st.xtitle_buf), &AxesEdit::xtitle, &TitleStamps::xtitle,
               &sty.xtitle_color, &sty.xtitle_fontsize },
-            { "Y title", "ytitle", st.ytitle_buf, sizeof(st.ytitle_buf), &AxesEdit::ytitle,
+            { "Y title", "ytitle", st.ytitle_buf, sizeof(st.ytitle_buf), &AxesEdit::ytitle, &TitleStamps::ytitle,
               &sty.ytitle_color, &sty.ytitle_fontsize },
         };
         for (const TitleUi& t : titles) {
@@ -1324,7 +1381,10 @@ void draw_cosmetic_panel(const FigureSnapshot& fsnap, FigureEditBox& edit_box, P
             if (begin_field_table("text")) {
                 field_row(t.label);
                 if (ImGui::InputText("##text", t.buf, t.cap))
-                    edit_box.update(idx, [&](AxesEdit& e){ e.*t.text = std::string(t.buf); });
+                    edit_box.update(idx, [&](AxesEdit& e){
+                        e.*t.text = std::string(t.buf);
+                        e.title_seen.*t.stamp = cur2d->title_stamps.*t.stamp;
+                    });
                 end_field_table();
             }
             if (begin_field_table("style", 2)) {
@@ -1455,7 +1515,9 @@ void draw_cosmetic_panel(const FigureSnapshot& fsnap, FigureEditBox& edit_box, P
                 // One row per axis: Auto, then low and high.
                 field_row(a.label);
                 if (ImGui::Checkbox("Auto", a.autoscale))
-                    edit_box.update(idx, [&](AxesEdit& e){ e.*a.auto_field = *a.autoscale; });
+                    edit_box.update(idx, [&](AxesEdit& e){
+                        e.*a.auto_field = *a.autoscale; e.lim_seen = cur2d->limit_stamps;
+                    });
                 ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
                 ImGui::BeginDisabled(*a.autoscale);
                 const float speed = limit_drag_speed(*a.lo, *a.hi);
@@ -1463,10 +1525,16 @@ void draw_cosmetic_panel(const FigureSnapshot& fsnap, FigureEditBox& edit_box, P
                 ImGui::SetNextItemWidth(-FLT_MIN);
                 split_begin(2);
                 if (drag_double("##lo", a.lo, speed))
-                    edit_box.update(idx, [&](AxesEdit& e){ e.*a.lo_field = *a.lo; e.*a.auto_field = false; });
+                    edit_box.update(idx, [&](AxesEdit& e){
+                        e.*a.lo_field = *a.lo; e.*a.auto_field = false;
+                        e.lim_seen = cur2d->limit_stamps;
+                    });
                 split_next();
                 if (drag_double("##hi", a.hi, speed))
-                    edit_box.update(idx, [&](AxesEdit& e){ e.*a.hi_field = *a.hi; e.*a.auto_field = false; });
+                    edit_box.update(idx, [&](AxesEdit& e){
+                        e.*a.hi_field = *a.hi; e.*a.auto_field = false;
+                        e.lim_seen = cur2d->limit_stamps;
+                    });
                 split_end();
                 ImGui::EndDisabled();
                 ImGui::PopID();
