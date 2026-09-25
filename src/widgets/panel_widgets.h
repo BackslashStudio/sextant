@@ -211,6 +211,27 @@ namespace sextant {
         return false;
     }
 
+    // One entry per Colormap value: a new colormap only needs its name added.
+    inline bool colormap_combo(const char* label, Colormap& c) {
+        static const char* kNames[] = {"Viridis"};
+        int cur = static_cast<int>(c);
+        if (ImGui::Combo(label, &cur, kNames, IM_ARRAYSIZE(kNames))) {
+            c = static_cast<Colormap>(cur);
+            return true;
+        }
+        return false;
+    }
+
+    inline bool capstyle_combo(const char* label, CapStyle& s) {
+        static const char* kNames[] = {"Flat", "Arrow"};
+        int cur = static_cast<int>(s);
+        if (ImGui::Combo(label, &cur, kNames, IM_ARRAYSIZE(kNames))) {
+            s = static_cast<CapStyle>(cur);
+            return true;
+        }
+        return false;
+    }
+
     inline bool projection_combo(const char* label, Projection& p) {
         static const char* kNames[] = {"Orthographic", "Perspective"};
         int cur = static_cast<int>(p);

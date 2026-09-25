@@ -862,7 +862,11 @@ void apply_plot_style_edits(T& t, const std::vector<PlotStyleEdit>& es) {
     for (const auto& e : es) {
         if (e.plane_index < 0) continue;
         if (static_cast<std::size_t>(e.plane_index) >= t.plane_count()) continue;
-        apply_plot_style_edit(t.plane_at(static_cast<std::size_t>(e.plane_index)).sheet, e);
+        auto& plane = t.plane_at(static_cast<std::size_t>(e.plane_index));
+        apply_plot_style_edit(plane.sheet, e);
+        // Snapshot only: the plane's cached raster must redraw.
+        if constexpr (requires { plane.style_generation; })
+            plane.style_generation = next_snapshot_generation();
     }
 }
 

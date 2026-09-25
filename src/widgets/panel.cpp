@@ -40,6 +40,29 @@ std::shared_ptr<const FigureMeasure> on_screen_measure(const PanelState& st,
     return std::make_shared<const FigureMeasure>(measure_figure(fsnap));
 }
 
+// A sheet's 2D appearance scratch, without hint_labels.
+void sync_sheet(PanelState::SheetStyles& dst, const RenderSnapshot& sn) {
+    auto copy = [](auto& out, const auto& plots) {
+        out.clear();
+        out.reserve(plots.size());
+        for (const auto& p : plots) {
+            out.push_back(p.opts);
+            out.back().hint_labels.clear();
+        }
+    };
+    copy(dst.lines, sn.lines);
+    copy(dst.scatters, sn.scatters);
+    copy(dst.bars, sn.bars);
+    copy(dst.heatmaps, sn.heatmaps);
+    copy(dst.scatter_z, sn.scatter_z);
+}
+
+bool sheet_counts_differ(const PanelState::SheetStyles& s, const RenderSnapshot& sn) {
+    return s.lines.size() != sn.lines.size() || s.scatters.size() != sn.scatters.size()
+        || s.bars.size() != sn.bars.size() || s.heatmaps.size() != sn.heatmaps.size()
+        || s.scatter_z.size() != sn.scatter_z.size();
+}
+
 // Takes the 2D snapshot; never call with a 3D cell.
 void sync_from_snapshot(PanelState& st, int slot_index, const RenderSnapshot& sn) {
     std::snprintf(st.title_buf,  sizeof(st.title_buf),  "%s", sn.title.c_str());
@@ -58,6 +81,7 @@ void sync_from_snapshot(PanelState& st, int slot_index, const RenderSnapshot& sn
     st.legend_enabled_local = sn.legend_enabled;
     st.legend_local     = sn.legend_opts;
     st.colorbar_local   = sn.colorbar_opts;
+    sync_sheet(st.sheet_local, sn);
     st.last_synced_slot = slot_index;
 }
 
@@ -70,6 +94,20 @@ void sync_planes(PanelState& st, const RenderSnapshot3D& sn) {
     st.planes_local.reserve(sn.planes.size());
     for (const auto& p : sn.planes)
         st.planes_local.push_back({ p.orient, p.offset, p.opts });
+}
+
+// Every plane's sheet, re-seeded as one list (like sync_planes()).
+void sync_plane_sheets(PanelState& st, const RenderSnapshot3D& sn) {
+    st.plane_sheets_local.resize(sn.planes.size());
+    for (std::size_t p = 0; p < sn.planes.size(); ++p)
+        sync_sheet(st.plane_sheets_local[p], sn.planes[p].sheet);
+}
+
+bool plane_sheets_differ(const PanelState& st, const RenderSnapshot3D& sn) {
+    if (st.plane_sheets_local.size() != sn.planes.size()) return true;
+    for (std::size_t p = 0; p < sn.planes.size(); ++p)
+        if (sheet_counts_differ(st.plane_sheets_local[p], sn.planes[p].sheet)) return true;
+    return false;
 }
 
 // The 3D kinds' appearance, on the same rule.
@@ -117,6 +155,7 @@ void sync_from_snapshot(PanelState& st, int slot_index, const RenderSnapshot3D& 
     st.box3d_local      = sn.box_style;
     st.aspect_local     = sn.aspect;
     sync_planes(st, sn);
+    sync_plane_sheets(st, sn);
     sync_scene_objects(st, sn);
     st.last_synced_slot = slot_index;
 }
@@ -1129,12 +1168,16 @@ int sync_selected_slot(PanelState& st, const FigureSnapshot& fsnap) {
         // so it happens even with the Cosmetic panel hidden.
         if (st.planes_local.size() != sn->planes.size())
             sync_planes(st, *sn);
+        if (plane_sheets_differ(st, *sn))
+            sync_plane_sheets(st, *sn);
         if (st.bars3d_local.size() != sn->bars3d.size() ||
             st.surfaces_local.size() != sn->surfaces.size() ||
             st.scatter3d_local.size() != sn->scatter3d.size() ||
             st.line3d_local.size() != sn->lines3d.size() ||
             st.surface_tri_local.size() != sn->surface_tri.size())
             sync_scene_objects(st, *sn);
+    } else if (const RenderSnapshot* sn = fa->snap2d()) {
+        if (sheet_counts_differ(st.sheet_local, *sn)) sync_sheet(st.sheet_local, *sn);
     }
     return fa->slot.index;
 }

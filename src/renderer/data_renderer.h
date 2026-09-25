@@ -475,13 +475,15 @@ private:
     unsigned int plane_comp_vao_     = 0;
     unsigned int plane_comp_vbo_     = 0;   // 6 vertices, the plot rect
 
-    // One plane's rendered contents. Keyed on the plane's data and the parent
-    // limits, not the camera, so orbits re-render nothing. Plane alpha is a
-    // uniform, so it isn't in the key.
+    // One plane's rendered contents. Keyed on the plane's data, its contents'
+    // style (PlaneSnapshot::style_generation) and the parent limits, not the
+    // camera, so orbits re-render nothing. Plane alpha is a uniform, so it isn't
+    // in the key.
     struct PlaneRasterCache {
         unsigned int       fbo = 0, tex = 0;
         int                w = 0, h = 0;       // real framebuffer pixels
         unsigned long long data_generation = 0;
+        unsigned long long style_generation = 0;
         CoordTransform     tr{};
         bool               valid = false;
     };

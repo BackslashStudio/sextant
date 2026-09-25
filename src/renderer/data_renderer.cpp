@@ -3206,7 +3206,8 @@ void main() {
                              && c.tr.ymin == raster.tr.ymin && c.tr.ymax == raster.tr.ymax
                              && c.tr.pw == raster.tr.pw && c.tr.ph == raster.tr.ph;
         const bool stale = !c.valid || c.w != rw || c.h != rh || !same_tr
-                           || data_generation_ == 0 || c.data_generation != data_generation_;
+                           || data_generation_ == 0 || c.data_generation != data_generation_
+                           || c.style_generation != pl.style_generation;
         if (!stale) return;
 
         if (c.w != rw || c.h != rh || !c.tex) {
@@ -3261,6 +3262,7 @@ void main() {
 
         c.tr = raster.tr;
         c.data_generation = data_generation_;
+        c.style_generation = pl.style_generation;
         c.valid = true;
     }
 

@@ -1839,9 +1839,9 @@ static void test_axis_position3d() {
 int main() {
     // test_axis_position3d();
     // test_axis_position();
-    test_axes_gallery();
+    // test_axes_gallery();
     test_axes3d_gallery();
-    // test_errorbar3d_gallery();
+    test_errorbar3d_gallery();
     // test_line3d_gallery();
     // test_surface_tri_gallery();
     // test_subplot_spans();

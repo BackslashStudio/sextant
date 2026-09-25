@@ -478,6 +478,9 @@ struct PlaneSnapshot {
     // Set when the plane is made and by set_offset()/set_alpha(); a plane edit
     // records it (as StyleStamps).
     unsigned long long placement_stamp = 0;
+    // Bumped when a Data-panel style edit patches `sheet` on the render thread
+    // (which leaves data_generation alone); the plane's raster keys on it.
+    unsigned long long style_generation = 0;
     RenderSnapshot   sheet;
 };
 

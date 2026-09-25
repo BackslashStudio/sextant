@@ -113,15 +113,6 @@ namespace sextant {
             // shift the clipper's rows). At most one per frame.
             std::optional<PlotRowEdit> row_edit;
 
-            // Bar width is one scalar per plot, edited beside the table.
-            if (t.bar_width) {
-                double w = *t.bar_width;
-                ImGui::SetNextItemWidth(160.0f);
-                if (ImGui::InputDouble("Bar width (shared)", &w, 0.0, 0.0, fmt)
-                    && ImGui::IsItemDeactivatedAfterEdit())
-                    push_op(BarWidthEdit{t.plot_index, w});
-            }
-
             constexpr ImGuiTableFlags kFlags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg
                                                | ImGuiTableFlags_ScrollX | ImGuiTableFlags_ScrollY
                                                | ImGuiTableFlags_Resizable;
@@ -445,21 +436,6 @@ namespace sextant {
                 else ImGui::TextDisabled("nothing finite to shade");
             }
 
-            // The data-space footprint, edited beside the grid (bars only; surfaces
-            // have none).
-            if (b) {
-                double uw = b->u_width, vw = b->v_width;
-                ImGui::SetNextItemWidth(120.0f);
-                if (ImGui::InputDouble("Width along u", &uw, 0.0, 0.0, fmt)
-                    && ImGui::IsItemDeactivatedAfterEdit())
-                    push_op(BarWidthEdit{t.plot_index, uw, -1, kind, 0});
-                ImGui::SameLine();
-                ImGui::SetNextItemWidth(120.0f);
-                if (ImGui::InputDouble("along v", &vw, 0.0, 0.0, fmt)
-                    && ImGui::IsItemDeactivatedAfterEdit())
-                    push_op(BarWidthEdit{t.plot_index, vw, -1, kind, 1});
-            }
-
             int first = 0;
             const int ncols = static_cast<int>(nv);
             if (ncols > kMaxGridCols) {
@@ -709,8 +685,7 @@ namespace sextant {
             // No `show_axis` control: Plane2DOptions has no such field.
         }
 
-        // A 2D plot object's appearance, above its table. Read directly from the
-        // snapshot (checkboxes need no scratch copy; one frame of latency).
+        // Sends a 2D plot object's whole options struct.
         template<class Opts>
         void push_plot_style(FigureEditBox& box, int idx, bool is3d,
                              int plane_index, int plot_index, const Opts& o) {
@@ -728,163 +703,314 @@ namespace sextant {
             else box.update(idx, [&](AxesEdit& e) { merge(e.plot_styles); });
         }
 
+        // The name (legend key and colorbar title), and the legend-key switch for
+        // kinds that have one. One shared name buffer, see text_field().
+        template<class Opts, class Push>
+        void name_and_key(PanelState& st, Opts& o, Push&& push) {
+            if (begin_field_table("plotname")) {
+                field_row("Name");
+                if (text_field("##plotname", o.name, st.name_buf, sizeof st.name_buf)) push();
+                end_field_table();
+            }
+            if constexpr (requires { o.show_legend; }) {
+                if (ImGui::Checkbox("Legend key##plotleg", &o.show_legend)) push();
+                // A key needs both the switch and a name; say which is missing.
+                if (o.show_legend && o.name.empty())
+                    ImGui::TextDisabled("No name, so no key is drawn.");
+            }
+        }
+
+        // Error-bar style (2D ErrorBarOptions or 3D ErrorBar3DOptions), drawn only
+        // for a series that has error bars. `fallback` is what an unset color
+        // resolves to; cap and box rows only show for data that draws them.
+        template<class EB, class Push>
+        void errorbar_style(EB& eb, Color fallback, bool has_cap, bool has_box, Push&& push) {
+            constexpr bool k3d = requires { eb.edge_alpha; };
+            ImGui::SeparatorText("Error bars");
+            bool own = eb.color.has_value();
+            if (ImGui::Checkbox("Own colour##ebown", &own)) {
+                eb.color = own ? std::optional<Color>(fallback) : std::nullopt;
+                push();
+            }
+            if (begin_field_table("errbar")) {
+                if (eb.color) {
+                    field_row("Color");
+                    if (color_swatch("##ebcol", *eb.color)) push();
+                }
+                field_row("Line width");
+                if (drag_float("##ebw", &eb.linewidth, 0.0f, 10.0f, 0.05f, "%.2f px")) push();
+                if (has_cap) {
+                    field_row("Cap size");
+                    if (drag_float("##ebcap", &eb.capsize, 0.0f, 50.0f, 0.1f, "%.1f px")) push();
+                    field_row("Cap style");
+                    if (capstyle_combo("##ebcs", eb.capstyle)) push();
+                }
+                if (has_box) {
+                    field_row("Box width");
+                    if (drag_float("##ebbw", &eb.boxwidth, 0.0f, 100.0f, 0.1f, "%.1f px")) push();
+                    field_row("Box alpha");
+                    if (drag_float("##ebba", &eb.box_alpha, 0.0f, 1.0f, 0.005f, "%.2f")) push();
+                    if constexpr (k3d) {
+                        field_row("Edge alpha");
+                        if (drag_float("##ebea", &eb.edge_alpha, 0.0f, 1.0f, 0.005f, "%.2f")) push();
+                    }
+                }
+                end_field_table();
+            }
+            if constexpr (k3d)
+                ImGui::TextDisabled("Lengths are pixels at the box centre; width 0 hides the bars.");
+        }
+
+        // A bar width in data units, over the snapshot's resolved value (an op, not
+        // an options field). Held in st.width_held while dragged; speed scales with
+        // the value. True with *out set on a change; never below 0.
+        bool width_drag(PanelState& st, const char* id, double snap, double* out) {
+            // Only the active drag touches the shared st.width_held; an inactive
+            // one drawn after it (bar3d's u then v) must not overwrite it.
+            const bool active = ImGui::GetActiveID() == ImGui::GetID(id);
+            double v = active ? st.width_held : snap;
+            const float speed = static_cast<float>(std::max(std::abs(v), 1e-9) * 0.005);
+            const bool changed = drag_double(id, &v, speed, "%.4g");
+            v = std::max(0.0, v);
+            // Activation happens inside the call: hold from that frame on.
+            if (ImGui::IsItemActive()) st.width_held = v;
+            if (!changed) return false;
+            *out = v;
+            return true;
+        }
+
+        bool has_cap(const ErrorBarData& e) { return e.has_x_cap() || e.has_y_cap(); }
+        bool has_box(const ErrorBarData& e) { return e.has_x_box() || e.has_y_box(); }
+        bool has_cap(const ErrorBar3DData& e) { return e.has_cap(0) || e.has_cap(1) || e.has_cap(2); }
+        bool has_box(const ErrorBar3DData& e) { return e.any_box(); }
+
+        template<class Push>
+        void line_style(PanelState& st, LineOptions& o, const LinePlot& p, bool on_plane, Push&& push) {
+            name_and_key(st, o, push);
+            if (ImGui::Checkbox("Close the loop##lineloop", &o.loop)) push();
+            if (begin_field_table("line")) {
+                field_row("Color");
+                if (color_swatch("##lcol", o.color)) push();
+                field_row("Alpha");
+                if (drag_float("##lalpha", &o.alpha, 0.0f, 1.0f, 0.005f, "%.2f")) push();
+                field_row("Width");
+                if (drag_float("##lwidth", &o.linewidth, 0.1f, 20.0f, 0.05f, "%.2f px")) push();
+                field_row("Style");
+                if (linestyle_combo("##lstyle", o.linestyle)) push();
+                end_field_table();
+            }
+            if (on_plane) ImGui::TextDisabled("SVG export draws a plane's lines solid (the window dashes them).");
+            if (!p.err.empty()) errorbar_style(o.errorbar, o.color, has_cap(p.err), has_box(p.err), push);
+        }
+
+        template<class Push>
+        void scatter_style(PanelState& st, ScatterOptions& o, const ScatterPlot& p, Push&& push) {
+            name_and_key(st, o, push);
+            if (begin_field_table("scatter")) {
+                field_row("Marker");
+                if (marker_combo("##smark", o.marker)) push();
+                field_row("Size");
+                if (drag_float("##ssize", &o.size, 1.0f, 100.0f, 0.2f, "%.1f px")) push();
+                field_row("Color");
+                if (color_swatch("##scol", o.color)) push();
+                field_row("Alpha");
+                if (drag_float("##salpha", &o.alpha, 0.0f, 1.0f, 0.005f, "%.2f")) push();
+                end_field_table();
+            }
+            if (!p.err.empty()) errorbar_style(o.errorbar, o.color, has_cap(p.err), has_box(p.err), push);
+        }
+
+        template<class Push>
+        void scatter_z_style(PanelState& st, ScatterZOptions& o, const ScatterZPlot& p, Push&& push) {
+            name_and_key(st, o, push);
+            if (ImGui::Checkbox("Colorbar##plotcb", &o.colorbar)) push();
+            if (begin_field_table("scatterz")) {
+                field_row("Marker");
+                if (marker_combo("##zmark", o.marker)) push();
+                field_row("Size");
+                if (drag_float("##zsize", &o.size, 1.0f, 100.0f, 0.2f, "%.1f px")) push();
+                field_row("Colormap");
+                if (colormap_combo("##zcmap", o.cmap)) push();
+                field_row("vmin");
+                if (drag_float("##zvmin", &o.vmin, -FLT_MAX, FLT_MAX, 0.01f, "%.4g")) push();
+                field_row("vmax");
+                if (drag_float("##zvmax", &o.vmax, -FLT_MAX, FLT_MAX, 0.01f, "%.4g")) push();
+                field_row("Alpha");
+                if (drag_float("##zalpha", &o.alpha, 0.0f, 1.0f, 0.005f, "%.2f")) push();
+                end_field_table();
+            }
+            if (!p.err.empty()) errorbar_style(o.errorbar, Color::Black, has_cap(p.err), has_box(p.err), push);
+        }
+
+        template<class Push>
+        void bar_style(PanelState& st, BarOptions& o, const BarPlot& p, int pi,
+                       const OpSink& sink, Push&& push) {
+            name_and_key(st, o, push);
+            if (begin_field_table("bar")) {
+                field_row("Color");
+                if (color_swatch("##bcol", o.color)) push();
+                field_row("Alpha");
+                if (drag_float("##balpha", &o.alpha, 0.0f, 1.0f, 0.005f, "%.2f")) push();
+                // BarOptions::width is a fraction resolved to data units at
+                // plotting; the resolved width is what is edited (a data op).
+                field_row("Bar width");
+                double w = 0.0;
+                if (width_drag(st, "##bwidth", p.bar_width, &w)) sink(BarWidthEdit{pi, w});
+                field_row("Edge");
+                if (color_swatch("##becol", o.edgecolor)) push();
+                field_row("Edge width");
+                if (drag_float("##bew", &o.linewidth, 0.0f, 10.0f, 0.05f, "%.2f px")) push();
+                end_field_table();
+            }
+            if (!p.err.empty()) errorbar_style(o.errorbar, o.edgecolor, has_cap(p.err), has_box(p.err), push);
+        }
+
+        // Contour levels, kept sorted and unique as the heatmap's ingest leaves
+        // them. Each commits on Enter or focus loss (edit_cell()).
+        template<class Push>
+        void contour_levels(std::vector<double>& lv, float vmin, float vmax, Push&& push) {
+            bool changed = false;
+            int remove_k = -1;
+            if (!lv.empty() && ImGui::BeginTable("##levels", 2, ImGuiTableFlags_SizingFixedFit)) {
+                ImGui::TableSetupColumn("##lv", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+                ImGui::TableSetupColumn("##x", ImGuiTableColumnFlags_WidthFixed);
+                for (int k = 0; k < static_cast<int>(lv.size()); ++k) {
+                    ImGui::PushID(k);
+                    ImGui::TableNextColumn();
+                    double v = 0.0;
+                    if (edit_cell(lv[static_cast<std::size_t>(k)], "%.4g", "%.17g", &v, -1.0f)
+                        && std::isfinite(v)) {
+                        lv[static_cast<std::size_t>(k)] = v;
+                        changed = true;
+                    }
+                    ImGui::TableNextColumn();
+                    if (ImGui::SmallButton("x")) remove_k = k;
+                    ImGui::PopID();
+                }
+                ImGui::EndTable();
+            }
+            if (remove_k >= 0) {
+                lv.erase(lv.begin() + remove_k);
+                changed = true;
+            }
+            // A new level continues the last step, or starts mid-range.
+            if (ImGui::SmallButton("+ level")) {
+                const std::size_t n = lv.size();
+                lv.push_back(n == 0 ? 0.5 * (static_cast<double>(vmin) + vmax)
+                                    : lv[n - 1] + (n > 1 ? lv[n - 1] - lv[n - 2] : 1.0));
+                changed = true;
+            }
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Clear##levels") && !lv.empty()) {
+                lv.clear();
+                changed = true;
+            }
+            if (!changed) return;
+            std::sort(lv.begin(), lv.end());
+            lv.erase(std::unique(lv.begin(), lv.end()), lv.end());
+            push();
+        }
+
+        template<class Push>
+        void heatmap_style(PanelState& st, HeatmapOptions& o, Push&& push) {
+            name_and_key(st, o, push);
+            if (ImGui::Checkbox("Colorbar##plotcb", &o.colorbar)) push();
+            if (begin_field_table("heatmap")) {
+                field_row("Colormap");
+                if (colormap_combo("##hcmap", o.cmap)) push();
+                field_row("vmin");
+                if (drag_float("##hvmin", &o.vmin, -FLT_MAX, FLT_MAX, 0.01f, "%.4g")) push();
+                field_row("vmax");
+                if (drag_float("##hvmax", &o.vmax, -FLT_MAX, FLT_MAX, 0.01f, "%.4g")) push();
+                field_row("Origin");
+                static const char* kOrigins[] = {"lower", "upper"};
+                int oc = o.origin == "lower" ? 0 : 1;
+                if (ImGui::Combo("##horigin", &oc, kOrigins, IM_ARRAYSIZE(kOrigins))) {
+                    o.origin = kOrigins[oc];
+                    push();
+                }
+                end_field_table();
+            }
+            ImGui::SeparatorText("Contours");
+            ImGui::TextDisabled("Levels are in data units, not the vmin/vmax scale.");
+            contour_levels(o.contours, o.vmin, o.vmax, push);
+            ImGui::BeginDisabled(o.contours.empty());
+            if (begin_field_table("contour")) {
+                field_row("Color");
+                if (color_swatch("##ccol", o.contour_color)) push();
+                field_row("Width");
+                if (drag_float("##cw", &o.contour_linewidth, 0.1f, 10.0f, 0.05f, "%.2f px")) push();
+                end_field_table();
+            }
+            if (ImGui::Checkbox("Labels##contourlab", &o.contour_labels)) push();
+            ImGui::BeginDisabled(!o.contour_labels);
+            if (begin_field_table("contourlab")) {
+                field_row("Label size");
+                if (drag_float("##cfs", &o.contour_fontsize, 1.0f, 96.0f, 0.2f, "%.1f px")) push();
+                end_field_table();
+            }
+            ImGui::EndDisabled();
+            ImGui::EndDisabled();
+        }
+
+        // A 2D plot object's appearance, above its table, from the sheet's scratch
+        // copy (PanelState::SheetStyles); the snapshot supplies the error-bar data.
         void draw_plot_appearance(PanelState& st, const RenderSnapshot& sheet, const PlotDataTable& t,
-                                  FigureEditBox& edit_box, int idx, bool is3d) {
+                                  FigureEditBox& edit_box, int idx, bool is3d, const OpSink& sink) {
             const int pi = t.plot_index;
             if (pi < 0) return;
             const std::size_t i = static_cast<std::size_t>(pi);
+            const bool on_plane = t.plane_index >= 0;
+            PanelState::SheetStyles* ss = nullptr;
+            if (!on_plane) ss = &st.sheet_local;
+            else if (static_cast<std::size_t>(t.plane_index) < st.plane_sheets_local.size())
+                ss = &st.plane_sheets_local[static_cast<std::size_t>(t.plane_index)];
+            if (!ss) return;
 
-            // `show_legend` for keyable kinds, `colorbar` for color-scale kinds
-            // (scatter_z has both).
-            bool legend = false, has_legend = false;
-            bool colorbar = false, has_colorbar = false;
+            // Scratch and snapshot both hold object i, else nothing is drawn (a
+            // count change re-seeds the scratch next frame).
+            auto both = [i](const auto& local, const auto& plots) {
+                return i < local.size() && i < plots.size();
+            };
             switch (t.kind) {
-                case PlotKind::Line:
-                    if (i >= sheet.lines.size()) return;
-                    legend = sheet.lines[i].opts.show_legend;
-                    has_legend = true;
-                    break;
-                case PlotKind::Scatter:
-                    if (i >= sheet.scatters.size()) return;
-                    legend = sheet.scatters[i].opts.show_legend;
-                    has_legend = true;
-                    break;
-                case PlotKind::Bar:
-                    if (i >= sheet.bars.size()) return;
-                    legend = sheet.bars[i].opts.show_legend;
-                    has_legend = true;
-                    break;
-                case PlotKind::ScatterZ:
-                    if (i >= sheet.scatter_z.size()) return;
-                    legend = sheet.scatter_z[i].opts.show_legend;
-                    has_legend = true;
-                    colorbar = sheet.scatter_z[i].opts.colorbar;
-                    has_colorbar = true;
-                    break;
-                case PlotKind::Heatmap:
-                    if (i >= sheet.heatmaps.size()) return;
-                    colorbar = sheet.heatmaps[i].opts.colorbar;
-                    has_colorbar = true;
-                    break;
-                default: return; // Bar3D and Surface have blocks of their own
+                case PlotKind::Line:     if (!both(ss->lines, sheet.lines)) return; break;
+                case PlotKind::Scatter:  if (!both(ss->scatters, sheet.scatters)) return; break;
+                case PlotKind::Bar:      if (!both(ss->bars, sheet.bars)) return; break;
+                case PlotKind::Heatmap:  if (!both(ss->heatmaps, sheet.heatmaps)) return; break;
+                case PlotKind::ScatterZ: if (!both(ss->scatter_z, sheet.scatter_z)) return; break;
+                default: return; // the 3D kinds have blocks of their own
             }
-            if (!has_legend && !has_colorbar) return;
             if (!section("Appearance", true)) return;
 
-            // The name (legend key and colorbar title); one shared buffer, see
-            // text_field().
-            {
-                std::string name =
-                        t.kind == PlotKind::Line
-                            ? sheet.lines[i].opts.name
-                            : t.kind == PlotKind::Scatter
-                                  ? sheet.scatters[i].opts.name
-                                  : t.kind == PlotKind::Bar
-                                        ? sheet.bars[i].opts.name
-                                        : t.kind == PlotKind::Heatmap
-                                              ? sheet.heatmaps[i].opts.name
-                                              : sheet.scatter_z[i].opts.name;
-                if (begin_field_table("plotname")) {
-                    field_row("Name");
-                    if (text_field("##plotname", name, st.name_buf, sizeof st.name_buf)) {
-                        switch (t.kind) {
-                            case PlotKind::Line: {
-                                auto o = sheet.lines[i].opts;
-                                o.name = name;
-                                push_plot_style(edit_box, idx, is3d, t.plane_index, pi, o);
-                                break;
-                            }
-                            case PlotKind::Scatter: {
-                                auto o = sheet.scatters[i].opts;
-                                o.name = name;
-                                push_plot_style(edit_box, idx, is3d, t.plane_index, pi, o);
-                                break;
-                            }
-                            case PlotKind::Bar: {
-                                auto o = sheet.bars[i].opts;
-                                o.name = name;
-                                push_plot_style(edit_box, idx, is3d, t.plane_index, pi, o);
-                                break;
-                            }
-                            case PlotKind::Heatmap: {
-                                auto o = sheet.heatmaps[i].opts;
-                                o.name = name;
-                                push_plot_style(edit_box, idx, is3d, t.plane_index, pi, o);
-                                break;
-                            }
-                            default: {
-                                auto o = sheet.scatter_z[i].opts;
-                                o.name = name;
-                                push_plot_style(edit_box, idx, is3d, t.plane_index, pi, o);
-                                break;
-                            }
-                        }
-                    }
-                    end_field_table();
-                }
-            }
-
-            if (has_legend) {
-                if (ImGui::Checkbox("Legend key##plotleg", &legend)) {
-                    switch (t.kind) {
-                        case PlotKind::Line: {
-                            auto o = sheet.lines[i].opts;
-                            o.show_legend = legend;
-                            push_plot_style(edit_box, idx, is3d, t.plane_index, pi, o);
-                            break;
-                        }
-                        case PlotKind::Scatter: {
-                            auto o = sheet.scatters[i].opts;
-                            o.show_legend = legend;
-                            push_plot_style(edit_box, idx, is3d, t.plane_index, pi, o);
-                            break;
-                        }
-                        case PlotKind::Bar: {
-                            auto o = sheet.bars[i].opts;
-                            o.show_legend = legend;
-                            push_plot_style(edit_box, idx, is3d, t.plane_index, pi, o);
-                            break;
-                        }
-                        case PlotKind::ScatterZ: {
-                            auto o = sheet.scatter_z[i].opts;
-                            o.show_legend = legend;
-                            push_plot_style(edit_box, idx, is3d, t.plane_index, pi, o);
-                            break;
-                        }
-                        default: break;
-                    }
-                }
-                // A key needs both the switch and a name; say which is missing.
-                const bool named =
-                        t.kind == PlotKind::Line
-                            ? !sheet.lines[i].opts.name.empty()
-                            : t.kind == PlotKind::Scatter
-                                  ? !sheet.scatters[i].opts.name.empty()
-                                  : t.kind == PlotKind::Bar
-                                        ? !sheet.bars[i].opts.name.empty()
-                                        : !sheet.scatter_z[i].opts.name.empty();
-                if (legend && !named)
-                    ImGui::TextDisabled("No name, so no key is drawn.");
-            }
-
-            if (has_colorbar) {
-                if (ImGui::Checkbox("Colorbar##plotcb", &colorbar)) {
-                    if (t.kind == PlotKind::Heatmap) {
-                        auto o = sheet.heatmaps[i].opts;
-                        o.colorbar = colorbar;
-                        push_plot_style(edit_box, idx, is3d, t.plane_index, pi, o);
-                    } else {
-                        auto o = sheet.scatter_z[i].opts;
-                        o.colorbar = colorbar;
-                        push_plot_style(edit_box, idx, is3d, t.plane_index, pi, o);
-                    }
-                }
+            auto push_of = [&](const auto& o) {
+                return [&, p = &o] { push_plot_style(edit_box, idx, is3d, t.plane_index, pi, *p); };
+            };
+            switch (t.kind) {
+                case PlotKind::Line:
+                    line_style(st, ss->lines[i], sheet.lines[i], on_plane, push_of(ss->lines[i]));
+                    break;
+                case PlotKind::Scatter:
+                    scatter_style(st, ss->scatters[i], sheet.scatters[i], push_of(ss->scatters[i]));
+                    break;
+                case PlotKind::Bar:
+                    bar_style(st, ss->bars[i], sheet.bars[i], pi, sink, push_of(ss->bars[i]));
+                    break;
+                case PlotKind::Heatmap:
+                    heatmap_style(st, ss->heatmaps[i], push_of(ss->heatmaps[i]));
+                    break;
+                case PlotKind::ScatterZ:
+                    scatter_z_style(st, ss->scatter_z[i], sheet.scatter_z[i], push_of(ss->scatter_z[i]));
+                    break;
+                default: break;
             }
             ImGui::Separator();
         }
 
         // A bar3d grid's appearance, above its table.
-        void draw_bar3d_appearance(PanelState& st, FigureEditBox& edit_box, int idx, int bi) {
+        // `b` is the snapshot's grid (its resolved widths and bases).
+        void draw_bar3d_appearance(PanelState& st, FigureEditBox& edit_box, int idx, int bi,
+                                   const Bar3DPlot* b, const OpSink& sink) {
+            const bool per_bar_bases = b && !b->bottoms.empty();
             if (bi < 0 || bi >= static_cast<int>(st.bars3d_local.size())) return;
             if (!section("Appearance", true)) return;
             Bar3DOptions& o = st.bars3d_local[static_cast<std::size_t>(bi)];
@@ -903,6 +1029,7 @@ namespace sextant {
                 if (text_field("##b3dname", o.name, st.name_buf, sizeof st.name_buf)) push_bar();
                 end_field_table();
             }
+            if (ImGui::Checkbox("Legend key##b3dlg", &o.show_legend)) push_bar();
             if (begin_field_table("bar3d")) {
                 field_row("Color");
                 if (color_swatch("##bcol", o.color)) push_bar();
@@ -910,8 +1037,24 @@ namespace sextant {
                 if (drag_float("##balpha", &o.alpha, 0.0f, 1.0f, 0.005f, "%.2f")) push_bar();
                 field_row("Shading");
                 if (drag_float("##bshade", &o.shading, 0.0f, 1.0f, 0.005f, "%.2f")) push_bar();
+                ImGui::BeginDisabled(per_bar_bases);
+                field_row("Base");
+                if (drag_double("##bbase", &o.bottom, 0.01f, "%.4g")) push_bar();
+                ImGui::EndDisabled();
+                // Width/depth fractions are resolved to data units at plotting;
+                // the resolved footprint is what is edited (a data op).
+                if (b) {
+                    double w = 0.0;
+                    field_row("Width u");
+                    if (width_drag(st, "##bwu", b->u_width, &w))
+                        sink(BarWidthEdit{bi, w, -1, PlotKind::Bar3D, 0});
+                    field_row("Width v");
+                    if (width_drag(st, "##bwv", b->v_width, &w))
+                        sink(BarWidthEdit{bi, w, -1, PlotKind::Bar3D, 1});
+                }
                 end_field_table();
             }
+            if (per_bar_bases) ImGui::TextDisabled("Each bar has its own base (the table's bases).");
             if (ImGui::Checkbox("Edges", &o.edges)) push_bar();
             ImGui::BeginDisabled(!o.edges);
             if (begin_field_table("bar3de")) {
@@ -949,6 +1092,9 @@ namespace sextant {
                 if (text_field("##surfname", o.name, st.name_buf, sizeof st.name_buf)) push_surf();
                 end_field_table();
             }
+            if (ImGui::Checkbox("Legend key##surflg", &o.show_legend)) push_surf();
+            if (o.colormap && o.show_legend)
+                ImGui::TextDisabled("Coloured by height, so no key is drawn.");
             if (ImGui::Checkbox("Colour by height", &o.colormap)) push_surf();
             if (ImGui::Checkbox("Colorbar##surfcb", &o.colorbar)) push_surf();
             if (!o.colormap && o.colorbar)
@@ -958,6 +1104,8 @@ namespace sextant {
                     field_row("Color");
                     if (color_swatch("##scol", o.color)) push_surf();
                 } else {
+                    field_row("Colormap");
+                    if (colormap_combo("##scmap", o.cmap)) push_surf();
                     // Both or neither: an empty interval means "the data's range".
                     field_row("vmin");
                     if (drag_float("##svmin", &o.vmin, -FLT_MAX, FLT_MAX, 0.01f, "%.4g")) push_surf();
@@ -989,7 +1137,9 @@ namespace sextant {
         }
 
         // A cloud's appearance, above its table (including the marker shape).
-        void draw_scatter3d_appearance(PanelState& st, FigureEditBox& edit_box, int idx, int ci) {
+        // `p` is the snapshot's cloud (its error-bar data); null draws no error-bar block.
+        void draw_scatter3d_appearance(PanelState& st, FigureEditBox& edit_box, int idx, int ci,
+                                       const Scatter3DPlot* p) {
             if (ci < 0 || ci >= static_cast<int>(st.scatter3d_local.size())) return;
             if (!section("Appearance", true)) return;
             Scatter3DOptions& o = st.scatter3d_local[static_cast<std::size_t>(ci)];
@@ -1027,6 +1177,8 @@ namespace sextant {
             }
             // vmin/vmax only with `colors`, both or neither (empty = data range).
             if (begin_field_table("cloudv")) {
+                field_row("Colormap");
+                if (colormap_combo("##ccmap", o.cmap)) push_cloud();
                 field_row("vmin");
                 if (drag_float("##cvmin", &o.vmin, -FLT_MAX, FLT_MAX, 0.01f, "%.4g")) push_cloud();
                 field_row("vmax");
@@ -1037,12 +1189,16 @@ namespace sextant {
                 ImGui::TextDisabled("vmin == vmax: coloured over the series' own range.");
             ImGui::TextDisabled("Color applies when the series has no 'c' column; the colormap "
                 "overrides it when it has.");
+            if (p && !p->err.empty())
+                errorbar_style(o.errorbar, p->colormapped() ? Color::Black : o.color,
+                               has_cap(p->err), has_box(p->err), push_cloud);
             ImGui::Separator();
         }
 
         // A path's appearance: stroke width and `loop` instead of marker fields. No
-        // line style (Line3DOptions has none).
-        void draw_line3d_appearance(PanelState& st, FigureEditBox& edit_box, int idx, int li) {
+        // line style (Line3DOptions has none). `p` as for a cloud.
+        void draw_line3d_appearance(PanelState& st, FigureEditBox& edit_box, int idx, int li,
+                                    const Line3DPlot* p) {
             if (li < 0 || li >= static_cast<int>(st.line3d_local.size())) return;
             if (!section("Appearance", true)) return;
             Line3DOptions& o = st.line3d_local[static_cast<std::size_t>(li)];
@@ -1079,6 +1235,8 @@ namespace sextant {
                 end_field_table();
             }
             if (begin_field_table("pathv")) {
+                field_row("Colormap");
+                if (colormap_combo("##pcmap", o.cmap)) push_path();
                 field_row("vmin");
                 if (drag_float("##pvmin", &o.vmin, -FLT_MAX, FLT_MAX, 0.01f, "%.4g")) push_path();
                 field_row("vmax");
@@ -1089,6 +1247,9 @@ namespace sextant {
                 ImGui::TextDisabled("vmin == vmax: coloured over the series' own range.");
             ImGui::TextDisabled("Color applies when the series has no 'c' column; the colormap "
                 "overrides it when it has.");
+            if (p && !p->err.empty())
+                errorbar_style(o.errorbar, p->colormapped() ? Color::Black : o.color,
+                               has_cap(p->err), has_box(p->err), push_path);
             ImGui::Separator();
         }
 
@@ -1128,6 +1289,8 @@ namespace sextant {
                 end_field_table();
             }
             if (begin_field_table("meshv")) {
+                field_row("Colormap");
+                if (colormap_combo("##mcmap", o.cmap)) push_mesh();
                 field_row("vmin");
                 if (drag_float("##mvmin", &o.vmin, -FLT_MAX, FLT_MAX, 0.01f, "%.4g")) push_mesh();
                 field_row("vmax");
@@ -1187,6 +1350,38 @@ namespace sextant {
             ImGui::EndTable();
             ImGui::Separator();
         }
+
+        // The table's display controls (notation, precision, shading), between an
+        // object's Appearance block and its table. Display-only; nothing reaches
+        // the plot. Returns the format for this frame's cells.
+        const char* draw_table_format(PanelState& st, char* fmt_buf, std::size_t n) {
+            static const char* kNotations[] = {"General", "Fixed", "Scientific"};
+            int notation = static_cast<int>(st.value_format.notation);
+            ImGui::SetNextItemWidth(130.0f);
+            if (ImGui::Combo("Notation", &notation, kNotations, IM_ARRAYSIZE(kNotations)))
+                st.value_format.notation = static_cast<ValueFormat::Notation>(notation);
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(130.0f);
+            ImGui::SliderInt("Precision", &st.value_format.precision, 0, 17);
+
+            const char* fmt = format_spec(st.value_format, fmt_buf, n);
+            ImGui::SameLine();
+            ImGui::TextDisabled("(%s)", fmt);
+
+            ImGui::Checkbox("Shade cells", &st.shade_cells);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Tint each cell by where its value falls between the\n"
+                    "low and high of its own column (light blue to light red).\n"
+                    "A heatmap shades against the whole matrix instead,\n"
+                    "over the data's own range rather than vmin/vmax.");
+            if (st.shade_cells) {
+                // A strip of the ramp (ranges are per column, so no numbers).
+                ImGui::SameLine(0.0f, 12.0f);
+                shade_legend();
+            }
+            ImGui::Separator();
+            return fmt;
+        }
     } // namespace
 
     std::vector<DataPanelTab> data_panel_tabs(const std::vector<PlotDataTable>& tables,
@@ -1241,34 +1436,10 @@ namespace sextant {
             return;
         }
 
-        // --- Display format, shared by every cell below.
-        static const char* kNotations[] = {"General", "Fixed", "Scientific"};
-        int notation = static_cast<int>(st.value_format.notation);
-        ImGui::SetNextItemWidth(130.0f);
-        if (ImGui::Combo("Notation", &notation, kNotations, IM_ARRAYSIZE(kNotations)))
-            st.value_format.notation = static_cast<ValueFormat::Notation>(notation);
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(130.0f);
-        ImGui::SliderInt("Precision", &st.value_format.precision, 0, 17);
-
+        // Display format, shared by every cell (the widgets are drawn per tab,
+        // just above its table: draw_table_format()).
         char fmt_buf[16];
         const char* fmt = format_spec(st.value_format, fmt_buf, sizeof(fmt_buf));
-        ImGui::SameLine();
-        ImGui::TextDisabled("(%s)", fmt);
-
-        // Display-only; nothing reaches the plot.
-        ImGui::Checkbox("Shade cells", &st.shade_cells);
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Tint each cell by where its value falls between the\n"
-                "low and high of its own column (light blue to light red).\n"
-                "A heatmap shades against the whole matrix instead,\n"
-                "over the data's own range rather than vmin/vmax.");
-        if (st.shade_cells) {
-            // A strip of the ramp (ranges are per column, so no numbers).
-            ImGui::SameLine(0.0f, 12.0f);
-            shade_legend();
-        }
-        ImGui::Separator();
 
         const auto tables = cur2d
                                 ? collect_plot_data_tables(*cur2d)
@@ -1337,15 +1508,24 @@ namespace sextant {
                         ImGui::TextDisabled("%s", t.group.c_str());
                         ImGui::Separator();
                     }
+                    // The snapshot's 3D object, where a block reads its data.
+                    auto obj = [&](const auto& v) {
+                        const std::size_t k = static_cast<std::size_t>(t.plot_index);
+                        return cur3d && t.plot_index >= 0 && k < v.size() ? &v[k] : nullptr;
+                    };
+                    const OpSink sink = sink_for(t);
                     // Appearance above the data (tables take the remaining height).
                     if (t.kind == PlotKind::Bar3D)
-                        draw_bar3d_appearance(st, edit_box, idx, t.plot_index);
+                        draw_bar3d_appearance(st, edit_box, idx, t.plot_index,
+                                              cur3d ? obj(cur3d->bars3d) : nullptr, sink);
                     else if (t.kind == PlotKind::Surface)
                         draw_surface_appearance(st, edit_box, idx, t.plot_index);
                     else if (t.kind == PlotKind::Scatter3D)
-                        draw_scatter3d_appearance(st, edit_box, idx, t.plot_index);
+                        draw_scatter3d_appearance(st, edit_box, idx, t.plot_index,
+                                                  cur3d ? obj(cur3d->scatter3d) : nullptr);
                     else if (t.kind == PlotKind::Line3D)
-                        draw_line3d_appearance(st, edit_box, idx, t.plot_index);
+                        draw_line3d_appearance(st, edit_box, idx, t.plot_index,
+                                               cur3d ? obj(cur3d->lines3d) : nullptr);
                     else if (t.kind == PlotKind::SurfaceTri)
                         draw_surface_tri_appearance(st, edit_box, idx, t.plot_index);
                     else {
@@ -1357,9 +1537,9 @@ namespace sextant {
                                     : (cur3d && static_cast<std::size_t>(t.plane_index) < cur3d->planes.size()
                                            ? &cur3d->planes[static_cast<std::size_t>(t.plane_index)].sheet
                                            : nullptr);
-                        if (sheet) draw_plot_appearance(st, *sheet, t, edit_box, idx, is3d);
+                        if (sheet) draw_plot_appearance(st, *sheet, t, edit_box, idx, is3d, sink);
                     }
-                    const OpSink sink = sink_for(t);
+                    fmt = draw_table_format(st, fmt_buf, sizeof fmt_buf);
                     if (t.mesh) draw_mesh_topology(t);
                     if (t.is_grid())
                         draw_grid_table(t, fmt, idx, fsnap.data_generation, sink, st);

@@ -144,6 +144,25 @@ namespace sextant {
         std::vector<Line3DOptions> line3d_local;
         std::vector<SurfaceTriOptions> surface_tri_local;
 
+        // The 2D kinds' appearance, for a 2D axes' own sheet and for each plane's
+        // sheet in 3D; same rule. hint_labels are dropped (an edit keeps the
+        // object's own).
+        struct SheetStyles {
+            std::vector<LineOptions> lines;
+            std::vector<ScatterOptions> scatters;
+            std::vector<BarOptions> bars;
+            std::vector<HeatmapOptions> heatmaps;
+            std::vector<ScatterZOptions> scatter_z;
+        };
+
+        SheetStyles sheet_local;
+        std::vector<SheetStyles> plane_sheets_local;
+
+        // The value under a bar-width drag while it is active (the snapshot lags
+        // the op by a frame); re-read from the snapshot otherwise. One suffices,
+        // since only one drag is active at a time.
+        double width_held = 0.0;
+
         // Forces a re-sync of the *_local/*_buf/*_scratch fields whenever the
         // selected slot changes (-1 = first frame).
         int last_synced_slot = -1;

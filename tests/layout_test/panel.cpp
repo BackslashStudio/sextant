@@ -414,6 +414,9 @@ namespace lt {
             l.y = std::vector<double>{0.0, 2.0, 1.0};
             l.z = std::vector<double>{0.0, 1.0, 3.0};
             l.colors = std::vector<double>{1.0, 2.0, 3.0}; // so vmin/vmax are drawn
+            // Cap and box data, so every error-bar row is drawn.
+            l.err.cap_lo[2] = std::vector<double>{0.1, 0.2, 0.3};
+            l.err.box_lo[2] = std::vector<double>{0.1, 0.2, 0.3};
             r.lines3d.push_back(std::move(l));
             fsl.axes.push_back({{1, 1, 1}, std::move(r)});
             fsl.generation = fsl.data_generation = 1;
@@ -426,6 +429,52 @@ namespace lt {
         if (sl.conflicts)
             std::printf("    line3d: %d of %d cursor positions reported a conflict, first id %u\n",
                         sl.conflicts, sl.probes, static_cast<unsigned>(sl.first));
+
+        // Each 2D kind alone on a 2D axes, so its tab is selected and its whole
+        // Appearance block is drawn: error bars with cap and box data, and for a
+        // heatmap two contour levels (the level list is a table of its own).
+        {
+            const std::vector<double> x{0.0, 1.0, 2.0}, y{0.0, 1.0, 4.0}, e{0.1, 0.2, 0.3};
+            ErrorBarData err;
+            err.y_cap_lo = e;
+            err.y_box_lo = e;
+            auto scan_2d = [&](const char* kind, auto add) {
+                FigureSnapshot fk;
+                RenderSnapshot r;
+                add(r);
+                fk.axes.push_back({{1, 1, 1}, std::move(r)});
+                fk.generation = fk.data_generation = 1;
+                const IdConflictScan sk = scan_panel_for_id_conflicts(
+                    fk, &draw_data_panel, "Data", {});
+                check(sk.conflicts == 0,
+                      (std::string("Data panel: and a 2D ") + kind
+                       + "'s tab, with every Appearance control drawn").c_str());
+                if (sk.conflicts)
+                    std::printf("    %s: %d of %d cursor positions reported a conflict, first id %u\n",
+                                kind, sk.conflicts, sk.probes, static_cast<unsigned>(sk.first));
+            };
+            scan_2d("line", [&](RenderSnapshot& r) {
+                LinePlot p; p.x = x; p.y = y; p.err = err; r.lines.push_back(std::move(p));
+            });
+            scan_2d("scatter", [&](RenderSnapshot& r) {
+                ScatterPlot p; p.x = x; p.y = y; p.err = err; r.scatters.push_back(std::move(p));
+            });
+            scan_2d("bar", [&](RenderSnapshot& r) {
+                BarPlot p; p.centers = x; p.heights = y; p.err = err; r.bars.push_back(std::move(p));
+            });
+            scan_2d("scatter_z", [&](RenderSnapshot& r) {
+                ScatterZPlot p; p.x = x; p.y = y; p.z = y; p.err = err;
+                r.scatter_z.push_back(std::move(p));
+            });
+            scan_2d("heatmap", [&](RenderSnapshot& r) {
+                HeatmapPlot p;
+                p.data = std::vector<float>{0.0f, 1.0f, 2.0f, 3.0f};
+                p.rows = p.cols = 2;
+                p.opts.contours = {0.5, 1.5};
+                p.opts.contour_labels = true;
+                r.heatmaps.push_back(std::move(p));
+            });
+        }
 
         std::printf("  swept %d cursor positions per panel\n", s3.probes);
     }
@@ -927,9 +976,14 @@ namespace lt {
             lo.show_legend = false;
             AxesEdit3D e;
             e.plot_styles.push_back({0, 0, lo});
+            const unsigned long long before = r.planes[0].style_generation;
             apply_axes3d_edit(r, e);
             check(!r.planes[0].sheet.lines[0].opts.show_legend,
                   "style lane: a plane-addressed edit reaches that plane's own object");
+            // The plane's contents are a cached raster keyed on this, and a style
+            // edit leaves data_generation alone.
+            check(r.planes[0].style_generation != before,
+                  "style lane: and bumps the plane's style_generation, so its raster redraws");
 
             // A plane that no longer exists is skipped, not clamped.
             AxesEdit3D stale;
@@ -998,9 +1052,11 @@ namespace lt {
 
             // Find the legend checkbox and the Name field (typed into; a click
             // alone emits nothing).
+            // Each edit carries the whole scratch copy, so a typed name stays in
+            // every later one: judge each field on its own.
             bool emitted = false, off = false, named = false;
-            for (float y = 90.0f; y < 400.0f && !(emitted && named); y += 4.0f) {
-                for (float x = 8.0f; x < 400.0f && !(emitted && named); x += 6.0f) {
+            for (float y = 90.0f; y < 400.0f && !(off && named); y += 4.0f) {
+                for (float x = 8.0f; x < 400.0f && !(off && named); x += 6.0f) {
                     io.MousePos = ImVec2(x, y);
                     io.MouseDown[0] = true;
                     frame();
@@ -1013,11 +1069,9 @@ namespace lt {
                     if (!e || e->per_axes.empty()) continue;
                     for (const auto& ps: e->per_axes[0].second.plot_styles)
                         if (const auto* o = std::get_if<LineOptions>(&ps.opts)) {
+                            emitted = true;
                             if (o->name.find('Z') != std::string::npos) named = true;
-                            else {
-                                emitted = true;
-                                off = !o->show_legend;
-                            }
+                            if (!o->show_legend) off = true;
                         }
                 }
             }
