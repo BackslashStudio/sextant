@@ -8,7 +8,8 @@
 <p align="center"><b>Plotting for C++ that never gets in the way.</b></p>
 
 <p align="center">
-  <a href="https://github.com/BackslashStudio/sextant/actions/workflows/ci.yml"><img src="https://github.com/BackslashStudio/sextant/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/BackslashStudio/sextant/actions/workflows/ci.yml?query=branch%3Amain"><img src="https://github.com/BackslashStudio/sextant/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <a href="https://github.com/BackslashStudio/sextant/releases/latest"><img src="https://img.shields.io/github/v/release/BackslashStudio/sextant" alt="Latest release"></a>
   <img src="https://img.shields.io/badge/C%2B%2B-20-blue" alt="C++20">
   <img src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey" alt="Windows | Linux | macOS">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT"></a>
@@ -110,15 +111,15 @@ while (!fig->wait_closed(1.0 / 60)) {   // until the window is closed
 
 ![Six subplots: styled lines with a legend, a series with error bars, a heatmap with labelled contours, a histogram, a bar chart, and a colour-mapped scatter](doc/images/readme/gallery_2d.png)
 
-| | |
-|---|---|
-| `line` | Polylines, solid, dashed, dotted or dash-dot, any width, open or closed. Millions of points. |
-| `scatter` | Six marker shapes, per-series colour and size. |
-| `scatter_z` | Scatter whose colour comes from a third value, with a colorbar. |
-| `bar` | Bar charts, positive or diverging, with edges. |
-| `hist` | Histograms: binning on top of the same bar plot, with `density` and `cumulative`. |
-| `heatmap`, `imshow` | Colour-mapped matrices over real coordinates or indices, with traced and labelled **contour lines**. |
-| error bars | A capped whisker for an observed range plus a box for a spread, one- or two-sided, on lines, bars and both scatter kinds. |
+|                     |                                                                                                                           |
+|---------------------|---------------------------------------------------------------------------------------------------------------------------|
+| `line`              | Polylines, solid, dashed, dotted or dash-dot, any width, open or closed. Millions of points.                              |
+| `scatter`           | Six marker shapes, per-series colour and size.                                                                            |
+| `scatter_z`         | Scatter whose colour comes from a third value, with a colorbar.                                                           |
+| `bar`               | Bar charts, positive or diverging, with edges.                                                                            |
+| `hist`              | Histograms: binning on top of the same bar plot, with `density` and `cumulative`.                                         |
+| `heatmap`, `imshow` | Colour-mapped matrices over real coordinates or indices, with traced and labelled **contour lines**.                      |
+| error bars          | A capped whisker for an observed range plus a box for a spread, one- or two-sided, on lines, bars and both scatter kinds. |
 
 ## 3D plots
 
@@ -132,16 +133,16 @@ ax3->plane(sextant::PlaneOrientation::XY, -10.0) // a 2D plane inside the scene
    ->heatmap(field, rows, cols, {-3, 3}, {-3, 3});
 ```
 
-| | |
-|---|---|
-| `bar3d` | Bars on a grid, standing along any axis, stackable with per-bar bases. |
-| `surface` | A sheet over a grid, flat or colour-mapped by height, with an optional wireframe. |
+|               |                                                                                              |
+|---------------|----------------------------------------------------------------------------------------------|
+| `bar3d`       | Bars on a grid, standing along any axis, stackable with per-bar bases.                       |
+| `surface`     | A sheet over a grid, flat or colour-mapped by height, with an optional wireframe.            |
 | `surface_tri` | A sheet on a triangle mesh: give the triangles, or let sextant triangulate scattered points. |
-| `scatter3d` | Markers in space, flat or colour-mapped, with depth shading. |
-| `line3d` | A path through space, flat or colour-mapped along its length, open or closed. |
-| `Plane2D` | A plane in the scene carrying any 2D plot: heatmaps, lines, scatter and bars. |
-| error bars | Whiskers and boxes on `scatter3d` and `line3d`, along any axis. |
-| camera | Orthographic or perspective, orbit, pan and zoom, a box of any aspect. |
+| `scatter3d`   | Markers in space, flat or colour-mapped, with depth shading.                                 |
+| `line3d`      | A path through space, flat or colour-mapped along its length, open or closed.                |
+| `Plane2D`     | A plane in the scene carrying any 2D plot: heatmaps, lines, scatter and bars.                |
+| error bars    | Whiskers and boxes on `scatter3d` and `line3d`, along any axis.                              |
+| camera        | Orthographic or perspective, orbit, pan and zoom, a box of any aspect.                       |
 
 Anything can be translucent: bars through a sheet through a plane are ordered
 correctly per pixel in the PNG and per polygon in the SVG.
@@ -229,16 +230,16 @@ handling.
 
 ## Dependencies
 
-| | License | |
-|---|---|---|
-| [GLFW](https://www.glfw.org/) 3.4 | zlib/libpng | fetched and statically linked |
-| [Dear ImGui](https://github.com/ocornut/imgui) | MIT | vendored |
-| [NanoVG](https://github.com/memononen/nanovg) | zlib | vendored |
-| [stb](https://github.com/nothings/stb) | public domain | vendored |
-| [GLAD](https://glad.dav1d.de/) | MIT / public domain | vendored |
-| [Roboto](https://fonts.google.com/specimen/Roboto) | Apache-2.0 | vendored (panel UI font) |
-| [FreeType](https://freetype.org/) | FTL | system (fetched on macOS); optional |
-| [libpng](http://www.libpng.org/pub/png/libpng.html) | libpng | system (fetched on macOS); optional |
+|                                                     | License             |                                     |
+|-----------------------------------------------------|---------------------|-------------------------------------|
+| [GLFW](https://www.glfw.org/) 3.4                   | zlib/libpng         | fetched and statically linked       |
+| [Dear ImGui](https://github.com/ocornut/imgui)      | MIT                 | vendored                            |
+| [NanoVG](https://github.com/memononen/nanovg)       | zlib                | vendored                            |
+| [stb](https://github.com/nothings/stb)              | public domain       | vendored                            |
+| [GLAD](https://glad.dav1d.de/)                      | MIT / public domain | vendored                            |
+| [Roboto](https://fonts.google.com/specimen/Roboto)  | Apache-2.0          | vendored (panel UI font)            |
+| [FreeType](https://freetype.org/)                   | FTL                 | system (fetched on macOS); optional |
+| [libpng](http://www.libpng.org/pub/png/libpng.html) | libpng              | system (fetched on macOS); optional |
 
 ## License
 
