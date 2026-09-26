@@ -16,6 +16,18 @@ if(@SEXTANT_BUILD_STATIC@)
     endif()
 endif()
 
+# A static package build (e.g. a vcpkg static triplet): sextant::sextant itself
+# is the archive, so the same dependencies are required, not optional.
+if(@SEXTANT_PACKAGE_STATIC@)
+    find_dependency(Threads)
+    if(@SEXTANT_USE_FREETYPE@)
+        find_dependency(Freetype)
+    endif()
+    if(@SEXTANT_USE_LIBPNG@)
+        find_dependency(PNG)
+    endif()
+endif()
+
 include("${CMAKE_CURRENT_LIST_DIR}/sextantTargets.cmake")
 
 check_required_components(sextant)

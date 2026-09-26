@@ -1,0 +1,130 @@
+name: vcpkg port
+
+# The sextant port from BackslashStudio/vcpkg-registry, built from this tree
+# instead of a release archive, on a shared and a static triplet per platform;
+# then tests/vcpkg_consumer built against it and run.
+
+on:
+  push:
+    paths: ['CMakeLists.txt', 'cmake/**', 'include/**', 'src/**', 'third_party/**',
+            'tests/vcpkg_consumer/**', 'tests/basic_smoke/**', '.github/workflows/vcpkg-port.yml']
+  pull_request:
+    paths: ['CMakeLists.txt', 'cmake/**', 'include/**', 'src/**', 'third_party/**',
+            'tests/vcpkg_consumer/**', 'tests/basic_smoke/**', '.github/workflows/vcpkg-port.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vcpkg-port-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  port:
+    name: ${{ matrix.triplet }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-2025, triplet: x64-windows }
+          - { os: windows-2025, triplet: x64-windows-static-md }
+          - { os: ubuntu-24.04, triplet: x64-linux-dynamic }
+          - { os: ubuntu-24.04, triplet: x64-linux }
+          - { os: macos-15,     triplet: arm64-osx-dynamic }
+          - { os: macos-15,     triplet: arm64-osx }
+
+    defaults:
+      run:
+        shell: bash
+
+    env:
+      GALLIUM_DRIVER: llvmpipe
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: sextant
+
+      - uses: actions/checkout@v7
+        with:
+          repository: BackslashStudio/vcpkg-registry
+          path: registry
+
+      - uses: actions/checkout@v7
+        with:
+          repository: microsoft/vcpkg
+          path: vcpkg
+
+      # GLFW's own build needs X11 and Wayland headers; the rest is for running
+      # the consumer headless.
+      - name: Install system packages (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build pkg-config libgl-dev libgl1-mesa-dri \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev \
+            libwayland-dev libxkbcommon-dev wayland-protocols \
+            xvfb xauth fonts-dejavu-core fonts-liberation
+
+      - name: Install system packages (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja
+
+      - name: Set up MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Mesa llvmpipe (Windows)
+        if: runner.os == 'Windows'
+        uses: ssciwr/setup-mesa-dist-win@v3
+
+      - name: Bootstrap vcpkg
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then ./vcpkg/bootstrap-vcpkg.bat -disableMetrics
+          else ./vcpkg/bootstrap-vcpkg.sh -disableMetrics; fi
+
+      # The registry's port with its first vcpkg_from_github (the sextant
+      # release archive) replaced by this checkout.
+      - name: Make overlay port from this tree
+        run: |
+          mkdir -p overlay
+          cp -r registry/ports/sextant overlay/
+          src=$(cd sextant && pwd -W 2>/dev/null || pwd)
+          {
+            echo "set(SOURCE_PATH \"$src\")"
+            awk '!done && /^vcpkg_from_github\(/ { skip = 1; next }
+                 skip { if (/^\)/) { skip = 0; done = 1 }; next }
+                 { print }' registry/ports/sextant/portfile.cmake
+          } > overlay/sextant/portfile.cmake
+          head -5 overlay/sextant/portfile.cmake
+
+      - name: Install the port
+        run: |
+          ./vcpkg/vcpkg install "sextant:${{ matrix.triplet }}" --classic \
+            --overlay-ports=overlay --x-install-root=installed
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vcpkg-logs-${{ matrix.triplet }}
+          path: vcpkg/buildtrees/sextant/*.log
+
+      - name: Build the consumer
+        run: |
+          root=$(cd vcpkg && pwd -W 2>/dev/null || pwd)
+          cmake -S sextant/tests/vcpkg_consumer -B consumer -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            "-DCMAKE_TOOLCHAIN_FILE=$root/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_MANIFEST_MODE=OFF "-DVCPKG_INSTALLED_DIR=$PWD/installed" \
+            -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }}
+          cmake --build consumer
+
+      - name: Run the consumer
+        working-directory: consumer
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then xvfb-run -a ./consumer; else ./consumer; fi
+          test -s sextant_smoke.png

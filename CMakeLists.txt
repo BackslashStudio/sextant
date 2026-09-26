@@ -2,10 +2,17 @@
 # policies at their NEW defaults on newer CMake.
 cmake_minimum_required(VERSION 3.21...4.3)
 
+# SEXTANT_PACKAGE_BUILD: built by a package manager (the vcpkg port), which
+# owns the dependencies and the linkage. One `sextant` target that follows
+# BUILD_SHARED_LIBS instead of SHARED + sextant_static; FreeType and libpng from
+# find_package on every platform; no triplet default, no DLL bundling; GLFW
+# from FETCHCONTENT_SOURCE_DIR_GLFW, already patched, when the port gives one.
+option(SEXTANT_PACKAGE_BUILD "Build for a package manager (see CMakeLists.txt)" OFF)
+
 # Default vcpkg to the static-md triplet so FreeType/libpng/zlib link into
 # sextant.dll. Must be set before project(). Override with
 # -DVCPKG_TARGET_TRIPLET=x64-windows for separate DLLs.
-if(CMAKE_HOST_WIN32 AND NOT DEFINED VCPKG_TARGET_TRIPLET)
+if(CMAKE_HOST_WIN32 AND NOT DEFINED VCPKG_TARGET_TRIPLET AND NOT SEXTANT_PACKAGE_BUILD)
     set(VCPKG_TARGET_TRIPLET "x64-windows-static-md" CACHE STRING "Vcpkg target triplet")
 endif()
 
@@ -18,7 +25,7 @@ if(APPLE AND NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version")
 endif()
 
-project(sextant VERSION 0.3.0 LANGUAGES CXX C)
+project(sextant VERSION 1.1.0 LANGUAGES CXX C)
 if(APPLE)
     # OBJCXX for src/platform/macos/. OBJC first: enabled alone, OBJCXX claims
     # .m files too and compiles GLFW's Cocoa sources as Objective-C++, which
@@ -42,7 +49,7 @@ set(CMAKE_C_STANDARD 11)
 option(SEXTANT_USE_FREETYPE   "Use FreeType for font rendering (stb fallback if OFF)" ON)
 option(SEXTANT_USE_LIBPNG     "Use libpng for PNG output (stb_image_write fallback if OFF)" ON)
 option(SEXTANT_FETCH_GLFW     "Download GLFW via FetchContent (set OFF if installed system-wide)" ON)
-option(SEXTANT_BUILD_TESTS    "Build smoke test executable" ON)
+option(SEXTANT_BUILD_TESTS    "Build smoke test executable" ${PROJECT_IS_TOP_LEVEL})
 
 # ---------------------------------------------------------------------------
 # Dependencies
@@ -52,33 +59,50 @@ find_package(OpenGL REQUIRED)
 # GLFW
 if(SEXTANT_FETCH_GLFW)
     include(FetchContent)
-    find_package(Git REQUIRED)
-    # Patched for macOS (cmake/glfw/): a software-renderer fallback for GPU-less
-    # machines, and the CGL lock around [NSOpenGLContext update]. The hash puts
-    # the patches' content into the declared details, so editing one re-patches.
-    file(GLOB glfw_patches "${CMAKE_CURRENT_SOURCE_DIR}/cmake/glfw/*.patch")
-    list(SORT glfw_patches)
-    set(glfw_patch_text "")
-    foreach(patch IN LISTS glfw_patches)
-        file(READ "${patch}" text)
-        string(APPEND glfw_patch_text "${text}")
-    endforeach()
-    string(SHA256 glfw_patch_hash "${glfw_patch_text}")
-    FetchContent_Declare(
-        glfw
-        GIT_REPOSITORY https://github.com/glfw/glfw.git
-        GIT_TAG        3.4
-        GIT_SHALLOW    TRUE
-        PATCH_COMMAND  ${CMAKE_COMMAND} -DGIT=${GIT_EXECUTABLE}
-                       -DPATCH_DIR=${CMAKE_CURRENT_SOURCE_DIR}/cmake/glfw
-                       -DPATCH_HASH=${glfw_patch_hash}
-                       -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/glfw/apply_patches.cmake
-    )
+    if(FETCHCONTENT_SOURCE_DIR_GLFW)
+        # A local tree, e.g. from the vcpkg port. FetchContent runs no
+        # PATCH_COMMAND on it, so it must already carry cmake/glfw/*.patch.
+        FetchContent_Declare(glfw SOURCE_DIR "${FETCHCONTENT_SOURCE_DIR_GLFW}")
+    else()
+        find_package(Git REQUIRED)
+        # Patched for macOS (cmake/glfw/): a software-renderer fallback for GPU-less
+        # machines, and the CGL lock around [NSOpenGLContext update]. The hash puts
+        # the patches' content into the declared details, so editing one re-patches.
+        file(GLOB glfw_patches "${CMAKE_CURRENT_SOURCE_DIR}/cmake/glfw/*.patch")
+        list(SORT glfw_patches)
+        set(glfw_patch_text "")
+        foreach(patch IN LISTS glfw_patches)
+            file(READ "${patch}" text)
+            string(APPEND glfw_patch_text "${text}")
+        endforeach()
+        string(SHA256 glfw_patch_hash "${glfw_patch_text}")
+        FetchContent_Declare(
+            glfw
+            GIT_REPOSITORY https://github.com/glfw/glfw.git
+            GIT_TAG        3.4
+            GIT_SHALLOW    TRUE
+            PATCH_COMMAND  ${CMAKE_COMMAND} -DGIT=${GIT_EXECUTABLE}
+                           -DPATCH_DIR=${CMAKE_CURRENT_SOURCE_DIR}/cmake/glfw
+                           -DPATCH_HASH=${glfw_patch_hash}
+                           -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/glfw/apply_patches.cmake
+        )
+    endif()
     set(GLFW_BUILD_DOCS     OFF CACHE BOOL "" FORCE)
     set(GLFW_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
     set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
     set(GLFW_INSTALL        OFF CACHE BOOL "" FORCE)
+    # Always a static archive inside sextant, whatever BUILD_SHARED_LIBS says
+    # (a package build sets it for a dynamic triplet).
+    set(_sextant_saved_shared ${BUILD_SHARED_LIBS})
+    set(BUILD_SHARED_LIBS OFF)
     FetchContent_MakeAvailable(glfw)
+    set(BUILD_SHARED_LIBS ${_sextant_saved_shared})
+    set_target_properties(glfw PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    if(SEXTANT_PACKAGE_BUILD)
+        # Installed next to sextant for a static triplet; its own name keeps it
+        # clear of the glfw3 port's files.
+        set_target_properties(glfw PROPERTIES OUTPUT_NAME sextant_glfw3)
+    endif()
 else()
     find_package(glfw3 3.3 REQUIRED)
     if(APPLE)
@@ -104,7 +128,7 @@ endif()
 # fonts sextant loads need none of them. The SHARED target only: sextant_static's
 # consumers resolve these themselves. (v1.0 steps 21.6, 22.6)
 set(SEXTANT_MACOS_STATIC_DEPS_DEFAULT OFF)
-if(APPLE)
+if(APPLE AND NOT SEXTANT_PACKAGE_BUILD)
     set(SEXTANT_MACOS_STATIC_DEPS_DEFAULT ON)
 endif()
 option(SEXTANT_MACOS_STATIC_DEPS
@@ -159,8 +183,14 @@ endif()
 
 # FreeType, for everything the bundled copy does not serve (sextant_static,
 # and every target off macOS).
+# A package build asked for them through port features, so a missing one is an
+# error there rather than a quiet fallback.
+set(_sextant_dep_mode QUIET)
+if(SEXTANT_PACKAGE_BUILD)
+    set(_sextant_dep_mode REQUIRED)
+endif()
 if(SEXTANT_USE_FREETYPE)
-    find_package(Freetype QUIET)
+    find_package(Freetype ${_sextant_dep_mode})
     if(NOT Freetype_FOUND AND NOT SEXTANT_FT_BUNDLED)
         message(WARNING "FreeType not found — falling back to stb_truetype")
         set(SEXTANT_USE_FREETYPE OFF)
@@ -169,7 +199,7 @@ endif()
 
 # libpng
 if(SEXTANT_USE_LIBPNG)
-    find_package(PNG QUIET)
+    find_package(PNG ${_sextant_dep_mode})
     if(NOT PNG_FOUND AND NOT SEXTANT_PNG_BUNDLED)
         message(WARNING "libpng not found — falling back to stb_image_write")
         set(SEXTANT_USE_LIBPNG OFF)
@@ -179,9 +209,9 @@ endif()
 # ---------------------------------------------------------------------------
 # Third-party vendored sources (run scripts/setup_deps.sh first)
 # ---------------------------------------------------------------------------
-set(GLAD_SOURCE   ${CMAKE_SOURCE_DIR}/third_party/glad/src/glad.c)
-set(NANOVG_SOURCE ${CMAKE_SOURCE_DIR}/third_party/nanovg/nanovg.c)
-set(IMGUI_SOURCE_DIR ${CMAKE_SOURCE_DIR}/third_party/imgui)
+set(GLAD_SOURCE   ${PROJECT_SOURCE_DIR}/third_party/glad/src/glad.c)
+set(NANOVG_SOURCE ${PROJECT_SOURCE_DIR}/third_party/nanovg/nanovg.c)
+set(IMGUI_SOURCE_DIR ${PROJECT_SOURCE_DIR}/third_party/imgui)
 set(IMGUI_MAIN_SOURCE ${IMGUI_SOURCE_DIR}/imgui.cpp)
 set(IMGUI_SOURCES
     ${IMGUI_SOURCE_DIR}/imgui.cpp
@@ -275,14 +305,14 @@ function(sextant_configure_target target_name link_scope)
 
     target_include_directories(${target_name}
         PUBLIC
-            $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
+            $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
             $<INSTALL_INTERFACE:include>
         PRIVATE
-            ${CMAKE_SOURCE_DIR}/src
-            ${CMAKE_SOURCE_DIR}/third_party/glad/include
-            ${CMAKE_SOURCE_DIR}/third_party/glad/include/KHR
-            ${CMAKE_SOURCE_DIR}/third_party/nanovg
-            ${CMAKE_SOURCE_DIR}/third_party/stb
+            ${PROJECT_SOURCE_DIR}/src
+            ${PROJECT_SOURCE_DIR}/third_party/glad/include
+            ${PROJECT_SOURCE_DIR}/third_party/glad/include/KHR
+            ${PROJECT_SOURCE_DIR}/third_party/nanovg
+            ${PROJECT_SOURCE_DIR}/third_party/stb
             ${IMGUI_SOURCE_DIR}
             ${IMGUI_SOURCE_DIR}/backends
     )
@@ -359,9 +389,27 @@ function(sextant_configure_target target_name link_scope)
     endif()
 endfunction()
 
-add_library(sextant SHARED ${SEXTANT_SOURCES})
-sextant_configure_target(sextant PRIVATE)
-target_compile_definitions(sextant PRIVATE SEXTANT_BUILD_SHARED)
+if(SEXTANT_PACKAGE_BUILD)
+    # One library, of the kind BUILD_SHARED_LIBS asks for, always named
+    # sextant::sextant so consumers need not know the triplet.
+    set(SEXTANT_BUILD_STATIC OFF)
+    add_library(sextant ${SEXTANT_SOURCES})
+    get_target_property(_sextant_type sextant TYPE)
+    if(_sextant_type STREQUAL "STATIC_LIBRARY")
+        set(SEXTANT_PACKAGE_STATIC ON)
+        sextant_configure_target(sextant PUBLIC)
+        target_compile_definitions(sextant PUBLIC SEXTANT_STATIC_DEFINE)
+    else()
+        set(SEXTANT_PACKAGE_STATIC OFF)
+        sextant_configure_target(sextant PRIVATE)
+        target_compile_definitions(sextant PRIVATE SEXTANT_BUILD_SHARED)
+    endif()
+else()
+    set(SEXTANT_PACKAGE_STATIC OFF)
+    add_library(sextant SHARED ${SEXTANT_SOURCES})
+    sextant_configure_target(sextant PRIVATE)
+    target_compile_definitions(sextant PRIVATE SEXTANT_BUILD_SHARED)
+endif()
 
 if(SEXTANT_BUILD_STATIC)
     # A separate target name: on Windows the SHARED target's import library is
@@ -388,7 +436,7 @@ install(TARGETS ${SEXTANT_INSTALL_TARGETS}
 
 # sextant_static links glfw PUBLIC, so install its archive for consumers
 # (GLFW_INSTALL is OFF; GLFW types never appear in public headers).
-if(SEXTANT_BUILD_STATIC)
+if((SEXTANT_BUILD_STATIC OR SEXTANT_PACKAGE_STATIC) AND SEXTANT_FETCH_GLFW)
     install(TARGETS glfw
         EXPORT sextantTargets
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -398,8 +446,9 @@ install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 # Bundle runtime DLL dependencies into the install tree. A no-op with the
 # default static-md triplet; only matters with a dynamic triplet
-# (e.g. -DVCPKG_TARGET_TRIPLET=x64-windows).
-if(WIN32)
+# (e.g. -DVCPKG_TARGET_TRIPLET=x64-windows). Never in a package build, where
+# the package manager installs those DLLs itself.
+if(WIN32 AND NOT SEXTANT_PACKAGE_BUILD)
     install(FILES $<TARGET_RUNTIME_DLLS:sextant> DESTINATION ${CMAKE_INSTALL_BINDIR})
 
     # TARGET_RUNTIME_DLLS can't see vcpkg's PNG/ZLIB (UNKNOWN IMPORTED targets
@@ -440,7 +489,7 @@ install(EXPORT sextantTargets
 )
 
 configure_package_config_file(
-    ${CMAKE_SOURCE_DIR}/cmake/sextantConfig.cmake.in
+    ${PROJECT_SOURCE_DIR}/cmake/sextantConfig.cmake.in
     ${CMAKE_CURRENT_BINARY_DIR}/sextantConfig.cmake
     INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/sextant
 )
@@ -460,7 +509,7 @@ install(FILES
 # built-in "install" isn't in the File API codemodel, so IDEs like CLion can't
 # list it; this custom target can be.
 # ---------------------------------------------------------------------------
-set(SEXTANT_LOCAL_INSTALL_PREFIX "${CMAKE_SOURCE_DIR}/dist" CACHE PATH
+set(SEXTANT_LOCAL_INSTALL_PREFIX "${PROJECT_SOURCE_DIR}/dist" CACHE PATH
     "Prefix used by the 'install_dist' convenience target")
 add_custom_target(install_dist
     COMMAND ${CMAKE_COMMAND} --install ${CMAKE_BINARY_DIR} --prefix ${SEXTANT_LOCAL_INSTALL_PREFIX}
@@ -489,7 +538,7 @@ if(SEXTANT_BUILD_TESTS)
     # context. Raw GLFW + GLAD, deliberately not linked against sextant, so it
     # runs even where the library does not build.
     add_executable(sextant_gl_probe tests/gl_probe/main.cpp ${GLAD_SOURCE})
-    target_include_directories(sextant_gl_probe PRIVATE ${CMAKE_SOURCE_DIR}/third_party/glad/include)
+    target_include_directories(sextant_gl_probe PRIVATE ${PROJECT_SOURCE_DIR}/third_party/glad/include)
     target_link_libraries(sextant_gl_probe PRIVATE glfw)
     if(APPLE)
         # Windowless CGL probe: the context headless export uses, without GLFW.
@@ -550,10 +599,10 @@ if(SEXTANT_BUILD_TESTS)
             tests/layout_test/window_wait.cpp)
         target_link_libraries(sextant_layout_test PRIVATE sextant_static)
         target_include_directories(sextant_layout_test PRIVATE
-            ${CMAKE_SOURCE_DIR}/src
-            ${CMAKE_SOURCE_DIR}/third_party/glad/include
-            ${CMAKE_SOURCE_DIR}/third_party/nanovg
-            ${CMAKE_SOURCE_DIR}/third_party/stb
+            ${PROJECT_SOURCE_DIR}/src
+            ${PROJECT_SOURCE_DIR}/third_party/glad/include
+            ${PROJECT_SOURCE_DIR}/third_party/nanovg
+            ${PROJECT_SOURCE_DIR}/third_party/stb
             # cell_shading.h names ImU32/IM_COL32, so compile with the same
             # IMGUI_USER_CONFIG as the library.
             ${IMGUI_SOURCE_DIR})
@@ -565,10 +614,10 @@ if(SEXTANT_BUILD_TESTS)
         add_executable(sextant_split_probe tests/split_probe/main.cpp)
         target_link_libraries(sextant_split_probe PRIVATE sextant_static)
         target_include_directories(sextant_split_probe PRIVATE
-            ${CMAKE_SOURCE_DIR}/src
-            ${CMAKE_SOURCE_DIR}/third_party/glad/include
-            ${CMAKE_SOURCE_DIR}/third_party/nanovg
-            ${CMAKE_SOURCE_DIR}/third_party/stb
+            ${PROJECT_SOURCE_DIR}/src
+            ${PROJECT_SOURCE_DIR}/third_party/glad/include
+            ${PROJECT_SOURCE_DIR}/third_party/nanovg
+            ${PROJECT_SOURCE_DIR}/third_party/stb
             ${IMGUI_SOURCE_DIR})
         target_compile_definitions(sextant_split_probe PRIVATE
             IMGUI_USER_CONFIG="widgets/sextant_imconfig.h")
