@@ -20,8 +20,12 @@ add_subdirectory(../.. sextant)
 add_library(sextant_module_probe MODULE probe_module.cpp)
 target_link_libraries(sextant_module_probe PRIVATE sextant::sextant_static)
 set_target_properties(sextant_module_probe PROPERTIES
+    PREFIX ""  # no "lib", as an extension module has none
     CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN ON)
+# Where it landed, for the CI step: the suffix differs per platform.
+file(GENERATE OUTPUT ${CMAKE_BINARY_DIR}/module_path.txt
+     CONTENT "$<TARGET_FILE:sextant_module_probe>\n")
 
 add_executable(sextant_module_loader loader.cpp)
 target_link_libraries(sextant_module_loader PRIVATE ${CMAKE_DL_LIBS})

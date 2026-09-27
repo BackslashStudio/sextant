@@ -322,7 +322,7 @@ jobs:
         timeout-minutes: 5
         run: |
           mkdir -p out/module && cd out/module
-          module=$(ls ../../build-module/sextant_module_probe.{so,dll} 2>/dev/null | head -n 1)
+          module=$(cat ../../build-module/module_path.txt)
           wrap=()
           if [ "$RUNNER_OS" = Linux ]; then wrap=(xvfb-run -a -s "-screen 0 1920x1080x24"); fi
           status=0
