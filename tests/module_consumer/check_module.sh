@@ -36,7 +36,10 @@ case "$(uname -s)" in
         ;;
 esac
 
-bad_deps=$(printf '%s\n' "$deps" | grep -iE 'freetype|png|(^|/)libz\.|zlib|glfw|sextant' || true)
+# The OS's own are fine by name: macOS's libz is in /usr/lib, as on every Mac,
+# and is meant to be linked from there.
+bad_deps=$(printf '%s\n' "$deps" | grep -vE '^(/usr/lib/|/System/)' \
+           | grep -iE 'freetype|png|(^|/)libz\.|zlib|glfw|sextant' || true)
 bad_exports=$(printf '%s\n' "$exports" \
     | grep -E 'sextant::|glfw|(^|[^A-Za-z])_?FT_|(^|[^A-Za-z])_?png_|ImGui|(^|[^A-Za-z])_?nvg|glad|^_?(deflate|inflate|adler32|crc32|zlibVersion|compress|uncompress|gz[a-z]+)' \
     || true)

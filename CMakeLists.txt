@@ -486,6 +486,25 @@ if(SEXTANT_BUILD_STATIC)
     # an archive without -fPIC cannot go into a .so, and a Python extension
     # module is one. Free elsewhere, where code is position-independent anyway.
     set_target_properties(sextant_static PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    # ...and nothing of it exported from that shared object. -fvisibility=hidden
+    # leaves one gap with libstdc++: std templates instantiated over sextant's
+    # own types (std::vector<sextant::...> and the like) stay default-visible,
+    # because namespace std is marked so. The ELF linker's --exclude-libs hides
+    # every symbol that comes from the archives named, so it is added to what
+    # links sextant_static -- for sextant's archives only, leaving the
+    # consumer's others alone. A no-op in an executable. Build tree only: the
+    # installed static target keeps the compile-time hiding.
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        set(_sextant_own_archives "$<TARGET_FILE_NAME:sextant_static>")
+        foreach(_t IN LISTS SEXTANT_BUNDLED_TARGETS)
+            string(APPEND _sextant_own_archives ":$<TARGET_FILE_NAME:${_t}>")
+        endforeach()
+        if(SEXTANT_FETCH_GLFW)
+            string(APPEND _sextant_own_archives ":$<TARGET_FILE_NAME:glfw>")
+        endif()
+        target_link_options(sextant_static INTERFACE
+            "$<BUILD_INTERFACE:-Wl,--exclude-libs,${_sextant_own_archives}>")
+    endif()
     if(NOT TARGET sextant)
         # SEXTANT_BUILD_SHARED=OFF: what names `sextant` -- the tests,
         # install_dist -- gets the archive.
