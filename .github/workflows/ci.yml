@@ -165,7 +165,7 @@ jobs:
           otool -L build/libsextant.dylib | tee otool.txt
           outside=$(awk '/^\t/ { print $1 }' otool.txt \
                     | grep -vE '^(/usr/lib/|/System/|@rpath/)' || true)
-          bundled=$(grep -c 'built from source into libsextant.dylib' configure.txt || true)
+          bundled=$(grep -c 'built from source into sextant' configure.txt || true)
           minos=$(otool -l build/libsextant.dylib | awk '/LC_BUILD_VERSION/ { f = 1 } f && /minos/ { print $2; exit }')
           # Only the library's own link line: ld prints the output it is
           # linking before its warnings, and tests may link Homebrew's dylibs.
@@ -174,7 +174,7 @@ jobs:
           {
             echo "### libsextant.dylib — ${{ matrix.name }}"
             echo '```'
-            grep -E 'built from source into libsextant.dylib' configure.txt || echo "(nothing bundled)"
+            grep -E 'built from source into sextant' configure.txt || echo "(nothing bundled)"
             echo "minos: ${minos:-?}"
             echo "dylib dependencies outside the SDK:"
             echo "${outside:-(none)}"
@@ -298,6 +298,44 @@ jobs:
             exit 1
           fi
 
+      # sextant_static linked into a shared module and loaded at run time, as
+      # the Python binding's extension module will be (v1.1 step 24): its own
+      # build, with no shared sextant and FreeType/libpng/zlib from source, so
+      # nothing from the steps above -- vcpkg, Homebrew, apt -- is linked in.
+      - name: Build module consumer
+        id: module_build
+        if: ${{ !cancelled() }}
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: |
+          args=(-S tests/module_consumer -B build-module -G Ninja -DCMAKE_BUILD_TYPE=Release)
+          if [ -n "${{ matrix.stdlib }}" ]; then
+            args+=("-DCMAKE_CXX_FLAGS=${{ matrix.stdlib }}"
+                   "-DCMAKE_EXE_LINKER_FLAGS=${{ matrix.stdlib }}"
+                   "-DCMAKE_MODULE_LINKER_FLAGS=${{ matrix.stdlib }}")
+          fi
+          cmake "${args[@]}" && cmake --build build-module
+
+      - name: module_consumer
+        if: ${{ !cancelled() && steps.module_build.outcome == 'success' }}
+        timeout-minutes: 5
+        run: |
+          mkdir -p out/module && cd out/module
+          module=$(ls ../../build-module/sextant_module_probe.{so,dll} 2>/dev/null | head -n 1)
+          wrap=()
+          if [ "$RUNNER_OS" = Linux ]; then wrap=(xvfb-run -a -s "-screen 0 1920x1080x24"); fi
+          status=0
+          "${wrap[@]}" ../../build-module/sextant_module_loader "$module" . 2>&1 | tee module_probe.txt || status=$?
+          bash ../../tests/module_consumer/check_module.sh "$module" 2>&1 | tee module_check.txt || status=1
+          {
+            echo "### module_consumer — ${{ matrix.name }}"
+            echo '```'
+            cat module_probe.txt module_check.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
+
       - name: Upload outputs
         if: always()
         uses: actions/upload-artifact@v7
@@ -308,6 +346,7 @@ jobs:
             out/*.svg
             out/*.txt
             out/poisoned/layout_test.txt
+            out/module/*
             configure.txt
             otool.txt
           if-no-files-found: ignore

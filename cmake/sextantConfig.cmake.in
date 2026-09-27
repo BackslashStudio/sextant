@@ -8,11 +8,14 @@ find_dependency(OpenGL REQUIRED)
 # static-target consumer without them gets a "target not found" error instead.
 if(@SEXTANT_BUILD_STATIC@)
     find_package(Threads QUIET)   # transitively required by glfw
-    if(@SEXTANT_USE_FREETYPE@)
+    # Bundled ones (SEXTANT_BUNDLE_DEPS) are installed with sextant instead.
+    if(@SEXTANT_USE_FREETYPE@ AND NOT @SEXTANT_FT_BUNDLED@)
         find_package(Freetype QUIET)
     endif()
-    if(@SEXTANT_USE_LIBPNG@)
+    if(@SEXTANT_USE_LIBPNG@ AND NOT @SEXTANT_PNG_BUNDLED@)
         find_package(PNG QUIET)
+    elseif(@SEXTANT_PNG_BUNDLED@ AND NOT @SEXTANT_ZLIB_BUNDLED@)
+        find_package(ZLIB QUIET)  # the SDK's, which the bundled libpng links
     endif()
 endif()
 

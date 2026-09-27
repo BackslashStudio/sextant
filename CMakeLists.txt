@@ -97,7 +97,13 @@ if(SEXTANT_FETCH_GLFW)
     set(BUILD_SHARED_LIBS OFF)
     FetchContent_MakeAvailable(glfw)
     set(BUILD_SHARED_LIBS ${_sextant_saved_shared})
-    set_target_properties(glfw PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    # Hidden: GLFW is sextant's own, and a shared object linking it -- the
+    # library, or a Python extension module -- must not export it, where it
+    # could meet another GLFW in the same process.
+    set_target_properties(glfw PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        C_VISIBILITY_PRESET hidden
+        OBJC_VISIBILITY_PRESET hidden)
     if(SEXTANT_PACKAGE_BUILD)
         # Installed next to sextant for a static triplet; its own name keeps it
         # clear of the glfw3 port's files.
@@ -117,31 +123,70 @@ else()
     endif()
 endif()
 
-# macOS: FreeType and libpng built from source into libsextant.dylib, instead
-# of depending on Homebrew dylibs at run time -- the bargain the Windows
-# static-md triplet makes. From source rather than Homebrew's archives, which
-# are built for the machine they were bottled on (macOS 27 on one, 15 on CI):
+# SEXTANT_BUNDLE_DEPS: FreeType and libpng -- and zlib, off macOS -- built from
+# source and linked into sextant, instead of found on the system. Both targets
+# get them: a self-contained libsextant.dylib, and a sextant_static that links
+# into a Python extension module with no second binary to ship beside it.
+#
+# macOS (default ON): from source rather than Homebrew's archives, which are
+# built for the machine they were bottled on (macOS 27 on one, 15 on CI):
 # linked into a library that claims CMAKE_OSX_DEPLOYMENT_TARGET, they would not
 # honour it. Built here they follow the deployment target and the
 # architectures, universal2 included. zlib comes from the SDK, as every Mac has
-# it; FreeType's optional codecs (brotli, bzip2, png, harfbuzz) are off -- the
-# fonts sextant loads need none of them. The SHARED target only: sextant_static's
-# consumers resolve these themselves. (v1.0 steps 21.6, 22.6)
-set(SEXTANT_MACOS_STATIC_DEPS_DEFAULT OFF)
+# it. (v1.0 steps 21.6, 22.6)
+# Elsewhere (default OFF; the Python binding turns it on): zlib as well, since
+# a manylinux wheel may not depend on the system's libz. FreeType's optional
+# codecs (zlib, brotli, bzip2, png, harfbuzz) are off everywhere -- the fonts
+# sextant loads need none of them.
+# SEXTANT_MACOS_STATIC_DEPS, the v1.0 name, still seeds the macOS default.
+set(_sextant_bundle_default OFF)
 if(APPLE AND NOT SEXTANT_PACKAGE_BUILD)
-    set(SEXTANT_MACOS_STATIC_DEPS_DEFAULT ON)
+    set(_sextant_bundle_default ON)
+    if(DEFINED SEXTANT_MACOS_STATIC_DEPS)
+        set(_sextant_bundle_default ${SEXTANT_MACOS_STATIC_DEPS})
+    endif()
 endif()
-option(SEXTANT_MACOS_STATIC_DEPS
-       "Build FreeType/libpng from source into libsextant.dylib on macOS"
-       ${SEXTANT_MACOS_STATIC_DEPS_DEFAULT})
+option(SEXTANT_BUNDLE_DEPS
+       "Build FreeType/libpng (and zlib, off macOS) from source into sextant"
+       ${_sextant_bundle_default})
+if(SEXTANT_BUNDLE_DEPS AND SEXTANT_PACKAGE_BUILD)
+    message(FATAL_ERROR
+        "SEXTANT_BUNDLE_DEPS: a package build takes its dependencies from the package manager")
+endif()
 
 set(SEXTANT_FT_BUNDLED OFF)
 set(SEXTANT_PNG_BUNDLED OFF)
-if(APPLE AND SEXTANT_MACOS_STATIC_DEPS)
+set(SEXTANT_ZLIB_BUNDLED OFF)
+set(SEXTANT_BUNDLED_TARGETS "")
+if(SEXTANT_BUNDLE_DEPS)
     include(FetchContent)
     set(_sextant_saved_shared ${BUILD_SHARED_LIBS})
     set(BUILD_SHARED_LIBS OFF)
-    set(SKIP_INSTALL_ALL ON)  # neither is installed; both live inside the dylib
+    set(SKIP_INSTALL_ALL ON)  # installed, if at all, through sextant's export set
+
+    if(SEXTANT_USE_LIBPNG AND NOT APPLE)
+        set(ZLIB_BUILD_SHARED  OFF CACHE BOOL "" FORCE)
+        set(ZLIB_BUILD_STATIC  ON  CACHE BOOL "" FORCE)
+        set(ZLIB_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+        set(ZLIB_INSTALL       OFF CACHE BOOL "" FORCE)
+        FetchContent_Declare(
+            sextant_zlib
+            GIT_REPOSITORY https://github.com/madler/zlib.git
+            GIT_TAG        v1.3.2
+            GIT_SHALLOW    TRUE
+        )
+        FetchContent_MakeAvailable(sextant_zlib)
+        # libpng asks find_package(ZLIB) for ZLIB::ZLIB. Make that name this
+        # archive, and preset what FindZLIB checks so it searches no further:
+        # it skips the search for a set ZLIB_LIBRARY and keeps an existing
+        # ZLIB::ZLIB.
+        add_library(ZLIB::ZLIB ALIAS zlibstatic)
+        set(ZLIB_INCLUDE_DIR "${sextant_zlib_SOURCE_DIR}" CACHE PATH "" FORCE)
+        set(ZLIB_LIBRARY zlibstatic CACHE STRING "" FORCE)
+        set(SEXTANT_ZLIB_BUNDLED ON)
+        list(APPEND SEXTANT_BUNDLED_TARGETS zlibstatic)
+        message(STATUS "zlib built from source into sextant (1.3.2)")
+    endif()
 
     if(SEXTANT_USE_FREETYPE)
         set(FT_DISABLE_ZLIB     ON CACHE BOOL "" FORCE)  # FreeType's own copy
@@ -156,8 +201,15 @@ if(APPLE AND SEXTANT_MACOS_STATIC_DEPS)
             GIT_SHALLOW    TRUE
         )
         FetchContent_MakeAvailable(sextant_freetype)
+        # FreeType marks its API visibility("default") itself, unconditionally,
+        # which the hidden preset below does not override; see the header.
+        if(NOT MSVC)
+            target_compile_options(freetype PRIVATE
+                "SHELL:-include ${PROJECT_SOURCE_DIR}/cmake/freetype/sextant_hidden_api.h")
+        endif()
         set(SEXTANT_FT_BUNDLED ON)
-        message(STATUS "FreeType built from source into libsextant.dylib (2.14.3)")
+        list(APPEND SEXTANT_BUNDLED_TARGETS freetype)
+        message(STATUS "FreeType built from source into sextant (2.14.3)")
     endif()
 
     if(SEXTANT_USE_LIBPNG)
@@ -174,33 +226,41 @@ if(APPLE AND SEXTANT_MACOS_STATIC_DEPS)
         )
         FetchContent_MakeAvailable(sextant_libpng)
         set(SEXTANT_PNG_BUNDLED ON)
-        message(STATUS "libpng built from source into libsextant.dylib (1.6.58)")
+        list(APPEND SEXTANT_BUNDLED_TARGETS png_static)
+        message(STATUS "libpng built from source into sextant (1.6.58)")
+    endif()
+
+    # Linkable into a shared object -- a Python extension module is one -- and
+    # nothing of theirs exported from it.
+    if(SEXTANT_BUNDLED_TARGETS)
+        set_target_properties(${SEXTANT_BUNDLED_TARGETS} PROPERTIES
+            POSITION_INDEPENDENT_CODE ON
+            C_VISIBILITY_PRESET hidden)
     endif()
 
     unset(SKIP_INSTALL_ALL)
     set(BUILD_SHARED_LIBS ${_sextant_saved_shared})
 endif()
 
-# FreeType, for everything the bundled copy does not serve (sextant_static,
-# and every target off macOS).
+# FreeType and libpng from the system, when not bundled.
 # A package build asked for them through port features, so a missing one is an
 # error there rather than a quiet fallback.
 set(_sextant_dep_mode QUIET)
 if(SEXTANT_PACKAGE_BUILD)
     set(_sextant_dep_mode REQUIRED)
 endif()
-if(SEXTANT_USE_FREETYPE)
+if(SEXTANT_USE_FREETYPE AND NOT SEXTANT_FT_BUNDLED)
     find_package(Freetype ${_sextant_dep_mode})
-    if(NOT Freetype_FOUND AND NOT SEXTANT_FT_BUNDLED)
+    if(NOT Freetype_FOUND)
         message(WARNING "FreeType not found — falling back to stb_truetype")
         set(SEXTANT_USE_FREETYPE OFF)
     endif()
 endif()
 
 # libpng
-if(SEXTANT_USE_LIBPNG)
+if(SEXTANT_USE_LIBPNG AND NOT SEXTANT_PNG_BUNDLED)
     find_package(PNG ${_sextant_dep_mode})
-    if(NOT PNG_FOUND AND NOT SEXTANT_PNG_BUNDLED)
+    if(NOT PNG_FOUND)
         message(WARNING "libpng not found — falling back to stb_image_write")
         set(SEXTANT_USE_LIBPNG OFF)
     endif()
@@ -235,6 +295,13 @@ endforeach()
 # Library target
 # ---------------------------------------------------------------------------
 option(SEXTANT_BUILD_STATIC  "Also build a static sextant_static library target" ON)
+# OFF: sextant_static alone, e.g. for a project that links it into a module of
+# its own (the Python binding) and has no use for the shared library. Ignored by
+# a package build, which makes exactly one library anyway.
+option(SEXTANT_BUILD_SHARED  "Build the sextant shared library" ON)
+if(NOT SEXTANT_BUILD_SHARED AND NOT SEXTANT_PACKAGE_BUILD)
+    set(SEXTANT_BUILD_STATIC ON)
+endif()
 
 set(CMAKE_DEBUG_POSTFIX "d")
 
@@ -342,20 +409,16 @@ function(sextant_configure_target target_name link_scope)
         target_compile_definitions(${target_name} PRIVATE GL_SILENCE_DEPRECATION)
     endif()
 
-    # The bundled builds go to the SHARED target only: a self-contained
-    # sextant.dylib is the whole point, while sextant_static's consumers resolve
-    # FreeType and libpng themselves (see cmake/sextantConfig.cmake.in). Each
-    # target gets its compile definitions only with a library actually linked,
-    # so one without falls back to stb on its own.
-    get_target_property(_sextant_target_type ${target_name} TYPE)
-    set(_use_bundled OFF)
-    if(_sextant_target_type STREQUAL "SHARED_LIBRARY")
-        set(_use_bundled ON)
-    endif()
-
+    # Bundled builds (SEXTANT_BUNDLE_DEPS) go to both targets, PRIVATE: no
+    # public header names them. For the archive that still puts them in its
+    # link interface (as $<LINK_ONLY:>), which is why they join the export set
+    # below. System ones follow link_scope, and sextant_static's consumers
+    # resolve them (see cmake/sextantConfig.cmake.in). Each target gets its
+    # compile definitions only with a library actually linked, so one without
+    # falls back to stb on its own.
     if(SEXTANT_USE_FREETYPE)
         set(_ft_linked ON)
-        if(_use_bundled AND SEXTANT_FT_BUNDLED)
+        if(SEXTANT_FT_BUNDLED)
             target_link_libraries(${target_name} PRIVATE freetype)
         elseif(TARGET Freetype::Freetype)
             target_link_libraries(${target_name} ${link_scope} Freetype::Freetype)
@@ -371,7 +434,7 @@ function(sextant_configure_target target_name link_scope)
 
     if(SEXTANT_USE_LIBPNG)
         set(_png_linked ON)
-        if(_use_bundled AND SEXTANT_PNG_BUNDLED)
+        if(SEXTANT_PNG_BUNDLED)
             target_link_libraries(${target_name} PRIVATE png_static)
         elseif(TARGET PNG::PNG)
             target_link_libraries(${target_name} ${link_scope} PNG::PNG)
@@ -404,11 +467,13 @@ if(SEXTANT_PACKAGE_BUILD)
         sextant_configure_target(sextant PRIVATE)
         target_compile_definitions(sextant PRIVATE SEXTANT_BUILD_SHARED)
     endif()
-else()
+elseif(SEXTANT_BUILD_SHARED)
     set(SEXTANT_PACKAGE_STATIC OFF)
     add_library(sextant SHARED ${SEXTANT_SOURCES})
     sextant_configure_target(sextant PRIVATE)
     target_compile_definitions(sextant PRIVATE SEXTANT_BUILD_SHARED)
+else()
+    set(SEXTANT_PACKAGE_STATIC OFF)
 endif()
 
 if(SEXTANT_BUILD_STATIC)
@@ -417,12 +482,33 @@ if(SEXTANT_BUILD_STATIC)
     add_library(sextant_static STATIC ${SEXTANT_SOURCES})
     sextant_configure_target(sextant_static PUBLIC)
     target_compile_definitions(sextant_static PUBLIC SEXTANT_STATIC_DEFINE)
+    # Linkable into a shared object as well as an executable: on Linux x86_64
+    # an archive without -fPIC cannot go into a .so, and a Python extension
+    # module is one. Free elsewhere, where code is position-independent anyway.
+    set_target_properties(sextant_static PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    if(NOT TARGET sextant)
+        # SEXTANT_BUILD_SHARED=OFF: what names `sextant` -- the tests,
+        # install_dist -- gets the archive.
+        add_library(sextant ALIAS sextant_static)
+    endif()
+endif()
+
+# The names an installed package gives, for a project that adds this one as a
+# subdirectory instead: the same link line works either way.
+if(SEXTANT_PACKAGE_BUILD OR SEXTANT_BUILD_SHARED)
+    add_library(sextant::sextant ALIAS sextant)
+endif()
+if(TARGET sextant_static)
+    add_library(sextant::sextant_static ALIAS sextant_static)
 endif()
 
 # ---------------------------------------------------------------------------
 # Install / export (CMake package config for downstream consumers)
 # ---------------------------------------------------------------------------
-set(SEXTANT_INSTALL_TARGETS sextant)
+set(SEXTANT_INSTALL_TARGETS "")
+if(SEXTANT_PACKAGE_BUILD OR SEXTANT_BUILD_SHARED)
+    list(APPEND SEXTANT_INSTALL_TARGETS sextant)
+endif()
 if(SEXTANT_BUILD_STATIC)
     list(APPEND SEXTANT_INSTALL_TARGETS sextant_static)
 endif()
@@ -442,13 +528,21 @@ if((SEXTANT_BUILD_STATIC OR SEXTANT_PACKAGE_STATIC) AND SEXTANT_FETCH_GLFW)
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     )
 endif()
+# Likewise the bundled FreeType/libpng/zlib, which sextant_static carries in
+# its link interface: their archives only, as with glfw.
+if(SEXTANT_BUILD_STATIC AND SEXTANT_BUNDLED_TARGETS)
+    install(TARGETS ${SEXTANT_BUNDLED_TARGETS}
+        EXPORT sextantTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    )
+endif()
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 # Bundle runtime DLL dependencies into the install tree. A no-op with the
 # default static-md triplet; only matters with a dynamic triplet
 # (e.g. -DVCPKG_TARGET_TRIPLET=x64-windows). Never in a package build, where
 # the package manager installs those DLLs itself.
-if(WIN32 AND NOT SEXTANT_PACKAGE_BUILD)
+if(WIN32 AND NOT SEXTANT_PACKAGE_BUILD AND SEXTANT_BUILD_SHARED)
     install(FILES $<TARGET_RUNTIME_DLLS:sextant> DESTINATION ${CMAKE_INSTALL_BINDIR})
 
     # TARGET_RUNTIME_DLLS can't see vcpkg's PNG/ZLIB (UNKNOWN IMPORTED targets
