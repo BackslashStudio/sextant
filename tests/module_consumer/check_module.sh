@@ -4,7 +4,8 @@
 #   check_module.sh <module>
 #
 # Fails if it needs a FreeType, libpng, zlib, GLFW or sextant binary at run time
-# -- they are meant to be inside it -- or exports a symbol of theirs, or of
+# -- they are meant to be inside it -- or libEGL, which is loaded only when an
+# export asks for it, or exports a symbol of theirs, or of
 # ImGui/NanoVG/GLAD: those must stay private to the module, since another one in
 # the same process may carry its own copies. Linux uses readelf/nm, macOS
 # otool/nm, Windows (Git Bash) dumpbin from an MSVC environment.
@@ -40,6 +41,12 @@ esac
 # and is meant to be linked from there.
 bad_deps=$(printf '%s\n' "$deps" | grep -vE '^(/usr/lib/|/System/)' \
            | grep -iE 'freetype|png|(^|/)libz\.|zlib|glfw|sextant' || true)
+# libEGL is dlopen()ed for headless exports on Linux, never linked: a manylinux
+# wheel may not depend on it, and it must be the system's.
+egl_deps=$(printf '%s\n' "$deps" | grep -E '(^|/)libEGL' || true)
+if [ -n "$egl_deps" ]; then
+    bad_deps=$(printf '%s\n%s\n' "$bad_deps" "$egl_deps" | grep . || true)
+fi
 bad_exports=$(printf '%s\n' "$exports" \
     | grep -E 'sextant::|glfw|(^|[^A-Za-z])_?FT_|(^|[^A-Za-z])_?png_|ImGui|(^|[^A-Za-z])_?nvg|glad|^_?(deflate|inflate|adler32|crc32|zlibVersion|compress|uncompress|gz[a-z]+)' \
     || true)

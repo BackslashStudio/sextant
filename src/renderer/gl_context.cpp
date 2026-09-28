@@ -30,41 +30,57 @@ namespace sextant {
 
         // Once per process. Not std::call_once: that would hold every other
         // thread wanting this message until the handler returns.
-        void warn_no_offscreen(const char* why) {
+        void warn_no_offscreen(const std::string& why) {
             static std::atomic<bool> said{false};
             if (said.exchange(true)) return;
-            emit_message(std::string("no windowless GL context (") + why
-                         + "). Exports fall back to a hidden window, which on this platform "
-                           "is the main thread's to make.");
+            emit_message("no windowless GL context (" + why
+                         + "). Exports fall back to a hidden window"
+                         + (platform::windows_on_main_thread
+                                ? ", which on this platform is the main thread's to make."
+                                : ", which needs a display."));
         }
     } // namespace
 
     GLContext::GLContext(GLContextOptions opts) {
-        if (opts.headless && platform::has_offscreen_gl) {
+        std::string offscreen_failure;
+        if (opts.headless && platform::has_offscreen_gl && platform::offscreen_gl_enabled()) {
             // No window, no window system, no main thread: a context of the
             // platform's own, current on this thread, whose only target is the
-            // export's FBO. What lets savefig() be called from anywhere.
+            // export's FBO. What lets savefig() be called from anywhere, and on
+            // Linux with no display at all.
             try {
                 offscreen_ = platform::create_offscreen_gl();
                 width_ = opts.width;
                 height_ = opts.height;
             } catch (const std::exception& e) {
                 // A hidden window is what this path used before there was an
-                // offscreen one, and on the main thread it still works -- so a
-                // machine that cannot give one is told about it and served
-                // anyway, rather than losing an export it would have got.
-                warn_no_offscreen(e.what());
+                // offscreen one, and where a window can be made it still works
+                // -- so a machine that cannot give one is told about it and
+                // served anyway, rather than losing an export it would have got.
+                offscreen_failure = e.what();
+                warn_no_offscreen(offscreen_failure);
             }
         }
 
         if (!offscreen_) {
             // The window, its callbacks and its link: the broker's, on whichever
             // thread this platform lets own one.
-            BrokeredWindow bw = create_window({
-                .width = opts.width, .height = opts.height, .title = opts.title,
-                .visible = opts.visible, .resizable = opts.resizable,
-                .scale_to_monitor = opts.scale_to_monitor
-            });
+            BrokeredWindow bw;
+            try {
+                bw = create_window({
+                    .width = opts.width, .height = opts.height, .title = opts.title,
+                    .visible = opts.visible, .resizable = opts.resizable,
+                    .scale_to_monitor = opts.scale_to_monitor
+                });
+            } catch (const std::exception& e) {
+                if (offscreen_failure.empty()) throw;
+                // Both ways failed: say both, and what would fix the first.
+                std::string msg = "no GL context for the export: no windowless one ("
+                                  + offscreen_failure + "), and no window (" + e.what() + ").";
+                if (const char* hint = platform::offscreen_gl_hint(); hint && *hint)
+                    msg += std::string(" ") + hint;
+                throw std::runtime_error(msg);
+            }
             window_ = bw.window;
             link_ = std::move(bw.link);
 

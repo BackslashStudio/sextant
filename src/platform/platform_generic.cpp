@@ -1,9 +1,10 @@
 #include "platform.h"
 
 // Windows and Linux: every thread may own a window, no context lock is needed,
-// the clipboard is GLFW's to read, and a headless export draws into a hidden
-// window because making one costs nothing here. macOS has none of that; see
-// macos/platform_macos.mm.
+// and the clipboard is GLFW's to read. macOS has none of that; see
+// macos/platform_macos.mm. A headless export on Windows draws into a hidden
+// window, which costs nothing there; Linux has a windowless context instead
+// (linux/offscreen_egl.cpp), since its windows need a display.
 namespace sextant::platform {
     bool this_thread_owns_windows() { return true; }
 
@@ -17,6 +18,7 @@ namespace sextant::platform {
 
     bool console_input_ready() { return false; }
 
+#if !defined(__linux__)   // Linux's are in linux/offscreen_egl.cpp
     OffscreenGL* create_offscreen_gl() { return nullptr; }
 
     void destroy_offscreen_gl(OffscreenGL*) {
@@ -26,4 +28,7 @@ namespace sextant::platform {
     }
 
     void* offscreen_gl_proc_address(const char*) { return nullptr; }
+
+    const char* offscreen_gl_hint() { return ""; }
+#endif
 } // namespace sextant::platform

@@ -137,4 +137,6 @@ namespace sextant::platform {
             RTLD_LAZY | RTLD_LOCAL);
         return framework ? dlsym(framework, name) : nullptr;
     }
+
+    const char* offscreen_gl_hint() { return ""; }
 } // namespace sextant::platform

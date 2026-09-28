@@ -78,6 +78,28 @@ namespace lt {
         check(live_window_count() == base,
               "headless: and the context leaves nothing behind");
 
+        // Which GL the windowless context got (EGL on Linux: llvmpipe on a
+        // runner, the GPU's driver on a desktop).
+        if (offscreen) {
+            GLContext ctx({.width = 16, .height = 16, .title = "layout_test", .visible = false,
+                           .headless = true});
+            const auto* r = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
+            const auto* v = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+            std::printf("  windowless context: %s / %s%s\n", r ? r : "?", v ? v : "?",
+                        ctx.is_headless() ? "" : " (fell back to a hidden window)");
+        }
+
+        // The test switch sends a headless request to the hidden window, so
+        // the two paths can be compared (v1.1 step 27).
+        platform::set_offscreen_gl_enabled(false);
+        {
+            GLContext ctx({.width = 32, .height = 24, .title = "layout_test", .visible = false,
+                           .headless = true});
+            check(!ctx.is_headless(),
+                  "headless: with the offscreen switch off, a headless request gets a window");
+        }
+        platform::set_offscreen_gl_enabled(true);
+
         // A headless context asked for where there is none falls back rather
         // than failing, which is what keeps one export path for every platform.
         {

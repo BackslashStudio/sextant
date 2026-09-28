@@ -64,6 +64,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             ninja-build libfreetype-dev libpng-dev libgl-dev libgl1-mesa-dri \
+            libegl1 libegl-mesa0 libopengl0 \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev \
             libwayland-dev libxkbcommon-dev wayland-protocols \
             xvfb xauth fonts-dejavu-core fonts-liberation
@@ -298,6 +299,43 @@ jobs:
             exit 1
           fi
 
+      # Headless export with no display (v1.1 step 27). Linux: run once with no
+      # X or Wayland at all -- the EGL context -- and once under xvfb forced onto
+      # the hidden-window path, and require byte-identical files: both are
+      # llvmpipe, so any difference is the export path's. Elsewhere once, as a
+      # smoke check of that platform's headless path. Not on macOS CI, whose
+      # software renderer does not repeat a translucent export exactly.
+      - name: headless_probe
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && runner.os != 'macOS' }}
+        timeout-minutes: 5
+        run: |
+          mkdir -p out/headless && cd out/headless
+          status=0
+          if [ "$RUNNER_OS" = Linux ]; then
+            env -u DISPLAY -u WAYLAND_DISPLAY ../../build/sextant_headless_probe egl \
+              2>&1 | tee probe_egl.txt || status=$?
+            xvfb-run -a -s "-screen 0 1920x1080x24" ../../build/sextant_headless_probe window --window \
+              2>&1 | tee probe_window.txt || status=$?
+            diffs=()
+            for f in egl/*; do
+              cmp -s "$f" "window/${f#egl/}" || diffs+=("${f#egl/}")
+            done
+            [ -n "$(ls egl)" ] || diffs+=("(no output)")
+            if [ ${#diffs[@]} -ne 0 ]; then status=1; fi
+          else
+            ../../build/sextant_headless_probe probe 2>&1 | tee probe_egl.txt || status=$?
+          fi
+          {
+            echo "### headless_probe — ${{ matrix.name }}"
+            echo '```'
+            cat probe_*.txt
+            if [ "$RUNNER_OS" = Linux ]; then
+              echo "windowless vs hidden-window files that differ: ${diffs[*]:-(none)}"
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
+
       # sextant_static linked into a shared module and loaded at run time, as
       # the Python binding's extension module will be (v1.1 step 24): its own
       # build, with no shared sextant and FreeType/libpng/zlib from source, so
@@ -323,10 +361,11 @@ jobs:
         run: |
           mkdir -p out/module && cd out/module
           module=$(cat ../../build-module/module_path.txt)
-          wrap=()
-          if [ "$RUNNER_OS" = Linux ]; then wrap=(xvfb-run -a -s "-screen 0 1920x1080x24"); fi
+          # No display on Linux: the module exports through EGL, as a Python
+          # extension in a container would (v1.1 step 27).
           status=0
-          "${wrap[@]}" ../../build-module/sextant_module_loader "$module" . 2>&1 | tee module_probe.txt || status=$?
+          env -u DISPLAY -u WAYLAND_DISPLAY ../../build-module/sextant_module_loader "$module" . \
+            2>&1 | tee module_probe.txt || status=$?
           bash ../../tests/module_consumer/check_module.sh "$module" 2>&1 | tee module_check.txt || status=1
           {
             echo "### module_consumer — ${{ matrix.name }}"
@@ -347,6 +386,7 @@ jobs:
             out/*.txt
             out/poisoned/layout_test.txt
             out/module/*
+            out/headless/**
             configure.txt
             otool.txt
           if-no-files-found: ignore

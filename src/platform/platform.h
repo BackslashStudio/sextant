@@ -1,9 +1,11 @@
 #pragma once
+#include <atomic>
 #include <string>
 
-// What differs on macOS, behind one header so nothing else has to know which
-// platform it is compiled for. The implementations live in
-// platform_generic.cpp and macos/platform_macos.mm.
+// What differs by platform, behind one header so nothing else has to know which
+// one it is compiled for. The implementations live in platform_generic.cpp
+// (Windows, Linux), macos/platform_macos.mm, and linux/offscreen_egl.cpp (the
+// Linux offscreen context).
 namespace sextant::platform {
     // True where the window system insists that windows are created, destroyed
     // and pumped on one particular thread. A property of the platform, not of
@@ -51,16 +53,29 @@ namespace sextant::platform {
     bool console_input_ready();
 
     // Whether this platform can make a GL context with no window, no window
-    // system and no particular thread -- what a headless savefig() wants, since
-    // here a window is the main thread's business and an export has no reason
-    // to be. False elsewhere, where a hidden window costs nothing because any
-    // thread may make one.
+    // system and no particular thread -- what a headless savefig() wants. macOS:
+    // CGL, since a window there is the main thread's business. Linux: EGL, since
+    // a window there needs a display, which a container, a CI runner or an SSH
+    // session does not have. False on Windows, where a hidden window costs
+    // nothing and every session has a desktop.
     inline constexpr bool has_offscreen_gl =
-#if defined(__APPLE__)
+#if defined(__APPLE__) || defined(__linux__)
             true;
 #else
             false;
 #endif
+
+    // Test hook, not API: off makes headless exports take the hidden-window
+    // path even where has_offscreen_gl, so a test can compare the two. On by
+    // default; process-wide.
+    inline std::atomic<bool>& offscreen_gl_switch() {
+        static std::atomic<bool> on{true};
+        return on;
+    }
+
+    inline void set_offscreen_gl_enabled(bool on) { offscreen_gl_switch().store(on); }
+
+    inline bool offscreen_gl_enabled() { return offscreen_gl_switch().load(); }
 
     // One offscreen GL context. Opaque: what is inside it is the platform's.
     struct OffscreenGL;
@@ -77,7 +92,13 @@ namespace sextant::platform {
     void make_offscreen_gl_current(OffscreenGL* c);
 
     // One GL entry point by name, without GLFW -- what GLAD is loaded with on
-    // the offscreen path, where glfwInit() has not necessarily happened and on
-    // this platform could not happen off the main thread anyway.
+    // the offscreen path, where glfwInit() has not necessarily happened (and on
+    // macOS could not off the main thread; on Linux may have no display to
+    // happen with). GLAD's table is process-wide, so these must be the same
+    // entry points a window's context would get.
     void* offscreen_gl_proc_address(const char* name);
+
+    // What a failed headless export should tell the user to do about it, or
+    // empty. Appended to the error when neither context could be made.
+    const char* offscreen_gl_hint();
 } // namespace sextant::platform

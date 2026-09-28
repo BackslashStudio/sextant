@@ -357,6 +357,11 @@ if(APPLE)
 else()
     list(APPEND SEXTANT_SOURCES src/platform/platform_generic.cpp)
 endif()
+# Linux's windowless context for headless exports: EGL, dlopen()ed at run time
+# rather than linked, so nothing gains a libEGL dependency (see the file).
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    list(APPEND SEXTANT_SOURCES src/platform/linux/offscreen_egl.cpp)
+endif()
 
 # Settings common to the SHARED and STATIC targets. link_scope: PRIVATE for
 # SHARED (deps are merged into sextant.dll), PUBLIC for STATIC (consumers must
@@ -409,6 +414,10 @@ function(sextant_configure_target target_name link_scope)
         # only ones there are. The 4.1 ceiling exists for exactly this: every
         # shader is `#version 410 core` and nothing uses a removed entry point.
         target_compile_definitions(${target_name} PRIVATE GL_SILENCE_DEPRECATION)
+    endif()
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        # dlopen() for libEGL; part of libc from glibc 2.34, libdl before that.
+        target_link_libraries(${target_name} ${link_scope} ${CMAKE_DL_LIBS})
     endif()
 
     # Bundled builds (SEXTANT_BUNDLE_DEPS) go to both targets, PRIVATE: no
@@ -738,5 +747,15 @@ if(SEXTANT_BUILD_TESTS)
             ${IMGUI_SOURCE_DIR})
         target_compile_definitions(sextant_split_probe PRIVATE
             IMGUI_USER_CONFIG="widgets/sextant_imconfig.h")
+
+        # Headless export with no display (v1.1 step 27): renders gallery
+        # figures to files through the windowless context, or with --window
+        # through the hidden-window path, so CI can compare the two byte for
+        # byte. Internal only for the test switch (platform.h).
+        add_executable(sextant_headless_probe tests/headless_probe/main.cpp)
+        target_link_libraries(sextant_headless_probe PRIVATE sextant_static)
+        target_include_directories(sextant_headless_probe PRIVATE
+            ${PROJECT_SOURCE_DIR}/src
+            ${PROJECT_SOURCE_DIR}/third_party/glad/include)
     endif()
 endif()
