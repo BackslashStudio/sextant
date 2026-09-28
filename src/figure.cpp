@@ -81,6 +81,8 @@ struct Figure::Impl {
 
     FigureOptions                 opts;
     std::vector<Slot>             slots;
+    // Declared before window_thread, so it outlives it.
+    FrameCounters                 frame_counters;
     std::unique_ptr<WindowThread> window_thread;
     std::atomic<bool>             open{false};
 
@@ -552,7 +554,8 @@ void Figure::show(bool pause) {
     auto wt = std::make_unique<WindowThread>(
         d->opts,
         std::move(render_fn),
-        [this]{ d->mark_closed(); }
+        [this]{ d->mark_closed(); },
+        d->frame_counters
     );
 
     // Registered before the thread runs, so the close callback always has a
@@ -589,6 +592,8 @@ void Figure::close() {
         d->window_thread->stop();   // joins; the close callback has run by now
         d->window_thread.reset();
     }
+    // No writer is left, so frame_stats() reads zero from here to the next show().
+    d->frame_counters.reset();
     // The render thread handed its window back on its way out. Where this
     // thread is the one that unmakes windows, do it now rather than leave it on
     // screen until whatever poll comes next.
@@ -629,9 +634,9 @@ void Figure::run() {
 }
 
 FrameStats Figure::frame_stats() const {
-    // window_thread is reset by close(), so this is all-zero before show() and
-    // after close.
-    return d->window_thread ? d->window_thread->stats() : FrameStats{};
+    // The counters are the Figure's, never the WindowThread's, so this reads
+    // nothing close() can free; any thread, during show() or close() alike.
+    return d->frame_counters.load();
 }
 
 void Figure::refresh() {

@@ -4,6 +4,7 @@
 // Part of sextant_layout_test; see layout_test.h.
 #include "layout_test.h"
 #include "window_registry.h"
+#include "window_broker.h"
 #include "platform/platform.h"
 
 namespace lt {
@@ -156,5 +157,52 @@ namespace lt {
         }
         check(!a->is_open() && !b->is_open() && open_window_count() == 0,
               "run: both figures are closed and the registry is empty");
+    }
+
+    // -------------------------------------------------------------------------
+    // frame_stats() from any thread, while show() and close() run on another
+    // (v1.1 step 28: the counters are the Figure's, not the WindowThread's)
+    // -------------------------------------------------------------------------
+    void test_frame_stats_any_thread() {
+        std::printf("\n[window wait: frame_stats() from any thread]\n");
+
+        auto fig = window_figure("frame_stats");
+        check(fig->frame_stats().frames == 0, "frame_stats: zero before show()");
+
+        // Where this thread is the pump, the window only draws while it pumps.
+        auto wait_until = [](const std::function<bool()>& done) {
+            if (pump_runs_here()) return pump_until(done, 10.0);
+            const auto end = Clock::now() + std::chrono::seconds(10);
+            while (!done() && Clock::now() < end)
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            return done();
+        };
+
+        std::atomic<bool> stop{false};
+        std::atomic<unsigned long long> reads{0}, most{0};
+        std::thread reader([&] {
+            while (!stop.load()) {
+                const FrameStats s = fig->frame_stats();
+                if (s.frames > most.load()) most.store(s.frames);
+                reads.fetch_add(1);
+            }
+        });
+
+        bool drew = true, zeroed = true;
+        for (int round = 0; round < 3; ++round) {
+            fig->show(false);
+            drew = wait_until([&fig] { return fig->frame_stats().frames > 0; }) && drew;
+            fig->close();
+            zeroed = fig->frame_stats().frames == 0 && fig->frame_stats().total_ms == 0.0 && zeroed;
+        }
+        stop.store(true);
+        reader.join();
+
+        check(drew, "frame_stats: counts frames while the window is open, each time it is");
+        check(zeroed, "frame_stats: and reads zero again after every close()");
+        check(reads.load() > 0 && most.load() > 0,
+              "frame_stats: read throughout from another thread ("
+                  + std::to_string(reads.load()) + " reads, up to "
+                  + std::to_string(most.load()) + " frames)");
     }
 } // namespace lt

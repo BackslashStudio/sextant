@@ -234,6 +234,11 @@ void Axes::Impl::ingest_heatmap(std::span<const double> data, int rows, int cols
     const std::string w = who;
     std::vector<float> cells = heatmap_cells(data, rows, cols, xrange, yrange, w);
 
+    // Every reader tests == "lower", so anything else would silently mean upper.
+    if (opts.origin != "lower" && opts.origin != "upper")
+        throw std::invalid_argument(w + ": origin must be \"lower\" or \"upper\", not \""
+                                    + opts.origin + "\"");
+
     // Sort and de-duplicate once. Check finiteness first (NaN doesn't sort).
     for (double level : opts.contours)
         if (!std::isfinite(level))

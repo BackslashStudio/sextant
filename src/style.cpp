@@ -27,12 +27,17 @@ Color Color::from_hex(uint32_t hex) {
 
 Color Color::from_name(std::string_view name) {
     if (name.starts_with('#')) {
-        std::string s(name.substr(1));
+        // The digit count, not the value, says whether there is alpha:
+        // "#000000ff" is opaque black, not 0xff read as RGB.
+        const std::string_view s = name.substr(1);
         uint32_t hex = 0;
-        auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), hex, 16);
-        if (ec != std::errc{})
-            throw std::invalid_argument("invalid hex color: " + std::string(name));
-        return from_hex(hex);
+        const auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), hex, 16);
+        if ((s.size() != 6 && s.size() != 8) || ec != std::errc{} || ptr != s.data() + s.size())
+            throw std::invalid_argument("invalid hex color (want #rrggbb or #rrggbbaa): "
+                                        + std::string(name));
+        if (s.size() == 6) hex = (hex << 8) | 0xFF;
+        return {((hex >> 24) & 0xFF) / 255.0f, ((hex >> 16) & 0xFF) / 255.0f,
+                ((hex >> 8) & 0xFF) / 255.0f, (hex & 0xFF) / 255.0f};
     }
     // Basic named colors
     if (name == "red")    return Red;

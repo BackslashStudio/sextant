@@ -388,7 +388,8 @@ namespace sextant {
     // its normal, carrying the 2D plot kinds. In-plane coordinates are the parent's
     // data coordinates (a plane at XY, offset 0.5 spans x and y at z = 0.5), and
     // its data feeds the parent's auto limits. Not an Axes: limits, ticks and
-    // titles belong to the parent.
+    // titles belong to the parent. Threads: as Axes (see Figure). A Plane2D keeps
+    // no pointer to its parent, so one outliving it is safe, merely inert.
     class SEXTANT_API Plane2D {
     public:
         ~Plane2D();
@@ -503,6 +504,7 @@ namespace sextant {
         Plane2D(PlaneOrientation orient, double offset, Plane2DOptions opts);
     };
 
+    // Threads: as Axes (see Figure).
     class SEXTANT_API Axes3D {
     public:
         ~Axes3D();

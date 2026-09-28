@@ -8,10 +8,12 @@
 #include <utility>
 
 namespace sextant {
-    WindowThread::WindowThread(FigureOptions opts, RenderFn render_fn, CloseFn on_close)
+    WindowThread::WindowThread(FigureOptions opts, RenderFn render_fn, CloseFn on_close,
+                               FrameCounters& counters)
         : opts_(std::move(opts))
           , render_fn_(std::move(render_fn))
-          , on_close_(std::move(on_close)) {
+          , on_close_(std::move(on_close))
+          , counters_(counters) {
     }
 
     WindowThread::~WindowThread() {
@@ -151,12 +153,13 @@ namespace sextant {
             const double ms = std::chrono::duration<double, std::milli>(
                 std::chrono::steady_clock::now() - t0).count();
 
-            last_ms_.store(ms, std::memory_order_relaxed);
-            total_ms_.store(total_ms_.load(std::memory_order_relaxed) + ms,
-                            std::memory_order_relaxed);
-            if (ms > max_ms_.load(std::memory_order_relaxed))
-                max_ms_.store(ms, std::memory_order_relaxed);
-            frames_.fetch_add(1, std::memory_order_relaxed);
+            FrameCounters& c = counters_;
+            c.last_ms.store(ms, std::memory_order_relaxed);
+            c.total_ms.store(c.total_ms.load(std::memory_order_relaxed) + ms,
+                             std::memory_order_relaxed);
+            if (ms > c.max_ms.load(std::memory_order_relaxed))
+                c.max_ms.store(ms, std::memory_order_relaxed);
+            c.frames.fetch_add(1, std::memory_order_relaxed);
 
             // Exports run outside the timed region, before the swap.
             if (exports_pending_.load(std::memory_order_acquire)) {

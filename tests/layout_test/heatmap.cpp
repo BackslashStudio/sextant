@@ -318,6 +318,32 @@ namespace lt {
         const std::vector<double> cells(4 * 6, 0.5);
         const double pad = sextant::kAutoScalePad;
 
+        // origin is validated at ingest (v1.1 step 28): every reader tests
+        // == "lower", so a typo used to mean "upper" silently.
+        {
+            auto fig = sextant::Figure::create();
+            auto ax = fig->axes();
+            auto throws = [&](std::string origin) {
+                try {
+                    ax->imshow(cells, 4, 6, {.origin = std::move(origin)});
+                } catch (const std::invalid_argument&) { return true; }
+                return false;
+            };
+            check(!throws("lower") && !throws("upper"),
+                  "heatmap origin: \"lower\" and \"upper\" are accepted");
+            const std::size_t n = ax->heatmap_count();
+            check(throws("Lower") && throws("bottom") && throws(""),
+                  "heatmap origin: anything else throws");
+            check(ax->heatmap_count() == n, "heatmap origin: and adds nothing");
+
+            auto f3 = sextant::Figure::create();
+            auto plane = f3->add_subplot3d(1, 1, 1)->plane(sextant::PlaneOrientation::XY, 0.0);
+            bool plane_threw = false;
+            try { plane->imshow(cells, 4, 6, {.origin = "top"}); }
+            catch (const std::invalid_argument&) { plane_threw = true; }
+            check(plane_threw, "heatmap origin: on a plane too");
+        }
+
         {
             auto fig = sextant::Figure::create();
             auto ax = fig->axes();

@@ -499,4 +499,6 @@ namespace lt {
     void test_wait_closed();
 
     void test_run_until_closed();
+
+    void test_frame_stats_any_thread();
 } // namespace lt

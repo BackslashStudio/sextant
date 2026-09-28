@@ -11,8 +11,13 @@ namespace sextant {
     struct SEXTANT_API Color {
         float r = 0.0f, g = 0.0f, b = 0.0f, a = 1.0f;
 
+        // 0xRRGGBB, or 0xRRGGBBAA when the value exceeds 0xFFFFFF -- so a
+        // 0xRRGGBBAA whose red is 0 reads as RGB. from_name("#...") has no
+        // such ambiguity.
         static Color from_hex(uint32_t hex);
 
+        // "#rrggbb", "#rrggbbaa", or one of red, blue, green, orange, purple,
+        // cyan, black, white, gray/grey. Anything else throws std::invalid_argument.
         static Color from_name(std::string_view name);
 
         static const Color Blue;
@@ -192,6 +197,8 @@ namespace sextant {
         // Names the color scale on this heatmap's colorbar (see ScatterZOptions::name).
         std::string name;
 
+        // Where row 0 is drawn: "lower" (bottom, the default) or "upper" (top, as
+        // an image). Anything else throws std::invalid_argument.
         std::string origin = "lower";
 
         // Contour levels in data units (not the vmin/vmax scale); empty = none.

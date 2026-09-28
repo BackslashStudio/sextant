@@ -234,6 +234,7 @@ int main() {
     test_memory_export_windowed();
     test_wait_closed();
     test_run_until_closed();
+    test_frame_stats_any_thread();
 
     if (std::getenv("SEXTANT_POISON_GL")) {
         const PoisonCounts n = gl_poison_counts();

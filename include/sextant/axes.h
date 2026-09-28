@@ -8,6 +8,8 @@
 #include <memory>
 
 namespace sextant {
+    // Part of its Figure's object graph: any thread, one call at a time per graph,
+    // window open or not (see Figure).
     class SEXTANT_API Axes {
     public:
         ~Axes();

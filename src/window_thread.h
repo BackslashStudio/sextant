@@ -18,6 +18,33 @@
 namespace sextant {
 struct FigureMeasure;
 
+// Render-loop timing, written by a window thread, read from any thread. Owned
+// by the Figure rather than the WindowThread, so a read never races the
+// thread's destruction in close().
+struct FrameCounters {
+    std::atomic<unsigned long long> frames{0};
+    std::atomic<double>             total_ms{0.0};
+    std::atomic<double>             last_ms{0.0};
+    std::atomic<double>             max_ms{0.0};
+
+    FrameStats load() const {
+        FrameStats s;
+        s.frames   = frames.load(std::memory_order_relaxed);
+        s.total_ms = total_ms.load(std::memory_order_relaxed);
+        s.last_ms  = last_ms.load(std::memory_order_relaxed);
+        s.max_ms   = max_ms.load(std::memory_order_relaxed);
+        return s;
+    }
+
+    // Only while no window thread writes (before start(), after stop()).
+    void reset() {
+        frames.store(0, std::memory_order_relaxed);
+        total_ms.store(0.0, std::memory_order_relaxed);
+        last_ms.store(0.0, std::memory_order_relaxed);
+        max_ms.store(0.0, std::memory_order_relaxed);
+    }
+};
+
 // Owns the GLFW window + GL context on a background thread.
 // render_fn is called every frame; on_close is called once when the loop exits.
 // Thread-safety: start() and stop() must be called from the same (caller) thread.
@@ -28,7 +55,9 @@ public:
     using RenderFn = std::function<void(GLContext&, NvgRenderer&, DataRenderer&, PlotFbo&)>;
     using CloseFn  = std::function<void()>;
 
-    WindowThread(FigureOptions opts, RenderFn render_fn, CloseFn on_close);
+    // `counters` is borrowed and must outlive this object.
+    WindowThread(FigureOptions opts, RenderFn render_fn, CloseFn on_close,
+                 FrameCounters& counters);
     ~WindowThread();
 
     // Launch thread; blocks until window is visible.
@@ -38,16 +67,6 @@ public:
     void stop();
 
     bool is_running() const { return running_.load(); }
-
-    // Cumulative render-loop timing; see FrameStats.
-    FrameStats stats() const {
-        FrameStats s;
-        s.frames   = frames_.load(std::memory_order_relaxed);
-        s.total_ms = total_ms_.load(std::memory_order_relaxed);
-        s.last_ms  = last_ms_.load(std::memory_order_relaxed);
-        s.max_ms   = max_ms_.load(std::memory_order_relaxed);
-        return s;
-    }
 
     // `serviced == false`: the loop wasn't taking work (not started, stopping,
     // or submitted from this thread) -- fall back to a headless context.
@@ -93,10 +112,7 @@ private:
     std::atomic<bool>      running_{false};
     std::atomic<bool>      stop_requested_{false};
 
-    std::atomic<unsigned long long> frames_{0};
-    std::atomic<double>             total_ms_{0.0};
-    std::atomic<double>             last_ms_{0.0};
-    std::atomic<double>             max_ms_{0.0};
+    FrameCounters&         counters_;
 
     // Set before ready_.release() (the happens-before edge). Lets a submit from
     // the window thread be rejected instead of deadlocking.

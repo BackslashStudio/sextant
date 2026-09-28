@@ -130,6 +130,19 @@ namespace sextant {
         SvgSaveReport report;
     };
 
+    // Threads. A Figure and the Axes, Axes3D and Plane2D it hands out form one
+    // object graph that the window thread never touches (it draws a copy
+    // published by show()/refresh()). So any thread may call into a graph, and
+    // an open window is never a reason to stop, but calls into one graph must
+    // not overlap: serialize them yourself, as with a standard container. The
+    // exceptions, safe from any thread at any time, even during another call
+    // on the same figure: is_open(), wait_closed(), frame_stats(), and the
+    // statics set_message_handler() and, where it is allowed, poll_events()/run().
+    // Separate figures are independent.
+    //
+    // Calls that block: show() until the window is up; close() and the
+    // destructor until its thread has joined; savefig*()/render_*() for the
+    // render, on the window thread when one is open; wait_closed()/run().
     class SEXTANT_API Figure {
     public:
         static std::shared_ptr<Figure> create(FigureOptions opts = {});
@@ -206,8 +219,9 @@ namespace sextant {
         // sextant, including this function. An exception it throws is ignored.
         static MessageHandler set_message_handler(MessageHandler handler);
 
-        // Publish the current Axes state to the render thread. Thread-safe. Throws
-        // std::logic_error before show() or after the window closed.
+        // Publish the current Axes state to the render thread, which keeps drawing
+        // meanwhile. Throws std::logic_error before show() or after the window
+        // closed.
         void refresh();
 
         // Headless file output; format from the extension, default options. Use
@@ -268,8 +282,8 @@ namespace sextant {
 
         void set_suptitle_style(SuptitleOptions opts = {});
 
-        // Render-loop timing; all zero before show() and after close(). Call from
-        // the thread that drives show()/close().
+        // Render-loop timing; all zero before show() and after close(). Any
+        // thread, including while another thread is in show() or close().
         FrameStats frame_stats() const;
 
     private:
