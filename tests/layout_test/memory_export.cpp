@@ -6,6 +6,7 @@
 // Part of sextant_layout_test; see layout_test.h.
 #include "layout_test.h"
 #include "window_broker.h"
+#include "output/png_writer.h"
 
 namespace lt {
     using namespace sextant;
@@ -22,15 +23,26 @@ namespace lt {
             return std::string(v.begin(), v.end());
         }
 
-        // The render_png() bytes are savefig_png()'s file. Two renders, so on a
-        // renderer that does not repeat an export exactly this falls back to the
-        // same picture (see same_picture()).
+        // Two renders of one figure agree: exactly, or where the renderer does
+        // not repeat an export (Apple's software one) up to 1% of pixels by any
+        // amount -- a depth-peeled translucent scene there moves hundreds of
+        // pixels by up to ~50 levels between identical exports (see scene3d.cpp).
+        // The exact, renderer-free check is the encode test in test_memory_export().
+        bool renders_agree(int off, int w, int h) {
+            return renderer_repeats_exactly() ? off == 0 : off * 100 <= w * h;
+        }
+
+        // The render_png() bytes are savefig_png()'s file -- two renders, so
+        // subject to renders_agree() where the bytes differ.
         bool png_matches_file(const std::vector<std::uint8_t>& png, const std::string& file) {
             if (as_string(png) == slurp(file)) return true;
             if (renderer_repeats_exactly()) return false;
             const std::string tmp = file + ".mem.png";
             { std::ofstream(tmp, std::ios::binary) << as_string(png); }
-            return same_picture(tmp, file);
+            const PixelDiff d = png_pixel_diff(tmp, file);
+            std::printf("    %s: %d px differ from memory, worst delta %d (%s)\n", file.c_str(),
+                        d.px, d.worst, gl_renderer().c_str());
+            return d.px >= 0 && renders_agree(d.px, d.w, d.h);
         }
 
         // 2D gallery: line + scatter with a legend, bars with error bars, a
@@ -138,11 +150,9 @@ namespace lt {
                         m = std::max(m, std::abs(int(dec[i + k]) - int(rgba.pixels[i + k])));
                     if (m) { ++off; worst = std::max(worst, m); }
                 }
-                const bool same = renderer_repeats_exactly()
-                                      ? off == 0
-                                      : off * 1000 <= w * h && worst <= 8;
-                check(same, stem + ": to render_rgba()'s pixels, top row first ("
-                                + std::to_string(off) + " px differ)");
+                check(renders_agree(off, w, h),
+                      stem + ": to render_rgba()'s pixels, top row first ("
+                          + std::to_string(off) + " px differ, worst " + std::to_string(worst) + ")");
             }
             if (dec) stbi_image_free(dec);
         }
@@ -171,6 +181,16 @@ namespace lt {
         check_figure(*g3, "mem_gallery3d_peel", {.peel_layers = 2});
         // A bound that binds: the report still agrees, file and memory.
         check_figure(*g3, "mem_gallery3d_bound", {}, {.max_splits = 1});
+
+        // One render, two encodings: the PNG half of the rule with no second
+        // render in it, so exact on every renderer.
+        {
+            const RgbaImage px = g3->render_rgba({.peel_layers = 2});
+            write_png("mem_encode.png", px.width, px.height, px.pixels);
+            check(as_string(write_png_to_memory(px.width, px.height, px.pixels))
+                      == slurp("mem_encode.png"),
+                  "memory: one image encoded to memory and to a file is the same bytes");
+        }
 
         // savefig() dispatches to the same bytes.
         g2->savefig("mem_dispatch.svg");
