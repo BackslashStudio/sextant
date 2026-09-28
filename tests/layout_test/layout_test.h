@@ -453,6 +453,12 @@ namespace lt {
     // PNG dpi: output pixels scale, the layout does not.
     void test_png_dpi();
 
+    // messages.cpp
+    void test_message_handler();
+
+    // Before anything else raises the once-per-process broker warning.
+    void test_message_handler_broker();
+
     // memory_export.cpp
     void test_memory_export();
 

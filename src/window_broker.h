@@ -39,7 +39,8 @@ namespace sextant {
 
     // Makes a window with its link attached. Inline when this thread may own one
     // -- always, outside macOS. Otherwise the request is queued for the pump and
-    // this blocks until the window arrives, warning once on stderr after about
+    // this blocks until the window arrives, warning once (the message handler,
+    // called with no lock held) after about
     // two seconds: a caller that has simply not started pumping yet is a correct
     // program, so refusing it outright would reject more than it saved.
     BrokeredWindow create_window(const WindowSpec& spec);

@@ -308,6 +308,7 @@ set(CMAKE_DEBUG_POSTFIX "d")
 set(SEXTANT_SOURCES
     src/figure.cpp
     src/figure_export.cpp
+    src/messages.cpp
     src/render_frame.cpp
     src/hint.cpp
     src/plot_data_view.cpp
@@ -708,6 +709,7 @@ if(SEXTANT_BUILD_TESTS)
             tests/layout_test/panel.cpp
             tests/layout_test/headless_export.cpp
             tests/layout_test/memory_export.cpp
+            tests/layout_test/messages.cpp
             tests/layout_test/window_broker.cpp
             tests/layout_test/window_input.cpp
             tests/layout_test/read_back.cpp

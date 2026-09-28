@@ -1,6 +1,7 @@
 #include "window_broker.h"
 #include "window_link.h"
 #include "platform/platform.h"
+#include "messages.h"
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
@@ -76,15 +77,15 @@ namespace sextant {
             return *b;
         }
 
+        // Once per process, with brk().m NOT held: the handler may block on
+        // something (Python's GIL) held by the very thread whose pump needs it.
         void warn_no_pump() {
-            static std::once_flag once;
-            std::call_once(once, [] {
-                std::fprintf(stderr,
-                             "sextant: still waiting for a window. On this platform windows are "
-                             "made and pumped on the main thread -- one shown from another thread "
-                             "appears once the main thread calls Figure::run(), "
-                             "Figure::poll_events() or Figure::wait_closed().\n");
-            });
+            static std::atomic<bool> said{false};
+            if (said.exchange(true)) return;
+            emit_message("still waiting for a window. On this platform windows are "
+                         "made and pumped on the main thread -- one shown from another thread "
+                         "appears once the main thread calls Figure::run(), "
+                         "Figure::poll_events() or Figure::wait_closed().");
         }
 
         // --- the owning thread -------------------------------------------------
@@ -198,7 +199,9 @@ namespace sextant {
             // Not an error, just slow: the main thread may not have reached its
             // pump yet. Say so once, then keep waiting.
             if (!brk().cv.wait_for(lock, std::chrono::seconds(2), ready)) {
+                lock.unlock();
                 warn_no_pump();
+                lock.lock();
                 brk().cv.wait(lock, ready);
             }
         }

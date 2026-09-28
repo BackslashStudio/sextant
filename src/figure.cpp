@@ -16,6 +16,7 @@
 #include "renderer/figure_layout.h"
 #include "renderer/plot_fbo.h"
 #include "platform/platform.h"
+#include "messages.h"
 #include "output/file_write.h"
 #include "output/png_writer.h"
 #include <glad/glad.h>
@@ -34,11 +35,11 @@ namespace sextant {
 
 namespace {
 
-// Print the export's warning to stderr, so a caller who ignores SvgSaveReport
-// still hears about a misordered picture. Silent when the order is exact.
+// Pass the export's warning to the message handler, so a caller who ignores
+// SvgSaveReport still hears about a misordered picture. Silent when exact.
 void warn_if_inexact(std::string_view path, const SvgSaveReport& r) {
     if (r.scene_order_exact || r.warning.empty()) return;
-    std::cerr << "sextant: " << path << ": " << r.warning << '\n';
+    emit_message(std::string(path) + ": " + r.warning);
 }
 
 // Renders one frame: the plot goes into an offscreen PlotFbo sized to its dock
@@ -613,6 +614,10 @@ void Figure::poll_events() {
     // correct on a platform whose events belong to the main thread -- where it
     // is the pump, and throws if it is not called there.
     pump_windows(0.0);
+}
+
+MessageHandler Figure::set_message_handler(MessageHandler handler) {
+    return exchange_message_handler(std::move(handler));
 }
 
 void Figure::run() {

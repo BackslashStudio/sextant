@@ -7,8 +7,11 @@
 #define NANOVG_GL3_IMPLEMENTATION
 #include "nanovg_gl.h"
 #include "../platform/platform.h"
+#include "../messages.h"
+#include <atomic>
 #include <cstdio>
 #include <mutex>
+#include <string>
 #include <stdexcept>
 
 namespace sextant {
@@ -25,14 +28,14 @@ namespace sextant {
             return ok;
         }
 
+        // Once per process. Not std::call_once: that would hold every other
+        // thread wanting this message until the handler returns.
         void warn_no_offscreen(const char* why) {
-            static std::once_flag once;
-            std::call_once(once, [why] {
-                std::fprintf(stderr,
-                             "sextant: no windowless GL context (%s). Exports fall back to a "
-                             "hidden window, which on this platform is the main thread's to "
-                             "make.\n", why);
-            });
+            static std::atomic<bool> said{false};
+            if (said.exchange(true)) return;
+            emit_message(std::string("no windowless GL context (") + why
+                         + "). Exports fall back to a hidden window, which on this platform "
+                           "is the main thread's to make.");
         }
     } // namespace
 

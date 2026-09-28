@@ -4,6 +4,7 @@
 #include "axes3d.h"
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -119,6 +120,10 @@ namespace sextant {
         std::vector<std::uint8_t> pixels;
     };
 
+    // Receives sextant's diagnostics (see Figure::set_message_handler()): one
+    // message per call, no "sextant: " prefix, no trailing newline.
+    using MessageHandler = std::function<void(std::string_view message)>;
+
     // An SVG document in memory, with the report savefig_svg() would return.
     struct SvgRender {
         std::string svg;
@@ -187,6 +192,19 @@ namespace sextant {
         // Block until every open figure in this process has closed. Returns at
         // once when none is open.
         static void run();
+
+        // Where diagnostics go, process-wide: warnings that do not fail the call
+        // that raised them (an SVG whose 3D order is inexact, a fallback to a
+        // hidden window, a window still waiting for the main thread's pump).
+        // Default, and after an empty handler: stderr, as "sextant: <message>".
+        // Returns the previous handler (empty = the default).
+        //
+        // Thread contract: the handler may be called on any thread -- the one
+        // making the call that raised the message, or a figure's window thread --
+        // and on several at once. sextant holds none of its locks while calling
+        // it, so the handler may block (e.g. take Python's GIL) or call back into
+        // sextant, including this function. An exception it throws is ignored.
+        static MessageHandler set_message_handler(MessageHandler handler);
 
         // Publish the current Axes state to the render thread. Thread-safe. Throws
         // std::logic_error before show() or after the window closed.

@@ -202,6 +202,10 @@ int main() {
     test_headless_export();
     test_png_dpi();
 
+    // messages.cpp
+    test_message_handler();
+    test_message_handler_broker();
+
     // memory_export.cpp
     test_memory_export();
 
