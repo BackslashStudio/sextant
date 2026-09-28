@@ -339,6 +339,7 @@ set(SEXTANT_SOURCES
     src/renderer/line3d.cpp
     src/renderer/error_bar3d.cpp
     src/renderer/painter3d.cpp
+    src/output/file_write.cpp
     src/output/png_writer.cpp
     src/output/svg_writer.cpp
     src/widgets/imgui_context.cpp
@@ -706,6 +707,7 @@ if(SEXTANT_BUILD_TESTS)
             tests/layout_test/scene3d_svg.cpp
             tests/layout_test/panel.cpp
             tests/layout_test/headless_export.cpp
+            tests/layout_test/memory_export.cpp
             tests/layout_test/window_broker.cpp
             tests/layout_test/window_input.cpp
             tests/layout_test/read_back.cpp

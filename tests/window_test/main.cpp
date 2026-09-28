@@ -26,6 +26,35 @@ static void pump_for(std::chrono::milliseconds total) {
     }
 }
 
+static std::string slurp(const std::string& path) {
+    std::FILE* f = std::fopen(path.c_str(), "rb");
+    if (!f) return {};
+    std::string s;
+    char buf[65536];
+    for (std::size_t n; (n = std::fread(buf, 1, sizeof buf, f)) > 0;) s.append(buf, n);
+    std::fclose(f);
+    return s;
+}
+
+// Save `stem`.png/.svg, then check the in-memory export is those files byte for
+// byte (v1.1 step 25). The PNG is rendered twice, so on a renderer that does
+// not repeat an export exactly (Apple's software one) it may differ.
+static void savefig_and_check_memory(const std::shared_ptr<sextant::Figure>& fig,
+                                     const std::string& stem) {
+    fig->savefig(stem + ".png");
+    fig->savefig(stem + ".svg");
+
+    const std::vector<std::uint8_t> png = fig->render_png();
+    const bool png_same = slurp(stem + ".png") == std::string(png.begin(), png.end());
+    const bool svg_same = slurp(stem + ".svg") == fig->render_svg().svg;
+    const sextant::RgbaImage rgba = fig->render_rgba();
+    const bool rgba_ok = rgba.pixels.size() == std::size_t(rgba.width) * rgba.height * 4;
+    printf("Saved: %s.png, %s.svg -- memory export: png %s, svg %s, rgba %dx%d %s\n",
+           stem.c_str(), stem.c_str(), png_same ? "identical" : "DIFFERS",
+           svg_same ? "identical" : "DIFFERS", rgba.width, rgba.height,
+           rgba_ok ? "ok" : "BAD SIZE");
+}
+
 // 1. Plot gallery — every basic plot type in one subplot grid.
 static void test_axes_gallery() {
     constexpr int N = 200;
@@ -254,10 +283,8 @@ static void test_axes_gallery() {
                        })
             .set_title("Two colorbars").legend();
 
-    fig->savefig("test_axes_gallery.png");
-    fig->savefig("test_axes_gallery.svg");
+    savefig_and_check_memory(fig, "test_axes_gallery");
     fig->show(true);
-    printf("Saved: test_axes_gallery.png, test_axes_gallery.svg\n");
 }
 
 // 3D gallery — one subplot per 3D kind, as an overview (test_translucent3d is
@@ -475,9 +502,7 @@ static void test_axes3d_gallery() {
     }
 
     fig->show(true);
-    fig->savefig("test_axes3d_gallery.png");
-    fig->savefig("test_axes3d_gallery.svg");
-    printf("Saved: test_axes3d_gallery.png, test_axes3d_gallery.svg\n");
+    savefig_and_check_memory(fig, "test_axes3d_gallery");
 }
 
 // -------------------------------------------------------------------------
@@ -612,9 +637,7 @@ static void test_line3d_gallery() {
     }
 
     fig->show(true);
-    fig->savefig("test_line3d_gallery.png");
-    fig->savefig("test_line3d_gallery.svg");
-    printf("Saved: test_line3d_gallery.png, test_line3d_gallery.svg\n");
+    savefig_and_check_memory(fig, "test_line3d_gallery");
 }
 
 // -------------------------------------------------------------------------
@@ -723,9 +746,7 @@ static void test_errorbar3d_gallery() {
     }
 
     fig->show(true);
-    fig->savefig("test_errorbar3d_gallery.png");
-    fig->savefig("test_errorbar3d_gallery.svg");
-    printf("Saved: test_errorbar3d_gallery.png, test_errorbar3d_gallery.svg\n");
+    savefig_and_check_memory(fig, "test_errorbar3d_gallery");
 }
 
 // -------------------------------------------------------------------------
@@ -897,9 +918,7 @@ static void test_surface_tri_gallery() {
     }
 
     fig->show(true);
-    fig->savefig("test_surface_tri_gallery.png");
-    fig->savefig("test_surface_tri_gallery.svg");
-    printf("Saved: test_surface_tri_gallery.png, test_surface_tri_gallery.svg\n");
+    savefig_and_check_memory(fig, "test_surface_tri_gallery");
 }
 
 static void test_translucent3d() {

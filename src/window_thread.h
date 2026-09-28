@@ -51,17 +51,17 @@ public:
 
     // `serviced == false`: the loop wasn't taking work (not started, stopping,
     // or submitted from this thread) -- fall back to a headless context.
-    // `error` is set only when serviced.
+    // `error` is set only when serviced; `image` only when serviced without one.
     struct ExportResult {
         bool               serviced = false;
         std::exception_ptr error;
+        RgbaImage          image;
     };
 
-    // Render `snap` to PNG on this thread's GL context, once per frame after
-    // render_fn_ (outside FrameStats). `snap` is borrowed and must outlive the
-    // future.
-    std::future<ExportResult> submit_png_export(const FigureSnapshot& snap,
-                                                std::string path,
+    // Render `snap` to pixels on this thread's GL context, once per frame after
+    // render_fn_ (outside FrameStats); the caller encodes them. `snap` is
+    // borrowed and must outlive the future.
+    std::future<ExportResult> submit_rgba_export(const FigureSnapshot& snap,
                                                 int width, int height,
                                                 int supersample,
                                                 int peel_layers = 0,
@@ -79,7 +79,6 @@ private:
     struct ExportJob {
         const FigureSnapshot*      snap = nullptr;
         const FigureMeasure*       on_screen = nullptr;   // borrowed, as `snap` is
-        std::string                path;
         int                        width = 0, height = 0, supersample = 1;
         int                        peel_layers = 0;
         float                      scale = 1.0f;          // dpi / 96

@@ -202,6 +202,9 @@ int main() {
     test_headless_export();
     test_png_dpi();
 
+    // memory_export.cpp
+    test_memory_export();
+
     // window_broker.cpp
     test_window_broker();
     test_window_broker_pump();
@@ -222,7 +225,9 @@ int main() {
     test_limit_journal();
     test_style_journal();
 
-    // window_wait.cpp -- last, because it opens real windows
+    // window_wait.cpp and the windowed memory export -- last, because they open
+    // real windows
+    test_memory_export_windowed();
     test_wait_closed();
     test_run_until_closed();
 

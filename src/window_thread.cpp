@@ -38,15 +38,14 @@ namespace sextant {
     }
 
     std::future<WindowThread::ExportResult>
-    WindowThread::submit_png_export(const FigureSnapshot& snap, std::string path,
-                                    int width, int height, int supersample,
-                                    int peel_layers,
-                                    const FigureMeasure* on_screen,
-                                    float scale) {
+    WindowThread::submit_rgba_export(const FigureSnapshot& snap,
+                                     int width, int height, int supersample,
+                                     int peel_layers,
+                                     const FigureMeasure* on_screen,
+                                     float scale) {
         ExportJob job;
         job.snap = &snap;
         job.on_screen = on_screen;
-        job.path = std::move(path);
         job.width = width;
         job.height = height;
         job.supersample = supersample;
@@ -78,9 +77,9 @@ namespace sextant {
             ExportResult r;
             r.serviced = true;
             try {
-                export_figure_png(ctx, nvg, data, *job.snap, job.path,
-                                  job.width, job.height, job.supersample,
-                                  job.peel_layers, job.on_screen, job.scale);
+                r.image = render_figure_rgba(ctx, nvg, data, *job.snap,
+                                             job.width, job.height, job.supersample,
+                                             job.peel_layers, job.on_screen, job.scale);
             } catch (...) {
                 r.error = std::current_exception();
             }

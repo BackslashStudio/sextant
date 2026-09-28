@@ -78,9 +78,12 @@ namespace sextant {
         std::vector<SvgAxesData> axes;
     };
 
+    // A multi-axes figure (one clipped <g> per axes) as an SVG document. No GL needed.
+    std::string svg_document(const SvgFigureData& d);
+
     // Write a single-axes figure to SVG. No GL context required.
     void write_svg(std::string_view path, const SvgAxesData& d);
 
-    // Write a multi-axes figure (one clipped <g> per axes) to SVG. No GL needed.
+    // svg_document() written to a file, byte for byte (LF line ends everywhere).
     void write_svg(std::string_view path, const SvgFigureData& d);
 } // namespace sextant

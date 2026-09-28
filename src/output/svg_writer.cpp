@@ -6,6 +6,7 @@
 #include "../renderer/marker_shape.h"
 #include "../renderer/error_bar_shape.h"
 #include "png_writer.h"
+#include "file_write.h"
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
@@ -1136,7 +1137,7 @@ static void emit_one_axes(std::ostringstream& o, const SvgAxesData& d, std::size
     emit_colorbar(o, d, idx);
 }
 
-void write_svg(std::string_view path, const SvgFigureData& fd) {
+std::string svg_document(const SvgFigureData& fd) {
     std::ostringstream o;
 
     o << "<svg xmlns=\"http://www.w3.org/2000/svg\""
@@ -1171,11 +1172,11 @@ void write_svg(std::string_view path, const SvgFigureData& fd) {
         emit_one_axes(o, fd.axes[i], i);
 
     o << "</svg>\n";
+    return std::move(o).str();
+}
 
-    std::ofstream f{std::string(path)};
-    if (!f) throw std::system_error(errno, std::system_category(),
-                                    "write_svg: cannot open '" + std::string(path) + "'");
-    f << o.str();
+void write_svg(std::string_view path, const SvgFigureData& fd) {
+    write_file(path, svg_document(fd), "write_svg");
 }
 
 void write_svg(std::string_view path, const SvgAxesData& d) {

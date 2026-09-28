@@ -3,6 +3,7 @@
 #include "axes.h"
 #include "axes3d.h"
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -109,6 +110,21 @@ namespace sextant {
         float dpi = 0.0f;
     };
 
+    // A rendered figure as raw pixels: 8-bit RGBA, rows top to bottom, no
+    // padding (pixels.size() == width * height * 4). The pixels a PNG export
+    // encodes, so its size follows PngExportOptions::dpi the same way.
+    struct RgbaImage {
+        int width = 0;
+        int height = 0;
+        std::vector<std::uint8_t> pixels;
+    };
+
+    // An SVG document in memory, with the report savefig_svg() would return.
+    struct SvgRender {
+        std::string svg;
+        SvgSaveReport report;
+    };
+
     class SEXTANT_API Figure {
     public:
         static std::shared_ptr<Figure> create(FigureOptions opts = {});
@@ -186,6 +202,18 @@ namespace sextant {
 
         void savefig_png(std::string_view path, PngExportOptions opts = {},
                          int width = 0, int height = 0);
+
+        // In-memory output, for a caller that wants no file. render_png() and
+        // render_svg() return exactly the bytes savefig_png()/savefig_svg() write
+        // with the same arguments; the savefig_* functions are these plus a file
+        // write. render_rgba() is the PNG's pixels before encoding. A
+        // render_svg() whose scene order is inexact also warns on stderr.
+        std::vector<std::uint8_t> render_png(PngExportOptions opts = {},
+                                             int width = 0, int height = 0);
+
+        SvgRender render_svg(SvgExportOptions opts = {}, int width = 0, int height = 0);
+
+        RgbaImage render_rgba(PngExportOptions opts = {}, int width = 0, int height = 0);
 
         // Figure edge to subplot grid; see FigureMargins.
         void set_margins(FigureMargins margins);

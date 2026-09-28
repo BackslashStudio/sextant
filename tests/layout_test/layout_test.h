@@ -453,6 +453,11 @@ namespace lt {
     // PNG dpi: output pixels scale, the layout does not.
     void test_png_dpi();
 
+    // memory_export.cpp
+    void test_memory_export();
+
+    void test_memory_export_windowed();
+
     // window_broker.cpp
     void test_window_broker();
 

@@ -16,6 +16,8 @@
 #include "renderer/figure_layout.h"
 #include "renderer/plot_fbo.h"
 #include "platform/platform.h"
+#include "output/file_write.h"
+#include "output/png_writer.h"
 #include <glad/glad.h>
 #include <algorithm>
 #include <iostream>
@@ -411,31 +413,63 @@ struct Figure::Impl {
         if (h <= 0) h = opts.height;
     }
 
-    // Route a PNG export to the window thread's GL context, if there is one.
-    // Returns false when it can't (no window, stopping, or called from that
-    // thread) so the caller falls back to headless; real failures rethrow.
-    // Blocks until serviced; renders the caller's own fresh snapshot.
-    bool export_png_via_window(const FigureSnapshot& fsnap, std::string_view path,
-                               int w, int h, int peel_layers = 0,
-                               const FigureMeasure* on_screen = nullptr,
-                               float scale = 1.0f) {
-        if (!open.load() || !window_thread) return false;
-        auto fut = window_thread->submit_png_export(fsnap, std::string(path),
-                                                    w, h, opts.supersample,
-                                                    peel_layers, on_screen, scale);
+    // Route a raster export to the window thread's GL context, if there is one.
+    // Empty when it can't (no window, stopping, or called from that thread) so
+    // the caller falls back to headless; real failures rethrow. Blocks until
+    // serviced; renders the caller's own fresh snapshot.
+    std::optional<RgbaImage> render_via_window(const FigureSnapshot& fsnap,
+                                               int w, int h, int peel_layers,
+                                               const FigureMeasure* on_screen,
+                                               float scale) {
+        if (!open.load() || !window_thread) return std::nullopt;
+        auto fut = window_thread->submit_rgba_export(fsnap, w, h, opts.supersample,
+                                                     peel_layers, on_screen, scale);
         WindowThread::ExportResult r = fut.get();
-        if (!r.serviced) return false;
+        if (!r.serviced) return std::nullopt;
         if (r.error) std::rethrow_exception(r.error);
-        return true;
+        return std::move(r.image);
     }
 
     // Output pixels per logical pixel for one PNG: its own dpi, else the
     // figure's, over 96.
     float png_scale(const PngExportOptions& o) const {
         if (!std::isfinite(o.dpi) || o.dpi < 0.0f)
-            throw std::invalid_argument("savefig_png: PngExportOptions::dpi must be 0 "
+            throw std::invalid_argument("Figure: PngExportOptions::dpi must be 0 "
                                         "(the figure's) or finite and positive");
         return (o.dpi > 0.0f ? o.dpi : opts.dpi) / 96.0f;
+    }
+
+    // The raster export every PNG/RGBA entry point shares, at a resolved size:
+    // on the window's GL context if there is one, else a headless one.
+    RgbaImage render_rgba(int peel_layers, float scale, int w, int h) {
+        ensure_any_axes();
+        const FigureSnapshot fsnap = build_figure_snapshot();
+        const auto on_screen = on_screen_measure();
+        if (auto img = render_via_window(fsnap, w, h, peel_layers, on_screen.get(), scale))
+            return std::move(*img);
+
+        GLContext    ctx({ .width=w, .height=h, .title="", .visible=false, .resizable=false,
+                           .headless=true });
+        NvgRenderer  nvg(ctx.nvg());
+        DataRenderer data;
+        return render_figure_rgba(ctx, nvg, data, fsnap, w, h, opts.supersample,
+                                  peel_layers, on_screen.get(), scale);
+    }
+
+    // The SVG export every SVG entry point shares, at a resolved size. Does not
+    // warn; each caller does, naming itself.
+    SvgRender render_svg(const SvgExportOptions& o, int w, int h) {
+        ensure_any_axes();
+        const FigureSnapshot fsnap = build_figure_snapshot();
+        const auto on_screen = on_screen_measure();
+        SvgRender r;
+        r.svg = render_figure_svg(fsnap, w, h, o, &r.report, on_screen.get());
+        return r;
+    }
+
+    void default_size(int& w, int& h) const {
+        if (w <= 0) w = opts.width;
+        if (h <= 0) h = opts.height;
     }
 };
 
@@ -616,39 +650,37 @@ void Figure::savefig(std::string_view path) {
     else throw std::invalid_argument("savefig: unsupported extension '" + ext + "'");
 }
 
-void Figure::savefig_png(std::string_view path, PngExportOptions opts, int w, int h) {
-    if (w <= 0) w = d->opts.width;
-    if (h <= 0) h = d->opts.height;
-
+// The savefig_* functions are the render_* ones plus a file write, so a file
+// is byte-identical to the in-memory output.
+RgbaImage Figure::render_rgba(PngExportOptions opts, int w, int h) {
+    d->default_size(w, h);
     const float scale = d->png_scale(opts);
-    d->ensure_any_axes();
-    const FigureSnapshot fsnap = d->build_figure_snapshot();
-    const auto on_screen = d->on_screen_measure();
+    return d->render_rgba(opts.peel_layers, scale, w, h);
+}
 
-    // Use the window's GL context if there is one, else a headless one.
-    if (d->export_png_via_window(fsnap, path, w, h, opts.peel_layers, on_screen.get(),
-                                 scale)) return;
+std::vector<std::uint8_t> Figure::render_png(PngExportOptions opts, int w, int h) {
+    const RgbaImage img = render_rgba(opts, w, h);
+    return write_png_to_memory(img.width, img.height, img.pixels);
+}
 
-    GLContext    ctx({ .width=w, .height=h, .title="", .visible=false, .resizable=false,
-                       .headless=true });
-    NvgRenderer  nvg(ctx.nvg());
-    DataRenderer data;
-    export_figure_png(ctx, nvg, data, fsnap, path, w, h, d->opts.supersample,
-                      opts.peel_layers, on_screen.get(), scale);
+SvgRender Figure::render_svg(SvgExportOptions opts, int w, int h) {
+    d->default_size(w, h);
+    SvgRender r = d->render_svg(opts, w, h);
+    warn_if_inexact("render_svg", r.report);
+    return r;
+}
+
+void Figure::savefig_png(std::string_view path, PngExportOptions opts, int w, int h) {
+    write_file(path, render_png(opts, w, h), "savefig_png");
 }
 
 SvgSaveReport Figure::savefig_svg(std::string_view path, SvgExportOptions opts,
                                   int w, int h) {
-    if (w <= 0) w = d->opts.width;
-    if (h <= 0) h = d->opts.height;
-
-    d->ensure_any_axes();
-    const FigureSnapshot fsnap = d->build_figure_snapshot();
-    const auto on_screen = d->on_screen_measure();
-    SvgSaveReport report;
-    export_figure_svg(fsnap, path, w, h, opts, &report, on_screen.get());
-    warn_if_inexact(path, report);
-    return report;
+    d->default_size(w, h);
+    SvgRender r = d->render_svg(opts, w, h);
+    write_file(path, r.svg, "savefig_svg");
+    warn_if_inexact(path, r.report);
+    return r.report;
 }
 
 void Figure::savefig_png_live(std::string_view path, PngExportOptions opts,
@@ -656,32 +688,20 @@ void Figure::savefig_png_live(std::string_view path, PngExportOptions opts,
     const float scale = d->png_scale(opts);
     d->ensure_any_axes();
     d->resolve_live_save_size(*this, w, h);
-    const FigureSnapshot fsnap = d->build_figure_snapshot();
-    const auto on_screen = d->on_screen_measure();
-
     // Normally routed to the window thread; the headless fallback lets this be
     // called from any thread.
-    if (d->export_png_via_window(fsnap, path, w, h, opts.peel_layers, on_screen.get(),
-                                 scale)) return;
-
-    GLContext    ctx({ .width=w, .height=h, .title="", .visible=false, .resizable=false,
-                       .headless=true });
-    NvgRenderer  nvg(ctx.nvg());
-    DataRenderer data;
-    export_figure_png(ctx, nvg, data, fsnap, path, w, h, d->opts.supersample,
-                      opts.peel_layers, on_screen.get(), scale);
+    const RgbaImage img = d->render_rgba(opts.peel_layers, scale, w, h);
+    write_png(path, img.width, img.height, img.pixels);
 }
 
 SvgSaveReport Figure::savefig_svg_live(std::string_view path, SvgExportOptions opts,
                                        int w, int h) {
     d->ensure_any_axes();
     d->resolve_live_save_size(*this, w, h);
-    const FigureSnapshot fsnap = d->build_figure_snapshot();
-    const auto on_screen = d->on_screen_measure();
-    SvgSaveReport report;
-    export_figure_svg(fsnap, path, w, h, opts, &report, on_screen.get());
-    warn_if_inexact(path, report);
-    return report;
+    SvgRender r = d->render_svg(opts, w, h);
+    write_file(path, r.svg, "savefig_svg");
+    warn_if_inexact(path, r.report);
+    return r.report;
 }
 
 void Figure::set_margins(FigureMargins m) {
