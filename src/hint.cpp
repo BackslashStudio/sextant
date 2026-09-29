@@ -203,9 +203,9 @@ const AxesLayout* find_hint_cell(const std::vector<AxesLayout>& layout,
     return nullptr;
 }
 
-std::optional<HintResult> find_hint(const RenderSnapshot& snap, const HintProjector& tr,
-                                    float cursor_x, float cursor_y,
-                                    HintIndexCache* index) {
+std::optional<PickHit> find_pick(const RenderSnapshot& snap, const HintProjector& tr,
+                                 float cursor_x, float cursor_y,
+                                 HintIndexCache* index) {
     // Runs every hovered frame, in two phases: find the nearest point without
     // any string work, then format only the winner. Candidates come from the
     // data-space bucket grid (hint_index.h). A surface with no candidate box
@@ -254,36 +254,17 @@ std::optional<HintResult> find_hint(const RenderSnapshot& snap, const HintProjec
     for (std::size_t o = 0; o < snap.bars.size(); ++o)
         sweep(PlotKind::Bar, o, 3, snap.bars[o].centers, snap.bars[o].heights);
 
-    // Phase 2: build the text for the winning point only.
+    // Phase 2: the winning point, identified but not yet worded.
     if (best_kind >= 0) {
-        std::string text;
-        switch (best_kind) {
-            case 0: {
-                const auto& lp = snap.lines[best_obj];
-                text = append_label(fmt_point_err(lp.x[best_i], lp.y[best_i], lp.err, best_i),
-                                    lp.opts.hint_labels, best_i);
-                break;
-            }
-            case 1: {
-                const auto& sp = snap.scatters[best_obj];
-                text = append_label(fmt_point_err(sp.x[best_i], sp.y[best_i], sp.err, best_i),
-                                    sp.opts.hint_labels, best_i);
-                break;
-            }
-            case 2: {
-                const auto& sp = snap.scatter_z[best_obj];
-                text = append_label(fmt_z_err(sp.x[best_i], sp.y[best_i], sp.z[best_i], sp.err, best_i),
-                                    sp.opts.hint_labels, best_i);
-                break;
-            }
-            default: {
-                const auto& bp = snap.bars[best_obj];
-                text = append_label(fmt_bar_err(bp.centers[best_i], bp.heights[best_i], bp.err, best_i),
-                                    bp.opts.hint_labels, best_i);
-                break;
-            }
-        }
-        return HintResult{ std::move(text), best_px, best_py };
+        static const PickKind kKinds[4] = { PickKind::Line, PickKind::Scatter,
+                                            PickKind::ScatterZ, PickKind::Bar };
+        PickHit hit;
+        hit.kind = kKinds[best_kind];
+        hit.object = best_obj;
+        hit.element = best_i;
+        hit.anchor_x = best_px;
+        hit.anchor_y = best_py;
+        return hit;
     }
 
     // Heatmap fallback: the cell under the cursor, in cell-index space via
@@ -291,7 +272,8 @@ std::optional<HintResult> find_hint(const RenderSnapshot& snap, const HintProjec
     // the origin=="lower" flip to find the displayed row.
     double dx = 0.0, dy = 0.0;
     if (!tr.at_pixel(cursor_x, cursor_y, dx, dy)) return std::nullopt;
-    for (const auto& hp : snap.heatmaps) {
+    for (std::size_t o = 0; o < snap.heatmaps.size(); ++o) {
+        const auto& hp = snap.heatmaps[o];
         if (hp.rows <= 0 || hp.cols <= 0) continue;
         const double fc = hp.col_at(dx), fr = hp.row_at(dy);
         if (fc < 0.0 || fc >= hp.cols || fr < 0.0 || fr >= hp.rows) continue;
@@ -299,19 +281,63 @@ std::optional<HintResult> find_hint(const RenderSnapshot& snap, const HintProjec
         const int col = std::clamp(static_cast<int>(fc), 0, hp.cols - 1);
         const int row_from_bottom = std::clamp(static_cast<int>(fr), 0, hp.rows - 1);
         const int row = (hp.opts.origin == "lower") ? row_from_bottom : (hp.rows - 1 - row_from_bottom);
-        const std::size_t idx = static_cast<std::size_t>(row) * static_cast<std::size_t>(hp.cols)
-                               + static_cast<std::size_t>(col);
-        const float value = idx < hp.data.size() ? hp.data[idx] : 0.0f;
-        return HintResult{ append_label(fmt_heatmap(row, col, value), hp.opts.hint_labels, idx),
-                            cursor_x, cursor_y };
+        PickHit hit;
+        hit.kind = PickKind::Heatmap;
+        hit.object = o;
+        hit.row = row;
+        hit.col = col;
+        hit.element = static_cast<std::size_t>(row) * static_cast<std::size_t>(hp.cols)
+                      + static_cast<std::size_t>(col);
+        hit.anchor_x = cursor_x;
+        hit.anchor_y = cursor_y;
+        return hit;
     }
 
     return std::nullopt;
 }
 
-std::optional<HintResult> find_hint3d(const RenderSnapshot3D& snap, const Projector3D& proj,
-                                      float cursor_x, float cursor_y,
-                                      HintIndexCache* index) {
+std::string format_pick(const RenderSnapshot& snap, const PickHit& hit) {
+    const std::size_t i = hit.element;
+    switch (hit.kind) {
+        case PickKind::Line: {
+            const auto& lp = snap.lines[hit.object];
+            return append_label(fmt_point_err(lp.x[i], lp.y[i], lp.err, i), lp.opts.hint_labels, i);
+        }
+        case PickKind::Scatter: {
+            const auto& sp = snap.scatters[hit.object];
+            return append_label(fmt_point_err(sp.x[i], sp.y[i], sp.err, i), sp.opts.hint_labels, i);
+        }
+        case PickKind::ScatterZ: {
+            const auto& sp = snap.scatter_z[hit.object];
+            return append_label(fmt_z_err(sp.x[i], sp.y[i], sp.z[i], sp.err, i),
+                                sp.opts.hint_labels, i);
+        }
+        case PickKind::Bar: {
+            const auto& bp = snap.bars[hit.object];
+            return append_label(fmt_bar_err(bp.centers[i], bp.heights[i], bp.err, i),
+                                bp.opts.hint_labels, i);
+        }
+        case PickKind::Heatmap: {
+            const auto& hp = snap.heatmaps[hit.object];
+            const float value = i < hp.data.size() ? hp.data[i] : 0.0f;
+            return append_label(fmt_heatmap(hit.row, hit.col, value), hp.opts.hint_labels, i);
+        }
+        default:
+            return {};
+    }
+}
+
+std::optional<HintResult> find_hint(const RenderSnapshot& snap, const HintProjector& tr,
+                                    float cursor_x, float cursor_y,
+                                    HintIndexCache* index) {
+    const auto hit = find_pick(snap, tr, cursor_x, cursor_y, index);
+    if (!hit) return std::nullopt;
+    return HintResult{ format_pick(snap, *hit), hit->anchor_x, hit->anchor_y };
+}
+
+std::optional<PickHit> find_pick3d(const RenderSnapshot3D& snap, const Projector3D& proj,
+                                   float cursor_x, float cursor_y,
+                                   HintIndexCache* index) {
     // Nearest surface first, by the depth of the cursor ray's own hit; misses
     // drop out here. `what` says which vector `object` indexes; `element` is
     // the bar index or nearest surface sample (unused for planes).
@@ -404,43 +430,77 @@ std::optional<HintResult> find_hint3d(const RenderSnapshot3D& snap, const Projec
     // First answer wins (nearest = drawn on top). Bars and surfaces answer by
     // being hit; a plane may decline if nothing is near the cursor.
     for (const Candidate& c : hits) {
-        if (c.what == What::Bar) {
-            const Bar3DPlot& b = snap.bars3d[c.object];
-            return HintResult{ append_label(fmt_bar3d(b, c.element),
-                                            b.opts.hint_labels, c.element),
-                               cursor_x, cursor_y };
-        }
-        if (c.what == What::Surface) {
-            const SurfacePlot& s = snap.surfaces[c.object];
-            return HintResult{ append_label(fmt_surface(s, c.element),
-                                            s.opts.hint_labels, c.element),
-                               cursor_x, cursor_y };
-        }
-        if (c.what == What::Mesh) {
-            const SurfaceTriPlot& s = snap.surface_tri[c.object];
-            return HintResult{ append_label(fmt_surface_tri(s, c.element),
-                                            s.opts.hint_labels, c.element),
-                               cursor_x, cursor_y };
-        }
-        if (c.what == What::Marker) {
-            const Scatter3DPlot& s = snap.scatter3d[c.object];
-            return HintResult{ append_label(fmt_scatter3d(s, c.element),
-                                            s.opts.hint_labels, c.element),
-                               cursor_x, cursor_y };
-        }
-        if (c.what == What::Vertex) {
-            const Line3DPlot& l = snap.lines3d[c.object];
-            return HintResult{ append_label(fmt_line3d(l, c.element),
-                                            l.opts.hint_labels, c.element),
-                               cursor_x, cursor_y };
+        if (c.what != What::Plane) {
+            PickHit hit;
+            switch (c.what) {
+                case What::Bar:     hit.kind = PickKind::Bar3D; break;
+                case What::Surface: hit.kind = PickKind::Surface; break;
+                case What::Mesh:    hit.kind = PickKind::SurfaceTri; break;
+                case What::Marker:  hit.kind = PickKind::Scatter3D; break;
+                default:            hit.kind = PickKind::Line3D; break;
+            }
+            hit.object = c.object;
+            hit.element = c.element;
+            hit.anchor_x = cursor_x;
+            hit.anchor_y = cursor_y;
+            // A bar's or a surface sample's grid position, as the hint words it.
+            if (c.what == What::Bar) {
+                const std::size_t nv = snap.bars3d[c.object].v.size();
+                hit.row = nv ? static_cast<int>(c.element / nv) : -1;
+                hit.col = nv ? static_cast<int>(c.element % nv) : -1;
+            } else if (c.what == What::Surface) {
+                const std::size_t nv = snap.surfaces[c.object].v.size();
+                hit.row = nv ? static_cast<int>(c.element / nv) : -1;
+                hit.col = nv ? static_cast<int>(c.element % nv) : -1;
+            }
+            return hit;
         }
         const PlaneSnapshot& pl = snap.planes[c.object];
         if (index) index->set_plane(static_cast<int>(c.object));
-        if (auto r = find_hint(pl.sheet, HintProjector(proj, pl.orient, pl.offset),
-                               cursor_x, cursor_y, index))
+        if (auto r = find_pick(pl.sheet, HintProjector(proj, pl.orient, pl.offset),
+                               cursor_x, cursor_y, index)) {
+            r->plane = static_cast<int>(c.object);
             return r;
+        }
     }
     return std::nullopt;
+}
+
+std::string format_pick3d(const RenderSnapshot3D& snap, const PickHit& hit) {
+    if (hit.plane >= 0) return format_pick(snap.planes[hit.plane].sheet, hit);
+    const std::size_t i = hit.element;
+    switch (hit.kind) {
+        case PickKind::Bar3D: {
+            const Bar3DPlot& b = snap.bars3d[hit.object];
+            return append_label(fmt_bar3d(b, i), b.opts.hint_labels, i);
+        }
+        case PickKind::Surface: {
+            const SurfacePlot& s = snap.surfaces[hit.object];
+            return append_label(fmt_surface(s, i), s.opts.hint_labels, i);
+        }
+        case PickKind::SurfaceTri: {
+            const SurfaceTriPlot& s = snap.surface_tri[hit.object];
+            return append_label(fmt_surface_tri(s, i), s.opts.hint_labels, i);
+        }
+        case PickKind::Scatter3D: {
+            const Scatter3DPlot& s = snap.scatter3d[hit.object];
+            return append_label(fmt_scatter3d(s, i), s.opts.hint_labels, i);
+        }
+        case PickKind::Line3D: {
+            const Line3DPlot& l = snap.lines3d[hit.object];
+            return append_label(fmt_line3d(l, i), l.opts.hint_labels, i);
+        }
+        default:
+            return {};
+    }
+}
+
+std::optional<HintResult> find_hint3d(const RenderSnapshot3D& snap, const Projector3D& proj,
+                                      float cursor_x, float cursor_y,
+                                      HintIndexCache* index) {
+    const auto hit = find_pick3d(snap, proj, cursor_x, cursor_y, index);
+    if (!hit) return std::nullopt;
+    return HintResult{ format_pick3d(snap, *hit), hit->anchor_x, hit->anchor_y };
 }
 
 } // namespace sextant

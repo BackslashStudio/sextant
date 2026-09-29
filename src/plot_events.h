@@ -2,6 +2,7 @@
 #include "sextant/events.h"
 #include "plot_objects.h"
 #include "render_frame.h"
+#include "hint_index.h"
 #include <cstdint>
 #include <vector>
 
@@ -53,11 +54,14 @@ PointLocation locate_point(const FigureSnapshot& fsnap,
                            const std::vector<AxesLayout>& layout, float x, float y);
 
 // Appends this frame's mouse, scroll and resize events to `out`, only for the
-// kinds set in `wanted` (bit = EventKind); the tracker advances either way.
+// kinds set in `wanted` (bit = EventKind); the tracker advances either way. A
+// press over a plot object also yields a Pick right after its MouseDown, found
+// as the hover hint finds it; `hint_index` (optional) only speeds that up.
 void collect_plot_events(PlotEventTracker& t, const PlotInputFrame& in,
                          const PlotEventInfo& what, const FigureSnapshot& fsnap,
                          const std::vector<AxesLayout>& layout,
-                         std::uint32_t wanted, std::vector<Event>& out);
+                         std::uint32_t wanted, std::vector<Event>& out,
+                         HintIndexCache* hint_index = nullptr);
 
 // One key transition (a WindowEvent::Kind::Key's fields) as an event; false for
 // a key with no name.

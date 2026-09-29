@@ -1,4 +1,5 @@
 #pragma once
+#include "sextant/events.h"
 #include "plot_objects.h"
 #include "coord_transform.h"
 #include "coord_transform3d.h"
@@ -84,6 +85,36 @@ private:
     PlaneOrientation      orient_ = PlaneOrientation::XY;
     double                offset_ = 0.0;
 };
+
+// What a hover or a click found, before any text is made of it. `object` indexes
+// the snapshot vector of its kind (creation order, the read-back index);
+// `element` is the point, bar, cell, sample, marker or vertex; `plane` is -1 for
+// an object of the axes itself, else the index into RenderSnapshot3D::planes
+// (a 2D kind on that plane's sheet). `row`/`col`: heatmap cells, else -1.
+struct PickHit {
+    PickKind    kind = PickKind::None;
+    int         plane = -1;
+    std::size_t object = 0, element = 0;
+    int         row = -1, col = -1;
+    float       anchor_x = 0, anchor_y = 0;   // physical pixels
+};
+
+// The hit find_hint() words: nearest point across line/scatter/scatter_z/bar
+// within kHintHitRadiusPx, else the heatmap cell under the cursor. `index` as for
+// find_hint().
+std::optional<PickHit> find_pick(const RenderSnapshot& snap, const HintProjector& proj,
+                                 float cursor_x, float cursor_y,
+                                 HintIndexCache* index = nullptr);
+
+// 3D: the nearest thing the cursor ray meets, as find_hint3d() searches it.
+std::optional<PickHit> find_pick3d(const RenderSnapshot3D& snap, const Projector3D& proj,
+                                   float cursor_x, float cursor_y,
+                                   HintIndexCache* index = nullptr);
+
+// The hint text for a hit found in `snap` (2D kinds), or in a 3D snapshot (any
+// kind, planes included). What find_hint()/find_hint3d() return.
+std::string format_pick(const RenderSnapshot& snap, const PickHit& hit);
+std::string format_pick3d(const RenderSnapshot3D& snap, const PickHit& hit);
 
 // Nearest point across line/scatter/scatter_z/bar within kHintHitRadiusPx,
 // else the heatmap cell under the cursor. nullopt = nothing. `index`

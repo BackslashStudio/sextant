@@ -23,7 +23,8 @@ namespace lt {
             return e;
         }
 
-        // Every kind, as a mask.
+        // Every kind before Pick, as a mask: the pointer tests below press over data and
+        // would otherwise grow a Pick they are not about (test_pick_events() has its own).
         constexpr std::uint32_t kAll = (1u << 8) - 1;
     } // namespace
 
@@ -461,6 +462,279 @@ namespace lt {
     }
 
     // -------------------------------------------------------------------------
+    // Pick: which object a press landed on
+    // -------------------------------------------------------------------------
+    void test_pick_events() {
+        std::printf("\n[events: pick]\n");
+
+        auto layout_of = [](const FigureSnapshot& fs, int w, int h) {
+            const FigureLayout fl = compute_figure_layout(fs, w, h);
+            std::vector<AxesLayout> layout;
+            for (const CellLayout& c: fl.cells)
+                layout.push_back({c.slot, c.tr,
+                                  c.box3d ? std::optional<Projector3D>(c.box3d->proj) : std::nullopt,
+                                  c.cell});
+            return layout;
+        };
+        // A fresh press of `button` at (x, y), what the window would report.
+        auto press = [](const FigureSnapshot& fs, const std::vector<AxesLayout>& layout,
+                        float x, float y, std::uint32_t wanted = (1u << 9) - 1, int button = 0) {
+            PlotEventTracker t;
+            PlotInputFrame in;
+            in.x = x;
+            in.y = y;
+            in.hovered = true;
+            in.down[button] = true;
+            std::vector<Event> out;
+            HintIndexCache index;
+            collect_plot_events(t, in, {}, fs, layout, wanted, out, &index);
+            return out;
+        };
+        auto pick_of = [](const std::vector<Event>& evs) -> std::optional<Event> {
+            for (const Event& e : evs)
+                if (e.kind == EventKind::Pick) return e;
+            return std::nullopt;
+        };
+        auto only_2d = [](auto&& fill) {
+            RenderSnapshot rs;
+            fill(rs);
+            FigureSnapshot fs;
+            fs.axes.push_back({AxesSlot{1, 1, 1}, std::move(rs)});
+            fs.generation = fs.data_generation = 1;
+            return fs;
+        };
+
+        // ---- Lines: the nearer of two, and a miss.
+        {
+            FigureSnapshot fs = only_2d([](RenderSnapshot& rs) {
+                LinePlot a, b;
+                a.x = std::vector<double>{0.0, 1.0, 2.0, 3.0};
+                a.y = std::vector<double>{0.0, 1.0, 2.0, 3.0};
+                b.x = std::vector<double>{0.0, 1.0, 2.0, 3.0};
+                b.y = std::vector<double>{3.0, 2.0, 1.0, 0.0};
+                rs.lines.push_back(std::move(a));
+                rs.lines.push_back(std::move(b));
+            });
+            const auto layout = layout_of(fs, 600, 400);
+            const CoordTransform& tr = layout[0].tr;
+            const float x = tr.to_px(2.0), y = tr.to_py(1.0);
+
+            const auto evs = press(fs, layout, x, y);
+            auto p = pick_of(evs);
+            check(evs.size() >= 2 && evs[0].kind == EventKind::MouseDown,
+                  "pick: a press reports its MouseDown first");
+            check(p && p->pick_kind == PickKind::Line && p->pick_object == 1 && p->pick_index == 2 &&
+                  p->pick_plane == -1 && p->pick_row == -1,
+                  "pick: on the second line's third point: Line, object 1, index 2");
+            check(p && p->x == x && p->y == y && p->axes == 1 && p->button == 0 && p->has_data,
+                  "pick: with the press's own pixel, subplot and data");
+            check(evs.size() >= 2 && evs[1].kind == EventKind::Pick,
+                  "pick: right after the MouseDown");
+
+            check(!pick_of(press(fs, layout, x, y + 60.0f)).has_value(),
+                  "pick: a press 60 px from any point picks nothing");
+            const auto miss = press(fs, layout, x, y + 60.0f);
+            check(!miss.empty() && miss[0].kind == EventKind::MouseDown,
+                  "pick: and is still a MouseDown");
+
+            const auto r = pick_of(press(fs, layout, x, y, (1u << 9) - 1, 1));
+            check(r && r->button == 1 && r->pick_object == 1,
+                  "pick: the right button picks too, and says which");
+
+            // What is wanted decides what is produced.
+            const auto only_pick = press(fs, layout, x, y, event_bit(EventKind::Pick));
+            check(only_pick.size() == 1 && only_pick[0].kind == EventKind::Pick,
+                  "pick: with only Pick wanted, only the Pick comes");
+            const auto only_down = press(fs, layout, x, y, event_bit(EventKind::MouseDown));
+            check(only_down.size() == 1 && only_down[0].kind == EventKind::MouseDown,
+                  "pick: with Pick not wanted, none is found");
+
+            // The hint says what the pick found.
+            const auto hit = find_pick(*fs.axes[0].snap2d(), layout[0].tr, x, y);
+            const auto hint = find_hint(*fs.axes[0].snap2d(), layout[0].tr, x, y);
+            check(hit && hint && format_pick(*fs.axes[0].snap2d(), *hit) == hint->text &&
+                  hit->anchor_x == hint->anchor_x && hit->anchor_y == hint->anchor_y,
+                  "pick: the hover hint is exactly the pick's text");
+        }
+
+        // ---- Scatter, scatter_z, bars.
+        {
+            FigureSnapshot fs = only_2d([](RenderSnapshot& rs) {
+                ScatterPlot s;
+                s.x = std::vector<double>{0.0, 1.0, 2.0};
+                s.y = std::vector<double>{0.0, 2.0, 1.0};
+                rs.scatters.push_back(std::move(s));
+            });
+            auto layout = layout_of(fs, 600, 400);
+            auto p = pick_of(press(fs, layout, layout[0].tr.to_px(1.0), layout[0].tr.to_py(2.0)));
+            check(p && p->pick_kind == PickKind::Scatter && p->pick_object == 0 && p->pick_index == 1,
+                  "pick: a scatter point");
+
+            fs = only_2d([](RenderSnapshot& rs) {
+                ScatterZPlot s;
+                s.x = std::vector<double>{0.0, 1.0, 2.0};
+                s.y = std::vector<double>{0.0, 2.0, 1.0};
+                s.z = std::vector<double>{5.0, 6.0, 7.0};
+                rs.scatter_z.push_back(std::move(s));
+            });
+            layout = layout_of(fs, 600, 400);
+            p = pick_of(press(fs, layout, layout[0].tr.to_px(2.0), layout[0].tr.to_py(1.0)));
+            check(p && p->pick_kind == PickKind::ScatterZ && p->pick_index == 2,
+                  "pick: a scatter_z point");
+
+            fs = only_2d([](RenderSnapshot& rs) {
+                BarPlot b;
+                b.centers = std::vector<double>{1.0, 2.0, 3.0};
+                b.heights = std::vector<double>{2.0, 4.0, 3.0};
+                b.bar_width = 0.5;
+                rs.bars.push_back(std::move(b));
+            });
+            layout = layout_of(fs, 600, 400);
+            p = pick_of(press(fs, layout, layout[0].tr.to_px(2.0), layout[0].tr.to_py(4.0)));
+            check(p && p->pick_kind == PickKind::Bar && p->pick_object == 0 && p->pick_index == 1,
+                  "pick: a bar, by the top of it");
+        }
+
+        // ---- A heatmap cell, for both origins.
+        for (const char* origin : {"lower", "upper"}) {
+            FigureSnapshot fs = only_2d([origin](RenderSnapshot& rs) {
+                HeatmapPlot hp;
+                hp.rows = 2;
+                hp.cols = 3;
+                hp.data = std::vector<float>{0, 1, 2, 3, 4, 5};
+                hp.xrange = {0.0, 3.0};
+                hp.yrange = {0.0, 2.0};
+                hp.opts.origin = origin;
+                rs.heatmaps.push_back(std::move(hp));
+            });
+            const auto layout = layout_of(fs, 600, 400);
+            const CoordTransform& tr = layout[0].tr;
+            // The cell in column 2, second from the bottom (data y in [1, 2]).
+            auto p = pick_of(press(fs, layout, tr.to_px(2.5), tr.to_py(1.5)));
+            const int row = std::string(origin) == "lower" ? 1 : 0;
+            check(p && p->pick_kind == PickKind::Heatmap && p->pick_col == 2 && p->pick_row == row &&
+                  p->pick_index == row * 3 + 2,
+                  std::string("pick: a heatmap cell: row, column and flat index (origin ") + origin + ")");
+        }
+
+        // ---- 3D, through the projector.
+        {
+            Transform3D tf;
+            tf.xmin = tf.ymin = tf.zmin = 0.0;
+            tf.xmax = tf.ymax = tf.zmax = 10.0;
+            const PlotRect frame{20.0f, 15.0f, 400.0f, 320.0f};
+            Camera3D cam;
+            cam.azimuth = -55.0;
+            cam.elevation = 24.0;
+            cam.projection = Projection::Orthographic;
+            const Projector3D proj(tf, cam, frame, 0.1f);
+
+            auto figure3d = [](RenderSnapshot3D rs) {
+                FigureSnapshot fs;
+                fs.axes.push_back({AxesSlot{1, 1, 1}, std::move(rs)});
+                fs.generation = fs.data_generation = 1;
+                return fs;
+            };
+            std::vector<AxesLayout> layout3(1);
+            layout3[0].slot = AxesSlot{1, 1, 1};
+            layout3[0].proj3d = proj;
+            layout3[0].cell = frame;
+
+            // The pick at a pixel, by the search and through the events; they agree.
+            auto pick3 = [&](RenderSnapshot3D rs, const Px3& q, PickKind kind, int object,
+                             int element, int plane, const char* what) {
+                const FigureSnapshot fs = figure3d(std::move(rs));
+                const RenderSnapshot3D& s = *fs.axes[0].snap3d();
+                const auto hit = find_pick3d(s, proj, q.x, q.y);
+                check(hit && hit->kind == kind && static_cast<int>(hit->object) == object &&
+                      static_cast<int>(hit->element) == element && hit->plane == plane,
+                      std::string("pick 3D: ") + what + " (search)");
+                const auto hint = find_hint3d(s, proj, q.x, q.y);
+                check(hit && hint && format_pick3d(s, *hit) == hint->text,
+                      std::string("pick 3D: ") + what + " -- the hint is the pick's text");
+                auto p = pick_of(press(fs, layout3, q.x, q.y));
+                check(p && p->pick_kind == kind && p->pick_object == object &&
+                      p->pick_index == element && p->pick_plane == plane && p->axes == 1,
+                      std::string("pick 3D: ") + what + " (event)");
+                return p ? *p : Event{};
+            };
+
+            {
+                RenderSnapshot3D rs;
+                const Bar3DPlot grid = bar3d_grid();
+                rs.bars3d.push_back(grid);
+                const std::size_t k = grid.index_of(2, 0);
+                const Px3 top = proj.project(grid.u[2], grid.v[0], grid.h_hi(k));
+                const Event e = pick3(std::move(rs), top, PickKind::Bar3D, 0, static_cast<int>(k), -1,
+                                      "a bar's top face");
+                check(e.pick_row == 2 && e.pick_col == 0, "pick 3D: a bar reports its grid position");
+            }
+            {
+                RenderSnapshot3D rs;
+                const SurfacePlot sp = ripple_surface();
+                rs.surfaces.push_back(sp);
+                const Px3 q = proj.project(sp.u[1], sp.v[1], sp.heights[4]);
+                const Event e = pick3(std::move(rs), q, PickKind::Surface, 0, 4, -1,
+                                      "a surface sample");
+                check(e.pick_row == 1 && e.pick_col == 1, "pick 3D: a surface sample reports its grid position");
+            }
+            {
+                RenderSnapshot3D rs;
+                Scatter3DPlot c;
+                c.x = std::vector<double>{2.0, 5.0, 8.0};
+                c.y = std::vector<double>{2.0, 6.0, 3.0};
+                c.z = std::vector<double>{3.0, 5.0, 7.0};
+                rs.scatter3d.push_back(c);
+                pick3(std::move(rs), proj.project(5.0, 6.0, 5.0), PickKind::Scatter3D, 0, 1, -1,
+                      "a cloud marker");
+            }
+            {
+                RenderSnapshot3D rs;
+                Line3DPlot path;
+                path.x = std::vector<double>{2.0, 5.0, 8.0};
+                path.y = std::vector<double>{2.0, 6.0, 3.0};
+                path.z = std::vector<double>{3.0, 5.0, 7.0};
+                path.opts.linewidth = 10.0f;
+                rs.lines3d.push_back(path);
+                pick3(std::move(rs), proj.project(8.0, 3.0, 7.0), PickKind::Line3D, 0, 2, -1,
+                      "a path vertex");
+            }
+            {
+                // A line on the second plane; the first has nothing to draw, so it is
+                // skipped, and the plane's index is still 1.
+                RenderSnapshot3D two = two_plane_snapshot();
+                RenderSnapshot3D rs;
+                rs.planes.push_back(PlaneSnapshot{});
+                rs.planes.push_back(two.planes[0]);
+                pick3(std::move(rs), proj.project(1.0, 1.0, 0.25), PickKind::Line, 0, 1, 1,
+                      "a line on a plane");
+            }
+            {
+                // A pixel over nothing.
+                RenderSnapshot3D rs;
+                const Bar3DPlot grid = bar3d_grid();
+                rs.bars3d.push_back(grid);
+                const FigureSnapshot fs = figure3d(std::move(rs));
+                check(!pick_of(press(fs, layout3, frame.x + 1.0f, frame.y + 1.0f)).has_value(),
+                      "pick 3D: a pixel over nothing picks nothing");
+            }
+        }
+
+        // ---- Axes3D::plane_count() / plane_at().
+        {
+            auto ax = Figure::create()->add_subplot3d(1, 1, 1);
+            check(ax->plane_count() == 0, "planes: none to begin with");
+            auto a = ax->plane(PlaneOrientation::XY, 0.0);
+            auto b = ax->plane(PlaneOrientation::YZ, 1.0);
+            check(ax->plane_count() == 2 && ax->plane_at(0) == a && ax->plane_at(1) == b,
+                  "planes: plane_at() returns the planes in the order plane() made them");
+            bool threw = false;
+            try { ax->plane_at(2); } catch (const std::out_of_range&) { threw = true; }
+            check(threw, "planes: plane_at() past the end throws std::out_of_range");
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Through the panel: synthetic window input -> WindowLink -> ImGui backend ->
     // draw_widget_panel() -> the channel. Everything a click takes except GLFW's
     // own callbacks, on a hidden window.
@@ -484,7 +758,7 @@ namespace lt {
         st.events = ch.get();
 
         std::vector<Event> log;
-        for (int k = 0; k <= static_cast<int>(EventKind::Resize); ++k)
+        for (int k = 0; k <= static_cast<int>(EventKind::Pick); ++k)
             ch->connect(static_cast<EventKind>(k), [&log](const Event& e) { log.push_back(e); });
 
         auto frame = [&] {
@@ -567,6 +841,49 @@ namespace lt {
         }
         button(1, false);
         step();
+
+        // ---- Pick: a press on a data point, and one on empty plot.
+        {
+            const FigureLayout fl = compute_figure_layout(fs, st.live_plot_w.load(),
+                                                          st.live_plot_h.load());
+            const CoordTransform& tr = fl.cells[0].tr;
+            const float to_plot = ImGui::GetIO().DisplayFramebufferScale.x / ctx.link().content_scale();
+            auto at = [&](float px, float py) {
+                return ImVec2(plot->ContentRegionRect.Min.x + px / to_plot,
+                              plot->ContentRegionRect.Min.y + py / to_plot);
+            };
+            auto find_pick_event = [](const std::vector<Event>& evs) -> const Event* {
+                for (const Event& e : evs)
+                    if (e.kind == EventKind::Pick) return &e;
+                return nullptr;
+            };
+
+            const ImVec2 on = at(tr.to_px(1.0), tr.to_py(1.0));
+            pos(on.x, on.y);
+            step();
+            button(0, true);
+            {
+                auto& got = step();
+                const Event* p = find_pick_event(got);
+                check(got.size() >= 2 && got[0].kind == EventKind::MouseDown && p &&
+                      p->pick_kind == PickKind::Line && p->pick_object == 0 && p->pick_index == 1,
+                      "panel events: a press on a data point reports MouseDown, then Pick with the object");
+            }
+            button(0, false);
+            step();
+
+            const ImVec2 off = at(tr.px + 4.0f, tr.py + 4.0f);
+            pos(off.x, off.y);
+            step();
+            button(0, true);
+            {
+                auto& got = step();
+                check(!got.empty() && got[0].kind == EventKind::MouseDown && !find_pick_event(got),
+                      "panel events: a press on empty plot is a MouseDown and no Pick");
+            }
+            button(0, false);
+            step();
+        }
 
         {
             WindowEvent w;

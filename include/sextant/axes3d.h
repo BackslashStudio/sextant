@@ -623,6 +623,13 @@ namespace sextant {
         std::shared_ptr<Plane2D> plane(PlaneOrientation orient, double offset,
                                        Plane2DOptions opts = {});
 
+        // The planes made so far, in the order plane() made them -- the index a
+        // Pick event's `pick_plane` names. plane_at() returns the same object
+        // plane() did; throws std::out_of_range for i >= plane_count().
+        std::size_t plane_count() const;
+
+        std::shared_ptr<Plane2D> plane_at(std::size_t i) const;
+
         // ----------------------------------------------------------------
         // Decoration -- all return *this for chaining, like Axes
         // ----------------------------------------------------------------

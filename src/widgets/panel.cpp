@@ -312,7 +312,8 @@ void report_plot_events(PanelState& st, const FigureSnapshot& fsnap,
     in.height = plot_h;
 
     std::vector<Event> events;
-    collect_plot_events(st.event_tracker, in, what, fsnap, layout, wanted, events);
+    collect_plot_events(st.event_tracker, in, what, fsnap, layout, wanted, events,
+                        &st.hint_index);
 
     if (!io.WantTextInput) {
         for (const WindowEvent& k : keys) {

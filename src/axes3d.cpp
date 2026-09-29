@@ -372,6 +372,16 @@ namespace sextant {
         return p;
     }
 
+    std::size_t Axes3D::plane_count() const { return d->planes.size(); }
+
+    std::shared_ptr<Plane2D> Axes3D::plane_at(std::size_t i) const {
+        if (i >= d->planes.size())
+            throw std::out_of_range("Axes3D::plane_at: index " + std::to_string(i) +
+                                    " out of range (plane_count() = " +
+                                    std::to_string(d->planes.size()) + ")");
+        return d->planes[i];
+    }
+
     Axes3D& Axes3D::set_title(std::string_view text, float fontsize) {
         d->title = text;
         d->title_stamps.title = next_snapshot_generation();

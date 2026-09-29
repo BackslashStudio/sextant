@@ -506,6 +506,7 @@ namespace lt {
     void test_event_channel();
     void test_event_key_names();
     void test_plot_events();
+    void test_pick_events();
     void test_plot_events_in_panel();
     void test_event_delivery();
 } // namespace lt

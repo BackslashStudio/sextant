@@ -2,6 +2,7 @@
 #include "coord_transform3d.h"
 #include "hint.h"
 #include "key_names.h"
+#include <optional>
 
 namespace sextant {
 namespace {
@@ -58,10 +59,38 @@ PointLocation locate_point(const FigureSnapshot& fsnap,
     return loc;
 }
 
+static bool fill_pick(Event& e, const FigureSnapshot& fsnap, const std::vector<AxesLayout>& layout,
+               HintIndexCache* index) {
+    const AxesLayout* cell = find_hint_cell(layout, e.x, e.y);
+    if (!cell) return false;
+    const FigureAxesSnapshot* fa = find_axes(fsnap, cell->slot.index);
+    if (!fa) return false;
+
+    std::optional<PickHit> hit;
+    if (fa->snap2d()) {
+        if (index) index->set_frame_key(fsnap.data_generation, cell->slot.index);
+        hit = find_pick(*fa->snap2d(), HintProjector(cell->tr), e.x, e.y, index);
+    } else if (fa->snap3d() && cell->proj3d) {
+        if (index) index->set_frame_key(fsnap.data_generation, cell->slot.index);
+        hit = find_pick3d(*fa->snap3d(), *cell->proj3d, e.x, e.y, index);
+    }
+    if (!hit) return false;
+
+    e.kind = EventKind::Pick;
+    e.pick_kind = hit->kind;
+    e.pick_object = static_cast<int>(hit->object);
+    e.pick_index = static_cast<int>(hit->element);
+    e.pick_row = hit->row;
+    e.pick_col = hit->col;
+    e.pick_plane = hit->plane;
+    return true;
+}
+
 void collect_plot_events(PlotEventTracker& t, const PlotInputFrame& in,
                          const PlotEventInfo& what, const FigureSnapshot& fsnap,
                          const std::vector<AxesLayout>& layout,
-                         std::uint32_t wanted, std::vector<Event>& out) {
+                         std::uint32_t wanted, std::vector<Event>& out,
+                         HintIndexCache* hint_index) {
     // The pointer's own fields, filled once and only if something needs them.
     bool located = false;
     PointLocation loc;
@@ -86,12 +115,18 @@ void collect_plot_events(PlotEventTracker& t, const PlotInputFrame& in,
                     if (what.grid_owns) t.held[b] = EventConsumed::GridDrag;
                     else if (what.nav_drag || what.nav_reset) t.held[b] = EventConsumed::Navigate;
                 }
-                if (wanted & event_bit(EventKind::MouseDown)) {
+                const bool want_down = wanted & event_bit(EventKind::MouseDown);
+                const bool want_pick = wanted & event_bit(EventKind::Pick);
+                if (want_down || want_pick) {
                     Event e = pointer_event(EventKind::MouseDown);
                     e.button = b;
                     e.double_click = in.double_click[b];
                     e.consumed = t.held[b];
-                    out.push_back(std::move(e));
+                    // The pick is the same press, found only when someone asked.
+                    Event pick = e;
+                    const bool picked = want_pick && fill_pick(pick, fsnap, layout, hint_index);
+                    if (want_down) out.push_back(std::move(e));
+                    if (picked) out.push_back(std::move(pick));
                 }
             }
         } else if (!in.down[b] && t.prev_down[b] && t.began[b]) {

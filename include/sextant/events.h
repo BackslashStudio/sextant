@@ -15,7 +15,8 @@ namespace sextant {
         Scroll,     // the wheel turned over the plot
         KeyDown,    // a key went down (no auto-repeat) while no text field is being edited
         KeyUp,
-        Resize      // the plot area changed size; not sent for the initial size
+        Resize,     // the plot area changed size; not sent for the initial size
+        Pick        // a plot object was under the press: sent right after its MouseDown
     };
 
     // Modifier bits, in Event::mods.
@@ -24,6 +25,14 @@ namespace sextant {
         kModShift = 1 << 1,
         kModAlt = 1 << 2,
         kModSuper = 1 << 3
+    };
+
+    // What a Pick event found. Object indices are in creation order, per kind:
+    // the `i` of the read-back calls (line_data(i), bar3d_data(i), ...).
+    enum class PickKind : int {
+        None,
+        Line, Scatter, ScatterZ, Bar, Heatmap,                // 2D kinds, on an Axes or a Plane2D
+        Bar3D, Surface, SurfaceTri, Scatter3D, Line3D          // 3D kinds
     };
 
     // What sextant itself did with the input. Informational only: an event is
@@ -80,6 +89,22 @@ namespace sextant {
         // Resize: the new plot area, in logical pixels.
         int width = 0;
         int height = 0;
+
+        // Pick (the position fields above describe the press): what was under it,
+        // within 12 pixels, nearest first. `pick_object`: index within its kind
+        // (on the axes, or on the plane when pick_plane >= 0); `pick_index`: the
+        // element -- point, bar, marker or vertex index; a sample of a surface;
+        // the flat cell index (row * columns + column) of a heatmap or bar3d;
+        // `pick_row`/`pick_col` for those grids, else -1. `pick_plane` is the
+        // plane's index in Axes3D::plane_at(), or -1 for an object of the axes
+        // itself. Indices refer to the data the window drew: a program that
+        // changed the data since may see them out of date.
+        PickKind pick_kind = PickKind::None;
+        int pick_object = -1;
+        int pick_index = -1;
+        int pick_row = -1;
+        int pick_col = -1;
+        int pick_plane = -1;
     };
 
     using EventCallback = std::function<void(const Event&)>;

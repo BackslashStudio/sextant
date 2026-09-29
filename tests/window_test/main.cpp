@@ -1864,11 +1864,15 @@ static void test_axis_position3d() {
 // Step 29: interactive events. Click, scroll, press keys and resize the window;
 // each event is printed on this thread (the one blocked in wait_closed()). The
 // left figure is 2D, the right one a 3D scene with a Plane2D; Edit > Navigate
-// shows `consumed`. Type in a panel field to see keys stay quiet. Close the
+// shows `consumed`, and a click on a line point, bar, marker or heatmap cell adds a
+// `pick` line naming the object and element. Type in a panel field to see keys
+// stay quiet. Close the
 // window to finish.
 static void test_events() {
     const char* consumed_names[] = {"none", "select", "navigate", "grid-drag"};
-    const char* kinds[] = {"close", "down", "up", "move", "scroll", "key-down", "key-up", "resize"};
+    const char* kinds[] = {"close", "down", "up", "move", "scroll", "key-down", "key-up", "resize", "pick"};
+    const char* pick_names[] = {"none", "line", "scatter", "scatter_z", "bar", "heatmap",
+                                "bar3d", "surface", "surface_tri", "scatter3d", "line3d"};
 
     auto fig = sextant::Figure::create({.width = 900, .height = 450, .title = "events"});
     constexpr int N = 60;
@@ -1883,7 +1887,7 @@ static void test_events() {
     ax3->plane(sextant::PlaneOrientation::XY, 0.0)->line(x, y);
 
     int moves = 0;
-    for (int k = 0; k <= static_cast<int>(sextant::EventKind::Resize); ++k) {
+    for (int k = 0; k <= static_cast<int>(sextant::EventKind::Pick); ++k) {
         const auto kind = static_cast<sextant::EventKind>(k);
         fig->connect(kind, [&, kind](const sextant::Event& e) {
             if (kind == sextant::EventKind::MouseMove && ++moves % 20 != 0) return; // thin the log
@@ -1905,6 +1909,11 @@ static void test_events() {
                     break;
                 case sextant::EventKind::Resize:
                     printf(" %dx%d", e.width, e.height);
+                    break;
+                case sextant::EventKind::Pick:
+                    printf(" %s object=%d index=%d row=%d col=%d plane=%d axes=%d button=%d",
+                           pick_names[static_cast<int>(e.pick_kind)], e.pick_object, e.pick_index,
+                           e.pick_row, e.pick_col, e.pick_plane, e.axes, e.button);
                     break;
                 default: break;
             }

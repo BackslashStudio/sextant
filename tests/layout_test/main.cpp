@@ -221,6 +221,7 @@ int main() {
     test_event_channel();
     test_event_key_names();
     test_plot_events();
+    test_pick_events();
 
     // read_back.cpp
     test_read_back_2d();
