@@ -26,6 +26,10 @@ namespace sextant {
             WindowCursor last_cursor = WindowCursor::Count; // nothing posted yet
             std::string clipboard;                          // held for the caller
             std::vector<WindowEvent> events;
+
+            // The key transitions replayed since the last ImGui_ImplSextant_TakeKeys(),
+            // for Figure's key events. Bounded, in case nothing takes them.
+            std::vector<WindowEvent> key_taps;
         };
 
         Backend* backend() {
@@ -286,7 +290,11 @@ namespace sextant {
         bd->have_time = true;
 
         link.take_events(bd->events);
-        for (const WindowEvent& e: bd->events) replay(io, *bd, e);
+        for (const WindowEvent& e: bd->events) {
+            replay(io, *bd, e);
+            if (e.kind == WindowEvent::Kind::Key && bd->key_taps.size() < 512)
+                bd->key_taps.push_back(e);
+        }
 
         // With the pointer outside the window but the window focused -- a drag
         // that left it -- no motion event arrives, so the mirror's position
@@ -310,6 +318,11 @@ namespace sextant {
                 link.post_cursor(want);
             }
         }
+    }
+
+    void ImGui_ImplSextant_TakeKeys(std::vector<WindowEvent>& out) {
+        out.clear();
+        if (Backend* bd = backend()) out.swap(bd->key_taps);
     }
 
     void ImGui_ImplSextant_Shutdown() {

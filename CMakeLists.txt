@@ -325,6 +325,9 @@ set(SEXTANT_SOURCES
     src/window_registry.cpp
     src/window_link.cpp
     src/window_broker.cpp
+    src/event_channel.cpp
+    src/key_names.cpp
+    src/plot_events.cpp
     src/renderer/gl_context.cpp
     src/renderer/nvg_renderer.cpp
     src/renderer/data_renderer.cpp
@@ -722,7 +725,8 @@ if(SEXTANT_BUILD_TESTS)
             tests/layout_test/window_broker.cpp
             tests/layout_test/window_input.cpp
             tests/layout_test/read_back.cpp
-            tests/layout_test/window_wait.cpp)
+            tests/layout_test/window_wait.cpp
+            tests/layout_test/events.cpp)
         target_link_libraries(sextant_layout_test PRIVATE sextant_static)
         target_include_directories(sextant_layout_test PRIVATE
             ${PROJECT_SOURCE_DIR}/src

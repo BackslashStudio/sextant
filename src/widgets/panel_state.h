@@ -3,6 +3,7 @@
 #include "sextant/axes3d.h"
 #include "../hint_index.h"
 #include "../plot_data_view.h"
+#include "../plot_events.h"
 #include "cell_shading.h"
 #include "../tick.h"
 #include "../renderer/figure_layout.h"
@@ -11,6 +12,8 @@
 #include <vector>
 
 namespace sextant {
+    class EventChannel;
+
     // Render-thread-only UI state for the widget panel, used only inside
     // draw_widget_panel() (exceptions are marked below).
     struct PanelState {
@@ -78,6 +81,12 @@ namespace sextant {
         };
 
         GridDrag grid_drag;
+
+        // Where the plot's mouse/scroll/key/resize events go (Figure::connect()).
+        // Borrowed from the Figure, which outlives the window thread; null in a
+        // test's bare panel. The tracker is what turns frames of input into events.
+        EventChannel* events = nullptr;
+        PlotEventTracker event_tracker;
 
         // The hover tooltip toggle (Cosmetic panel's "Hints").
         bool hints_enabled = true;

@@ -62,4 +62,21 @@ bool wait_window_closed(const std::atomic<bool>& open, double timeout_s) {
 bool wait_all_windows_closed(double timeout_s) {
     return wait_until([] { return reg().count == 0; }, timeout_s);
 }
+
+void wake_waiters() {
+    // The lock, taken and dropped, orders this after a waiter that has checked
+    // its predicate and not yet gone to sleep; without it the notify could land
+    // in that gap and be lost.
+    { std::lock_guard<std::mutex> lock(reg().m); }
+    reg().cv.notify_all();
+}
+
+void wait_window_closed_or(const std::atomic<bool>& open, double timeout_s,
+                           const std::function<bool()>& wake) {
+    wait_until([&] { return !open.load() || wake(); }, timeout_s);
+}
+
+void wait_all_windows_closed_or(double timeout_s, const std::function<bool()>& wake) {
+    wait_until([&] { return reg().count == 0 || wake(); }, timeout_s);
+}
 } // namespace sextant

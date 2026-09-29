@@ -2,6 +2,7 @@
 #include "export.h"
 #include "axes.h"
 #include "axes3d.h"
+#include "events.h"
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -136,9 +137,18 @@ namespace sextant {
     // an open window is never a reason to stop, but calls into one graph must
     // not overlap: serialize them yourself, as with a standard container. The
     // exceptions, safe from any thread at any time, even during another call
-    // on the same figure: is_open(), wait_closed(), frame_stats(), and the
-    // statics set_message_handler() and, where it is allowed, poll_events()/run().
-    // Separate figures are independent.
+    // on the same figure: is_open(), wait_closed(), frame_stats(), connect(),
+    // disconnect(), dispatch_events(), and the statics set_message_handler() and,
+    // where it is allowed, poll_events()/run(). Separate figures are independent.
+    //
+    // Events. connect() registers a callback for a kind of event (mouse, key,
+    // scroll, resize, close). The window thread never calls it: it only queues,
+    // and the callbacks run on the thread that drains the queue -- inside
+    // poll_events(), wait_closed(), run() or dispatch_events(). So a callback
+    // may block, call close(), or use any figure's graph as that thread would
+    // (the rule above still applies: not while another thread is in a call on
+    // the same graph). A program that never calls one of those never sees an
+    // event.
     //
     // Calls that block: show() until the window is up; close() and the
     // destructor until its thread has joined; savefig*()/render_*() for the
@@ -192,19 +202,47 @@ namespace sextant {
         // Block until this figure's window has closed, or until timeout_s seconds
         // have passed; a negative timeout waits forever. Returns true once closed
         // (at once if the figure was never shown), false if the timeout ran out
-        // first. Callable from any thread, and from several at once.
+        // first. Callable from any thread, and from several at once. Delivers this
+        // figure's events (see connect()) on the calling thread while it waits,
+        // and the Close event before it returns true.
         bool wait_closed(double timeout_s = -1);
 
-        // Pump this process's window events once and return. A no-op on Windows
-        // and Linux, where every window pumps its own events on its own thread;
-        // call it in a loop that keeps a window up, so the loop stays portable.
-        // On macOS it is the pump, and has to be called on the main thread --
-        // anywhere else it throws std::logic_error.
+        // Pump this process's window events once, deliver every figure's queued
+        // events (see connect()) on this thread, and return. On Windows and Linux
+        // every window pumps its own events on its own thread, so there the pump
+        // is a no-op and the delivery works from any thread; call it in a loop
+        // that keeps a window up, so the loop stays portable. On macOS it is the
+        // pump, and has to be called on the main thread -- anywhere else it
+        // throws std::logic_error.
         static void poll_events();
 
-        // Block until every open figure in this process has closed. Returns at
-        // once when none is open.
+        // Block until every open figure in this process has closed, delivering
+        // events meanwhile. Returns at once when none is open (after delivering
+        // what is queued).
         static void run();
+
+        // Register `callback` for events of `kind` on this figure; returns an id
+        // for disconnect(). Callbacks for a kind run in the order connected. The
+        // Event is only valid during the call. An exception a callback throws
+        // goes to the message handler and does not stop delivery. The callback
+        // is not called for events that predate this call, and events of a kind
+        // nobody wants are not queued at all. Throws std::invalid_argument for
+        // an empty callback. Events are reported whatever sextant did with the
+        // input (Event::consumed says); a callback cannot suppress it.
+        int connect(EventKind kind, EventCallback callback);
+
+        // Stops a callback, including for events already queued. Unknown ids are
+        // ignored. Callable from inside a callback.
+        void disconnect(int id);
+
+        // Deliver this figure's queued events on the calling thread, in order,
+        // and return how many there were. What poll_events() does for every
+        // figure, for a loop that has its own way of pumping. Returns 0 when
+        // called from inside one of this figure's callbacks or while another
+        // thread is delivering. A Close event queued by a window that has
+        // closed is delivered here too; events still queued when the figure is
+        // destroyed are dropped.
+        int dispatch_events();
 
         // Where diagnostics go, process-wide: warnings that do not fail the call
         // that raised them (an SVG whose 3D order is inexact, a fallback to a

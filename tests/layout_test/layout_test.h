@@ -501,4 +501,11 @@ namespace lt {
     void test_run_until_closed();
 
     void test_frame_stats_any_thread();
+
+    // events.cpp
+    void test_event_channel();
+    void test_event_key_names();
+    void test_plot_events();
+    void test_plot_events_in_panel();
+    void test_event_delivery();
 } // namespace lt

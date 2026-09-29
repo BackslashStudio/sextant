@@ -1861,11 +1861,67 @@ static void test_axis_position3d() {
 }
 
 // -------------------------------------------------------------------------
+// Step 29: interactive events. Click, scroll, press keys and resize the window;
+// each event is printed on this thread (the one blocked in wait_closed()). The
+// left figure is 2D, the right one a 3D scene with a Plane2D; Edit > Navigate
+// shows `consumed`. Type in a panel field to see keys stay quiet. Close the
+// window to finish.
+static void test_events() {
+    const char* consumed_names[] = {"none", "select", "navigate", "grid-drag"};
+    const char* kinds[] = {"close", "down", "up", "move", "scroll", "key-down", "key-up", "resize"};
+
+    auto fig = sextant::Figure::create({.width = 900, .height = 450, .title = "events"});
+    constexpr int N = 60;
+    std::vector<double> x(N), y(N);
+    for (int i = 0; i < N; ++i) {
+        x[i] = i * 0.1;
+        y[i] = std::sin(x[i]);
+    }
+    fig->add_subplot(1, 2, 1)->line(x, y).set_title("2D: click for data coordinates");
+    auto ax3 = fig->add_subplot3d(1, 2, 2);
+    ax3->set_title("3D: data only where a plane is hit");
+    ax3->plane(sextant::PlaneOrientation::XY, 0.0)->line(x, y);
+
+    int moves = 0;
+    for (int k = 0; k <= static_cast<int>(sextant::EventKind::Resize); ++k) {
+        const auto kind = static_cast<sextant::EventKind>(k);
+        fig->connect(kind, [&, kind](const sextant::Event& e) {
+            if (kind == sextant::EventKind::MouseMove && ++moves % 20 != 0) return; // thin the log
+            printf("[event] %-8s", kinds[static_cast<int>(kind)]);
+            switch (kind) {
+                case sextant::EventKind::MouseDown:
+                case sextant::EventKind::MouseUp:
+                case sextant::EventKind::MouseMove:
+                case sextant::EventKind::Scroll:
+                    printf(" px=(%.0f,%.0f) axes=%d", e.x, e.y, e.axes);
+                    if (e.has_data) printf(" data=(%.4g,%.4g,%.4g)", e.xdata, e.ydata, e.zdata);
+                    if (kind == sextant::EventKind::Scroll) printf(" scroll=(%.2g,%.2g)", e.scroll_x, e.scroll_y);
+                    if (kind != sextant::EventKind::MouseMove) printf(" button=%d dbl=%d", e.button, e.double_click);
+                    printf(" consumed=%s mods=%d", consumed_names[static_cast<int>(e.consumed)], e.mods);
+                    break;
+                case sextant::EventKind::KeyDown:
+                case sextant::EventKind::KeyUp:
+                    printf(" key='%s'", e.key.c_str());
+                    break;
+                case sextant::EventKind::Resize:
+                    printf(" %dx%d", e.width, e.height);
+                    break;
+                default: break;
+            }
+            printf("\n");
+        });
+    }
+    fig->show(false);
+    printf("[main] events are delivered inside wait_closed(); close the window to finish\n");
+    fig->wait_closed();
+    printf("[main] done\n");
+}
+
 int main() {
     // test_axis_position3d();
     // test_axis_position();
-    test_axes_gallery();
-    test_axes3d_gallery();
+    // test_axes_gallery();
+    // test_axes3d_gallery();
     // test_errorbar3d_gallery();
     // test_line3d_gallery();
     // test_surface_tri_gallery();
@@ -1884,4 +1940,5 @@ int main() {
     // test_frame_resize();
     // test_mouse_hint();
     // test_data_panel();
+    test_events();
 }

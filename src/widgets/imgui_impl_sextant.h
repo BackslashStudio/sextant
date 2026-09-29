@@ -1,7 +1,10 @@
 #pragma once
 
+#include <vector>
+
 namespace sextant {
     class WindowLink;
+    struct WindowEvent;
 
     // sextant's ImGui platform backend, in place of imgui_impl_glfw. That one
     // calls GLFW's window, cursor and clipboard functions every frame from
@@ -16,6 +19,10 @@ namespace sextant {
     // Display size, time step, input, and the cursor shape ImGui asked for last
     // frame. Before ImGui::NewFrame(), as imgui_impl_glfw's NewFrame is.
     void ImGui_ImplSextant_NewFrame(WindowLink& link);
+
+    // The key transitions ImGui_ImplSextant_NewFrame() replayed since the last
+    // call (none without a backend), each as the link queued it.
+    void ImGui_ImplSextant_TakeKeys(std::vector<WindowEvent>& out);
 
     void ImGui_ImplSextant_Shutdown();
 } // namespace sextant

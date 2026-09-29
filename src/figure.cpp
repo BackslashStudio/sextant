@@ -4,6 +4,7 @@
 #include "window_thread.h"
 #include "window_registry.h"
 #include "window_broker.h"
+#include "event_channel.h"
 #include "snapshot_box.h"
 #include "edit_box.h"
 #include "figure_edits.h"
@@ -83,6 +84,10 @@ struct Figure::Impl {
     std::vector<Slot>             slots;
     // Declared before window_thread, so it outlives it.
     FrameCounters                 frame_counters;
+    // The window thread pushes into it (through panel_state.events); the
+    // callers' threads connect to it and drain it. Shared with the process-wide
+    // list poll_events()/run() walk.
+    std::shared_ptr<EventChannel> events = EventChannel::create();
     std::unique_ptr<WindowThread> window_thread;
     std::atomic<bool>             open{false};
 
@@ -96,8 +101,17 @@ struct Figure::Impl {
     // Retire this figure's registration, from the window thread or the caller,
     // whichever closes it first.
     void mark_closed() {
-        open.store(false);
-        if (registered.exchange(false)) unregister_open_window();
+        // Once per show(). The Close event is queued before `open` reads false,
+        // so a wait that sees the window closed and then drains delivers it.
+        if (registered.exchange(false)) {
+            Event e;
+            e.kind = EventKind::Close;
+            events->push(std::move(e));
+            open.store(false);
+            unregister_open_window();
+        } else {
+            open.store(false);
+        }
     }
 
     std::string     suptitle_text;
@@ -560,6 +574,7 @@ void Figure::show(bool pause) {
 
     // Registered before the thread runs, so the close callback always has a
     // registration to take back.
+    d->panel_state.events = d->events.get();
     d->open.store(true);
     d->registered.store(true);
     register_open_window();
@@ -605,20 +620,66 @@ bool Figure::is_open() const {
     return d->open.load();
 }
 
+namespace {
+    // A drain that found nothing to take although something is queued means
+    // another thread is mid-drain (or this is a callback waiting on its own
+    // figure); a short sleep keeps the caller's wait loop from spinning.
+    void drain_or_yield(EventChannel& ch) {
+        if (ch.dispatch() == 0 && ch.has_pending())
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+} // namespace
+
 bool Figure::wait_closed(double timeout_s) {
+    EventChannel& ch = *d->events;
+    // Read the flag before draining: the Close event is queued before the flag
+    // flips, so a wait that saw "closed" has that event to deliver.
+    auto step = [this, &ch] {
+        const bool closed = !d->open.load();
+        drain_or_yield(ch);
+        return closed;
+    };
+
     // On the thread that owns the windows there is nobody else to pump them:
     // blocking here would freeze the very window we are waiting for.
-    if (pump_runs_here())
-        return pump_until([this] { return !d->open.load(); }, timeout_s);
-    return wait_window_closed(d->open, timeout_s);
+    if (pump_runs_here()) return pump_until(step, timeout_s);
+
+    const bool finite = timeout_s >= 0.0;   // negative or NaN: forever
+    const auto deadline = std::chrono::steady_clock::now() +
+        std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+            std::chrono::duration<double>(finite ? std::min(timeout_s, 1e9) : 0.0));
+    for (;;) {
+        if (step()) return true;
+        double left = -1.0;
+        if (finite) {
+            left = std::chrono::duration<double>(deadline - std::chrono::steady_clock::now()).count();
+            if (left <= 0.0) return !d->open.load();
+        }
+        // Woken by the close, or by an event to deliver.
+        wait_window_closed_or(d->open, left, [&ch] { return ch.has_pending(); });
+    }
+}
+
+int Figure::connect(EventKind kind, EventCallback callback) {
+    if (!callback) throw std::invalid_argument("Figure::connect: empty callback");
+    return d->events->connect(kind, std::move(callback));
+}
+
+void Figure::disconnect(int id) {
+    d->events->disconnect(id);
+}
+
+int Figure::dispatch_events() {
+    return d->events->dispatch();
 }
 
 void Figure::poll_events() {
-    // Nothing to pump on Windows and Linux: each window thread polls its own
-    // events inside its render loop. It exists so a caller's loop is already
-    // correct on a platform whose events belong to the main thread -- where it
-    // is the pump, and throws if it is not called there.
+    // Each window thread polls its own events inside its render loop on Windows
+    // and Linux; on a platform whose events belong to the main thread this is
+    // the pump, and throws if it is not called there. Either way it then
+    // delivers the events the windows have queued, on this thread.
     pump_windows(0.0);
+    dispatch_all_events();
 }
 
 MessageHandler Figure::set_message_handler(MessageHandler handler) {
@@ -626,11 +687,20 @@ MessageHandler Figure::set_message_handler(MessageHandler handler) {
 }
 
 void Figure::run() {
+    // Same order as wait_closed(): note that no window is open, then drain, so
+    // the Close events of the last windows are delivered before this returns.
+    auto step = [] {
+        const bool none = open_window_count() == 0;
+        if (dispatch_all_events() == 0 && any_events_pending())
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        return none;
+    };
     if (pump_runs_here()) {
-        pump_until([] { return open_window_count() == 0; }, -1.0);
+        pump_until(step, -1.0);
         return;
     }
-    wait_all_windows_closed(-1.0);
+    while (!step())
+        wait_all_windows_closed_or(-1.0, [] { return any_events_pending(); });
 }
 
 FrameStats Figure::frame_stats() const {

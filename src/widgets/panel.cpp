@@ -8,6 +8,9 @@
 #include "../render_frame.h"
 #include "../figure_export.h"
 #include "../hint.h"
+#include "../event_channel.h"
+#include "../plot_events.h"
+#include "../window_link.h"
 #include "../plot_data_view.h"
 #include "../renderer/gl_context.h"
 #include "../renderer/nvg_renderer.h"
@@ -271,6 +274,57 @@ void ensure_layout(ImGuiID dockspace_id, float panel_width, PanelState& st) {
     ImGui::DockBuilderFinish(dockspace_id);
 }
 
+// Hands Figure::connect()'s callbacks this frame's input over the plot: the
+// pointer (from the image item's own hover state, so a panel, menu or dialog on
+// top never reports), the wheel, a size change, and the keys ImGui did not take
+// for a text field. Also empties the backend's key tap every frame, connected or
+// not.
+void report_plot_events(PanelState& st, const FigureSnapshot& fsnap,
+                        const std::vector<AxesLayout>& layout, bool hovered,
+                        float x, float y, int plot_w, int plot_h,
+                        const PlotEventInfo& what) {
+    const ImGuiIO& io = ImGui::GetIO();
+    std::vector<WindowEvent> keys;
+    ImGui_ImplSextant_TakeKeys(keys);
+    EventChannel* ch = st.events;
+    if (!ch) return;
+
+    const std::uint32_t wanted = ch->wanted_mask();
+    // ImGui files physical Ctrl under Super and Cmd under Ctrl with its macOS
+    // behaviours on; the event reports the physical key.
+    const bool ctrl  = io.ConfigMacOSXBehaviors ? io.KeySuper : io.KeyCtrl;
+    const bool super = io.ConfigMacOSXBehaviors ? io.KeyCtrl : io.KeySuper;
+    const int mods = (ctrl ? kModCtrl : 0) | (io.KeyShift ? kModShift : 0)
+                     | (io.KeyAlt ? kModAlt : 0) | (super ? kModSuper : 0);
+
+    PlotInputFrame in;
+    in.x = x;
+    in.y = y;
+    in.hovered = hovered;
+    for (int b = 0; b < 3; ++b) {
+        in.down[b] = io.MouseDown[b];
+        in.double_click[b] = io.MouseDoubleClicked[b];
+    }
+    in.wheel_x = io.MouseWheelH;
+    in.wheel_y = io.MouseWheel;
+    in.mods = mods;
+    in.width = plot_w;
+    in.height = plot_h;
+
+    std::vector<Event> events;
+    collect_plot_events(st.event_tracker, in, what, fsnap, layout, wanted, events);
+
+    if (!io.WantTextInput) {
+        for (const WindowEvent& k : keys) {
+            const EventKind kind = k.down ? EventKind::KeyDown : EventKind::KeyUp;
+            Event e;
+            if ((wanted & event_bit(kind)) && make_key_event(k.key, k.mods, k.down, e))
+                events.push_back(std::move(e));
+        }
+    }
+    for (Event& e : events) ch->push(std::move(e));
+}
+
 // Renders the plot into plot_fbo at the "Plot" panel's live size and shows it
 // via ImGui::Image(), making the plot a resizable dock panel.
 void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
@@ -371,7 +425,17 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
         if (grid.owns) {
             in.hovered = in.active = in.pressed = in.double_clicked = in.released = false;
         }
+        const int selected_before = st.selected_slot_index;
         gate = update_plot_selection(st, fsnap, layout, in);
+
+        // Report what happened over the plot, now that it is known what the
+        // panel did with it. Read-only: nothing below changes the input.
+        report_plot_events(st, fsnap, layout, in_hovered, in.x, in.y, render_w, render_h,
+                           PlotEventInfo{grid.owns,
+                                         st.navigate_enabled && gate.drag,
+                                         st.navigate_enabled && gate.wheel,
+                                         st.navigate_enabled && gate.reset,
+                                         st.selected_slot_index != selected_before});
     }
 
     // Outline the selected subplot, drawn over the image (never saved). Only

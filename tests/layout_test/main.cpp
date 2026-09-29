@@ -217,6 +217,11 @@ int main() {
     test_window_input_queue();
     test_window_input_requests();
 
+    // events.cpp (all but the last need no window)
+    test_event_channel();
+    test_event_key_names();
+    test_plot_events();
+
     // read_back.cpp
     test_read_back_2d();
     test_read_back_3d();
@@ -235,6 +240,8 @@ int main() {
     test_wait_closed();
     test_run_until_closed();
     test_frame_stats_any_thread();
+    test_plot_events_in_panel();
+    test_event_delivery();
 
     if (std::getenv("SEXTANT_POISON_GL")) {
         const PoisonCounts n = gl_poison_counts();
