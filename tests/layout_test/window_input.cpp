@@ -6,6 +6,8 @@
 // Part of sextant_layout_test; see layout_test.h.
 #include "layout_test.h"
 #include "window_link.h"
+#include "window_broker.h"
+#include "platform/platform.h"
 #include "widgets/imgui_impl_sextant.h"
 
 #define GLFW_INCLUDE_NONE
@@ -225,10 +227,27 @@ namespace lt {
         check(after_w == ww && after_h == wh,
               "requests: posting a resize does not touch the window by itself");
         h.link().service_requests();
-        h.link().sync_state();
-        h.link().window_size(after_w, after_h);
+        // The pump has asked. With no window manager (xvfb, Windows) the size
+        // is there at once; under one (Hyprland's XWayland, measured) it is the
+        // WM's answer, which comes a few events later -- so pump and look again
+        // for up to a second.
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+        for (;;) {
+            h.link().sync_state();
+            h.link().window_size(after_w, after_h);
+            if ((after_w == ww - 60 && after_h == wh - 40)
+                || std::chrono::steady_clock::now() >= deadline)
+                break;
+            if (pump_runs_here()) pump_windows(0.01);
+            else if constexpr (!platform::windows_on_main_thread) {
+                glfwPollEvents();
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+        }
         check(after_w == ww - 60 && after_h == wh - 40,
-              "requests: the pump resizes it, and the mirror carries the new size");
+              "requests: the pump resizes it, and the mirror carries the new size ("
+                  + std::to_string(after_w) + "x" + std::to_string(after_h) + ", asked "
+                  + std::to_string(ww - 60) + "x" + std::to_string(wh - 40) + ")");
         check(h.ctx.width() > 0 && h.ctx.height() > 0,
               "requests: GLContext's framebuffer size reads the same mirror");
 
