@@ -7,7 +7,8 @@
 // exports take the platform's windowless context -- EGL on Linux, CGL on macOS
 // -- and on Linux CI this runs with no X or Wayland display at all. --window
 // turns that off (a test switch, not API) so they take the hidden-window path,
-// and CI compares the two output directories byte for byte.
+// and CI compares the two output directories byte for byte. With no DISPLAY on
+// Linux it also checks that show() fails by throwing, not by ending the process.
 //
 // Exit 0 when every check passed, 1 otherwise.
 #include <sextant/sextant.h>
@@ -16,12 +17,15 @@
 #include "window_broker.h"
 #include <glad/glad.h>
 
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -196,6 +200,40 @@ int main(int argc, char** argv) {
         }
         check(workers_ok, "4 worker threads export at once, none throws");
         check(workers_same, "each worker's PNG is the main thread's, byte for byte");
+
+#if defined(__linux__)
+        // No display: show() cannot make a window. It must throw to its caller
+        // -- the failure used to escape on the window thread and std::terminate
+        // the process -- and leave the figure as if never shown.
+        if (!window && !std::getenv("DISPLAY")) {
+            std::string what;
+            try {
+                f2->show(false);
+            } catch (const std::runtime_error& e) {
+                what = e.what();
+            }
+            std::printf("  show() with no display: %s\n", what.c_str());
+            check(what.find("DISPLAY") != std::string::npos,
+                  "show() with no display throws runtime_error, naming DISPLAY");
+            check(!f2->is_open() && f2->wait_closed(0), "the figure is not open afterwards");
+            bool again = false;
+            try { f2->show(false); } catch (const std::runtime_error&) { again = true; }
+            check(again, "a second show() throws again");
+            // A leaked registration would make run() wait for a window that
+            // does not exist.
+            auto ran = std::async(std::launch::async, [] { sextant::Figure::run(); });
+            const bool returned = ran.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+            check(returned, "Figure::run() returns: no open window is registered");
+            if (!returned) {
+                std::printf("FAILED\n");
+                std::fflush(stdout);
+                std::_Exit(1);
+            }
+            f2->savefig((out / "after_show.png").string());
+            check(slurp(out / "after_show.png") == slurp(out / "fig2d.png"),
+                  "savefig() after the failed show() writes the same PNG");
+        }
+#endif
 
         if (!window)
             check(sextant::live_window_count() == 0, "no window is left behind");

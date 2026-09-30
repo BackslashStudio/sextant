@@ -580,7 +580,16 @@ void Figure::show(bool pause) {
     register_open_window();
 
     d->window_thread = std::move(wt);
-    d->window_thread->start();  // blocks until window visible, then returns
+    try {
+        d->window_thread->start();  // blocks until window visible, then returns
+    } catch (...) {
+        // No window was made: undo the registration without the Close event a
+        // window that never opened has no business sending.
+        d->window_thread.reset();
+        if (d->registered.exchange(false)) unregister_open_window();
+        d->open.store(false);
+        throw;
+    }
 
     if (pause) {
         std::cout << "Press ENTER to continue (the plot window stays open)..." << std::endl;

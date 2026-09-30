@@ -32,6 +32,11 @@ namespace sextant {
         } else {
             ready_.acquire(); // blocks until window is visible
         }
+
+        if (startup_error_) {
+            thread_.join(); // it has returned, or is about to
+            std::rethrow_exception(startup_error_);
+        }
     }
 
     void WindowThread::stop() {
@@ -101,6 +106,21 @@ namespace sextant {
     }
 
     void WindowThread::thread_main() {
+        try {
+            run_loop();
+        } catch (...) {
+            // Once the window is up there is no caller left to report to: that
+            // stays std::terminate, as before. Until then start() is waiting, so
+            // the error is its to throw -- escaping here would end the process
+            // (a Python interpreter included) for want of a display.
+            if (window_up_) throw;
+            startup_error_ = std::current_exception();
+            running_.store(false);
+            ready_.release();
+        }
+    }
+
+    void WindowThread::run_loop() {
         GLContext ctx({
             .width = opts_.width, .height = opts_.height,
             .title = opts_.title, .visible = true,
@@ -125,6 +145,7 @@ namespace sextant {
             accepting_exports_ = true;
         }
 
+        window_up_ = true;
         ready_.release(); // unblocks start() — window is now visible
 
         // poll -> requests -> replay -> render -> swap. The poll and the requests

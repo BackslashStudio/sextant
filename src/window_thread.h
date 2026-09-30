@@ -60,7 +60,8 @@ public:
                  FrameCounters& counters);
     ~WindowThread();
 
-    // Launch thread; blocks until window is visible.
+    // Launch thread; blocks until window is visible. Throws what making the
+    // window threw (no display, no GL 4.1), after joining the thread.
     void start();
 
     // Signal loop to exit and join thread. Safe to call multiple times.
@@ -89,6 +90,7 @@ public:
 
 private:
     void thread_main();
+    void run_loop();
 
     // Window thread only. retire_pending_exports() fulfils leftover jobs as
     // un-serviced when the loop exits.
@@ -109,6 +111,10 @@ private:
     CloseFn                on_close_;
     std::thread            thread_;
     std::binary_semaphore  ready_{0};
+    // Set by the thread before the window was up, then ready_ released; start()
+    // rethrows it. Written before the release, read after the acquire.
+    std::exception_ptr     startup_error_;
+    bool                   window_up_ = false; // thread-local use only
     std::atomic<bool>      running_{false};
     std::atomic<bool>      stop_requested_{false};
 

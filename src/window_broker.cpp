@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <mutex>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace sextant {
@@ -29,6 +30,16 @@ namespace sextant {
         // wake a pump that cannot exist yet.
         std::atomic<bool> glfw_ready{false};
 
+        // `what`, GLFW's own reason when it has one, then `hint`.
+        [[noreturn]] void throw_glfw_error(const char* what, const char* hint) {
+            const char* reason = nullptr;
+            glfwGetError(&reason);
+            std::string msg = what;
+            if (reason && *reason) msg += std::string(": ") + reason;
+            msg += hint;
+            throw std::runtime_error(msg);
+        }
+
         void ensure_glfw_init() {
             static std::once_flag s_init;
             std::call_once(s_init, [] {
@@ -41,8 +52,15 @@ namespace sextant {
                 // caller thinks it will.
                 glfwInitHint(GLFW_COCOA_CHDIR_RESOURCES, GLFW_FALSE);
 #endif
-                if (!glfwInit())
-                    throw std::runtime_error("glfwInit failed");
+                if (!glfwInit()) {
+#if defined(__linux__)
+                    throw_glfw_error("glfwInit failed",
+                                     " (sextant's windows use X11 -- XWayland on a Wayland "
+                                     "desktop -- so DISPLAY must name an X server)");
+#else
+                    throw_glfw_error("glfwInit failed", "");
+#endif
+                }
                 glfw_ready.store(true);
             });
         }
@@ -119,7 +137,7 @@ namespace sextant {
                                              spec.title.c_str(), nullptr, nullptr);
             }
             if (!bw.window)
-                throw std::runtime_error("glfwCreateWindow failed");
+                throw_glfw_error("glfwCreateWindow failed", "");
 
             // Callbacks, user pointer and the first read of the mirror are GLFW
             // calls on the window, so they are this thread's too.
