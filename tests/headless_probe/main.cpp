@@ -232,6 +232,9 @@ int main(int argc, char** argv) {
             f2->savefig((out / "after_show.png").string());
             check(slurp(out / "after_show.png") == slurp(out / "fig2d.png"),
                   "savefig() after the failed show() writes the same PNG");
+            // Only this path writes it, and CI compares every file here with
+            // the --window run's: checked equal to fig2d.png, so drop it.
+            std::filesystem::remove(out / "after_show.png");
         }
 #endif
 
