@@ -211,6 +211,14 @@ namespace lt {
               "memory: savefig_png() to an unwritable path throws std::system_error");
         check(throws_system([&] { g2->savefig_svg("no_such_dir/x.svg"); }),
               "memory: savefig_svg() to an unwritable path throws std::system_error");
+        // The code is an errno, so in generic_category: system_category would
+        // read it as a Win32 error on Windows. (ENOENT equals Win32's
+        // ERROR_FILE_NOT_FOUND, so the value alone would not tell.)
+        std::error_code code;
+        try { g2->savefig_png("no_such_dir/x.png"); } catch (const std::system_error& e) { code = e.code(); }
+        check(code.category() == std::generic_category()
+                  && code == std::errc::no_such_file_or_directory,
+              "memory: a missing directory is errc::no_such_file_or_directory, generic category");
     }
 
     // Through an open window's GL context rather than a headless one. The

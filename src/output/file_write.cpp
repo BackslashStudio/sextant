@@ -8,7 +8,9 @@ namespace sextant {
     namespace {
         [[noreturn]] void fail(int err, std::string_view who, const std::string& path,
                                const char* what) {
-            throw std::system_error(err ? err : EIO, std::system_category(),
+            // generic_category: the code is an errno. system_category would read
+            // it as a Win32 error on Windows and give the wrong message.
+            throw std::system_error(err ? err : EIO, std::generic_category(),
                                     std::string(who) + ": " + what + " '" + path + "'");
         }
     } // namespace
