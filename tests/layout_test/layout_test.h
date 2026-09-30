@@ -155,6 +155,7 @@ namespace lt {
     void test_wide_tick_labels();
 
     void test_zero_tick();
+    void test_reversed_ticks();
 
     void test_grid_alignment();
 

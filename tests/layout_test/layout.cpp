@@ -177,6 +177,45 @@ namespace lt {
               "not the residue of accumulating a step across the axis");
     }
 
+    // set_ylim(hi, lo) draws an inverted axis; it once got no ticks at all.
+    void test_reversed_ticks() {
+        std::printf("\n[reversed axis ticks]\n");
+
+        using namespace sextant;
+
+        const std::vector<Tick> up = generate_ticks(-0.5, 9.5);
+        const std::vector<Tick> down = generate_ticks(9.5, -0.5);
+        bool mirrored = !up.empty() && up.size() == down.size();
+        for (std::size_t i = 0; mirrored && i < up.size(); ++i)
+            mirrored = up[i].value == down[down.size() - 1 - i].value && up[i].label == down[down.size() - 1 - i].label;
+        check(mirrored, "reversed ticks: the same ticks as the ascending range, in reverse (ticks[0] at `lo`)");
+
+        // Through the public API: the inverted axis draws its labels. Tick labels
+        // are dark ink left of the frame; count it with and without the ticks.
+        auto ink_left_of_frame = [](bool reversed, bool labels) {
+            auto fig = Figure::create({.width = 240, .height = 180});
+            auto ax = fig->axes();
+            const std::vector<double> y{0.0, 1.0, 4.0, 9.0};
+            ax->line(y).set_axes_style({.label_color = labels ? Color::Black : Color::White});
+            if (reversed) ax->set_ylim(9.5, -0.5);
+            const RgbaImage img = fig->render_rgba();
+            int dark = 0;
+            for (int yy = 0; yy < img.height; ++yy)
+                for (int xx = 0; xx < 30; ++xx) {
+                    const std::uint8_t* p = &img.pixels[(static_cast<std::size_t>(yy) * img.width + xx) * 4];
+                    if (p[0] < 100 && p[1] < 100 && p[2] < 100) ++dark;
+                }
+            return dark;
+        };
+        const int normal = ink_left_of_frame(false, true);
+        const int reversed = ink_left_of_frame(true, true);
+        const int blank = ink_left_of_frame(true, false);
+        std::printf("  dark pixels left of the frame: normal %d, reversed %d, reversed with white labels %d\n",
+                    normal, reversed, blank);
+        check(reversed > blank + 20 && reversed > normal / 2,
+              "reversed ticks: an inverted y axis draws its tick labels");
+    }
+
     // Frames line up across the grid: shared left/right edges per column, top/
     // bottom per row. Different columns may differ in width.
     void test_grid_alignment() {

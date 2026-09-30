@@ -234,7 +234,15 @@ namespace sextant {
         return nice * std::pow(10.0, exp);
     }
 
+    // `lo` is the axis end drawn first (left, bottom). A reversed axis (lo > hi,
+    // set_ylim(hi, lo)) gets the same ticks in reverse, so ticks[0] stays the
+    // one at the `lo` end, as the layout measures the end labels.
     inline std::vector<Tick> generate_ticks(double lo, double hi, int target = 7) {
+        if (lo > hi) {
+            std::vector<Tick> ticks = generate_ticks(hi, lo, target);
+            std::reverse(ticks.begin(), ticks.end());
+            return ticks;
+        }
         if (lo >= hi) return {};
         const double step = nice_step((hi - lo) / target);
         if (!(step > 0.0)) return {};

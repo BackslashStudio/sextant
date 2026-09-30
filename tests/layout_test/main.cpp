@@ -30,6 +30,7 @@ int main() {
     test_absent_decorations_cost_nothing();
     test_wide_tick_labels();
     test_zero_tick();
+    test_reversed_ticks();
     test_grid_alignment();
     test_margins();
     test_degenerate_sizes();
