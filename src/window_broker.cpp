@@ -2,6 +2,9 @@
 #include "window_link.h"
 #include "platform/platform.h"
 #include "messages.h"
+#if defined(SEXTANT_WINDOW_ICON) && !defined(__APPLE__)
+#include "window_icon.h"
+#endif
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
@@ -11,6 +14,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
+#include <iterator>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -108,6 +112,21 @@ namespace sextant {
 
         // --- the owning thread -------------------------------------------------
 
+        // The sextant icon on the title bar and taskbar (src/window_icon.h).
+        // macOS has no per-window icon (the Dock's comes from the app bundle),
+        // and GLFW reports an error for trying, so it is not asked there.
+        // -DSEXTANT_WINDOW_ICON=OFF leaves every window the platform default.
+        void set_icon([[maybe_unused]] GLFWwindow* w) {
+#if defined(SEXTANT_WINDOW_ICON) && !defined(__APPLE__)
+            GLFWimage images[std::size(window_icon::k_images)];
+            for (std::size_t i = 0; i < std::size(images); ++i) {
+                const auto& src = window_icon::k_images[i];
+                images[i] = {src.size, src.size, const_cast<unsigned char *>(src.rgba)};
+            }
+            glfwSetWindowIcon(w, static_cast<int>(std::size(images)), images);
+#endif
+        }
+
         BrokeredWindow make_window_here(const WindowSpec& spec) {
             ensure_glfw_init();
 
@@ -138,6 +157,7 @@ namespace sextant {
             }
             if (!bw.window)
                 throw_glfw_error("glfwCreateWindow failed", "");
+            set_icon(bw.window);
 
             // Callbacks, user pointer and the first read of the mirror are GLFW
             // calls on the window, so they are this thread's too.

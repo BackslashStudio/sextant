@@ -49,7 +49,8 @@ set(CMAKE_C_STANDARD 11)
 option(SEXTANT_USE_FREETYPE   "Use FreeType for font rendering (stb fallback if OFF)" ON)
 option(SEXTANT_USE_LIBPNG     "Use libpng for PNG output (stb_image_write fallback if OFF)" ON)
 option(SEXTANT_FETCH_GLFW     "Download GLFW via FetchContent (set OFF if installed system-wide)" ON)
-option(SEXTANT_BUILD_TESTS    "Build smoke test executable" ${PROJECT_IS_TOP_LEVEL})
+option(SEXTANT_WINDOW_ICON    "Give every window the sextant icon (OFF: the platform default)" ON)
+option(SEXTANT_BUILD_TESTS   "Build smoke test executable" ${PROJECT_IS_TOP_LEVEL})
 
 # ---------------------------------------------------------------------------
 # Dependencies
@@ -403,6 +404,9 @@ function(sextant_configure_target target_name link_scope)
             IMGUI_IMPL_OPENGL_LOADER_CUSTOM
             IMGUI_USER_CONFIG="widgets/sextant_imconfig.h"
     )
+    if(SEXTANT_WINDOW_ICON)
+        target_compile_definitions(${target_name} PRIVATE SEXTANT_WINDOW_ICON)
+    endif()
 
     target_link_libraries(${target_name}
         PUBLIC  OpenGL::GL
