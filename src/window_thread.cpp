@@ -41,7 +41,18 @@ namespace sextant {
 
     void WindowThread::stop() {
         stop_requested_.store(true);
-        if (thread_.joinable()) thread_.join();
+        if (!thread_.joinable()) return;
+
+        // As in start(): where this thread owns the windows (the macOS main
+        // thread), a bare join can wait on ourselves. The render thread may be
+        // inside a GL call that needs the main thread's run loop -- seen on a GPU-
+        // less macOS VM, a window's first glDrawArrays blocked in Apple's software
+        // renderer while the main thread sat in join() at interpreter exit. So
+        // pump until it has returned, then join.
+        if (pump_runs_here()) {
+            while (!exited_.load()) pump_windows(0.01);
+        }
+        thread_.join();
     }
 
     std::future<WindowThread::ExportResult>
@@ -116,8 +127,11 @@ namespace sextant {
             if (window_up_) throw;
             startup_error_ = std::current_exception();
             running_.store(false);
+            exited_.store(true);
             ready_.release();
+            return;
         }
+        exited_.store(true);
     }
 
     void WindowThread::run_loop() {

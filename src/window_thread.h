@@ -117,6 +117,9 @@ private:
     bool                   window_up_ = false; // thread-local use only
     std::atomic<bool>      running_{false};
     std::atomic<bool>      stop_requested_{false};
+    // Set as thread_main() returns, after run_loop()'s GL objects are gone: what
+    // a pumping stop() waits for before it joins.
+    std::atomic<bool>      exited_{false};
 
     FrameCounters&         counters_;
 
