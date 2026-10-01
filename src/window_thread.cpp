@@ -162,6 +162,20 @@ namespace sextant {
         window_up_ = true;
         ready_.release(); // unblocks start() — window is now visible
 
+        // macOS: one window at a time draws its first frame. On a GPU-less Mac
+        // (a CI VM), Apple's software renderer compiles its draw code on a
+        // context's first draws, through a cache shared by the process; with
+        // several contexts doing that at once, tearing windows down could leave
+        // one render thread blocked in that cache for good
+        // (cvmRequestFunctionPointerArrayWrite). Teardown while only one window
+        // is on its first frame never did. Released after the first swap, or on
+        // the way out; a stop() that came while waiting skips the frame.
+        std::unique_lock<std::mutex> first_frame;
+        if constexpr (platform::windows_on_main_thread) {
+            static std::mutex first_frame_mutex;
+            first_frame = std::unique_lock<std::mutex>(first_frame_mutex);
+        }
+
         // poll -> requests -> replay -> render -> swap. The poll and the requests
         // are GLContext::poll_events(); the replay is inside the frame, in
         // ImGui_ImplSextant_NewFrame(). It is the order macOS needs, where the
@@ -203,7 +217,9 @@ namespace sextant {
             }
 
             ctx.swap_buffers();
+            if (first_frame.owns_lock()) first_frame.unlock();
         }
+        if (first_frame.owns_lock()) first_frame.unlock();
 
         // One last pump, so a request the final frame posted (a clipboard write
         // from a Ctrl+C, say) is not dropped on the way out.
