@@ -110,6 +110,9 @@ namespace sextant {
             nvg_ = nullptr;
         }
         release_target();
+        // Usually the last reference: the link's cursors are freed with it, and
+        // those are GLFW calls.
+        auto lock = glfw_state_lock();
         link_.reset();
     }
 
@@ -141,6 +144,8 @@ namespace sextant {
         // the whole split exists to avoid.
         if constexpr (platform::windows_on_main_thread) return;
 
+        // Other windows' threads poll too: one at a time (glfw_state_lock()).
+        auto lock = glfw_state_lock();
         glfwPollEvents();        // the link's callbacks run in here
         link_->sync_state();
         link_->service_requests();

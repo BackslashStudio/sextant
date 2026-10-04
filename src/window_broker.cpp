@@ -24,7 +24,8 @@ namespace sextant {
     namespace {
         // Serialises window creation and destruction, which touch unlocked
         // process-wide state (GLFW's window list) and the window hints, which are
-        // global. Never held during a frame.
+        // global; on Linux also every other GLFW call a window thread makes
+        // (glfw_state_lock()). Never held during a frame.
         std::mutex& global_gl_mutex() {
             static std::mutex m;
             return m;
@@ -154,14 +155,15 @@ namespace sextant {
 
                 bw.window = glfwCreateWindow(spec.width, spec.height,
                                              spec.title.c_str(), nullptr, nullptr);
-            }
-            if (!bw.window)
-                throw_glfw_error("glfwCreateWindow failed", "");
-            set_icon(bw.window);
+                if (!bw.window)
+                    throw_glfw_error("glfwCreateWindow failed", "");
+                set_icon(bw.window);
 
-            // Callbacks, user pointer and the first read of the mirror are GLFW
-            // calls on the window, so they are this thread's too.
-            bw.link->attach(bw.window);
+                // Callbacks, user pointer and the first read of the mirror are
+                // GLFW calls on the window, so they are this thread's too, and
+                // under the lock for the same reason as the poll.
+                bw.link->attach(bw.window);
+            }
             {
                 std::lock_guard<std::mutex> lock(brk().m);
                 brk().live.push_back({bw.window, bw.link});
@@ -172,8 +174,10 @@ namespace sextant {
         void destroy_window_here(GLFWwindow* w, std::shared_ptr<WindowLink> link) {
             std::lock_guard<std::mutex> lock(global_gl_mutex());
             glfwDestroyWindow(w);
-            // `link` dies with this scope, and its standard cursors with it --
-            // GLFW wants those freed on this thread as well.
+            // The link's standard cursors go with it -- GLFW wants those freed
+            // on this thread as well, and under the lock. Released here rather
+            // than with the parameter, which outlives `lock`.
+            link.reset();
         }
 
         // Takes a window off the live list. Null when it is not there, which is
@@ -323,5 +327,13 @@ namespace sextant {
     int live_window_count() {
         std::lock_guard<std::mutex> lock(brk().m);
         return static_cast<int>(brk().live.size());
+    }
+
+    std::unique_lock<std::mutex> glfw_state_lock() {
+#if defined(__linux__)
+        return std::unique_lock<std::mutex>(global_gl_mutex());
+#else
+        return {};
+#endif
     }
 } // namespace sextant

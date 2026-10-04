@@ -1,6 +1,7 @@
 #pragma once
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 
 struct GLFWwindow;
@@ -77,4 +78,20 @@ namespace sextant {
 
     // How many windows the broker is holding -- exactly the ones its pump walks.
     int live_window_count();
+
+    // Hold while making a GLFW call that touches its process-wide state from a
+    // window thread. GLFW's event and window functions are documented
+    // main-thread-only. On Linux each window thread pumps its own window anyway,
+    // and several pumping at once raced inside GLFW's X11 code: heap corruption,
+    // and a poll left blocked in XNextEvent after another thread took its event.
+    // So there they take turns: the poll step (glfwPollEvents, the state mirror,
+    // the requests), window creation and destruction, and the clipboard read.
+    // Not needed for make-current, swap or swap interval (context-only), nor for
+    // glfwPostEmptyEvent and glfwGetTime (thread-safe). Never held during a
+    // frame's GL work, and nothing taken under it may take it again.
+    //
+    // An empty lock elsewhere: on Windows glfwPollEvents can block for as long as
+    // the user drags a window, which would stall every other window; on macOS
+    // one thread owns every window.
+    std::unique_lock<std::mutex> glfw_state_lock();
 } // namespace sextant
