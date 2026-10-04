@@ -208,8 +208,10 @@ namespace sextant {
         int save_peel_layers = 0;
 
         // Warning from the last save; non-empty opens a modal (cleared by it).
+        // save_failed: the file was not written and save_warning says why.
         std::string save_warning;
         bool save_warning_open = false;
+        bool save_failed = false;
 
         // "File > Resize to plot frame" dialog; applied via pending_plot_w/h.
         bool resize_dialog_open = false;

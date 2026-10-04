@@ -18,6 +18,7 @@
 #include "../renderer/figure_layout.h"
 #include "../renderer/plot_fbo.h"
 #include "../font_discovery.h"
+#include "../messages.h"
 #include "sextant/figure.h"
 #include <imgui.h>
 #include <imgui_internal.h>  // DockBuilder* — not part of ImGui's stable public API
@@ -29,6 +30,7 @@
 #include <cmath>
 #include <cstdio>
 #include <memory>
+#include <stdexcept>
 #include <string>
 
 namespace sextant {
@@ -1801,17 +1803,20 @@ bool scene_has_3d(const FigureSnapshot& fsnap) {
 }
 
 // The warning window raised by a knowingly misordered export (the file is
-// already written). Shows the exporter's own sentence. An undocked window
-// rather than a popup, since it is raised outside any window scope.
+// already written) or a failed one (it is not). Shows the exporter's own
+// sentence. An undocked window rather than a popup, since it is raised outside
+// any window scope.
 void draw_save_warning(PanelState& st) {
     if (st.save_warning.empty()) return;
     st.save_warning_open = false;
 
     ImGui::SetNextWindowSize(ImVec2(430, 0), ImGuiCond_FirstUseEver);
-    ImGui::Begin("Export warning", nullptr,
-                 ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_AlwaysAutoResize);
-    ImGui::TextWrapped("The file was written, but part of it is not in the "
-                       "right order.");
+    // "###": one window whichever title, so it keeps its place.
+    ImGui::Begin(st.save_failed ? "Save failed###save_warning" : "Export warning###save_warning",
+                 nullptr, ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_AlwaysAutoResize);
+    ImGui::TextWrapped(st.save_failed ? "The figure was not saved."
+                                      : "The file was written, but part of it is not in the "
+                                        "right order.");
     ImGui::Spacing();
     ImGui::PushTextWrapPos(410.0f);
     ImGui::TextUnformatted(st.save_warning.c_str());
@@ -1987,23 +1992,36 @@ void draw_widget_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
             const std::string path = st.save_path_buf;
             const auto dot = path.rfind('.');
             const auto ext = (dot == std::string::npos) ? "" : path.substr(dot);
-            if (ext == ".svg" || ext == ".SVG") {
-                SvgSaveReport report;
-                export_figure_svg(fsnap, path, sw, sh,
-                                  { .max_splits = static_cast<std::size_t>(
-                                        std::max(0, st.save_max_splits)) },
-                                  &report, on_screen.get());
-                // Tell the user: the file is written either way.
-                if (!report.scene_order_exact) {
-                    st.save_warning      = report.warning;
-                    st.save_warning_open = true;
+            // Nothing above this frame can take an exception (it would end the
+            // process): a failure goes to the modal and the message handler.
+            try {
+                if (ext == ".svg" || ext == ".SVG") {
+                    SvgSaveReport report;
+                    export_figure_svg(fsnap, path, sw, sh,
+                                      { .max_splits = static_cast<std::size_t>(
+                                            std::max(0, st.save_max_splits)) },
+                                      &report, on_screen.get());
+                    // Tell the user: the file is written either way.
+                    if (!report.scene_order_exact) {
+                        st.save_warning      = report.warning;
+                        st.save_warning_open = true;
+                        st.save_failed       = false;
+                    }
+                } else if (ext == ".png" || ext == ".PNG") {
+                    // At the figure's dpi (1x by default), not the display's: a
+                    // file is the same on every machine.
+                    export_figure_png(ctx, nvg, data, fsnap, path, sw, sh,
+                                      opts.supersample, st.save_peel_layers, on_screen.get(),
+                                      opts.dpi / 96.0f);
+                } else {
+                    throw std::invalid_argument("'" + path + "': the file name must end in "
+                                                ".png or .svg");
                 }
-            } else {
-                // At the figure's dpi (1x by default), not the display's: a
-                // file is the same on every machine.
-                export_figure_png(ctx, nvg, data, fsnap, path, sw, sh,
-                                  opts.supersample, st.save_peel_layers, on_screen.get(),
-                                  opts.dpi / 96.0f);
+            } catch (const std::exception& ex) {
+                st.save_warning      = ex.what();
+                st.save_warning_open = true;
+                st.save_failed       = true;
+                emit_message(std::string("Save failed: ") + ex.what());
             }
         }
     }

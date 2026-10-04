@@ -14,4 +14,16 @@ extern thread_local ImGuiContext* MyImGuiTLS;
 // CMakeLists.txt, disables the bundled loader). The bundled loader's shared
 // global table is zeroed by each ImGui_ImplOpenGL3_Shutdown(), which broke
 // other windows still rendering.
+//
+// On Windows glad defines APIENTRY (__stdcall) unless it is defined already,
+// and <windows.h>, which imgui.cpp includes after this, defines it again as
+// WINAPI: warning C4005. Taken back out once glad's declarations are made, as
+// glfw3.h does with its own; nothing past glad.h uses it.
+#if defined(_WIN32) && !defined(APIENTRY)
+#define SEXTANT_GLAD_APIENTRY
+#endif
 #include <glad/glad.h>
+#ifdef SEXTANT_GLAD_APIENTRY
+#undef APIENTRY
+#undef SEXTANT_GLAD_APIENTRY
+#endif
