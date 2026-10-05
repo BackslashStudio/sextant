@@ -38,19 +38,29 @@ namespace lt {
 
         // The same picture: byte-identical where the renderer repeats itself,
         // else at most 0.1% of pixels off by at most 8 levels (same_picture()).
-        bool same_rgba(const RgbaImage& a, const RgbaImage& b) {
-            if (a.width != b.width || a.height != b.height || a.pixels.size() != b.pixels.size())
+        // On a mismatch it prints how many pixels differ and by how much, unless
+        // `quiet` (a control that expects one).
+        bool same_rgba(const RgbaImage& a, const RgbaImage& b, bool quiet = false) {
+            if (a.width != b.width || a.height != b.height || a.pixels.size() != b.pixels.size()) {
+                if (quiet) return false;
+                std::printf("    sizes differ: %dx%d vs %dx%d\n", a.width, a.height, b.width, b.height);
                 return false;
-            if (renderer_repeats_exactly()) return a.pixels == b.pixels;
-            std::size_t off = 0;
-            for (std::size_t i = 0; i < a.pixels.size(); i += 4) {
-                int worst = 0;
-                for (int c = 0; c < 4; ++c)
-                    worst = std::max(worst, std::abs(int(a.pixels[i + c]) - int(b.pixels[i + c])));
-                if (worst > 8) return false;
-                if (worst > 0) ++off;
             }
-            return off * 1000 <= a.pixels.size() / 4;
+            std::size_t off = 0;
+            int worst = 0;
+            for (std::size_t i = 0; i < a.pixels.size(); i += 4) {
+                int px = 0;
+                for (int c = 0; c < 4; ++c)
+                    px = std::max(px, std::abs(int(a.pixels[i + c]) - int(b.pixels[i + c])));
+                if (px > 0) ++off;
+                worst = std::max(worst, px);
+            }
+            const std::size_t n = a.pixels.size() / 4;
+            const bool same = renderer_repeats_exactly() ? off == 0
+                                                         : worst <= 8 && off * 1000 <= n;
+            if (!same && !quiet)
+                std::printf("    %zu of %zu pixels differ, by up to %d levels\n", off, n, worst);
+            return same;
         }
 
         int loader_calls = 0;
@@ -160,7 +170,7 @@ namespace lt {
             DataRenderer d;
             alone2 = render_figure_rgba(dev, d, f2, W, H, 1);
         }
-        check(!same_rgba(alone1, alone2), "two figures: (control) the two figures differ");
+        check(!same_rgba(alone1, alone2, true), "two figures: (control) the two figures differ");
 
         RenderDevice dev;
         {
