@@ -24,9 +24,9 @@ namespace lt {
                 .width = W, .height = H, .title = "layout_test",
                 .visible = false, .resizable = false, .headless = headless
             });
-            NvgRenderer nvg(ctx.nvg());
+            RenderDevice dev;
             DataRenderer data;
-            export_figure_png(ctx, nvg, data, fs, path, W, H, 1);
+            export_figure_png(dev, data, fs, path, W, H, 1);
         }
 
         long long file_size(const std::string& p) {
@@ -57,8 +57,8 @@ namespace lt {
                   "a hidden window where it does not");
             check(live_window_count() == base + (offscreen ? 0 : 1),
                   "headless: so the broker is holding one window fewer there");
-            check(ctx.nvg() != nullptr,
-                  "headless: and a NanoVG context either way");
+            check(RenderDevice().nvg() != nullptr,
+                  "headless: and a RenderDevice (NanoVG) builds on it either way");
             check(offscreen
                       ? (ctx.width() == W && ctx.height() == H)
                       : (ctx.width() > 0 && ctx.height() > 0),

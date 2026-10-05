@@ -13,6 +13,7 @@
 #include "renderer/data_renderer.h"
 #include "renderer/gl_context.h"
 #include "renderer/nvg_renderer.h"
+#include "renderer/render_device.h"
 #include "font_discovery.h"
 #include "renderer/figure_layout.h"
 #include "renderer/box3d.h"
@@ -486,6 +487,13 @@ namespace lt {
     void test_perform_save();
 
     void test_dialogs_drawn();
+
+    // render_device.cpp (GUI-kit R5)
+    void test_render_device_host_context();
+
+    void test_render_device_two_figures();
+
+    void test_render_device_caller_target();
 
     // headless_export.cpp
     void test_headless_context();

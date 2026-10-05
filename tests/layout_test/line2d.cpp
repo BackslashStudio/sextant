@@ -120,13 +120,13 @@ namespace lt {
 
         const int W = 400, H = 320; {
             GLContext ctx({.width = W, .height = H, .title = "layout_test", .visible = false});
-            NvgRenderer nvg(ctx.nvg());
+            RenderDevice dev;
             DataRenderer data;
             // One DataRenderer and the same data generation: the stroke cache must
             // key on `loop`, or the second render reuses the first's buffer.
             for (bool loop: {false, true}) {
                 FigureSnapshot fs = one_axes(triangle(loop));
-                export_figure_png(ctx, nvg, data, fs, loop ? "line_loop.png" : "line_open.png",
+                export_figure_png(dev, data, fs, loop ? "line_loop.png" : "line_open.png",
                                   W, H, 1);
                 export_figure_svg(fs, loop ? "line_loop.svg" : "line_open.svg", W, H);
             }
@@ -137,7 +137,7 @@ namespace lt {
             bend.y = std::vector<double>{8.0, 2.0, 2.0};
             FigureSnapshot fs = one_axes(bend);
             fs.generation = fs.data_generation = 2;
-            export_figure_png(ctx, nvg, data, fs, "line_bend.png", W, H, 1);
+            export_figure_png(dev, data, fs, "line_bend.png", W, H, 1);
         }
 
         const CoordTransform tr = compute_figure_layout(one_axes(triangle(false)), W, H).cells[0].tr;

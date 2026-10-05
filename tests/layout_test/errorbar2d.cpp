@@ -299,14 +299,14 @@ namespace lt {
         cases.push_back({"eb_onesided", err_point({0.0}, {2.0}, CapStyle::Arrow)});
         cases.push_back({"eb_masked", err_point({2.0}, {nan}, CapStyle::Flat)}); {
             GLContext ctx({.width = W, .height = H, .title = "layout_test", .visible = false});
-            NvgRenderer nvg(ctx.nvg());
+            RenderDevice dev;
             DataRenderer data;
             // One DataRenderer for all four, so each needs its own generation.
             unsigned long long gen = 0;
             for (const Case& c: cases) {
                 FigureSnapshot fs = one_axes(c.lp);
                 fs.generation = fs.data_generation = ++gen;
-                export_figure_png(ctx, nvg, data, fs, std::string(c.name) + ".png", W, H, 1);
+                export_figure_png(dev, data, fs, std::string(c.name) + ".png", W, H, 1);
                 export_figure_svg(fs, std::string(c.name) + ".svg", W, H);
             }
         }

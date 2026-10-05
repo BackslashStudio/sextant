@@ -1,7 +1,7 @@
 #pragma once
 #include "sextant/figure.h"
 #include "renderer/gl_context.h"
-#include "renderer/nvg_renderer.h"
+#include "renderer/render_device.h"
 #include "renderer/data_renderer.h"
 #include "renderer/plot_fbo.h"
 #include "plot_objects.h"
@@ -52,7 +52,7 @@ class WindowThread {
 public:
     // plot_fbo is a persistent offscreen target owned by this thread, for
     // compositing the plot with the widget panel.
-    using RenderFn = std::function<void(GLContext&, NvgRenderer&, DataRenderer&, PlotFbo&)>;
+    using RenderFn = std::function<void(GLContext&, RenderDevice&, DataRenderer&, PlotFbo&)>;
     using CloseFn  = std::function<void()>;
 
     // `counters` is borrowed and must outlive this object.
@@ -94,7 +94,7 @@ private:
 
     // Window thread only. retire_pending_exports() fulfils leftover jobs as
     // un-serviced when the loop exits.
-    void drain_exports(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data);
+    void drain_exports(RenderDevice& dev, DataRenderer& data);
     void retire_pending_exports();
 
     struct ExportJob {

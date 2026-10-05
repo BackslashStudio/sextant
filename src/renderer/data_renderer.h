@@ -4,6 +4,7 @@
 #include "../coord_transform.h"
 #include "../coord_transform3d.h"
 #include "plane2d.h"
+#include "../contour.h"
 #include <array>
 #include <cstdint>
 #include <unordered_map>
@@ -63,6 +64,11 @@ public:
     // restored (see PeelLayerScope in figure_export.cpp).
     int  peel_layers_override() const { return peel_layers_override_; }
     void set_peel_layers_override(int n) { peel_layers_override_ = n; }
+
+    // Traced heatmap contours held across frames, for NvgRenderer to draw
+    // with: a per-view cache like the GL ones here (keyed by position, so a
+    // renderer shared by two figures would trace every frame).
+    ContourCache& contour_cache() { return contour_cache_; }
 
 private:
     // Which half of the scene a per-kind draw is for: opaque (depth-resolved)
@@ -408,6 +414,9 @@ private:
         std::vector<double> view;
     };
     std::unordered_map<CacheKey, ErrorBar3DCache, CacheKeyHash> errbar3d_cache_;
+
+    // Traced contours (see contour.h); CPU only.
+    ContourCache contour_cache_;
 
     struct ErrorBar3DUniforms { int clip = -1, depth = -1, shade = -1; };
     ErrorBar3DUniforms errbar3d_u_{};

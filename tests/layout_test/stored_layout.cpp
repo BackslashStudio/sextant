@@ -313,9 +313,9 @@ namespace lt {
         // The PNG path: the frame's white background starts where the layout says.
         {
             GLContext ctx({.width = W, .height = H, .title = "layout_test", .visible = false});
-            NvgRenderer nvg(ctx.nvg());
+            RenderDevice dev;
             DataRenderer data;
-            export_figure_png(ctx, nvg, data, panned, "stored_on_screen.png", W, H, 1, 0, &m);
+            export_figure_png(dev, data, panned, "stored_on_screen.png", W, H, 1, 0, &m);
         }
         int pw = 0, ph = 0, comp = 0;
         unsigned char* px = stbi_load("stored_on_screen.png", &pw, &ph, &comp, 4);

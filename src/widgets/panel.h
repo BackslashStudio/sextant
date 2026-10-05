@@ -5,7 +5,7 @@
 
 namespace sextant {
     class GLContext;
-    class NvgRenderer;
+    class RenderDevice;
     class DataRenderer;
     class PlotFbo;
     struct FigureSnapshot;
@@ -27,7 +27,7 @@ namespace sextant {
     // the Plot panel's size, shows it via ImGui::Image(), then draws the side
     // panels. The live window's only per-frame entry point; call on the GL/ImGui
     // thread before swap_buffers().
-    void draw_widget_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
+    void draw_widget_panel(GLContext& ctx, RenderDevice& dev, DataRenderer& data,
                            PlotFbo& plot_fbo, const FigureSnapshot& fsnap,
                            const FigureOptions& opts,
                            FigureEditBox& edit_box, PanelState& state);

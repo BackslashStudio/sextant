@@ -85,7 +85,7 @@ namespace sextant {
         return fut;
     }
 
-    void WindowThread::drain_exports(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data) {
+    void WindowThread::drain_exports(RenderDevice& dev, DataRenderer& data) {
         std::vector<ExportJob> jobs; {
             std::lock_guard<std::mutex> lock(export_mutex_);
             jobs.swap(export_jobs_);
@@ -95,7 +95,7 @@ namespace sextant {
             ExportResult r;
             r.serviced = true;
             try {
-                r.image = render_figure_rgba(ctx, nvg, data, *job.snap,
+                r.image = render_figure_rgba(dev, data, *job.snap,
                                              job.width, job.height, job.supersample,
                                              job.peel_layers, job.on_screen, job.scale);
             } catch (...) {
@@ -143,7 +143,9 @@ namespace sextant {
             // (DPI-scaled). savefig() contexts keep exact pixels.
             .scale_to_monitor = true
         });
-        NvgRenderer nvg(ctx.nvg());
+        // Drawing, on this thread's context (current since its construction);
+        // destroyed before it, in reverse order.
+        RenderDevice dev;
         DataRenderer data;
         PlotFbo plot_fbo; // lazily sized by render_fn_ on first use
 
@@ -198,7 +200,7 @@ namespace sextant {
 
             // Time render work only; swap_buffers() blocks on vsync.
             const auto t0 = std::chrono::steady_clock::now();
-            render_fn_(ctx, nvg, data, plot_fbo);
+            render_fn_(ctx, dev, data, plot_fbo);
             const double ms = std::chrono::duration<double, std::milli>(
                 std::chrono::steady_clock::now() - t0).count();
 
@@ -213,7 +215,7 @@ namespace sextant {
             // Exports run outside the timed region, before the swap.
             if (exports_pending_.load(std::memory_order_acquire)) {
                 if (!export_data) export_data.emplace();
-                drain_exports(ctx, nvg, *export_data);
+                drain_exports(dev, *export_data);
             }
 
             ctx.swap_buffers();

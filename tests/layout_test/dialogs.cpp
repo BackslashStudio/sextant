@@ -258,7 +258,7 @@ namespace lt {
         std::printf("\n[dialogs: perform_save()]\n");
 
         GLContext gl({.width = 200, .height = 150, .title = "layout_test", .visible = false});
-        NvgRenderer nvg(gl.nvg());
+        RenderDevice dev;
         DataRenderer data;
 
         const FigureSnapshot fs = one_line_snapshot({0.0, 1.0, 2.0}, {0.0, 1.0, 4.0});
@@ -268,7 +268,7 @@ namespace lt {
         // ---- SVG and PNG, the same bytes as the exporters'.
         {
             const SaveRequest req{ .path = "r4_save.svg", .width = 420, .height = 300 };
-            const SaveResult r = perform_save(gl, nvg, data, fs, req, &on_screen, 1, 1.0f);
+            const SaveResult r = perform_save(dev, data, fs, req, &on_screen, 1, 1.0f);
             export_figure_svg(fs, "r4_direct.svg", 420, 300, {}, nullptr, &on_screen);
             check(r.written && r.exact && r.warning.empty(),
                   "perform_save: an SVG is written, exact, with no warning");
@@ -279,8 +279,8 @@ namespace lt {
         {
             const SaveRequest req{ .path = "r4_save.png", .width = 420, .height = 300,
                                    .peel_layers = 4 };
-            const SaveResult r = perform_save(gl, nvg, data, fs, req, &on_screen, 2, 1.5f);
-            export_figure_png(gl, nvg, data, fs, "r4_direct.png", 420, 300, 2, 4, &on_screen, 1.5f);
+            const SaveResult r = perform_save(dev, data, fs, req, &on_screen, 2, 1.5f);
+            export_figure_png(dev, data, fs, "r4_direct.png", 420, 300, 2, 4, &on_screen, 1.5f);
             check(r.written && r.exact && r.warning.empty(),
                   "perform_save: a PNG is written, exact, with no warning");
             check(exists("r4_save.png") && same_picture("r4_save.png", "r4_direct.png"),
@@ -298,7 +298,7 @@ namespace lt {
         // ---- Failures: written = false, the exporter's sentence, the handler told.
         {
             const SaveRequest req{ .path = "r4_save.txt", .width = 420, .height = 300 };
-            const SaveResult r = perform_save(gl, nvg, data, fs, req, &on_screen, 1, 1.0f);
+            const SaveResult r = perform_save(dev, data, fs, req, &on_screen, 1, 1.0f);
             check(!r.written && r.warning.find("must end in .png or .svg") != std::string::npos,
                   "perform_save: a bad extension is not written, and says why");
             check(!exists("r4_save.txt"), "perform_save: and no file appears");
@@ -318,7 +318,7 @@ namespace lt {
             SaveResult r;
             bool threw = false;
             try {
-                r = perform_save(gl, nvg, data, fs, req, &on_screen, 1, 1.0f);
+                r = perform_save(dev, data, fs, req, &on_screen, 1, 1.0f);
             } catch (...) {
                 threw = true;
             }
@@ -330,13 +330,13 @@ namespace lt {
                   "perform_save: and the handler is told");
 
             const SaveRequest png{ .path = "r4_no_such_dir/plot.png", .width = 420, .height = 300 };
-            const SaveResult rp = perform_save(gl, nvg, data, fs, png, &on_screen, 1, 1.0f);
+            const SaveResult rp = perform_save(dev, data, fs, png, &on_screen, 1, 1.0f);
             check(!rp.written && !rp.warning.empty() && inbox.take().size() == 1,
                   "perform_save: the same for a PNG");
         }
         {
             const SaveRequest req{ .path = "r4_empty.svg", .width = 0, .height = 300 };
-            const SaveResult r = perform_save(gl, nvg, data, fs, req, &on_screen, 1, 1.0f);
+            const SaveResult r = perform_save(dev, data, fs, req, &on_screen, 1, 1.0f);
             check(!r.written && !exists("r4_empty.svg") && inbox.take().size() == 1,
                   "perform_save: a size <= 0 is a failure, not a 0-pixel file");
         }
@@ -348,7 +348,7 @@ namespace lt {
             export_figure_svg(f3, "r4_direct3d.svg", 420, 360, {.max_splits = 1}, &direct);
             const SaveRequest req{ .path = "r4_save3d.svg", .width = 420, .height = 360,
                                    .max_splits = 1 };
-            const SaveResult r = perform_save(gl, nvg, data, f3, req, nullptr, 1, 1.0f);
+            const SaveResult r = perform_save(dev, data, f3, req, nullptr, 1, 1.0f);
             check(!direct.scene_order_exact,
                   "perform_save: (control) max_splits = 1 binds on this scene");
             check(r.written && !r.exact && r.warning == direct.warning,
@@ -359,7 +359,7 @@ namespace lt {
                   "perform_save: an inexact save is not a failure, so no \"Save failed\"");
 
             const SaveRequest roomy{ .path = "r4_save3d.svg", .width = 420, .height = 360 };
-            const SaveResult ok = perform_save(gl, nvg, data, f3, roomy, nullptr, 1, 1.0f);
+            const SaveResult ok = perform_save(dev, data, f3, roomy, nullptr, 1, 1.0f);
             check(ok.written && ok.exact, "perform_save: with the automatic bound it is exact");
         }
 

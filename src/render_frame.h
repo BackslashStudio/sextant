@@ -7,8 +7,7 @@
 #include <vector>
 
 namespace sextant {
-class GLContext;
-class NvgRenderer;
+class RenderDevice;
 class DataRenderer;
 struct FigureLayout;
 
@@ -27,14 +26,14 @@ struct AxesLayout {
 };
 
 // Renders fsnap into the currently bound framebuffer, laid out at target_w x
-// target_h logical pixels (<= 0: ctx's size). Only rasterization is scaled, by
-// `pixel_ratio` -- the display scale times the supersample factor, so not
-// necessarily whole -- and the caller must allocate the target at that scale
-// (and filter any supersampling down). `out_layout` receives one entry per
-// axes. `layout`, if given, is a precomputed layout at this size; null lays out
-// afresh.
-void render_frame(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
-                  const FigureSnapshot& fsnap, int target_w = -1, int target_h = -1,
+// target_h logical pixels (each at least 1), with `dev` on the current context.
+// Only rasterization is scaled, by `pixel_ratio` -- the display scale times the
+// supersample factor, so not necessarily whole -- and the caller must allocate
+// the target at that scale (and filter any supersampling down). `out_layout`
+// receives one entry per axes. `layout`, if given, is a precomputed layout at
+// this size; null lays out afresh.
+void render_frame(RenderDevice& dev, DataRenderer& data,
+                  const FigureSnapshot& fsnap, int target_w, int target_h,
                   float pixel_ratio = 1.0f,
                   std::vector<AxesLayout>* out_layout = nullptr,
                   const FigureLayout* layout = nullptr);

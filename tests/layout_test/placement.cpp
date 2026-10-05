@@ -481,9 +481,9 @@ namespace lt {
 
         const std::string png_path = "placement.png", svg_path = "placement.svg"; {
             GLContext ctx({.width = W, .height = H, .title = "layout_test", .visible = false});
-            NvgRenderer nvg(ctx.nvg());
+            RenderDevice dev;
             DataRenderer data;
-            export_figure_png(ctx, nvg, data, fs, png_path, W, H, 1);
+            export_figure_png(dev, data, fs, png_path, W, H, 1);
         }
         export_figure_svg(fs, svg_path, W, H);
 

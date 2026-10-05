@@ -1,8 +1,7 @@
 #include "figure_export.h"
 #include "render_frame.h"
 #include "coord_transform.h"
-#include "renderer/gl_context.h"
-#include "renderer/nvg_renderer.h"
+#include "renderer/render_device.h"
 #include "renderer/data_renderer.h"
 #include "renderer/fbo_readback.h"
 #include "renderer/figure_layout.h"
@@ -40,7 +39,7 @@ FigureLayout layout_for_export(const FigureSnapshot& fsnap, const FigureMeasure*
 }
 } // namespace
 
-RgbaImage render_figure_rgba(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
+RgbaImage render_figure_rgba(RenderDevice& dev, DataRenderer& data,
                              const FigureSnapshot& fsnap,
                              int width, int height, int supersample, int peel_layers,
                              const FigureMeasure* on_screen, float scale) {
@@ -54,18 +53,18 @@ RgbaImage render_figure_rgba(GLContext& ctx, NvgRenderer& nvg, DataRenderer& dat
     // width/height stay logical; render_frame scales the viewport and
     // read_pixels() filters back down.
     const FigureLayout layout = layout_for_export(fsnap, on_screen, width, height);
-    render_frame(ctx, nvg, data, fsnap, width, height,
+    render_frame(dev, data, fsnap, width, height,
                  scale * static_cast<float>(fbo.supersample()), nullptr, &layout);
     img.pixels = fbo.read_pixels();
     fbo.unbind();
     return img;
 }
 
-void export_figure_png(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
+void export_figure_png(RenderDevice& dev, DataRenderer& data,
                        const FigureSnapshot& fsnap, std::string_view path,
                        int width, int height, int supersample, int peel_layers,
                        const FigureMeasure* on_screen, float scale) {
-    const RgbaImage img = render_figure_rgba(ctx, nvg, data, fsnap, width, height,
+    const RgbaImage img = render_figure_rgba(dev, data, fsnap, width, height,
                                              supersample, peel_layers, on_screen, scale);
     write_png(path, img.width, img.height, img.pixels);
 }
@@ -78,7 +77,7 @@ void export_figure_svg(const FigureSnapshot& fsnap, std::string_view path,
                "write_svg");
 }
 
-SaveResult perform_save(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
+SaveResult perform_save(RenderDevice& dev, DataRenderer& data,
                         const FigureSnapshot& fsnap, const SaveRequest& req,
                         const FigureMeasure* on_screen, int supersample, float png_scale) {
     SaveResult res;
@@ -99,7 +98,7 @@ SaveResult perform_save(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
                 res.warning = report.warning;
             }
         } else if (ext == ".png" || ext == ".PNG") {
-            export_figure_png(ctx, nvg, data, fsnap, path, req.width, req.height,
+            export_figure_png(dev, data, fsnap, path, req.width, req.height,
                               supersample, req.peel_layers, on_screen, png_scale);
         } else {
             throw std::invalid_argument("'" + path + "': the file name must end in "

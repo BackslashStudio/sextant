@@ -1,4 +1,5 @@
 #pragma once
+#include "saved_target.h"
 
 namespace sextant {
 
@@ -21,7 +22,8 @@ public:
     void unbind();
 
     // Box-filter the supersampled target into color_texture(). Call after
-    // drawing, before sampling; no-op at supersample 1. Unbinds the FBO.
+    // drawing, before sampling; no-op at supersample 1. Unbinds the FBO, and
+    // leaves the caller's framebuffer and viewport as they were.
     void resolve();
 
     // Display-size color texture for ImGui::Image(); valid after resolve().
@@ -57,6 +59,9 @@ private:
     unsigned int resolve_program_ = 0;
     unsigned int resolve_vao_     = 0;
     int          resolve_loc_samples_ = -1;
+
+    // The caller's target, from bind() to unbind() (or resolve()).
+    SavedTarget  saved_;
 };
 
 } // namespace sextant

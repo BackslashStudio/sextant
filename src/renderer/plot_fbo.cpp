@@ -73,6 +73,8 @@ void PlotFbo::ensure_size(int width, int height, int supersample) {
     height = std::max(1, height);
     const int ss = std::clamp(supersample, 1, kMaxSupersample);
     if (width == width_ && height == height_ && ss == supersample_ && fbo_ != 0) return;
+    SavedTarget caller;
+    caller.save();
     destroy();
 
     width_       = width;
@@ -126,7 +128,7 @@ void PlotFbo::ensure_size(int width, int height, int supersample) {
     }
 
     glBindTexture(GL_TEXTURE_2D, 0);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    caller.restore();
 }
 
 void PlotFbo::ensure_resolve_program() {
@@ -160,12 +162,14 @@ void PlotFbo::ensure_resolve_program() {
 }
 
 void PlotFbo::resolve() {
+    saved_.restore();   // still bound: back to the caller's target first
     if (supersample_ <= 1 || resolved_fbo_ == 0) {
         // Nothing to filter.
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
         return;
     }
     ensure_resolve_program();
+    SavedTarget caller;
+    caller.save();
 
     glBindFramebuffer(GL_FRAMEBUFFER, resolved_fbo_);
     glViewport(0, 0, width_, height_);
@@ -189,10 +193,14 @@ void PlotFbo::resolve() {
     glBindVertexArray(0);
     glBindTexture(GL_TEXTURE_2D, 0);
     glUseProgram(0);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    caller.restore();
 }
 
-void PlotFbo::bind()   { glBindFramebuffer(GL_FRAMEBUFFER, fbo_); }
-void PlotFbo::unbind() { glBindFramebuffer(GL_FRAMEBUFFER, 0); }
+void PlotFbo::bind() {
+    if (!saved_.held) saved_.save();
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo_);
+}
+
+void PlotFbo::unbind() { saved_.restore(); }
 
 } // namespace sextant

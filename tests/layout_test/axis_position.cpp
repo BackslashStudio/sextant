@@ -227,13 +227,13 @@ namespace lt {
 
         {
             GLContext ctx({.width = W, .height = H, .title = "layout_test", .visible = false});
-            NvgRenderer nvg(ctx.nvg());
+            RenderDevice dev;
             DataRenderer data;
             unsigned long long gen = 0;
             for (auto [name, st]: {std::pair{"ax_mid", mid_st}, std::pair{"ax_box", box_st}}) {
                 FigureSnapshot fs = one_axes(st);
                 fs.generation = fs.data_generation = ++gen;
-                export_figure_png(ctx, nvg, data, fs, std::string(name) + ".png", W, H, 1);
+                export_figure_png(dev, data, fs, std::string(name) + ".png", W, H, 1);
                 export_figure_svg(fs, std::string(name) + ".svg", W, H);
             }
         }

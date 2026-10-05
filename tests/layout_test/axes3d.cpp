@@ -551,9 +551,9 @@ namespace lt {
                     .width = W, .height = H,
                     .title = "layout_test", .visible = false
                 });
-                NvgRenderer nvg(ctx.nvg());
+                RenderDevice dev;
                 DataRenderer data;
-                export_figure_png(ctx, nvg, data, fs, stem + ".png", W, H, 1);
+                export_figure_png(dev, data, fs, stem + ".png", W, H, 1);
             }
             export_figure_svg(fs, stem + ".svg", W, H);
         };

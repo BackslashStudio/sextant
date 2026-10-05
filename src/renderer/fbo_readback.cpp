@@ -11,6 +11,8 @@ FboReadback::FboReadback(int width, int height, int supersample)
     , supersample_(std::clamp(supersample, 1, kMaxSupersample))
 {
     const int rw = render_width(), rh = render_height();
+    SavedTarget caller;
+    caller.save();
 
     glGenFramebuffers(1, &fbo_);
     glBindFramebuffer(GL_FRAMEBUFFER, fbo_);
@@ -27,10 +29,10 @@ FboReadback::FboReadback(int width, int height, int supersample)
     glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
                               GL_RENDERBUFFER, depth_rb_);
 
-    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+    const bool complete = glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+    caller.restore();
+    if (!complete)
         throw std::runtime_error("FboReadback: framebuffer incomplete");
-
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
 FboReadback::~FboReadback() {
@@ -40,11 +42,12 @@ FboReadback::~FboReadback() {
 }
 
 void FboReadback::bind() {
+    if (!saved_.held) saved_.save();
     glBindFramebuffer(GL_FRAMEBUFFER, fbo_);
 }
 
 void FboReadback::unbind() {
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    saved_.restore();
 }
 
 std::vector<uint8_t> FboReadback::read_pixels() const {

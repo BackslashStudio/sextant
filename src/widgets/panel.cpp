@@ -14,7 +14,7 @@
 #include "../window_link.h"
 #include "../plot_data_view.h"
 #include "../renderer/gl_context.h"
-#include "../renderer/nvg_renderer.h"
+#include "../renderer/render_device.h"
 #include "../renderer/data_renderer.h"
 #include "../renderer/figure_layout.h"
 #include "../renderer/plot_fbo.h"
@@ -354,9 +354,9 @@ void report_plot_events(PlotViewState& pv, const FigureSnapshot& fsnap,
 // via ImGui::Image(), making the plot a resizable dock panel.
 // Draws into the current window (the shell opens "Plot"); `pv` is this view's
 // own state.
-void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
+void draw_plot_panel(RenderDevice& dev, DataRenderer& data,
                      PlotFbo& plot_fbo, FigureContext& fig, PlotViewState& pv,
-                     int supersample) {
+                     float display_scale, int supersample) {
     const FigureSnapshot& fsnap = fig.snap;
     FigureEditBox& edit_box = fig.edits;
 
@@ -367,7 +367,7 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
     // and only the sharpness changes. `to_plot` takes ImGui units to plot ones.
     const ImVec2 avail = ImGui::GetContentRegionAvail();
     const float fb_scale = ImGui::GetIO().DisplayFramebufferScale.x;
-    const float display_scale = std::max(ctx.link().content_scale(), 0.01f);
+    display_scale = std::max(display_scale, 0.01f);
     const float to_plot = fb_scale / display_scale;
     const int fb_w = std::max(1, static_cast<int>(avail.x * fb_scale));
     const int fb_h = std::max(1, static_cast<int>(avail.y * fb_scale));
@@ -388,7 +388,7 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
 
     std::vector<AxesLayout> layout;
     plot_fbo.bind();
-    render_frame(ctx, nvg, data, fsnap, render_w, render_h,
+    render_frame(dev, data, fsnap, render_w, render_h,
                  pixel_ratio, &layout, &fl);
     plot_fbo.unbind();
 
@@ -506,9 +506,10 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
             if (hint) {
                 plot_fbo.bind();
                 glViewport(0, 0, plot_fbo.render_width(), plot_fbo.render_height());
-                ctx.begin_nvg_frame(render_w, render_h, pixel_ratio);
-                nvg.draw_hint(render_w, render_h, hint->anchor_x, hint->anchor_y, hint->text);
-                ctx.end_nvg_frame();
+                dev.begin_nvg_frame(render_w, render_h, pixel_ratio);
+                dev.renderer().draw_hint(render_w, render_h, hint->anchor_x, hint->anchor_y,
+                                         hint->text);
+                dev.end_nvg_frame();
                 plot_fbo.unbind();
             }
         }
@@ -2002,7 +2003,7 @@ std::optional<ResizeRequest> draw_resize_dialog(FigureContext& ctx, ResizeDialog
     return req;
 }
 
-void draw_widget_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
+void draw_widget_panel(GLContext& ctx, RenderDevice& dev, DataRenderer& data,
                        PlotFbo& plot_fbo, const FigureSnapshot& fsnap,
                        const FigureOptions& opts,
                        FigureEditBox& edit_box, PanelState& st)
@@ -2026,7 +2027,8 @@ void draw_widget_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
     ImGui::Begin("Plot", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
     ImGui::PopStyleVar();
     push_figure_id(fig.figure_id);
-    draw_plot_panel(ctx, nvg, data, plot_fbo, fig, st.plot, opts.supersample);
+    draw_plot_panel(dev, data, plot_fbo, fig, st.plot, ctx.link().content_scale(),
+                    opts.supersample);
     ImGui::PopID();
     ImGui::End();
     if (st.shell.cosmetic_visible) {
@@ -2096,7 +2098,7 @@ void draw_widget_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
     // default), not the display's: a file is the same on every machine.
     if (save) {
         const auto on_screen = on_screen_measure(&st.plot, fsnap);
-        const SaveResult r = perform_save(ctx, nvg, data, fsnap, *save, on_screen.get(),
+        const SaveResult r = perform_save(dev, data, fsnap, *save, on_screen.get(),
                                           opts.supersample, opts.dpi / 96.0f);
         if (!r.written || !r.exact) {
             st.save.warning = r.warning;

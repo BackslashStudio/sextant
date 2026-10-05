@@ -5,18 +5,17 @@
 #include <string_view>
 
 namespace sextant {
-class GLContext;
-class NvgRenderer;
+class RenderDevice;
 class DataRenderer;
 struct FigureMeasure;
 
-// Renders fsnap into its own FboReadback and returns the pixels, using the
-// current GL context (safe mid-frame in a live window; never touches the default
-// framebuffer). `supersample` matches on-screen antialiasing. `peel_layers`
-// (0 = unchanged) is restored afterwards, since `data` may be the window's.
-// `scale` (dpi / 96) multiplies the output pixels, not the layout: the image is
-// round(width * scale) x round(height * scale).
-RgbaImage render_figure_rgba(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
+// Renders fsnap into its own FboReadback and returns the pixels, with `dev` on
+// the current GL context (safe mid-frame in a live window; leaves the bound
+// framebuffer and viewport as they were). `supersample` matches on-screen
+// antialiasing. `peel_layers` (0 = unchanged) is restored afterwards, since
+// `data` may be the window's. `scale` (dpi / 96) multiplies the output pixels,
+// not the layout: the image is round(width * scale) x round(height * scale).
+RgbaImage render_figure_rgba(RenderDevice& dev, DataRenderer& data,
                              const FigureSnapshot& fsnap,
                              int width, int height, int supersample = 1,
                              int peel_layers = 0,
@@ -24,7 +23,7 @@ RgbaImage render_figure_rgba(GLContext& ctx, NvgRenderer& nvg, DataRenderer& dat
                              float scale = 1.0f);
 
 // render_figure_rgba() encoded as PNG and written to `path`.
-void export_figure_png(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
+void export_figure_png(RenderDevice& dev, DataRenderer& data,
                        const FigureSnapshot& fsnap, std::string_view path,
                        int width, int height, int supersample = 1,
                        int peel_layers = 0,
@@ -71,7 +70,7 @@ struct SaveResult {
 // window frame may): a failure comes back as written = false and also goes to
 // the message handler as "Save failed: ...". A PNG is `png_scale` (dpi / 96)
 // times the figure size, at `supersample`.
-SaveResult perform_save(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
+SaveResult perform_save(RenderDevice& dev, DataRenderer& data,
                         const FigureSnapshot& fsnap, const SaveRequest& req,
                         const FigureMeasure* on_screen, int supersample, float png_scale);
 

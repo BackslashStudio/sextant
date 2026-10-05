@@ -183,6 +183,7 @@ namespace sextant {
     // Heatmap contours with inline labels (in NanoVG because labels are text).
     // Called first in pass 3: above the data, below the furniture.
     void NvgRenderer::draw_contours(const CellLayout& cell, const RenderSnapshot& snap,
+                                    ContourCache& cache,
                                     unsigned long long data_generation, int axes_index) {
         bool any = false;
         for (const auto& hp: snap.heatmaps)
@@ -200,8 +201,8 @@ namespace sextant {
             const auto& hp = snap.heatmaps[i];
             if (hp.opts.contours.empty() || hp.rows <= 0 || hp.cols <= 0) continue;
 
-            const ContourSet& set = contour_cache_.get(axes_index, -1, static_cast<int>(i),
-                                                       data_generation, hp);
+            const ContourSet& set = cache.get(axes_index, -1, static_cast<int>(i),
+                                              data_generation, hp);
             const ContourDraw d = plan_contours(set, cell.tr, hp.opts,
                                                 snap.axes_style.font_path);
             stroke_contours(d, hp.opts.contour_color, hp.opts.contour_linewidth,
@@ -245,11 +246,12 @@ namespace sextant {
     // Plane contours, drawn in pass 3 as annotation (fixed size, not occluded),
     // clipped to the cell frame. Already in pixels.
     void NvgRenderer::draw_contours3d(const CellLayout& cell, const RenderSnapshot3D& snap,
+                                      ContourCache& cache,
                                       unsigned long long data_generation, int axes_index) {
         if (!cell.box3d) return;
         const std::vector<PlaneContourDraw> plans =
                 plan_plane_contours(cell.box3d->proj, snap.planes, snap.axes_style.font_path,
-                                    &contour_cache_, data_generation, axes_index);
+                                    &cache, data_generation, axes_index);
         if (plans.empty()) return;
 
         const PlotRect& r = cell.frame;

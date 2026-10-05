@@ -210,9 +210,9 @@ namespace lt {
                     .width = W, .height = H,
                     .title = "layout_test", .visible = false
                 });
-                sextant::NvgRenderer nvg(ctx.nvg());
+                sextant::RenderDevice dev;
                 sextant::DataRenderer data;
-                sextant::export_figure_png(ctx, nvg, data, fs, stem + ".png", W, H, 1);
+                sextant::export_figure_png(dev, data, fs, stem + ".png", W, H, 1);
             }
             sextant::export_figure_svg(fs, stem + ".svg", W, H);
         };

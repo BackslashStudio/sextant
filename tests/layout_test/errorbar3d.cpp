@@ -393,9 +393,9 @@ namespace lt {
         };
         auto render = [&](const FigureSnapshot& fs, const std::string& stem) {
             GLContext ctx({.width = W, .height = H, .title = "layout_test", .visible = false});
-            NvgRenderer nvg(ctx.nvg());
+            RenderDevice dev;
             DataRenderer data_r;
-            export_figure_png(ctx, nvg, data_r, fs, stem + ".png", W, H, 1);
+            export_figure_png(dev, data_r, fs, stem + ".png", W, H, 1);
         };
         auto green = [](const unsigned char* p) {
             return p[1] > 110 && p[0] < 60 && p[2] < 60;

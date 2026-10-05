@@ -150,7 +150,8 @@ namespace lt {
             .width = 400, .height = 300,
             .title = "layout_test", .visible = false
         });
-        NVGcontext* vg = ctx.nvg();
+        sextant::RenderDevice dev;   // NanoVG, on ctx
+        NVGcontext* vg = dev.nvg();
         if (!vg) {
             std::printf("FATAL: no NanoVG context\n");
             ++g_failures;

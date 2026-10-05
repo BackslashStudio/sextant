@@ -198,6 +198,11 @@ int main() {
     test_perform_save();
     test_dialogs_drawn();
 
+    // render_device.cpp
+    test_render_device_host_context();
+    test_render_device_two_figures();
+    test_render_device_caller_target();
+
     // cell_shading.cpp
     test_cell_shading_ramp();
     test_cell_shading_range();

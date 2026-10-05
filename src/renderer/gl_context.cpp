@@ -3,31 +3,16 @@
 #include <glad/glad.h>
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
-// NANOVG_GL3_IMPLEMENTATION must be defined in exactly one TU — here.
-#define NANOVG_GL3_IMPLEMENTATION
-#include "nanovg_gl.h"
+#include "render_device.h"
 #include "../platform/platform.h"
 #include "../messages.h"
 #include <atomic>
 #include <cstdio>
-#include <mutex>
 #include <string>
 #include <stdexcept>
 
 namespace sextant {
     namespace {
-        // GLAD's table is process-wide, so it is loaded once and never again:
-        // reloading would rewrite it under other rendering threads. On the one
-        // platform that has both loaders they answer with the same entry points
-        // -- GLFW's own goes to the same framework the offscreen path dlsym()s
-        // -- so whichever context comes first is the one that loads it.
-        bool ensure_glad(GLADloadproc loader) {
-            static std::once_flag once;
-            static bool ok = false;
-            std::call_once(once, [loader] { ok = gladLoadGLLoader(loader) != 0; });
-            return ok;
-        }
-
         // Once per process. Not std::call_once: that would hold every other
         // thread wanting this message until the handler returns.
         void warn_no_offscreen(const std::string& why) {
@@ -90,25 +75,19 @@ namespace sextant {
             glfwSwapInterval(opts.vsync ? 1 : 0);
         }
 
-        if (!ensure_glad(offscreen_
-                             ? reinterpret_cast<GLADloadproc>(&platform::offscreen_gl_proc_address)
-                             : reinterpret_cast<GLADloadproc>(glfwGetProcAddress))) {
+        // GLAD's table is process-wide and loaded once (load_gl()). On the one
+        // platform that has both loaders they answer with the same entry points
+        // -- GLFW's own goes to the same framework the offscreen path dlsym()s
+        // -- so whichever context comes first is the one that loads it.
+        if (!load_gl(offscreen_
+                         ? reinterpret_cast<GLLoadProc>(&platform::offscreen_gl_proc_address)
+                         : reinterpret_cast<GLLoadProc>(glfwGetProcAddress))) {
             release_target();
             throw std::runtime_error("gladLoadGLLoader failed");
-        }
-
-        nvg_ = nvgCreateGL3(NVG_ANTIALIAS | NVG_STENCIL_STROKES);
-        if (!nvg_) {
-            release_target();
-            throw std::runtime_error("nvgCreateGL3 failed");
         }
     }
 
     GLContext::~GLContext() {
-        if (nvg_) {
-            nvgDeleteGL3(nvg_);
-            nvg_ = nullptr;
-        }
         release_target();
         // Usually the last reference: the link's cursors are freed with it, and
         // those are GLFW calls.
@@ -158,15 +137,5 @@ namespace sextant {
     void GLContext::make_current() {
         if (offscreen_) platform::make_offscreen_gl_current(offscreen_);
         else glfwMakeContextCurrent(window_);
-    }
-
-    void GLContext::begin_nvg_frame(int w, int h, float pixel_ratio) const {
-        const float fw = w > 0 ? static_cast<float>(w) : static_cast<float>(width());
-        const float fh = h > 0 ? static_cast<float>(h) : static_cast<float>(height());
-        nvgBeginFrame(nvg_, fw, fh, pixel_ratio > 0.0f ? pixel_ratio : 1.0f);
-    }
-
-    void GLContext::end_nvg_frame() const {
-        nvgEndFrame(nvg_);
     }
 } // namespace sextant

@@ -241,9 +241,9 @@ namespace lt {
                     .width = W, .height = H,
                     .title = "layout_test", .visible = false
                 });
-                NvgRenderer nvg(ctx.nvg());
+                RenderDevice dev;
                 DataRenderer data_r;
-                export_figure_png(ctx, nvg, data_r, fs, stem + ".png", W, H, 1);
+                export_figure_png(dev, data_r, fs, stem + ".png", W, H, 1);
             }
             export_figure_svg(fs, stem + ".svg", W, H);
         };
@@ -446,7 +446,7 @@ namespace lt {
                     .width = W, .height = H,
                     .title = "layout_test", .visible = false
                 });
-                NvgRenderer nvg(ctx.nvg());
+                RenderDevice dev;
                 DataRenderer data_r;
 
                 FigureSnapshot fs = bare(Projection::Orthographic);
@@ -464,7 +464,7 @@ namespace lt {
                     SurfaceOptions& o = fs.axes[0].snap3d()->surfaces[0].opts;
                     o.colormap = colormap;
                     o.edges = edges;
-                    export_figure_png(ctx, nvg, data_r, fs, stem + ".png", W, H, 1);
+                    export_figure_png(dev, data_r, fs, stem + ".png", W, H, 1);
                 };
                 frame(false, true, "surface_toggle_a"); // the wireframe, as a baseline
                 frame(false, false, "surface_toggle_b"); // off
@@ -483,7 +483,7 @@ namespace lt {
                     .width = W, .height = H,
                     .title = "layout_test", .visible = false
                 });
-                NvgRenderer nvg(ctx.nvg());
+                RenderDevice dev;
                 DataRenderer data_r;
 
                 FigureSnapshot fs = bare(Projection::Orthographic);
@@ -502,7 +502,7 @@ namespace lt {
                     Bar3DOptions& o = fs.axes[0].snap3d()->bars3d[0].opts;
                     o.shading = shading;
                     o.edges = edges;
-                    export_figure_png(ctx, nvg, data_r, fs, stem + ".png", W, H, 1);
+                    export_figure_png(dev, data_r, fs, stem + ".png", W, H, 1);
                 };
                 frame(0.5f, true, "bar3d_toggle_a");
                 frame(0.5f, false, "bar3d_toggle_b");

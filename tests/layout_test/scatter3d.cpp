@@ -189,9 +189,9 @@ namespace lt {
                 .width = W, .height = H,
                 .title = "layout_test", .visible = false
             });
-            NvgRenderer nvg(ctx.nvg());
+            RenderDevice dev;
             DataRenderer data_r;
-            export_figure_png(ctx, nvg, data_r, fs, stem + ".png", W, H, 1);
+            export_figure_png(dev, data_r, fs, stem + ".png", W, H, 1);
         };
 
         // A square marker fills its quad, so its drawn width is `size`.

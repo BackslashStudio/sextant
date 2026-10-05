@@ -1,6 +1,7 @@
 #pragma once
 #include <vector>
 #include <cstdint>
+#include "saved_target.h"
 
 namespace sextant {
 
@@ -36,6 +37,7 @@ private:
     unsigned int fbo_      = 0;
     unsigned int color_rb_ = 0;
     unsigned int depth_rb_ = 0;
+    SavedTarget  saved_;     // the caller's target, from bind() to unbind()
 };
 
 } // namespace sextant

@@ -112,9 +112,9 @@ namespace sextant {
         const std::string& font_path, ContourCache* cache,
         unsigned long long data_generation, int axes_index);
 
-    // Traced geometry kept across frames (one per window thread). Keyed on data
-    // generation plus levels, origin, grid size and extent; generation 0 never
-    // matches.
+    // Traced geometry kept across frames, one per view (DataRenderer holds it).
+    // Keyed on data generation plus levels, origin, grid size and extent;
+    // generation 0 never matches.
     class ContourCache {
     public:
         // `plane_index` is -1 for the axes' own heatmaps, else the plane's index.

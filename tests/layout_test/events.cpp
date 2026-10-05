@@ -746,7 +746,7 @@ namespace lt {
         opts.width = 800;
         opts.height = 600;
         GLContext ctx({.width = 800, .height = 600, .title = "events_panel", .visible = false});
-        NvgRenderer nvg(ctx.nvg());
+        RenderDevice dev;
         DataRenderer data;
         PlotFbo plot_fbo;
         ImGuiPanelContext imgui_ctx(ctx, opts);
@@ -767,7 +767,7 @@ namespace lt {
             ctx.link().sync_state();
             platform::GLContextLock gl_lock;
             glViewport(0, 0, ctx.width(), ctx.height());
-            draw_widget_panel(ctx, nvg, data, plot_fbo, fs, opts, edit_box, st);
+            draw_widget_panel(ctx, dev, data, plot_fbo, fs, opts, edit_box, st);
             ctx.link().service_requests();
         };
         auto drain = [&] {

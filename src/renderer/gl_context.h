@@ -5,7 +5,6 @@
 #include <string>
 
 struct GLFWwindow;
-struct NVGcontext;
 
 namespace sextant {
     struct GLContextOptions {
@@ -31,27 +30,26 @@ namespace sextant {
         bool headless = false;
     };
 
-    // The render half of one window: its GL context, GLAD's function pointers
-    // and a NanoVG context, all made and used on the thread that will draw.
-    // The window itself comes from the broker (window_broker.h), which may be a
-    // different thread entirely -- on macOS it has to be.
+    // One GL context to draw on, made current on the thread that will draw:
+    // a window's (from the broker, which may be a different thread entirely --
+    // on macOS it has to be) or, headless, the platform's own. Loads GLAD's
+    // table on first use (load_gl()). Drawing is a RenderDevice's, built on it
+    // once it is current (render_device.h).
     //
-    // A headless context has no window and no link: only nvg(), make_current(),
-    // the size and the NanoVG frame wrappers mean anything on one, which is
-    // exactly what figure_export.cpp uses.
+    // A headless context has no window and no link: only make_current() and
+    // the size mean anything on one, which is exactly what an export uses.
     class GLContext {
     public:
         explicit GLContext(GLContextOptions opts);
 
         ~GLContext();
 
-        // Non-copyable, non-movable (GLFW/NVG context is not portable)
+        // Non-copyable, non-movable (a GL context is not portable)
         GLContext(const GLContext&) = delete;
 
         GLContext& operator=(const GLContext&) = delete;
 
         GLFWwindow* window() const { return window_; }
-        NVGcontext* nvg() const { return nvg_; }
 
         // True when this context has no window behind it.
         bool is_headless() const { return offscreen_ != nullptr; }
@@ -80,13 +78,6 @@ namespace sextant {
         int width() const { return link_ ? link_->framebuffer_width() : width_; }
         int height() const { return link_ ? link_->framebuffer_height() : height_; }
 
-        // NanoVG frame wrappers. w/h (logical pixels) override this context's size
-        // for an offscreen target (<= 0: own size). pixel_ratio is the device-pixel
-        // ratio (the supersample factor), which keeps NanoVG's AA and text sharp.
-        void begin_nvg_frame(int w = 0, int h = 0, float pixel_ratio = 1.0f) const;
-
-        void end_nvg_frame() const;
-
     private:
         // Gives the window back, or unmakes the offscreen context: what the
         // destructor does, and what a failed construction undoes.
@@ -94,7 +85,6 @@ namespace sextant {
 
         GLFWwindow* window_ = nullptr;
         platform::OffscreenGL* offscreen_ = nullptr;
-        NVGcontext* nvg_ = nullptr;
         int width_ = 0;  // headless only; a window's size comes from its link
         int height_ = 0;
         // Shared with the broker, which keeps it alive until the window is

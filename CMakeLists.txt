@@ -358,10 +358,12 @@ set(SEXTANT_SOURCES
     src/key_names.cpp
     src/plot_events.cpp
     src/renderer/gl_context.cpp
+    src/renderer/render_device.cpp
     src/renderer/nvg_renderer.cpp
     src/renderer/data_renderer.cpp
     src/renderer/fbo_readback.cpp
     src/renderer/plot_fbo.cpp
+    src/renderer/saved_target.cpp
     src/renderer/figure_layout.cpp
     src/renderer/box3d.cpp
     src/renderer/bar3d.cpp
@@ -778,6 +780,7 @@ if(SEXTANT_BUILD_TESTS)
             tests/layout_test/scene3d_svg.cpp
             tests/layout_test/panel.cpp
             tests/layout_test/dialogs.cpp
+            tests/layout_test/render_device.cpp
             tests/layout_test/headless_export.cpp
             tests/layout_test/memory_export.cpp
             tests/layout_test/messages.cpp

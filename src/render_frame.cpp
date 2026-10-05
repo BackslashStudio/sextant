@@ -1,6 +1,6 @@
 #include "render_frame.h"
 #include "coord_transform.h"
-#include "renderer/gl_context.h"
+#include "renderer/render_device.h"
 #include "renderer/nvg_renderer.h"
 #include "renderer/data_renderer.h"
 #include "renderer/figure_layout.h"
@@ -14,13 +14,14 @@ namespace sextant {
 
 // Draws every axes into the current framebuffer: one glClear, one layout pass,
 // and two NanoVG frames total (the grid is looped inside each).
-void render_frame(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
+void render_frame(RenderDevice& dev, DataRenderer& data,
                   const FigureSnapshot& fsnap, int target_w, int target_h,
                   float pixel_ratio, std::vector<AxesLayout>* out_layout,
                   const FigureLayout* given)
 {
-    const int iw = target_w > 0 ? target_w : ctx.width();
-    const int ih = target_h > 0 ? target_h : ctx.height();
+    NvgRenderer& nvg = dev.renderer();
+    const int iw = std::max(1, target_w);
+    const int ih = std::max(1, target_h);
 
     // Layout stays in logical pixels; only the viewport and device-pixel ratio
     // know about the display scale and supersampling.
@@ -48,7 +49,7 @@ void render_frame(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
                                       layout.cells[i].box3d->zticks);
 
     // Pass 1 — NanoVG: backgrounds (3D: back panes and their grid).
-    ctx.begin_nvg_frame(iw, ih, ratio);
+    dev.begin_nvg_frame(iw, ih, ratio);
     for (std::size_t i = 0; i < layout.cells.size(); ++i) {
         const auto& c = layout.cells[i];
         if (const RenderSnapshot3D* s3 = fsnap.axes[i].snap3d())
@@ -56,7 +57,7 @@ void render_frame(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
         else
             nvg.draw_axes_background(c.frame);
     }
-    ctx.end_nvg_frame();
+    dev.end_nvg_frame();
 
     if (out_layout) {
         out_layout->clear();
@@ -93,13 +94,13 @@ void render_frame(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
     }
 
     // Pass 3 — NanoVG: borders, ticks, labels, legend, colorbar, suptitle.
-    ctx.begin_nvg_frame(iw, ih, ratio);
+    dev.begin_nvg_frame(iw, ih, ratio);
     for (std::size_t i = 0; i < layout.cells.size(); ++i) {
         const auto& c = layout.cells[i];
         if (const RenderSnapshot3D* s3 = fsnap.axes[i].snap3d()) {
             // Annotation is drawn in pixel space over the scene. Contours
             // first: over the scene, under the box furniture (as in SVG).
-            nvg.draw_contours3d(c, *s3, fsnap.data_generation, c.slot.index);
+            nvg.draw_contours3d(c, *s3, data.contour_cache(), fsnap.data_generation, c.slot.index);
             nvg.draw_box3d_frame(box_plans[i], *s3);
             nvg.draw_title3d(c, *s3);
             // Legend then colorbar, beside the frame, as in 2D.
@@ -111,7 +112,7 @@ void render_frame(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
         const RenderSnapshot& snap = *fsnap.axes[i].snap2d();
         // Contours first: over the data, under border/grid/ticks. Cached on
         // the data generation.
-        nvg.draw_contours(c, snap, fsnap.data_generation, c.slot.index);
+        nvg.draw_contours(c, snap, data.contour_cache(), fsnap.data_generation, c.slot.index);
         nvg.draw_axes_border(c.frame, snap.axes_style);
         nvg.draw_ticks(c, snap.axes_style, snap.grid_enabled, snap.grid_opts);
         nvg.draw_titles(c, snap);
@@ -119,7 +120,7 @@ void render_frame(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
         for (const auto& cb : c.colorbars) nvg.draw_colorbar(cb, snap.colorbar_opts);
     }
     nvg.draw_suptitle(iw, layout.suptitle_band, fsnap.suptitle, fsnap.suptitle_opts);
-    ctx.end_nvg_frame();
+    dev.end_nvg_frame();
 }
 
 } // namespace sextant

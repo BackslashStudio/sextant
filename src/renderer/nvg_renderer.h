@@ -40,12 +40,13 @@ public:
     // Positions come from compute_figure_layout() via CellLayout.
 
     // Heatmap contours with labels; call first in pass 3 (above data, below
-    // furniture). data_generation/axes_index key the ContourCache.
-    void draw_contours(const CellLayout& cell, const RenderSnapshot& snap,
+    // furniture). `cache` is the view's (DataRenderer::contour_cache()),
+    // keyed by data_generation/axes_index.
+    void draw_contours(const CellLayout& cell, const RenderSnapshot& snap, ContourCache& cache,
                        unsigned long long data_generation, int axes_index);
 
     // The same for plane heatmaps, drawn in pass 3 as annotation.
-    void draw_contours3d(const CellLayout& cell, const RenderSnapshot3D& snap,
+    void draw_contours3d(const CellLayout& cell, const RenderSnapshot3D& snap, ContourCache& cache,
                          unsigned long long data_generation, int axes_index);
 
     // Ticks, labels and (if grid_enabled) grid lines.
@@ -86,9 +87,6 @@ private:
     // Colorbar gradient images, cached by colormap and orientation (true =
     // horizontal) for the renderer's lifetime.
     std::map<std::pair<Colormap, bool>, int> colorbar_images_;
-
-    // Traced contours held across frames (see contour.h).
-    ContourCache contour_cache_;
 };
 
 } // namespace sextant

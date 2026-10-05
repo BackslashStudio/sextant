@@ -13,7 +13,7 @@
 #include "widgets/panel.h"
 #include "widgets/panel_state.h"
 #include "renderer/gl_context.h"
-#include "renderer/nvg_renderer.h"
+#include "renderer/render_device.h"
 #include "renderer/data_renderer.h"
 #include "renderer/figure_layout.h"
 #include "renderer/plot_fbo.h"
@@ -46,7 +46,7 @@ void warn_if_inexact(std::string_view path, const SvgSaveReport& r) {
 
 // Renders one frame: the plot goes into an offscreen PlotFbo sized to its dock
 // panel and is shown via ImGui::Image(); render_frame() is dock-unaware.
-void render_and_composite(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
+void render_and_composite(GLContext& ctx, RenderDevice& dev, DataRenderer& data,
                           PlotFbo& plot_fbo, const FigureSnapshot& snap,
                           const FigureOptions& opts, FigureEditBox& edit_box,
                           PanelState& panel_state)
@@ -56,7 +56,7 @@ void render_and_composite(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
     glClearColor(0.93f, 0.93f, 0.93f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
-    draw_widget_panel(ctx, nvg, data, plot_fbo, snap, opts, edit_box, panel_state);
+    draw_widget_panel(ctx, dev, data, plot_fbo, snap, opts, edit_box, panel_state);
 }
 
 } // namespace
@@ -326,9 +326,9 @@ RgbaImage Figure::Impl::render_rgba(int peel_layers, float scale, int w, int h) 
 
     GLContext    ctx({ .width=w, .height=h, .title="", .visible=false, .resizable=false,
                        .headless=true });
-    NvgRenderer  nvg(ctx.nvg());
+    RenderDevice dev;   // on ctx, current since its construction
     DataRenderer data;
-    return render_figure_rgba(ctx, nvg, data, fsnap, w, h, opts.supersample,
+    return render_figure_rgba(dev, data, fsnap, w, h, opts.supersample,
                               peel_layers, on_screen.get(), scale);
 }
 
@@ -411,12 +411,12 @@ void Figure::show(bool pause) {
 
     // render_fn captures `this`; safe because close()/~Figure() join the
     // thread first. It never touches live Axes::Impl.
-    auto render_fn = [this](GLContext& ctx, NvgRenderer& nvg, DataRenderer& data, PlotFbo& plot_fbo) {
+    auto render_fn = [this](GLContext& ctx, RenderDevice& dev, DataRenderer& data, PlotFbo& plot_fbo) {
         d->apply_panel_edits_to_snapshot();
         auto snap = d->snapshot_box.load();  // loaded ONCE, reused for both draws below
         // Panel edits pushed this frame record this snapshot's stamps.
         d->edit_box.set_drawn(snap);
-        render_and_composite(ctx, nvg, data, plot_fbo, *snap, d->opts, d->edit_box, d->panel_state);
+        render_and_composite(ctx, dev, data, plot_fbo, *snap, d->opts, d->edit_box, d->panel_state);
     };
 
     auto wt = std::make_unique<WindowThread>(
