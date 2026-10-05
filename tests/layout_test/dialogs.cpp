@@ -22,9 +22,9 @@ namespace lt {
             return fs;
         }
 
-        void set_live(PlotViewState& pv, int w, int h) {
-            pv.live_plot_w.store(w);
-            pv.live_plot_h.store(h);
+        void set_live(PlotViewInfo& pv, int w, int h) {
+            pv.plot_w = w;
+            pv.plot_h = h;
         }
 
         int rounded(float v) { return static_cast<int>(std::lround(v)); }
@@ -93,7 +93,7 @@ namespace lt {
         Selection sel;
         SlotViewState sv;
         FigureEditBox box;
-        PlotViewState pv;
+        PlotViewInfo pv;
         set_live(pv, 640, 480);
         FigureContext ctx{ fs, box, sel, sv, &pv, 1 };
         const FigureMeasure fresh = measure_figure(fs);
@@ -156,15 +156,17 @@ namespace lt {
         {
             FigureSnapshot titled = fs;
             titled.axes[0].snap2d()->title = "Titled";
-            PlotViewState stored;
+            PlotViewState fitted;
+            (void)fitted.layout.fit(titled, 640, 480);
+            PlotViewInfo stored;
             set_live(stored, 640, 480);
-            (void)stored.layout.fit(titled, 640, 480);
+            stored.measure = fitted.layout.load();
             FigureContext sctx{ fs, box, sel, sv, &stored, 1 };
             SaveDialogState st;
             st.size_mode = SaveDialogState::SizeMode::PlotFrame;
             st.width = 300;
             st.height = 200;
-            const auto m = stored.layout.load();
+            const auto m = stored.measure;
             const LayoutSize want = m ? figure_size_for_frame(fs, *m, 1, 300.0f, 200.0f)
                                       : LayoutSize{};
             const LayoutSize afresh = figure_size_for_frame(fs, fresh, 1, 300.0f, 200.0f);
@@ -189,7 +191,7 @@ namespace lt {
             check(r && r->width == 500 && r->height == 400,
                   "save request: but an entered figure size needs no view");
 
-            PlotViewState unseen;   // before its first frame
+            PlotViewInfo unseen;    // before its first frame
             FigureContext early{ fs, box, sel, sv, &unseen, 1 };
             check(!resolve_save_request(SaveDialogState{}, early),
                   "save request: before the view's first frame, an empty size is no request");
@@ -426,7 +428,7 @@ namespace lt {
             io.Fonts->AddFontDefault();
 
             PanelState st;
-            set_live(st.plot, 640, 480);
+            set_live(st.plot_info, 640, 480);
             FigureEditBox box;
             FigureContext ctx = panel_ctx(fs, box, st);
             open_save_dialog(st.save, ctx);

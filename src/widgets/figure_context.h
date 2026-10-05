@@ -17,10 +17,10 @@ namespace sextant {
         Selection&            selection;
         // Shared per figure; reach it through slot_view(), never directly.
         SlotViewState&        slot_view_state;
-        // The plot view showing this figure, for what only a drawn frame knows
-        // (resolved auto limits, the live plot size); null when none is on
-        // screen. R6 replaces it with the plot view's PlotViewInfo.
-        const PlotViewState*  view;
+        // What the plot view showing this figure returned from its last frame
+        // (resolved auto limits, the live plot size, its measurements); null
+        // when none is on screen.
+        const PlotViewInfo*   view;
         // For ImGui::PushID around each window's contents, so two figures'
         // widgets never share ids. Pushed as an int: a process-wide counter.
         std::uint64_t         figure_id;

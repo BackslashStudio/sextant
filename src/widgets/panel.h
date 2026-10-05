@@ -6,8 +6,7 @@
 namespace sextant {
     class GLContext;
     class RenderDevice;
-    class DataRenderer;
-    class PlotFbo;
+    class PlotView;
     struct FigureSnapshot;
     struct FigureOptions;
     class FigureEditBox;
@@ -23,13 +22,11 @@ namespace sextant {
     struct GridTracks;
     struct PlotPointer;
 
-    // One full ImGui frame of the docked layout: renders the plot into plot_fbo at
-    // the Plot panel's size, shows it via ImGui::Image(), then draws the side
-    // panels. The live window's only per-frame entry point; call on the GL/ImGui
-    // thread before swap_buffers().
-    void draw_widget_panel(GLContext& ctx, RenderDevice& dev, DataRenderer& data,
-                           PlotFbo& plot_fbo, const FigureSnapshot& fsnap,
-                           const FigureOptions& opts,
+    // One full ImGui frame of the docked layout: the plot view in the Plot panel
+    // at its size, then the side panels. The live window's only per-frame entry
+    // point; call on the GL/ImGui thread before swap_buffers().
+    void draw_widget_panel(GLContext& ctx, RenderDevice& dev, PlotView& view,
+                           const FigureSnapshot& fsnap, const FigureOptions& opts,
                            FigureEditBox& edit_box, PanelState& state);
 
     // The Cosmetic inspector's contents, into the caller's current window (the

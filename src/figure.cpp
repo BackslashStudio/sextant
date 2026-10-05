@@ -16,7 +16,7 @@
 #include "renderer/render_device.h"
 #include "renderer/data_renderer.h"
 #include "renderer/figure_layout.h"
-#include "renderer/plot_fbo.h"
+#include "widgets/plot_view.h"
 #include "platform/platform.h"
 #include "messages.h"
 #include "output/file_write.h"
@@ -44,10 +44,10 @@ void warn_if_inexact(std::string_view path, const SvgSaveReport& r) {
     emit_message(std::string(path) + ": " + r.warning);
 }
 
-// Renders one frame: the plot goes into an offscreen PlotFbo sized to its dock
-// panel and is shown via ImGui::Image(); render_frame() is dock-unaware.
-void render_and_composite(GLContext& ctx, RenderDevice& dev, DataRenderer& data,
-                          PlotFbo& plot_fbo, const FigureSnapshot& snap,
+// Renders one frame: the plot view renders into its offscreen target, sized to
+// its dock panel, and shows it via ImGui::Image(); render_frame() is dock-unaware.
+void render_and_composite(GLContext& ctx, RenderDevice& dev, PlotView& view,
+                          const FigureSnapshot& snap,
                           const FigureOptions& opts, FigureEditBox& edit_box,
                           PanelState& panel_state)
 {
@@ -56,7 +56,7 @@ void render_and_composite(GLContext& ctx, RenderDevice& dev, DataRenderer& data,
     glClearColor(0.93f, 0.93f, 0.93f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
-    draw_widget_panel(ctx, dev, data, plot_fbo, snap, opts, edit_box, panel_state);
+    draw_widget_panel(ctx, dev, view, snap, opts, edit_box, panel_state);
 }
 
 } // namespace
@@ -411,12 +411,12 @@ void Figure::show(bool pause) {
 
     // render_fn captures `this`; safe because close()/~Figure() join the
     // thread first. It never touches live Axes::Impl.
-    auto render_fn = [this](GLContext& ctx, RenderDevice& dev, DataRenderer& data, PlotFbo& plot_fbo) {
+    auto render_fn = [this](GLContext& ctx, RenderDevice& dev, PlotView& view) {
         d->apply_panel_edits_to_snapshot();
         auto snap = d->snapshot_box.load();  // loaded ONCE, reused for both draws below
         // Panel edits pushed this frame record this snapshot's stamps.
         d->edit_box.set_drawn(snap);
-        render_and_composite(ctx, dev, data, plot_fbo, *snap, d->opts, d->edit_box, d->panel_state);
+        render_and_composite(ctx, dev, view, *snap, d->opts, d->edit_box, d->panel_state);
     };
 
     auto wt = std::make_unique<WindowThread>(

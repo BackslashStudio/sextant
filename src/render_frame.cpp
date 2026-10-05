@@ -12,6 +12,16 @@
 
 namespace sextant {
 
+std::vector<AxesLayout> axes_layouts(const FigureLayout& layout) {
+    std::vector<AxesLayout> out;
+    out.reserve(layout.cells.size());
+    for (const auto& c : layout.cells)
+        out.push_back({ c.slot, c.tr,
+                        c.box3d ? std::optional<Projector3D>(c.box3d->proj) : std::nullopt,
+                        c.cell });
+    return out;
+}
+
 // Draws every axes into the current framebuffer: one glClear, one layout pass,
 // and two NanoVG frames total (the grid is looped inside each).
 void render_frame(RenderDevice& dev, DataRenderer& data,
@@ -59,15 +69,7 @@ void render_frame(RenderDevice& dev, DataRenderer& data,
     }
     dev.end_nvg_frame();
 
-    if (out_layout) {
-        out_layout->clear();
-        out_layout->reserve(layout.cells.size());
-        for (const auto& c : layout.cells)
-            out_layout->push_back({ c.slot, c.tr,
-                                    c.box3d ? std::optional<Projector3D>(c.box3d->proj)
-                                            : std::nullopt,
-                                    c.cell });
-    }
+    if (out_layout) *out_layout = axes_layouts(layout);
 
     // Pass 2 — GLSL data. 2D: fixed back-to-front order; 3D: depth-tested scene.
     for (std::size_t i = 0; i < layout.cells.size(); ++i) {

@@ -136,10 +136,10 @@ namespace lt {
         }
 
         // Limit fields show the resolved limits for axes on auto (the declared
-        // ones stay 0..1). draw_plot_panel() stores them in PanelState; filled by
+        // ones stay 0..1), read from the plot view's PlotViewInfo; filled by
         // hand here since no frame runs.
-        st.plot.resolved.clear();
-        st.plot.resolved.push_back({1, true, 400.0, 600.0, -1.5, 1.5, 0.0, 21.0});
+        st.plot_info.resolved.clear();
+        st.plot_info.resolved.push_back({1, true, 400.0, 600.0, -1.5, 1.5, 0.0, 21.0});
         // Force a re-seed, as a slot change would.
         st.cosmetic.synced_generation = st.slot_view.synced_generation = kNeverSynced;
         for (int f = 0; f < 2; ++f) {

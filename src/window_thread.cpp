@@ -1,6 +1,7 @@
 #include "window_thread.h"
 #include "figure_export.h"
 #include "widgets/imgui_context.h"
+#include "widgets/plot_view.h"
 #include "window_broker.h"
 #include "platform/platform.h"
 #include <chrono>
@@ -146,8 +147,7 @@ namespace sextant {
         // Drawing, on this thread's context (current since its construction);
         // destroyed before it, in reverse order.
         RenderDevice dev;
-        DataRenderer data;
-        PlotFbo plot_fbo; // lazily sized by render_fn_ on first use
+        PlotView view;
 
         // Exports get their own DataRenderer (built on first use), so a different
         // export size doesn't invalidate the window's caches.
@@ -200,7 +200,7 @@ namespace sextant {
 
             // Time render work only; swap_buffers() blocks on vsync.
             const auto t0 = std::chrono::steady_clock::now();
-            render_fn_(ctx, dev, data, plot_fbo);
+            render_fn_(ctx, dev, view);
             const double ms = std::chrono::duration<double, std::milli>(
                 std::chrono::steady_clock::now() - t0).count();
 

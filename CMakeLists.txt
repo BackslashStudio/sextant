@@ -380,6 +380,7 @@ set(SEXTANT_SOURCES
     src/widgets/imgui_context.cpp
     src/widgets/imgui_impl_sextant.cpp
     src/widgets/panel.cpp
+    src/widgets/plot_view.cpp
     src/widgets/data_panel.cpp
 )
 
@@ -781,6 +782,7 @@ if(SEXTANT_BUILD_TESTS)
             tests/layout_test/panel.cpp
             tests/layout_test/dialogs.cpp
             tests/layout_test/render_device.cpp
+            tests/layout_test/plot_view.cpp
             tests/layout_test/headless_export.cpp
             tests/layout_test/memory_export.cpp
             tests/layout_test/messages.cpp

@@ -8,7 +8,6 @@
 #include "key_names.h"
 #include "window_link.h"
 #include "platform/platform.h"
-#include "renderer/plot_fbo.h"
 #include "widgets/imgui_context.h"
 #include <GLFW/glfw3.h>
 
@@ -747,8 +746,7 @@ namespace lt {
         opts.height = 600;
         GLContext ctx({.width = 800, .height = 600, .title = "events_panel", .visible = false});
         RenderDevice dev;
-        DataRenderer data;
-        PlotFbo plot_fbo;
+        PlotView view;
         ImGuiPanelContext imgui_ctx(ctx, opts);
 
         FigureSnapshot fs = one_line_snapshot({0.0, 1.0, 2.0}, {0.0, 1.0, 4.0});
@@ -767,7 +765,7 @@ namespace lt {
             ctx.link().sync_state();
             platform::GLContextLock gl_lock;
             glViewport(0, 0, ctx.width(), ctx.height());
-            draw_widget_panel(ctx, dev, data, plot_fbo, fs, opts, edit_box, st);
+            draw_widget_panel(ctx, dev, view, fs, opts, edit_box, st);
             ctx.link().service_requests();
         };
         auto drain = [&] {

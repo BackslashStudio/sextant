@@ -34,6 +34,7 @@
 #include <imgui_internal.h>   // ImGuiWindow, TreeNodeSetOpen, the id-conflict detector
 #include "widgets/panel_state.h"
 #include "widgets/figure_context.h"
+#include "widgets/plot_view.h"
 
 #include <sextant/sextant.h>
 
@@ -494,6 +495,13 @@ namespace lt {
     void test_render_device_two_figures();
 
     void test_render_device_caller_target();
+
+    // plot_view.cpp (GUI-kit R6)
+    void test_axes_layouts();
+
+    void test_plot_view_draw();
+
+    void test_plot_view_two_figures();
 
     // headless_export.cpp
     void test_headless_context();

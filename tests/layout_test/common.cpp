@@ -233,7 +233,7 @@ namespace lt {
 namespace lt {
     sextant::FigureContext panel_ctx(const sextant::FigureSnapshot& fs, sextant::FigureEditBox& box,
                                      sextant::PanelState& st) {
-        return { fs, box, st.selection, st.slot_view, &st.plot, st.figure_id };
+        return { fs, box, st.selection, st.slot_view, &st.plot_info, st.figure_id };
     }
 
     void draw_cosmetic_window(const sextant::FigureSnapshot& fs, sextant::FigureEditBox& box,

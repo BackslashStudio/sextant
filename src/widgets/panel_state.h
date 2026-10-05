@@ -9,6 +9,7 @@
 #include "../renderer/figure_layout.h"
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -150,19 +151,34 @@ namespace sextant {
         std::atomic<int> live_plot_fb_h{0};
 
         // The window's stored layout. fit() is render-thread only; load() is read
-        // from any thread (savefig(), size_for_frame()) and by all panels.
+        // from any thread (savefig(), size_for_frame()); the panels read it
+        // through PlotViewInfo::measure.
         LayoutStore layout;
+    };
 
-        // What each slot's auto limits resolved to in the last drawn frame (the
-        // snapshot only has the declared limits). Stored by draw_plot_panel().
-        struct ResolvedLimits {
-            int slot = 0;
-            bool is_3d = false;
-            double xmin = 0.0, xmax = 1.0;
-            double ymin = 0.0, ymax = 1.0;
-            double zmin = 0.0, zmax = 1.0; // 3D only
-        };
+    // What one slot's auto limits resolved to in a drawn frame (the snapshot only
+    // has the declared limits).
+    struct ResolvedLimits {
+        int slot = 0;
+        bool is_3d = false;
+        double xmin = 0.0, xmax = 1.0;
+        double ymin = 0.0, ymax = 1.0;
+        double zmin = 0.0, zmax = 1.0; // 3D only
+    };
 
+    // What the plot view learned drawing a frame, returned by PlotView::draw()
+    // (GUI-kit R6) and read by the other components through FigureContext::view:
+    // only a drawn frame knows the live size and the resolved auto limits.
+    struct PlotViewInfo {
+        // The plot's laid-out size in logical pixels; 0 before the first frame.
+        int plot_w = 0;
+        int plot_h = 0;
+
+        // The view's stored measurements (PlotViewState::layout); null before
+        // its first fit.
+        std::shared_ptr<const FigureMeasure> measure;
+
+        // One per slot drawn.
         std::vector<ResolvedLimits> resolved;
 
         const ResolvedLimits* resolved_for(int slot) const {
@@ -325,6 +341,11 @@ namespace sextant {
         DataPanelState    data;
         SaveDialogState   save;
         ResizeDialogState resize;
+
+        // The plot view's output from its last frame, kept by the shell for
+        // FigureContext::view (the menu, drawn before the view, sees the
+        // previous frame's).
+        PlotViewInfo      plot_info;
 
         // The figure's id for ImGui::PushID (FigureContext::figure_id); set once
         // by Figure::Impl.

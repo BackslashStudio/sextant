@@ -203,6 +203,11 @@ int main() {
     test_render_device_two_figures();
     test_render_device_caller_target();
 
+    // plot_view.cpp
+    test_axes_layouts();
+    test_plot_view_draw();
+    test_plot_view_two_figures();
+
     // cell_shading.cpp
     test_cell_shading_ramp();
     test_cell_shading_range();
