@@ -31,7 +31,6 @@
 #include <cmath>
 #include <cstdio>
 #include <memory>
-#include <stdexcept>
 #include <string>
 
 namespace sextant {
@@ -1734,37 +1733,22 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
 
 namespace {
 
-// The main menu bar. Must run before ensure_layout()/DockSpaceOverViewport(),
-// so the dockspace sees the work area shrunk by the menu bar.
-void draw_menu_bar(const FigureSnapshot& fsnap, PanelState& st) {
+// The plot view's live size in logical pixels; 0 x 0 with none on screen.
+void live_plot_size(const FigureContext& ctx, int& w, int& h) {
+    w = ctx.view ? ctx.view->live_plot_w.load(std::memory_order_relaxed) : 0;
+    h = ctx.view ? ctx.view->live_plot_h.load(std::memory_order_relaxed) : 0;
+}
+
+// The main menu bar: shell code, over the window's own states. Must run before
+// ensure_layout()/DockSpaceOverViewport(), so the dockspace sees the work area
+// shrunk by the menu bar.
+void draw_menu_bar(const FigureContext& fig, PanelState& st) {
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("File")) {
-            if (ImGui::MenuItem("Save")) {
-                if (!st.save.open) {
-                    // Prefill with the live plot size.
-                    st.save.width  = st.plot.live_plot_w.load(std::memory_order_relaxed);
-                    st.save.height = st.plot.live_plot_h.load(std::memory_order_relaxed);
-                }
-                st.save.open = true;
-            }
-            if (ImGui::MenuItem("Resize to plot frame")) {
-                // Prefill with the selected axes' current frame.
-                if (!st.resize.open) {
-                    const int lw = st.plot.live_plot_w.load(std::memory_order_relaxed);
-                    const int lh = st.plot.live_plot_h.load(std::memory_order_relaxed);
-                    if (lw > 0 && lh > 0) {
-                        const FigureLayout fl =
-                            compute_figure_layout(fsnap, *on_screen_measure(&st.plot, fsnap), lw, lh);
-                        for (const auto& c : fl.cells) {
-                            if (c.slot.index != st.selection.slot) continue;
-                            st.resize.frame_w = static_cast<int>(std::lround(c.frame.w));
-                            st.resize.frame_h = static_cast<int>(std::lround(c.frame.h));
-                            break;
-                        }
-                    }
-                }
-                st.resize.open = true;
-            }
+            if (ImGui::MenuItem("Save"))
+                open_save_dialog(st.save, fig);
+            if (ImGui::MenuItem("Resize to plot frame"))
+                open_resize_dialog(st.resize, fig);
             // Re-measure on demand (e.g. tick labels frozen by navigation).
             if (ImGui::MenuItem("Refit layout"))
                 st.plot.layout.request_refit();
@@ -1778,7 +1762,8 @@ void draw_menu_bar(const FigureSnapshot& fsnap, PanelState& st) {
                 st.shell.focus_data_on_rebuild = st.shell.data_visible;
             ImGui::EndMenu();
         }
-        // Interaction modes: they govern the mouse over the plot.
+        // Interaction modes: they govern the mouse over the plot, so they are
+        // the plot view's own settings.
         if (ImGui::BeginMenu("Edit")) {
             ImGui::MenuItem("Navigate", nullptr, &st.plot.navigate_enabled);
             if (ImGui::IsItemHovered())
@@ -1790,11 +1775,11 @@ void draw_menu_bar(const FigureSnapshot& fsnap, PanelState& st) {
             ImGui::EndMenu();
         }
         // The subplot every panel edits (clicking a subplot also sets it).
-        if (fsnap.axes.size() > 1) {
-            int sel = st.selection.slot;
+        if (fig.snap.axes.size() > 1) {
+            int sel = fig.selection.slot;
             ImGui::SetNextItemWidth(220.0f);
-            if (axes_selector("##axessel", fsnap, sel))
-                st.selection.select(sel);
+            if (axes_selector("##axessel", fig.snap, sel))
+                fig.selection.select(sel);
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("The subplot the panels edit and Navigate moves.\n"
                                   "Clicking a subplot selects it too.");
@@ -1803,12 +1788,18 @@ void draw_menu_bar(const FigureSnapshot& fsnap, PanelState& st) {
     }
 }
 
-// Floating save dialog (NoDocking). The "Figure / Plot frame" selector is
-// shared with the Resize dialog; in PlotFrame mode the figure size is derived
-// and shown.
-void size_mode_fields(const FigureSnapshot& fsnap, PanelState& st,
-                      SaveDialogState::SizeMode& mode, int* w, int* h,
-                      const char* frame_hint) {
+// The figure size for a frame of w x h on the selected slot, with the view's
+// stored measure.
+LayoutSize figure_size_for_selected_frame(const FigureContext& ctx, int w, int h) {
+    return figure_size_for_frame(ctx.snap, *on_screen_measure(ctx.view, ctx.snap),
+                                 ctx.selection.slot,
+                                 static_cast<float>(w), static_cast<float>(h));
+}
+
+// The "Figure / Plot frame" selector and the size fields, shared by both
+// dialogs; in PlotFrame mode the figure size is derived and shown.
+void size_mode_fields(const FigureContext& ctx, SaveDialogState::SizeMode& mode,
+                      int* w, int* h, const char* frame_hint) {
     int m = (mode == SaveDialogState::SizeMode::PlotFrame) ? 1 : 0;
     if (ImGui::RadioButton("Figure", &m, 0)) mode = SaveDialogState::SizeMode::Figure;
     ImGui::SameLine();
@@ -1819,23 +1810,20 @@ void size_mode_fields(const FigureSnapshot& fsnap, PanelState& st,
 
     if (mode == SaveDialogState::SizeMode::PlotFrame) {
         if (*w > 0 && *h > 0) {
-            const LayoutSize s = figure_size_for_frame(fsnap, *on_screen_measure(&st.plot, fsnap),
-                                                       st.selection.slot,
-                                                       static_cast<float>(*w),
-                                                       static_cast<float>(*h));
+            const LayoutSize s = figure_size_for_selected_frame(ctx, *w, *h);
             ImGui::TextDisabled("Figure becomes %.0f x %.0f (axis %d)",
                                 static_cast<double>(s.width), static_cast<double>(s.height),
-                                st.selection.slot);
+                                ctx.selection.slot);
         }
         // A frame size only determines the axes it was asked about.
-        if (fsnap.axes.size() > 1)
+        if (ctx.snap.axes.size() > 1)
             ImGui::TextDisabled("Other subplots may differ (legend/colorbar).");
     } else {
         ImGui::TextDisabled("%s", frame_hint);
     }
 }
 
-// Whether the filename asks for SVG (the same test the save site uses).
+// Whether the filename asks for SVG (the same test perform_save() uses).
 bool save_path_is_svg(const char* path) {
     const std::string s = path ? path : "";
     const auto dot = s.rfind('.');
@@ -1848,101 +1836,6 @@ bool scene_has_3d(const FigureSnapshot& fsnap) {
     for (const FigureAxesSnapshot& a : fsnap.axes)
         if (a.snap3d()) return true;
     return false;
-}
-
-// The warning window raised by a knowingly misordered export (the file is
-// already written) or a failed one (it is not). Shows the exporter's own
-// sentence. An undocked window rather than a popup, since it is raised outside
-// any window scope.
-void draw_save_warning(PanelState& st) {
-    if (st.save.warning.empty()) return;
-    st.save.warning_open = false;
-
-    ImGui::SetNextWindowSize(ImVec2(430, 0), ImGuiCond_FirstUseEver);
-    // "###": one window whichever title, so it keeps its place.
-    ImGui::Begin(st.save.failed ? "Save failed###save_warning" : "Export warning###save_warning",
-                 nullptr, ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_AlwaysAutoResize);
-    ImGui::TextWrapped(st.save.failed ? "The figure was not saved."
-                                      : "The file was written, but part of it is not in the "
-                                        "right order.");
-    ImGui::Spacing();
-    ImGui::PushTextWrapPos(410.0f);
-    ImGui::TextUnformatted(st.save.warning.c_str());
-    ImGui::PopTextWrapPos();
-    ImGui::Spacing();
-    if (ImGui::Button("OK")) st.save.warning.clear();
-    ImGui::End();
-}
-
-void draw_save_dialog(const FigureSnapshot& fsnap, PanelState& st) {
-    if (!st.save.open) return;
-
-    ImGui::SetNextWindowSize(ImVec2(340, 0), ImGuiCond_FirstUseEver);
-    ImGui::Begin("Save Figure", &st.save.open,
-                 ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_AlwaysAutoResize);
-
-    ImGui::InputText("File", st.save.path_buf, sizeof(st.save.path_buf));
-    size_mode_fields(fsnap, st, st.save.size_mode, &st.save.width, &st.save.height,
-                     "<=0 uses the Plot panel's current size.");
-
-    // Export bounds, only for the chosen format and only when the figure has
-    // 3D (0 = automatic).
-    if (scene_has_3d(fsnap)) {
-        ImGui::Separator();
-        if (save_path_is_svg(st.save.path_buf)) {
-            ImGui::InputInt("Max splits", &st.save.max_splits);
-            if (st.save.max_splits < 0) st.save.max_splits = 0;
-            ImGui::TextDisabled("0 = automatic (8 x polygons + 64).");
-            ImGui::TextDisabled("Raise if a save reports it gave up.");
-        } else {
-            ImGui::InputInt("Peel layers", &st.save.peel_layers);
-            st.save.peel_layers = std::clamp(st.save.peel_layers, 0, 64);
-            ImGui::TextDisabled("0 = automatic (8). Translucent layers a ray");
-            ImGui::TextDisabled("may cross before the rest is dropped.");
-        }
-    }
-
-    if (ImGui::Button("Save")) {
-        st.save.requested = true;
-        st.save.open = false;
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Cancel"))
-        st.save.open = false;
-
-    ImGui::End();
-}
-
-// Resizes the window so the selected subplot's frame gets the requested size.
-void draw_resize_dialog(const FigureSnapshot& fsnap, PanelState& st) {
-    if (!st.resize.open) return;
-
-    ImGui::SetNextWindowSize(ImVec2(340, 0), ImGuiCond_FirstUseEver);
-    ImGui::Begin("Resize", &st.resize.open,
-                 ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_AlwaysAutoResize);
-
-    // Always frame-driven (dragging the window edge resizes the figure).
-    SaveDialogState::SizeMode mode = SaveDialogState::SizeMode::PlotFrame;
-    size_mode_fields(fsnap, st, mode, &st.resize.frame_w, &st.resize.frame_h, "");
-
-    ImGui::BeginDisabled(st.resize.frame_w <= 0 || st.resize.frame_h <= 0);
-    if (ImGui::Button("Apply")) {
-        const LayoutSize s = figure_size_for_frame(fsnap, *on_screen_measure(&st.plot, fsnap),
-                                                   st.selection.slot,
-                                                   static_cast<float>(st.resize.frame_w),
-                                                   static_cast<float>(st.resize.frame_h));
-        st.shell.pending_plot_w.store(static_cast<int>(std::lround(s.width)),
-                                std::memory_order_relaxed);
-        st.shell.pending_plot_h.store(static_cast<int>(std::lround(s.height)),
-                                std::memory_order_relaxed);
-        st.resize.open = false;
-    }
-    ImGui::EndDisabled();
-    ImGui::SameLine();
-    if (ImGui::Button("Cancel"))
-        st.resize.open = false;
-
-    ImGui::End();
 }
 
 // Applies a pending plot-area size to the window, adding the chrome measured
@@ -1985,6 +1878,130 @@ void apply_pending_resize(GLContext& ctx, PanelState& st) {
 
 } // namespace
 
+void open_save_dialog(SaveDialogState& st, const FigureContext& ctx) {
+    // Prefill with the live plot size.
+    if (!st.open) live_plot_size(ctx, st.width, st.height);
+    st.open = true;
+}
+
+void open_resize_dialog(ResizeDialogState& st, const FigureContext& ctx) {
+    // Prefill with the selected axes' current frame.
+    if (!st.open) {
+        int lw = 0, lh = 0;
+        live_plot_size(ctx, lw, lh);
+        if (lw > 0 && lh > 0) {
+            const FigureLayout fl =
+                compute_figure_layout(ctx.snap, *on_screen_measure(ctx.view, ctx.snap), lw, lh);
+            for (const auto& c : fl.cells) {
+                if (c.slot.index != ctx.selection.slot) continue;
+                st.frame_w = static_cast<int>(std::lround(c.frame.w));
+                st.frame_h = static_cast<int>(std::lround(c.frame.h));
+                break;
+            }
+        }
+    }
+    st.open = true;
+}
+
+std::optional<SaveRequest> resolve_save_request(const SaveDialogState& st,
+                                                const FigureContext& ctx) {
+    int lw = 0, lh = 0;
+    live_plot_size(ctx, lw, lh);
+    int sw = st.width  > 0 ? st.width  : lw;
+    int sh = st.height > 0 ? st.height : lh;
+    if (st.size_mode == SaveDialogState::SizeMode::PlotFrame && st.width > 0 && st.height > 0) {
+        const LayoutSize s = figure_size_for_selected_frame(ctx, st.width, st.height);
+        sw = static_cast<int>(std::lround(s.width));
+        sh = static_cast<int>(std::lround(s.height));
+    }
+    if (sw <= 0 || sh <= 0) return std::nullopt;
+    return SaveRequest{ .path = st.path_buf, .width = sw, .height = sh,
+                        .max_splits = st.max_splits, .peel_layers = st.peel_layers };
+}
+
+std::optional<ResizeRequest> resolve_resize_request(const ResizeDialogState& st,
+                                                    const FigureContext& ctx) {
+    if (st.frame_w <= 0 || st.frame_h <= 0) return std::nullopt;
+    const LayoutSize s = figure_size_for_selected_frame(ctx, st.frame_w, st.frame_h);
+    const ResizeRequest r{ static_cast<int>(std::lround(s.width)),
+                           static_cast<int>(std::lround(s.height)) };
+    if (r.plot_w <= 0 || r.plot_h <= 0) return std::nullopt;
+    return r;
+}
+
+// The warning raised by a knowingly misordered export (the file is already
+// written) or a failed one (it is not). Shows the exporter's own sentence. The
+// host's window is undocked rather than a popup, since it is raised outside
+// any window scope.
+void draw_save_warning(SaveDialogState& st) {
+    if (st.warning.empty()) return;
+    ImGui::TextWrapped(st.failed ? "The figure was not saved."
+                                 : "The file was written, but part of it is not in the "
+                                   "right order.");
+    ImGui::Spacing();
+    ImGui::PushTextWrapPos(410.0f);
+    ImGui::TextUnformatted(st.warning.c_str());
+    ImGui::PopTextWrapPos();
+    ImGui::Spacing();
+    if (ImGui::Button("OK")) st.warning.clear();
+}
+
+std::optional<SaveRequest> draw_save_dialog(FigureContext& ctx, SaveDialogState& st) {
+    if (!st.open) return std::nullopt;
+
+    ImGui::InputText("File", st.path_buf, sizeof(st.path_buf));
+    size_mode_fields(ctx, st.size_mode, &st.width, &st.height,
+                     "<=0 uses the Plot panel's current size.");
+
+    // Export bounds, only for the chosen format and only when the figure has
+    // 3D (0 = automatic).
+    if (scene_has_3d(ctx.snap)) {
+        ImGui::Separator();
+        if (save_path_is_svg(st.path_buf)) {
+            ImGui::InputInt("Max splits", &st.max_splits);
+            if (st.max_splits < 0) st.max_splits = 0;
+            ImGui::TextDisabled("0 = automatic (8 x polygons + 64).");
+            ImGui::TextDisabled("Raise if a save reports it gave up.");
+        } else {
+            ImGui::InputInt("Peel layers", &st.peel_layers);
+            st.peel_layers = std::clamp(st.peel_layers, 0, 64);
+            ImGui::TextDisabled("0 = automatic (8). Translucent layers a ray");
+            ImGui::TextDisabled("may cross before the rest is dropped.");
+        }
+    }
+
+    std::optional<SaveRequest> req;
+    if (ImGui::Button("Save")) {
+        req = resolve_save_request(st, ctx);
+        st.open = false;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel"))
+        st.open = false;
+    return req;
+}
+
+// Resizes the window so the selected subplot's frame gets the requested size.
+std::optional<ResizeRequest> draw_resize_dialog(FigureContext& ctx, ResizeDialogState& st) {
+    if (!st.open) return std::nullopt;
+
+    // Always frame-driven (dragging the window edge resizes the figure).
+    SaveDialogState::SizeMode mode = SaveDialogState::SizeMode::PlotFrame;
+    size_mode_fields(ctx, mode, &st.frame_w, &st.frame_h, "");
+
+    std::optional<ResizeRequest> req;
+    ImGui::BeginDisabled(st.frame_w <= 0 || st.frame_h <= 0);
+    if (ImGui::Button("Apply")) {
+        req = resolve_resize_request(st, ctx);
+        st.open = false;
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel"))
+        st.open = false;
+    return req;
+}
+
 void draw_widget_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
                        PlotFbo& plot_fbo, const FigureSnapshot& fsnap,
                        const FigureOptions& opts,
@@ -1994,16 +2011,16 @@ void draw_widget_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
     ImGui_ImplSextant_NewFrame(ctx.link());
     ImGui::NewFrame();
 
-    draw_menu_bar(fsnap, st);
+    // The shell owns the windows (names and flags ensure_layout() docks); the
+    // components draw their contents under the figure's id.
+    FigureContext fig{ fsnap, edit_box, st.selection, st.slot_view, &st.plot, st.figure_id };
+
+    draw_menu_bar(fig, st);
 
     const ImGuiID dockspace_id = ImGui::GetID("SextantDockspace");
     ensure_layout(dockspace_id,
                   opts.panel_width * ImGui::GetStyle().FontScaleDpi, st);
     ImGui::DockSpaceOverViewport(dockspace_id);
-
-    // The shell owns the windows (names and flags ensure_layout() docks); the
-    // components draw their contents under the figure's id.
-    FigureContext fig{ fsnap, edit_box, st.selection, st.slot_view, &st.plot, st.figure_id };
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     ImGui::Begin("Plot", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
@@ -2031,66 +2048,59 @@ void draw_widget_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
         ImGui::SetWindowFocus(st.shell.pending_panel_focus);
         st.shell.pending_panel_focus = nullptr;
     }
-    draw_save_dialog(fsnap, st);
-    // Reads the stored warning (set by a save one frame earlier).
-    draw_save_warning(st);
-    draw_resize_dialog(fsnap, st);
+
+    // The dialogs float (NoDocking) and size to their contents.
+    constexpr ImGuiWindowFlags dialog_flags =
+        ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_AlwaysAutoResize;
+    std::optional<SaveRequest> save;
+    if (st.save.open) {
+        ImGui::SetNextWindowSize(ImVec2(340, 0), ImGuiCond_FirstUseEver);
+        ImGui::Begin("Save Figure", &st.save.open, dialog_flags);
+        push_figure_id(fig.figure_id);
+        save = draw_save_dialog(fig, st.save);
+        ImGui::PopID();
+        ImGui::End();
+    }
+    // Shows the stored warning (set by a save one frame earlier).
+    if (!st.save.warning.empty()) {
+        ImGui::SetNextWindowSize(ImVec2(430, 0), ImGuiCond_FirstUseEver);
+        // "###": one window whichever title, so it keeps its place.
+        ImGui::Begin(st.save.failed ? "Save failed###save_warning"
+                                    : "Export warning###save_warning",
+                     nullptr, dialog_flags);
+        push_figure_id(fig.figure_id);
+        draw_save_warning(st.save);
+        ImGui::PopID();
+        ImGui::End();
+    }
+    if (st.resize.open) {
+        ImGui::SetNextWindowSize(ImVec2(340, 0), ImGuiCond_FirstUseEver);
+        ImGui::Begin("Resize", &st.resize.open, dialog_flags);
+        push_figure_id(fig.figure_id);
+        const std::optional<ResizeRequest> resize = draw_resize_dialog(fig, st.resize);
+        ImGui::PopID();
+        ImGui::End();
+        // Figure::resize()'s channel, applied just below.
+        if (resize) {
+            st.shell.pending_plot_w.store(resize->plot_w, std::memory_order_relaxed);
+            st.shell.pending_plot_h.store(resize->plot_h, std::memory_order_relaxed);
+        }
+    }
 
     // After the plot panel has published this frame's live size.
     apply_pending_resize(ctx, st);
 
-    // Serviced here since a PNG save needs ctx/nvg/data (safe mid-frame: its
+    // Performed here since a PNG save needs ctx/nvg/data (safe mid-frame: its
     // own FBO). Exports the render thread's snapshot, including panel edits,
-    // laid out with the window's measurements. Width/height <= 0 = live size.
-    if (st.save.requested) {
-        st.save.requested = false;
+    // laid out with the window's measurements, at the figure's dpi (1x by
+    // default), not the display's: a file is the same on every machine.
+    if (save) {
         const auto on_screen = on_screen_measure(&st.plot, fsnap);
-        int sw = st.save.width  > 0 ? st.save.width  : st.plot.live_plot_w.load(std::memory_order_relaxed);
-        int sh = st.save.height > 0 ? st.save.height : st.plot.live_plot_h.load(std::memory_order_relaxed);
-        if (st.save.size_mode == SaveDialogState::SizeMode::PlotFrame
-            && st.save.width > 0 && st.save.height > 0) {
-            const LayoutSize s = figure_size_for_frame(fsnap, *on_screen,
-                                                       st.selection.slot,
-                                                       static_cast<float>(st.save.width),
-                                                       static_cast<float>(st.save.height));
-            sw = static_cast<int>(std::lround(s.width));
-            sh = static_cast<int>(std::lround(s.height));
-        }
-        if (sw > 0 && sh > 0) {
-            const std::string path = st.save.path_buf;
-            const auto dot = path.rfind('.');
-            const auto ext = (dot == std::string::npos) ? "" : path.substr(dot);
-            // Nothing above this frame can take an exception (it would end the
-            // process): a failure goes to the modal and the message handler.
-            try {
-                if (ext == ".svg" || ext == ".SVG") {
-                    SvgSaveReport report;
-                    export_figure_svg(fsnap, path, sw, sh,
-                                      { .max_splits = static_cast<std::size_t>(
-                                            std::max(0, st.save.max_splits)) },
-                                      &report, on_screen.get());
-                    // Tell the user: the file is written either way.
-                    if (!report.scene_order_exact) {
-                        st.save.warning      = report.warning;
-                        st.save.warning_open = true;
-                        st.save.failed       = false;
-                    }
-                } else if (ext == ".png" || ext == ".PNG") {
-                    // At the figure's dpi (1x by default), not the display's: a
-                    // file is the same on every machine.
-                    export_figure_png(ctx, nvg, data, fsnap, path, sw, sh,
-                                      opts.supersample, st.save.peel_layers, on_screen.get(),
-                                      opts.dpi / 96.0f);
-                } else {
-                    throw std::invalid_argument("'" + path + "': the file name must end in "
-                                                ".png or .svg");
-                }
-            } catch (const std::exception& ex) {
-                st.save.warning      = ex.what();
-                st.save.warning_open = true;
-                st.save.failed       = true;
-                emit_message(std::string("Save failed: ") + ex.what());
-            }
+        const SaveResult r = perform_save(ctx, nvg, data, fsnap, *save, on_screen.get(),
+                                          opts.supersample, opts.dpi / 96.0f);
+        if (!r.written || !r.exact) {
+            st.save.warning = r.warning;
+            st.save.failed  = !r.written;
         }
     }
 

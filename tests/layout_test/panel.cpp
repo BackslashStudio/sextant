@@ -276,12 +276,6 @@ namespace lt {
     // a conflict only for the hovered item, and closed headers submit nothing, so
     // open every section and sweep the cursor down the panel. Two frames per
     // position: the count is gathered in one frame and read in the next.
-    struct IdConflictScan {
-        int probes = 0;
-        int conflicts = 0;
-        ImGuiID first = 0;
-    };
-
     IdConflictScan scan_panel_for_id_conflicts(
         const sextant::FigureSnapshot& fsnap,
         void (*draw)(const sextant::FigureSnapshot&, sextant::FigureEditBox&, sextant::PanelState&),

@@ -25,14 +25,13 @@ namespace sextant {
     // last synced and re-seeds itself when that moves (GUI-kit R3), so no code
     // has to know which components exist.
     //
-    // Accesses that still cross owners, through the aggregate -- the work list
-    // for the later steps:
-    //   1. The shell's menu writes PlotViewState's hints/navigate toggles and
-    //      reads its `layout` (Refit) and live_plot_* (Save/Resize) (R4).
-    //   2. The Save and Resize dialogs read Selection (shared by design).
-    // (Settled in R3: the plot view writing the camera/limit scratch, now the
-    // shared SlotViewState; Cosmetic reading PlotViewState, now through
-    // FigureContext::view; the shared re-seed, now per-state pulls.)
+    // No access crosses owners any more. Settled in R3: the plot view writing
+    // the camera/limit scratch (now the shared SlotViewState), Cosmetic reading
+    // PlotViewState (now through FigureContext::view), the shared re-seed (now
+    // per-state pulls). Settled in R4: the dialogs read Selection and the live
+    // size through FigureContext and return requests the shell performs; the
+    // menu, shell code, writes the plot view's own settings (navigate/hints)
+    // and asks it to refit, as a host does.
 
     // A synced generation no Selection has: the first pull always seeds.
     inline constexpr std::uint64_t kNeverSynced = ~std::uint64_t{0};
@@ -289,7 +288,6 @@ namespace sextant {
         char path_buf[260] = "figure.png";
         int width = 0;
         int height = 0;
-        bool requested = false;
 
         // Whether the save size is the whole figure or the selected plot frame
         // (then converted via figure_size_for_frame()).
@@ -302,14 +300,14 @@ namespace sextant {
         int max_splits = 0;
         int peel_layers = 0;
 
-        // Warning from the last save; non-empty opens a modal (cleared by it).
+        // Warning from the last save; non-empty opens its window (cleared by OK).
         // failed: the file was not written and warning says why.
         std::string warning;
-        bool warning_open = false;
         bool failed = false;
     };
 
-    // "File > Resize to plot frame" dialog; applied via ShellState::pending_plot_w/h.
+    // "File > Resize to plot frame" dialog; its request goes to
+    // ShellState::pending_plot_w/h.
     struct ResizeDialogState {
         bool open = false;
         int frame_w = 0;

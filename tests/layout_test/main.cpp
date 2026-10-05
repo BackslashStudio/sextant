@@ -193,6 +193,11 @@ int main() {
     test_panel_axis_position_3d();
     test_panel_dpi_scale();
 
+    // dialogs.cpp
+    test_dialog_requests();
+    test_perform_save();
+    test_dialogs_drawn();
+
     // cell_shading.cpp
     test_cell_shading_ramp();
     test_cell_shading_range();

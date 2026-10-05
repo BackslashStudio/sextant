@@ -11,8 +11,12 @@
 #include "output/file_write.h"
 #include "output/png_writer.h"
 #include "output/svg_writer.h"
+#include "messages.h"
 #include <algorithm>
 #include <cmath>
+#include <exception>
+#include <stdexcept>
+#include <string>
 
 namespace sextant {
 
@@ -72,6 +76,44 @@ void export_figure_svg(const FigureSnapshot& fsnap, std::string_view path,
                        const FigureMeasure* on_screen) {
     write_file(path, render_figure_svg(fsnap, width, height, opts, report, on_screen),
                "write_svg");
+}
+
+SaveResult perform_save(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
+                        const FigureSnapshot& fsnap, const SaveRequest& req,
+                        const FigureMeasure* on_screen, int supersample, float png_scale) {
+    SaveResult res;
+    try {
+        if (req.width <= 0 || req.height <= 0)
+            throw std::invalid_argument("the figure size must be positive");
+        const std::string& path = req.path;
+        const auto dot = path.rfind('.');
+        const auto ext = (dot == std::string::npos) ? "" : path.substr(dot);
+        if (ext == ".svg" || ext == ".SVG") {
+            SvgSaveReport report;
+            export_figure_svg(fsnap, path, req.width, req.height,
+                              { .max_splits = static_cast<std::size_t>(std::max(0, req.max_splits)) },
+                              &report, on_screen);
+            // The file is written either way.
+            if (!report.scene_order_exact) {
+                res.exact   = false;
+                res.warning = report.warning;
+            }
+        } else if (ext == ".png" || ext == ".PNG") {
+            export_figure_png(ctx, nvg, data, fsnap, path, req.width, req.height,
+                              supersample, req.peel_layers, on_screen, png_scale);
+        } else {
+            throw std::invalid_argument("'" + path + "': the file name must end in "
+                                        ".png or .svg");
+        }
+        res.written = true;
+    } catch (const std::exception& ex) {
+        res = SaveResult{ .written = false, .exact = true, .warning = ex.what() };
+        emit_message(std::string("Save failed: ") + ex.what());
+    } catch (...) {
+        res = SaveResult{ .written = false, .exact = true, .warning = "unknown error" };
+        emit_message("Save failed: unknown error");
+    }
+    return res;
 }
 
 std::string render_figure_svg(const FigureSnapshot& fsnap,

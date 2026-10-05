@@ -1,4 +1,5 @@
 #pragma once
+#include "../figure_export.h"
 #include <optional>
 #include <vector>
 
@@ -14,6 +15,8 @@ namespace sextant {
     struct FigureContext;
     struct CosmeticState;
     struct PlotViewState;
+    struct SaveDialogState;
+    struct ResizeDialogState;
     struct Selection;
     struct AxesLayout;
     struct FigureLayout;
@@ -33,6 +36,40 @@ namespace sextant {
     // caller opens it, and pushes the figure id). `cosmetic` is the inspector's
     // own state, owned by the host.
     void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic);
+
+    // --- The Save and Resize dialogs (GUI-kit R4) --------------------------------
+    // Contents only, like the inspectors: the host opens the window (with the
+    // state's `open` as its close button) and pushes the figure id. A dialog
+    // closes itself through `open` and returns a request on Save/Apply; the host
+    // performs it (perform_save(), or a window resize).
+
+    // A window resize asked for: the plot area's size in logical pixels, > 0.
+    struct ResizeRequest {
+        int plot_w = 0;
+        int plot_h = 0;
+    };
+
+    // Opens a dialog, prefilled if it was closed: Save with the live plot size
+    // (0 = live size when no plot view is on screen), Resize with the selected
+    // axes' current frame.
+    void open_save_dialog(SaveDialogState& st, const FigureContext& ctx);
+    void open_resize_dialog(ResizeDialogState& st, const FigureContext& ctx);
+
+    // The dialog's fields as a request, GL- and ImGui-free. A size <= 0 is the
+    // live plot size from ctx.view; frame mode becomes a figure size through
+    // figure_size_for_frame() with the view's stored measure. Nullopt when a
+    // size stays unknown (<= 0 with no view, or before the first frame).
+    std::optional<SaveRequest> resolve_save_request(const SaveDialogState& st,
+                                                    const FigureContext& ctx);
+    std::optional<ResizeRequest> resolve_resize_request(const ResizeDialogState& st,
+                                                        const FigureContext& ctx);
+
+    std::optional<SaveRequest> draw_save_dialog(FigureContext& ctx, SaveDialogState& st);
+    std::optional<ResizeRequest> draw_resize_dialog(FigureContext& ctx, ResizeDialogState& st);
+
+    // The last save's warning or failure, while SaveDialogState::warning is
+    // non-empty (the host's window is titled by `failed`). OK clears it.
+    void draw_save_warning(SaveDialogState& st);
 
     // --- Subplot selection (GL-free, tested directly) ---------------------------
 

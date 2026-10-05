@@ -48,4 +48,31 @@ void export_figure_svg(const FigureSnapshot& fsnap, std::string_view path,
                        SvgSaveReport* report = nullptr,
                        const FigureMeasure* on_screen = nullptr);
 
+// A save asked for in the window (the Save dialog's result, GUI-kit R4), with
+// every size resolved: the figure size in logical pixels, never <= 0.
+struct SaveRequest {
+    std::string path;
+    int width = 0;
+    int height = 0;
+    int max_splits = 0;  // SvgExportOptions::max_splits (0 = automatic)
+    int peel_layers = 0; // PngExportOptions::peel_layers (0 = automatic)
+};
+
+// What a save did. `written`: the file is there; if not, `warning` says why.
+// `exact`: false when an SVG gave up ordering part of a 3D scene (written all
+// the same), with the exporter's sentence in `warning`.
+struct SaveResult {
+    bool written = false;
+    bool exact = true;
+    std::string warning;
+};
+
+// Writes `req` as SVG or PNG by its extension. Never throws (nothing above a
+// window frame may): a failure comes back as written = false and also goes to
+// the message handler as "Save failed: ...". A PNG is `png_scale` (dpi / 96)
+// times the figure size, at `supersample`.
+SaveResult perform_save(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
+                        const FigureSnapshot& fsnap, const SaveRequest& req,
+                        const FigureMeasure* on_screen, int supersample, float png_scale);
+
 } // namespace sextant

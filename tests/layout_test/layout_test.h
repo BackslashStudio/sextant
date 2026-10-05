@@ -467,6 +467,26 @@ namespace lt {
 
     void test_panel_dpi_scale();
 
+    // Duplicate widget ids in a panel window, swept with the cursor (panel.cpp).
+    struct IdConflictScan {
+        int probes = 0;
+        int conflicts = 0;
+        ImGuiID first = 0;
+    };
+
+    IdConflictScan scan_panel_for_id_conflicts(
+        const sextant::FigureSnapshot& fsnap,
+        void (*draw)(const sextant::FigureSnapshot&, sextant::FigureEditBox&, sextant::PanelState&),
+        const char* window_name,
+        std::initializer_list<const char *> sections);
+
+    // dialogs.cpp (GUI-kit R4)
+    void test_dialog_requests();
+
+    void test_perform_save();
+
+    void test_dialogs_drawn();
+
     // headless_export.cpp
     void test_headless_context();
 
