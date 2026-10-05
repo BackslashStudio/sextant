@@ -131,6 +131,9 @@ namespace sextant {
         SvgSaveReport report;
     };
 
+    // Internal (src/figure_impl.h): in-tree code that drives a Figure itself.
+    namespace detail { struct FigureAccess; }
+
     // Threads. A Figure and the Axes, Axes3D and Plane2D it hands out form one
     // object graph that the window thread never touches (it draws a copy
     // published by show()/refresh()). So any thread may call into a graph, and
@@ -327,6 +330,7 @@ namespace sextant {
     private:
         struct Impl;
         std::unique_ptr<Impl> d;
+        friend struct detail::FigureAccess;
 
         explicit Figure(FigureOptions opts);
 

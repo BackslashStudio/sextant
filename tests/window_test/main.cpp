@@ -1929,8 +1929,8 @@ static void test_events() {
 int main() {
     // test_axis_position3d();
     // test_axis_position();
-    // test_axes_gallery();
-    // test_axes3d_gallery();
+    test_axes_gallery();
+    test_axes3d_gallery();
     // test_errorbar3d_gallery();
     // test_line3d_gallery();
     // test_surface_tri_gallery();
@@ -1949,5 +1949,5 @@ int main() {
     // test_frame_resize();
     // test_mouse_hint();
     // test_data_panel();
-    test_events();
+    // test_events();
 }

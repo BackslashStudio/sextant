@@ -292,6 +292,34 @@ foreach(_f ${GLAD_SOURCE} ${NANOVG_SOURCE} ${IMGUI_MAIN_SOURCE})
     endif()
 endforeach()
 
+# Dear ImGui, compiled once with sextant's config and folded into each library
+# target as objects. OBJECT rather than STATIC: sextant_static is exported and
+# links PUBLIC, so a STATIC imgui would enter its link interface and have to
+# be installed and exported (as glfw is), and join the --exclude-libs list
+# below. As objects it lands inside the archive/DLL exactly as sources did.
+if(EXISTS ${IMGUI_MAIN_SOURCE})
+    add_library(sextant_imgui OBJECT ${IMGUI_SOURCES})
+    # The archive's objects go into shared objects too (see sextant_static).
+    set_target_properties(sextant_imgui PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    target_include_directories(sextant_imgui PRIVATE
+        ${PROJECT_SOURCE_DIR}/src
+        ${PROJECT_SOURCE_DIR}/third_party/glad/include
+        ${IMGUI_SOURCE_DIR}
+        ${IMGUI_SOURCE_DIR}/backends)
+    # Same IMGUI_USER_CONFIG and loader switch as the library (see
+    # sextant_configure_target): ImGui and sextant must agree on both.
+    target_compile_definitions(sextant_imgui PRIVATE
+        IMGUI_IMPL_OPENGL_LOADER_CUSTOM
+        IMGUI_USER_CONFIG="widgets/sextant_imconfig.h")
+    target_link_libraries(sextant_imgui PRIVATE OpenGL::GL)
+    if(APPLE)
+        target_compile_definitions(sextant_imgui PRIVATE GL_SILENCE_DEPRECATION)
+    endif()
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(sextant_imgui PRIVATE -fvisibility=hidden)
+    endif()
+endif()
+
 # ---------------------------------------------------------------------------
 # Library target
 # ---------------------------------------------------------------------------
@@ -377,8 +405,8 @@ function(sextant_configure_target target_name link_scope)
     if(EXISTS ${NANOVG_SOURCE})
         target_sources(${target_name} PRIVATE ${NANOVG_SOURCE})
     endif()
-    if(EXISTS ${IMGUI_MAIN_SOURCE})
-        target_sources(${target_name} PRIVATE ${IMGUI_SOURCES})
+    if(TARGET sextant_imgui)
+        target_sources(${target_name} PRIVATE $<TARGET_OBJECTS:sextant_imgui>)
     endif()
 
     target_include_directories(${target_name}
@@ -539,6 +567,31 @@ if(TARGET sextant_static)
     add_library(sextant::sextant_static ALIAS sextant_static)
 endif()
 
+# In-tree only: sextant_static plus what code reaching past the public headers
+# needs -- src/ (figure_impl.h and friends), the vendored headers, and ImGui
+# compiled against the library's own config. For the internal tests and for an
+# app built from source with add_subdirectory(). Never installed or exported:
+# an installed package and the vcpkg port have no such target, and a package
+# build makes no sextant_static to base it on.
+if(TARGET sextant_static)
+    add_library(sextant_internal INTERFACE)
+    target_link_libraries(sextant_internal INTERFACE sextant_static)
+    target_include_directories(sextant_internal INTERFACE
+        ${PROJECT_SOURCE_DIR}/src
+        ${PROJECT_SOURCE_DIR}/third_party/glad/include
+        ${PROJECT_SOURCE_DIR}/third_party/nanovg
+        ${PROJECT_SOURCE_DIR}/third_party/stb
+        ${IMGUI_SOURCE_DIR}
+        ${IMGUI_SOURCE_DIR}/backends)
+    target_compile_definitions(sextant_internal INTERFACE
+        IMGUI_IMPL_OPENGL_LOADER_CUSTOM
+        IMGUI_USER_CONFIG="widgets/sextant_imconfig.h")
+    if(APPLE)
+        target_compile_definitions(sextant_internal INTERFACE GL_SILENCE_DEPRECATION)
+    endif()
+    add_library(sextant::internal ALIAS sextant_internal)
+endif()
+
 # ---------------------------------------------------------------------------
 # Install / export (CMake package config for downstream consumers)
 # ---------------------------------------------------------------------------
@@ -686,9 +739,10 @@ if(SEXTANT_BUILD_TESTS)
     add_executable(sextant_window_probe tests/window_probe/main.cpp)
     target_link_libraries(sextant_window_probe PRIVATE sextant Threads::Threads)
 
-    # Internal layout checks: linked against sextant_static with src/ on the
-    # include path, since what it checks isn't reachable through public headers.
-    if(SEXTANT_BUILD_STATIC)
+    # Internal layout checks: linked against sextant::internal (sextant_static
+    # with src/ on the include path), since what it checks isn't reachable
+    # through public headers.
+    if(TARGET sextant::internal)
         # One translation unit per subject (see tests/layout_test/layout_test.h).
         # Listed rather than globbed, like SEXTANT_SOURCES.
         add_executable(sextant_layout_test
@@ -729,41 +783,23 @@ if(SEXTANT_BUILD_TESTS)
             tests/layout_test/window_broker.cpp
             tests/layout_test/window_input.cpp
             tests/layout_test/read_back.cpp
+            tests/layout_test/figure_impl.cpp
             tests/layout_test/window_wait.cpp
             tests/layout_test/events.cpp)
-        target_link_libraries(sextant_layout_test PRIVATE sextant_static)
-        target_include_directories(sextant_layout_test PRIVATE
-            ${PROJECT_SOURCE_DIR}/src
-            ${PROJECT_SOURCE_DIR}/third_party/glad/include
-            ${PROJECT_SOURCE_DIR}/third_party/nanovg
-            ${PROJECT_SOURCE_DIR}/third_party/stb
-            # cell_shading.h names ImU32/IM_COL32, so compile with the same
-            # IMGUI_USER_CONFIG as the library.
-            ${IMGUI_SOURCE_DIR})
-        target_compile_definitions(sextant_layout_test PRIVATE
-            IMGUI_USER_CONFIG="widgets/sextant_imconfig.h")
+        # cell_shading.h names ImU32/IM_COL32, so it needs the library's
+        # IMGUI_USER_CONFIG too -- sextant::internal carries it.
+        target_link_libraries(sextant_layout_test PRIVATE sextant::internal)
 
         # Diagnostic for painter splits: calls paint_order() directly (internal
         # API). Asserts nothing; prints a table.
         add_executable(sextant_split_probe tests/split_probe/main.cpp)
-        target_link_libraries(sextant_split_probe PRIVATE sextant_static)
-        target_include_directories(sextant_split_probe PRIVATE
-            ${PROJECT_SOURCE_DIR}/src
-            ${PROJECT_SOURCE_DIR}/third_party/glad/include
-            ${PROJECT_SOURCE_DIR}/third_party/nanovg
-            ${PROJECT_SOURCE_DIR}/third_party/stb
-            ${IMGUI_SOURCE_DIR})
-        target_compile_definitions(sextant_split_probe PRIVATE
-            IMGUI_USER_CONFIG="widgets/sextant_imconfig.h")
+        target_link_libraries(sextant_split_probe PRIVATE sextant::internal)
 
         # Headless export with no display (v1.1 step 27): renders gallery
         # figures to files through the windowless context, or with --window
         # through the hidden-window path, so CI can compare the two byte for
         # byte. Internal only for the test switch (platform.h).
         add_executable(sextant_headless_probe tests/headless_probe/main.cpp)
-        target_link_libraries(sextant_headless_probe PRIVATE sextant_static)
-        target_include_directories(sextant_headless_probe PRIVATE
-            ${PROJECT_SOURCE_DIR}/src
-            ${PROJECT_SOURCE_DIR}/third_party/glad/include)
+        target_link_libraries(sextant_headless_probe PRIVATE sextant::internal)
     endif()
 endif()

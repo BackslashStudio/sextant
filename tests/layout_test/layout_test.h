@@ -496,6 +496,9 @@ namespace lt {
 
     void test_style_journal();
 
+    // figure_impl.cpp
+    void test_figure_impl_access();
+
     // window_wait.cpp -- last: it opens real windows
     void test_wait_closed();
 

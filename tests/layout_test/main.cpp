@@ -236,6 +236,9 @@ int main() {
     test_limit_journal();
     test_style_journal();
 
+    // figure_impl.cpp
+    test_figure_impl_access();
+
     // window_wait.cpp and the windowed memory export -- last, because they open
     // real windows
     test_memory_export_windowed();
