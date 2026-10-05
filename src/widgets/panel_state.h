@@ -15,10 +15,29 @@ namespace sextant {
     class EventChannel;
 
     // Render-thread-only UI state for the widget panel, used only inside
-    // draw_widget_panel() (exceptions are marked below).
-    struct PanelState {
-        int selected_slot_index = 1;
+    // draw_widget_panel() (exceptions are marked below). Split by owner (GUI-kit
+    // R2): one struct per component or shell, none referring to another, so a
+    // host can own each one; PanelState aggregates them for now.
+    //
+    // Accesses that still cross owners, through the aggregate -- the work list
+    // for the later steps:
+    //   1. PlotView writes CosmeticState: pan/zoom/reset the x/y limit locals,
+    //      orbit/zoom/fly camera_local, so the fields follow a drag (R6).
+    //   2. CosmeticState reads PlotViewState: track_resolved_limits() reads
+    //      `resolved`, draw_layout_fields() reads live_plot_w/h (R6).
+    //   3. The shell's menu writes PlotViewState's hints/navigate toggles and
+    //      reads its `layout` (Refit) and live_plot_* (Save/Resize) (R4).
+    //   4. sync_selected_slot() seeds CosmeticState and DataPanelState together,
+    //      through PanelState::last_synced_slot (R3).
+    //   5. The Save and Resize dialogs read Selection (shared by design).
 
+    // Which subplot the panels address; shared by every component.
+    struct Selection {
+        int slot = 1;
+    };
+
+    // The library window's own chrome: docks, focus, pending resize.
+    struct ShellState {
         // Show/hide for the "Cosmetic" dock (View menu). layout_cosmetic_visible
         // records what the dockspace was built for, so ensure_layout() rebuilds
         // only on a real toggle.
@@ -38,22 +57,14 @@ namespace sextant {
         // drawn (the last-drawn window otherwise wins). A string literal or null.
         const char* pending_panel_focus = nullptr;
 
-        // Display format for Data-panel cells.
-        ValueFormat value_format;
+        // Requested plot size in logical pixels (> 0 = pending). Written from any
+        // thread (Figure::resize()) or the dialog; applied in draw_widget_panel().
+        std::atomic<int> pending_plot_w{0};
+        std::atomic<int> pending_plot_h{0};
+    };
 
-        // Tint Data-panel cells by their column's min/max (see cell_shading.h),
-        // with the cached ranges.
-        bool shade_cells = true;
-        CellShadingCache cell_shading;
-
-        // First matrix column shown when a grid is wider than one table (see
-        // kMaxGridCols); shared by all grids and clamped every frame.
-        int grid_col_offset = 0;
-
-        // Which bar3d matrix the grid cells edit: false = heights, true = per-bar
-        // bases (offered only when the plot has bases).
-        bool bar3d_show_bases = false;
-
+    // The plot view: navigation, selection gesture, hints, events, layout.
+    struct PlotViewState {
         // Pan/zoom: left-drag pans and scroll zooms the selected slot only; a drag
         // must start on it and continues if the cursor leaves.
         bool navigate_enabled = false;
@@ -94,13 +105,46 @@ namespace sextant {
         // Spatial index for find_hint(), keyed on data_generation.
         HintIndexCache hint_index;
 
+        // The plot's last laid-out size in logical pixels -- what the layout,
+        // the panels and a save see. Exception: read from any thread by
+        // savefig_png()/savefig_svg().
+        std::atomic<int> live_plot_w{0};
+        std::atomic<int> live_plot_h{0};
+
+        // The same plot in framebuffer pixels (logical x display scale), for
+        // the one thing that has to add window chrome to it: a resize.
+        std::atomic<int> live_plot_fb_w{0};
+        std::atomic<int> live_plot_fb_h{0};
+
+        // The window's stored layout. fit() is render-thread only; load() is read
+        // from any thread (savefig(), size_for_frame()) and by all panels.
+        LayoutStore layout;
+
+        // What each slot's auto limits resolved to in the last drawn frame (the
+        // snapshot only has the declared limits). Stored by draw_plot_panel().
+        struct ResolvedLimits {
+            int slot = 0;
+            bool is_3d = false;
+            double xmin = 0.0, xmax = 1.0;
+            double ymin = 0.0, ymax = 1.0;
+            double zmin = 0.0, zmax = 1.0; // 3D only
+        };
+
+        std::vector<ResolvedLimits> resolved;
+
+        const ResolvedLimits* resolved_for(int slot) const {
+            for (const ResolvedLimits& r: resolved)
+                if (r.slot == slot) return &r;
+            return nullptr;
+        }
+    };
+
+    // The Cosmetic inspector's scratch: what its widgets bind to between edits.
+    struct CosmeticState {
         char title_buf[256]{};
         char xtitle_buf[128]{};
         char ytitle_buf[128]{};
 
-        // Scratch buffer for the one name field the Data panel draws per frame;
-        // text_field() re-seeds it while inactive.
-        char name_buf[128]{};
         bool grid_local = false;
         bool xauto_local = true, yauto_local = true;
         double xmin_local = 0, xmax_local = 1, ymin_local = 0, ymax_local = 1;
@@ -123,7 +167,7 @@ namespace sextant {
         ColorbarOptions colorbar_local;
 
         // 3D-only scratch (third axis, camera, box); shared fields above are reused
-        // and re-seeded via last_synced_slot.
+        // and re-seeded via PanelState::last_synced_slot.
         char ztitle_buf[128]{};
         double zmin_local = 0, zmax_local = 1;
         bool zauto_local = true;
@@ -134,6 +178,42 @@ namespace sextant {
         unsigned long long camera_stamp_local = 0;
         Box3DStyle box3d_local;
         BoxAspect aspect_local;
+
+        // Figure-level, seeded once on the first frame (not per slot).
+        char suptitle_buf[256]{};
+        SuptitleOptions suptitle_local;
+        bool suptitle_synced = false;
+
+        // Layout controls: figure-level, seeded once (re-seeding every frame would
+        // fight a drag).
+        FigureMargins margins_local;
+        float col_gap_local = 0.0f;
+        float row_gap_local = 0.0f;
+        bool layout_synced = false;
+    };
+
+    // The Data inspector: cell display, and the per-object appearance scratch its
+    // tabs edit (seeded by sync_selected_slot() in panel.cpp).
+    struct DataPanelState {
+        // Display format for Data-panel cells.
+        ValueFormat value_format;
+
+        // Tint Data-panel cells by their column's min/max (see cell_shading.h),
+        // with the cached ranges.
+        bool shade_cells = true;
+        CellShadingCache cell_shading;
+
+        // First matrix column shown when a grid is wider than one table (see
+        // kMaxGridCols); shared by all grids and clamped every frame.
+        int grid_col_offset = 0;
+
+        // Which bar3d matrix the grid cells edit: false = heights, true = per-bar
+        // bases (offered only when the plot has bases).
+        bool bar3d_show_bases = false;
+
+        // Scratch buffer for the one name field the Data panel draws per frame;
+        // text_field() re-seeds it while inactive.
+        char name_buf[128]{};
 
         // One plane's Data-panel tab. Scratch copies keep drag values stable across
         // a gesture; positional, re-seeded on slot or plane-count change.
@@ -171,89 +251,53 @@ namespace sextant {
         // the op by a frame); re-read from the snapshot otherwise. One suffices,
         // since only one drag is active at a time.
         double width_held = 0.0;
+    };
 
-        // Forces a re-sync of the *_local/*_buf/*_scratch fields whenever the
-        // selected slot changes (-1 = first frame).
-        int last_synced_slot = -1;
-
-        // Figure-level, seeded once on the first frame (not per slot).
-        char suptitle_buf[256]{};
-        SuptitleOptions suptitle_local;
-        bool suptitle_synced = false;
-
-        // Layout controls: figure-level, seeded once (re-seeding every frame would
-        // fight a drag).
-        FigureMargins margins_local;
-        float col_gap_local = 0.0f;
-        float row_gap_local = 0.0f;
-        bool layout_synced = false;
-
-        // "File > Save" dialog. save_width/save_height <= 0 = the Plot panel's live
-        // size.
-        bool save_dialog_open = false;
-        char save_path_buf[260] = "figure.png";
-        int save_width = 0;
-        int save_height = 0;
-        bool save_requested = false;
+    // "File > Save" dialog. width/height <= 0 = the Plot panel's live size.
+    struct SaveDialogState {
+        bool open = false;
+        char path_buf[260] = "figure.png";
+        int width = 0;
+        int height = 0;
+        bool requested = false;
 
         // Whether the save size is the whole figure or the selected plot frame
         // (then converted via figure_size_for_frame()).
         enum class SizeMode { Figure, PlotFrame };
 
-        SizeMode save_size_mode = SizeMode::Figure;
+        SizeMode size_mode = SizeMode::Figure;
 
         // Export bounds (0 = automatic): SvgExportOptions::max_splits and
         // PngExportOptions::peel_layers. Only the current format's field is shown.
-        int save_max_splits = 0;
-        int save_peel_layers = 0;
+        int max_splits = 0;
+        int peel_layers = 0;
 
         // Warning from the last save; non-empty opens a modal (cleared by it).
-        // save_failed: the file was not written and save_warning says why.
-        std::string save_warning;
-        bool save_warning_open = false;
-        bool save_failed = false;
+        // failed: the file was not written and warning says why.
+        std::string warning;
+        bool warning_open = false;
+        bool failed = false;
+    };
 
-        // "File > Resize to plot frame" dialog; applied via pending_plot_w/h.
-        bool resize_dialog_open = false;
-        int resize_frame_w = 0;
-        int resize_frame_h = 0;
+    // "File > Resize to plot frame" dialog; applied via ShellState::pending_plot_w/h.
+    struct ResizeDialogState {
+        bool open = false;
+        int frame_w = 0;
+        int frame_h = 0;
+    };
 
-        // Requested plot size in logical pixels (> 0 = pending). Written from any
-        // thread (Figure::resize()) or the dialog; applied in draw_widget_panel().
-        std::atomic<int> pending_plot_w{0};
-        std::atomic<int> pending_plot_h{0};
+    struct PanelState {
+        Selection         selection;
+        ShellState        shell;
+        PlotViewState     plot;
+        CosmeticState     cosmetic;
+        DataPanelState    data;
+        SaveDialogState   save;
+        ResizeDialogState resize;
 
-        // The plot's last laid-out size in logical pixels -- what the layout,
-        // the panels and a save see. Exception: read from any thread by
-        // savefig_png()/savefig_svg().
-        std::atomic<int> live_plot_w{0};
-        std::atomic<int> live_plot_h{0};
-
-        // The same plot in framebuffer pixels (logical x display scale), for
-        // the one thing that has to add window chrome to it: a resize.
-        std::atomic<int> live_plot_fb_w{0};
-        std::atomic<int> live_plot_fb_h{0};
-
-        // The window's stored layout. fit() is render-thread only; load() is read
-        // from any thread (savefig(), size_for_frame()) and by all panels.
-        LayoutStore layout;
-
-        // What each slot's auto limits resolved to in the last drawn frame (the
-        // snapshot only has the declared limits). Stored by draw_plot_panel().
-        struct ResolvedLimits {
-            int slot = 0;
-            bool is_3d = false;
-            double xmin = 0.0, xmax = 1.0;
-            double ymin = 0.0, ymax = 1.0;
-            double zmin = 0.0, zmax = 1.0; // 3D only
-        };
-
-        std::vector<ResolvedLimits> resolved;
-
-        const ResolvedLimits* resolved_for(int slot) const {
-            for (const ResolvedLimits& r: resolved)
-                if (r.slot == slot) return &r;
-            return nullptr;
-        }
+        // Forces a re-sync of the Cosmetic and Data scratch whenever the selected
+        // slot changes (-1 = first frame). Read by sync_selected_slot(), which
+        // seeds both; replaced by a Selection generation pull in R3.
+        int last_synced_slot = -1;
     };
 } // namespace sextant

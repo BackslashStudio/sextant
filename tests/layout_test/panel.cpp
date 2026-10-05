@@ -67,32 +67,32 @@ namespace lt {
 
         check(vertices > 0, "3D panel: the panel draws for a 3D slot");
         check(st.last_synced_slot == 1, "3D panel: the slot was synced");
-        check(st.camera_local.azimuth == 17.0 && st.camera_local.zoom == 1.5,
+        check(st.cosmetic.camera_local.azimuth == 17.0 && st.cosmetic.camera_local.zoom == 1.5,
               "3D panel: the camera is seeded from the 3D snapshot, not left at its default");
-        check(st.zmin_local == -4.0 && st.zmax_local == 9.0,
+        check(st.cosmetic.zmin_local == -4.0 && st.cosmetic.zmax_local == 9.0,
               "3D panel: so is the third axis, which the 2D sync has no field for");
-        check(std::string(st.ztitle_buf) == "counts",
+        check(std::string(st.cosmetic.ztitle_buf) == "counts",
               "3D panel: and the z title");
-        check(st.aspect_local.x == 2.0, "3D panel: and the box aspect");
+        check(st.cosmetic.aspect_local.x == 2.0, "3D panel: and the box aspect");
 
         // Plane rows seeded positionally (the planes differ in every field shown).
-        check(st.planes_local.size() == 2, "3D panel: one Planes row per plane");
-        check(st.planes_local[0].orient == PlaneOrientation::XY &&
-              st.planes_local[0].offset == 0.25 &&
-              st.planes_local[0].opts.visible && st.planes_local[0].opts.alpha == 1.0f,
+        check(st.data.planes_local.size() == 2, "3D panel: one Planes row per plane");
+        check(st.data.planes_local[0].orient == PlaneOrientation::XY &&
+              st.data.planes_local[0].offset == 0.25 &&
+              st.data.planes_local[0].opts.visible && st.data.planes_local[0].opts.alpha == 1.0f,
               "3D panel: the first row seeded from the first plane");
-        check(st.planes_local[1].orient == PlaneOrientation::YZ &&
-              st.planes_local[1].offset == 0.5 &&
-              !st.planes_local[1].opts.visible && st.planes_local[1].opts.alpha == 0.25f,
+        check(st.data.planes_local[1].orient == PlaneOrientation::YZ &&
+              st.data.planes_local[1].offset == 0.5 &&
+              !st.data.planes_local[1].opts.visible && st.data.planes_local[1].opts.alpha == 0.25f,
               "3D panel: and the second from the second, not from the first again");
 
         // Bar and surface rows, seeded the same way.
-        check(st.bars3d_local.size() == 1 && st.surfaces_local.size() == 1,
+        check(st.data.bars3d_local.size() == 1 && st.data.surfaces_local.size() == 1,
               "3D panel: one Bars row per bar3d grid, one Surfaces row per surface");
-        check(st.bars3d_local[0].color.r == 1.0f && st.bars3d_local[0].shading == 0.9f,
+        check(st.data.bars3d_local[0].color.r == 1.0f && st.data.bars3d_local[0].shading == 0.9f,
               "3D panel: the Bars row is seeded from its own grid's options");
-        check(st.surfaces_local[0].colormap && st.surfaces_local[0].alpha == 0.4f &&
-              st.surfaces_local[0].edges,
+        check(st.data.surfaces_local[0].colormap && st.data.surfaces_local[0].alpha == 0.4f &&
+              st.data.surfaces_local[0].edges,
               "3D panel: and the Surfaces row from its own surface's");
 
         check(!box.load_and_clear().has_value(),
@@ -129,8 +129,8 @@ namespace lt {
         // Limit fields show the resolved limits for axes on auto (the declared
         // ones stay 0..1). draw_plot_panel() stores them in PanelState; filled by
         // hand here since no frame runs.
-        st.resolved.clear();
-        st.resolved.push_back({1, true, 400.0, 600.0, -1.5, 1.5, 0.0, 21.0});
+        st.plot.resolved.clear();
+        st.plot.resolved.push_back({1, true, 400.0, 600.0, -1.5, 1.5, 0.0, 21.0});
         st.last_synced_slot = -1; // force a re-seed, as a slot change would
         for (int f = 0; f < 2; ++f) {
             ImGui::NewFrame();
@@ -138,13 +138,13 @@ namespace lt {
             draw_cosmetic_panel(fs, box, st);
             ImGui::Render();
         }
-        check(st.xmin_local == 400.0 && st.xmax_local == 600.0,
+        check(st.cosmetic.xmin_local == 400.0 && st.cosmetic.xmax_local == 600.0,
               "3D panel: an automatic axis shows the limits it resolved to, not its declared ones");
-        check(st.ymin_local == -1.5 && st.ymax_local == 1.5,
+        check(st.cosmetic.ymin_local == -1.5 && st.cosmetic.ymax_local == 1.5,
               "3D panel: on every automatic axis");
 
         // ...and only for auto axes: explicit z limits must show as declared.
-        check(st.zmin_local == -4.0 && st.zmax_local == 9.0,
+        check(st.cosmetic.zmin_local == -4.0 && st.cosmetic.zmax_local == 9.0,
               "3D panel: while an axis with explicit limits keeps them");
 
         ImGui::DestroyContext(ctx);
@@ -549,7 +549,7 @@ namespace lt {
 
         // ---- The first frame seeds the scratch from slot 1 with no panel drawn.
         frame(in1x, in1y, idle);
-        check(st.selected_slot_index == 1 && st.last_synced_slot == 1,
+        check(st.selection.slot == 1 && st.last_synced_slot == 1,
               "select: the selection is synced before any panel draws");
 
         // ---- Hovering the other cell lets nothing through to navigation.
@@ -560,26 +560,26 @@ namespace lt {
 
         // ---- A drag starting on an unselected cell neither navigates nor selects.
         g = frame(in2x, in2y, press);
-        check(!g.drag && st.selected_slot_index == 1,
+        check(!g.drag && st.selection.slot == 1,
               "select: a press on an unselected cell does not select it yet");
         g = frame(in2x - 30.0f, in2y, hold);
         check(!g.drag, "select: nor does the drag after it navigate anything");
         frame(in2x - 30.0f, in2y, drop);
-        check(st.selected_slot_index == 1, "select: and ending a drag is not a click");
+        check(st.selection.slot == 1, "select: and ending a drag is not a click");
 
         // ---- Pressed on one cell, released on the other: nothing.
         frame(in2x, in2y, press);
         frame(in1x, in1y, release);
-        check(st.selected_slot_index == 1,
+        check(st.selection.slot == 1,
               "select: a press released over a different cell selects neither");
 
         // ---- A click selects on release and re-seeds (the 3D camera).
         frame(in2x, in2y, press);
-        check(st.selected_slot_index == 1, "select: still not on the press");
+        check(st.selection.slot == 1, "select: still not on the press");
         frame(in2x, in2y, release);
-        check(st.selected_slot_index == 2, "select: a click selects on its release");
-        check(st.last_synced_slot == 2 && st.camera_local.azimuth == 71.0 &&
-              st.camera_local.zoom == 2.5,
+        check(st.selection.slot == 2, "select: a click selects on its release");
+        check(st.last_synced_slot == 2 && st.cosmetic.camera_local.azimuth == 71.0 &&
+              st.cosmetic.camera_local.zoom == 2.5,
               "select: and the camera navigation starts from is the new slot's own");
 
         // ---- The double-click completing a selecting click doesn't reset...
@@ -601,20 +601,20 @@ namespace lt {
         check(g.drag && g.keys && !g.wheel,
               "select: a drag begun on the selected cell keeps it when the cursor leaves");
         frame(in1x, in1y, drop);
-        check(st.selected_slot_index == 2, "select: and does not select where it ends");
+        check(st.selection.slot == 2, "select: and does not select where it ends");
 
         // ---- select_slot() (the menu) re-seeds as a click does.
         select_slot(st, fs, 1);
-        check(st.selected_slot_index == 1 && st.last_synced_slot == 1 &&
-              std::string(st.title_buf).empty(),
+        check(st.selection.slot == 1 && st.last_synced_slot == 1 &&
+              std::string(st.cosmetic.title_buf).empty(),
               "select: select_slot() moves the selection and re-seeds from that slot");
         select_slot(st, fs, 2);
-        check(std::string(st.title_buf) == "box", "select: in either direction");
+        check(std::string(st.cosmetic.title_buf) == "box", "select: in either direction");
 
         // ---- A nonexistent selection is normalized to the first slot.
         PanelState st2;
-        st2.selected_slot_index = 7;
-        check(sync_selected_slot(st2, fs) == 1 && st2.selected_slot_index == 1,
+        st2.selection.slot = 7;
+        check(sync_selected_slot(st2, fs) == 1 && st2.selection.slot == 1,
               "select: a missing slot falls back to the first one");
         check(sync_selected_slot(st2, FigureSnapshot{}) == -1, "select: and no axes is no slot");
     }
@@ -771,7 +771,7 @@ namespace lt {
             FigureSnapshot fs = wrap(std::move(r));
             PanelState st;
             sync_selected_slot(st, fs);
-            check(st.bars3d_local.size() == 1 && st.bars3d_local[0].color.r == 1.0f,
+            check(st.data.bars3d_local.size() == 1 && st.data.bars3d_local[0].color.r == 1.0f,
                   "object tabs: the copies are seeded from the snapshot");
 
             Bar3DPlot blue = bar3d_grid();
@@ -781,10 +781,10 @@ namespace lt {
             PlaneSnapshot pl;
             s3->planes.push_back(pl);
             sync_selected_slot(st, fs);
-            check(st.bars3d_local.size() == 2 && st.bars3d_local[0].color.b == 1.0f &&
-                  st.bars3d_local[1].color.r == 1.0f,
+            check(st.data.bars3d_local.size() == 2 && st.data.bars3d_local[0].color.b == 1.0f &&
+                  st.data.bars3d_local[1].color.r == 1.0f,
                   "object tabs: a grid inserted ahead re-seeds them, so index 0 is the new grid");
-            check(st.planes_local.size() == 1,
+            check(st.data.planes_local.size() == 1,
                   "object tabs: and a plane added is picked up the same way");
         }
     }
@@ -1135,19 +1135,19 @@ namespace lt {
             seed.spine_top = false;
 
             PanelState st;
-            st.origin_x_scratch = 99.0; // a stale value the seed must overwrite
+            st.cosmetic.origin_x_scratch = 99.0; // a stale value the seed must overwrite
             run(seed, st);
 
-            check(st.axes_style_local.xaxis_y == AxisPosition::Mid &&
-                  st.axes_style_local.yaxis_x == AxisPosition::High &&
-                  !st.axes_style_local.spine_top,
+            check(st.cosmetic.axes_style_local.xaxis_y == AxisPosition::Mid &&
+                  st.cosmetic.axes_style_local.yaxis_x == AxisPosition::High &&
+                  !st.cosmetic.axes_style_local.spine_top,
                   "panel: the placements and spine flags reach the panel's scratch");
-            check(st.axes_style_local.origin_y.has_value() &&
-                  *st.axes_style_local.origin_y == 3.5,
+            check(st.cosmetic.axes_style_local.origin_y.has_value() &&
+                  *st.cosmetic.axes_style_local.origin_y == 3.5,
                   "panel: and so does a pinned origin component");
-            check(near_px(static_cast<float>(st.origin_y_scratch), 3.5f),
+            check(near_px(static_cast<float>(st.cosmetic.origin_y_scratch), 3.5f),
                   "panel: the pin's drag box is seeded with the pinned value");
-            check(st.origin_x_scratch == 0.0,
+            check(st.cosmetic.origin_x_scratch == 0.0,
                   "panel: an unset component seeds 0, not the last subplot's number");
         }
 
@@ -1268,7 +1268,7 @@ namespace lt {
             io.Fonts->AddFontDefault();
 
             PanelState st;
-            st.origin_z_scratch = 99.0;
+            st.cosmetic.origin_z_scratch = 99.0;
             FigureEditBox box;
             auto frame = [&] {
                 ImGui::NewFrame();
@@ -1282,10 +1282,10 @@ namespace lt {
             ImGui::DestroyContext(ctx);
             ImGui::SetCurrentContext(nullptr);
 
-            check(st.axes_style_local.xaxis_z == AxisPosition::High &&
-                  st.axes_style_local.zaxis_y == AxisPosition::Mid,
+            check(st.cosmetic.axes_style_local.xaxis_z == AxisPosition::High &&
+                  st.cosmetic.axes_style_local.zaxis_y == AxisPosition::Mid,
                   "3D panel: the z-involving placements reach the panel's scratch");
-            check(near_px(static_cast<float>(st.origin_z_scratch), 2.5f),
+            check(near_px(static_cast<float>(st.cosmetic.origin_z_scratch), 2.5f),
                   "3D panel: and origin_z seeds its drag box");
         }
 

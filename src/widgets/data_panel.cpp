@@ -168,8 +168,8 @@ namespace sextant {
                         const DataColumn& col = t.columns[c];
                         if (static_cast<std::size_t>(r) >= col.count) continue;
                         // Each column against its own (cached) min/max.
-                        const float shade = st.shade_cells
-                                                ? st.cell_shading.column(data_generation, slot_idx, t.plane_index,
+                        const float shade = st.data.shade_cells
+                                                ? st.data.cell_shading.column(data_generation, slot_idx, t.plane_index,
                                                                          t.kind, t.plot_index, c,
                                                                          col.values, col.count)
                                                 .norm(col.values[r])
@@ -216,8 +216,8 @@ namespace sextant {
 
             ImGui::Text("%d rows x %d cols", hp.rows, hp.cols);
             // One range for the whole matrix (the data's, not vmin/vmax); shown.
-            if (st.shade_cells) {
-                const ValueRange& vr = st.cell_shading.matrix(data_generation, slot_idx,
+            if (st.data.shade_cells) {
+                const ValueRange& vr = st.data.cell_shading.matrix(data_generation, slot_idx,
                                                               t.plane_index, t.plot_index,
                                                               hp.data);
                 ImGui::SameLine();
@@ -235,11 +235,11 @@ namespace sextant {
 
             int first = 0;
             if (hp.cols > kMaxGridCols) {
-                st.grid_col_offset = std::clamp(st.grid_col_offset, 0, hp.cols - kMaxGridCols);
+                st.data.grid_col_offset = std::clamp(st.data.grid_col_offset, 0, hp.cols - kMaxGridCols);
                 ImGui::SetNextItemWidth(160.0f);
-                ImGui::InputInt("First column", &st.grid_col_offset);
-                st.grid_col_offset = std::clamp(st.grid_col_offset, 0, hp.cols - kMaxGridCols);
-                first = st.grid_col_offset;
+                ImGui::InputInt("First column", &st.data.grid_col_offset);
+                st.data.grid_col_offset = std::clamp(st.data.grid_col_offset, 0, hp.cols - kMaxGridCols);
+                first = st.data.grid_col_offset;
                 ImGui::SameLine();
                 ImGui::TextDisabled("showing %d..%d", first, first + kMaxGridCols - 1);
             }
@@ -331,8 +331,8 @@ namespace sextant {
                                                 + static_cast<std::size_t>(first + c);
                         if (idx >= hp.data.size()) continue;
                         // One range for the whole matrix.
-                        const float shade = st.shade_cells
-                                                ? st.cell_shading.matrix(data_generation, slot_idx,
+                        const float shade = st.data.shade_cells
+                                                ? st.data.cell_shading.matrix(data_generation, slot_idx,
                                                                          t.plane_index, t.plot_index, hp.data)
                                                 .norm(static_cast<double>(hp.data[idx]))
                                                 : -1.0f;
@@ -411,24 +411,24 @@ namespace sextant {
 
             // Heights/bases selector, only when the plot has per-bar bases.
             const bool has_bases = b && b->bottoms.size() == nu * nv;
-            if (!has_bases) st.bar3d_show_bases = false;
+            if (!has_bases) st.data.bar3d_show_bases = false;
             if (has_bases) {
                 ImGui::TextDisabled("Cells:");
                 ImGui::SameLine();
-                if (ImGui::RadioButton("heights", !st.bar3d_show_bases)) st.bar3d_show_bases = false;
+                if (ImGui::RadioButton("heights", !st.data.bar3d_show_bases)) st.data.bar3d_show_bases = false;
                 ImGui::SameLine();
-                if (ImGui::RadioButton("bases", st.bar3d_show_bases)) st.bar3d_show_bases = true;
+                if (ImGui::RadioButton("bases", st.data.bar3d_show_bases)) st.data.bar3d_show_bases = true;
             } else if (b) {
                 ImGui::TextDisabled("Every bar stands on %g (one base for the plot, "
                                     "Bar3DOptions::bottom).", b->opts.bottom);
             }
-            const bool bases = has_bases && st.bar3d_show_bases;
+            const bool bases = has_bases && st.data.bar3d_show_bases;
             const CowVec<double>& cells = bases ? b->bottoms : primary;
             // PlotCellEdit::column, also this matrix's shading-cache key.
             const int cell_col = bases ? 3 : 2;
 
-            if (st.shade_cells) {
-                const ValueRange& vr = st.cell_shading.column(data_generation, slot_idx,
+            if (st.data.shade_cells) {
+                const ValueRange& vr = st.data.cell_shading.column(data_generation, slot_idx,
                                                               t.plane_index, kind,
                                                               t.plot_index, cell_col,
                                                               cells.data(), cells.size());
@@ -439,11 +439,11 @@ namespace sextant {
             int first = 0;
             const int ncols = static_cast<int>(nv);
             if (ncols > kMaxGridCols) {
-                st.grid_col_offset = std::clamp(st.grid_col_offset, 0, ncols - kMaxGridCols);
+                st.data.grid_col_offset = std::clamp(st.data.grid_col_offset, 0, ncols - kMaxGridCols);
                 ImGui::SetNextItemWidth(160.0f);
-                ImGui::InputInt("First v", &st.grid_col_offset);
-                st.grid_col_offset = std::clamp(st.grid_col_offset, 0, ncols - kMaxGridCols);
-                first = st.grid_col_offset;
+                ImGui::InputInt("First v", &st.data.grid_col_offset);
+                st.data.grid_col_offset = std::clamp(st.data.grid_col_offset, 0, ncols - kMaxGridCols);
+                first = st.data.grid_col_offset;
                 ImGui::SameLine();
                 ImGui::TextDisabled("showing %d..%d", first, first + kMaxGridCols - 1);
             }
@@ -507,8 +507,8 @@ namespace sextant {
             for (int c = 0; c < shown; ++c) {
                 if (!ImGui::TableSetColumnIndex(c + kBar3DGutterCols)) continue;
                 const int abs_c = first + c;
-                const float shade = st.shade_cells
-                                        ? st.cell_shading.column(data_generation, slot_idx, t.plane_index,
+                const float shade = st.data.shade_cells
+                                        ? st.data.cell_shading.column(data_generation, slot_idx, t.plane_index,
                                                                  kind, t.plot_index, 1,
                                                                  gv.data(), nv)
                                         .norm(gv[static_cast<std::size_t>(abs_c)])
@@ -564,8 +564,8 @@ namespace sextant {
 
                     // The u coordinate, in the gutter.
                     if (ImGui::TableSetColumnIndex(2)) {
-                        const float shade = st.shade_cells
-                                                ? st.cell_shading.column(data_generation, slot_idx, t.plane_index,
+                        const float shade = st.data.shade_cells
+                                                ? st.data.cell_shading.column(data_generation, slot_idx, t.plane_index,
                                                                          kind, t.plot_index, 0,
                                                                          gu.data(), nu)
                                                 .norm(gu[static_cast<std::size_t>(r)])
@@ -588,8 +588,8 @@ namespace sextant {
                                                 + static_cast<std::size_t>(first + c);
                         if (idx >= cells.size()) continue;
                         // One range for the whole matrix.
-                        const float shade = st.shade_cells
-                                                ? st.cell_shading.column(data_generation, slot_idx, t.plane_index,
+                        const float shade = st.data.shade_cells
+                                                ? st.data.cell_shading.column(data_generation, slot_idx, t.plane_index,
                                                                          kind, t.plot_index, cell_col,
                                                                          cells.data(), cells.size())
                                                 .norm(cells[idx])
@@ -632,10 +632,10 @@ namespace sextant {
         // A plane's tab: placement and visibility (its objects have their own tabs).
         void draw_plane_tab(PanelState& st, const RenderSnapshot3D& sn, FigureEditBox& edit_box,
                             int idx, int pi, int objects) {
-            if (pi < 0 || pi >= static_cast<int>(st.planes_local.size()) ||
+            if (pi < 0 || pi >= static_cast<int>(st.data.planes_local.size()) ||
                 pi >= static_cast<int>(sn.planes.size()))
                 return;
-            PanelState::PlaneUi& p = st.planes_local[static_cast<std::size_t>(pi)];
+            DataPanelState::PlaneUi& p = st.data.planes_local[static_cast<std::size_t>(pi)];
 
             // Merged into the pending entry for this plane, so a drag doesn't append
             // one entry per frame.
@@ -709,7 +709,7 @@ namespace sextant {
         void name_and_key(PanelState& st, Opts& o, Push&& push) {
             if (begin_field_table("plotname")) {
                 field_row("Name");
-                if (text_field("##plotname", o.name, st.name_buf, sizeof st.name_buf)) push();
+                if (text_field("##plotname", o.name, st.data.name_buf, sizeof st.data.name_buf)) push();
                 end_field_table();
             }
             if constexpr (requires { o.show_legend; }) {
@@ -762,18 +762,18 @@ namespace sextant {
         }
 
         // A bar width in data units, over the snapshot's resolved value (an op, not
-        // an options field). Held in st.width_held while dragged; speed scales with
+        // an options field). Held in st.data.width_held while dragged; speed scales with
         // the value. True with *out set on a change; never below 0.
         bool width_drag(PanelState& st, const char* id, double snap, double* out) {
-            // Only the active drag touches the shared st.width_held; an inactive
+            // Only the active drag touches the shared st.data.width_held; an inactive
             // one drawn after it (bar3d's u then v) must not overwrite it.
             const bool active = ImGui::GetActiveID() == ImGui::GetID(id);
-            double v = active ? st.width_held : snap;
+            double v = active ? st.data.width_held : snap;
             const float speed = static_cast<float>(std::max(std::abs(v), 1e-9) * 0.005);
             const bool changed = drag_double(id, &v, speed, "%.4g");
             v = std::max(0.0, v);
             // Activation happens inside the call: hold from that frame on.
-            if (ImGui::IsItemActive()) st.width_held = v;
+            if (ImGui::IsItemActive()) st.data.width_held = v;
             if (!changed) return false;
             *out = v;
             return true;
@@ -954,17 +954,17 @@ namespace sextant {
         }
 
         // A 2D plot object's appearance, above its table, from the sheet's scratch
-        // copy (PanelState::SheetStyles); the snapshot supplies the error-bar data.
+        // copy (DataPanelState::SheetStyles); the snapshot supplies the error-bar data.
         void draw_plot_appearance(PanelState& st, const RenderSnapshot& sheet, const PlotDataTable& t,
                                   FigureEditBox& edit_box, int idx, bool is3d, const OpSink& sink) {
             const int pi = t.plot_index;
             if (pi < 0) return;
             const std::size_t i = static_cast<std::size_t>(pi);
             const bool on_plane = t.plane_index >= 0;
-            PanelState::SheetStyles* ss = nullptr;
-            if (!on_plane) ss = &st.sheet_local;
-            else if (static_cast<std::size_t>(t.plane_index) < st.plane_sheets_local.size())
-                ss = &st.plane_sheets_local[static_cast<std::size_t>(t.plane_index)];
+            DataPanelState::SheetStyles* ss = nullptr;
+            if (!on_plane) ss = &st.data.sheet_local;
+            else if (static_cast<std::size_t>(t.plane_index) < st.data.plane_sheets_local.size())
+                ss = &st.data.plane_sheets_local[static_cast<std::size_t>(t.plane_index)];
             if (!ss) return;
 
             // Scratch and snapshot both hold object i, else nothing is drawn (a
@@ -1011,9 +1011,9 @@ namespace sextant {
         void draw_bar3d_appearance(PanelState& st, FigureEditBox& edit_box, int idx, int bi,
                                    const Bar3DPlot* b, const OpSink& sink) {
             const bool per_bar_bases = b && !b->bottoms.empty();
-            if (bi < 0 || bi >= static_cast<int>(st.bars3d_local.size())) return;
+            if (bi < 0 || bi >= static_cast<int>(st.data.bars3d_local.size())) return;
             if (!section("Appearance", true)) return;
-            Bar3DOptions& o = st.bars3d_local[static_cast<std::size_t>(bi)];
+            Bar3DOptions& o = st.data.bars3d_local[static_cast<std::size_t>(bi)];
             auto push_bar = [&] {
                 edit_box.update3d(idx, [&](AxesEdit3D& e) {
                     for (auto& be: e.bars3d)
@@ -1026,7 +1026,7 @@ namespace sextant {
             };
             if (begin_field_table("bar3dname")) {
                 field_row("Name");
-                if (text_field("##b3dname", o.name, st.name_buf, sizeof st.name_buf)) push_bar();
+                if (text_field("##b3dname", o.name, st.data.name_buf, sizeof st.data.name_buf)) push_bar();
                 end_field_table();
             }
             if (ImGui::Checkbox("Legend key##b3dlg", &o.show_legend)) push_bar();
@@ -1073,9 +1073,9 @@ namespace sextant {
 
         // A surface's appearance, above its table.
         void draw_surface_appearance(PanelState& st, FigureEditBox& edit_box, int idx, int si) {
-            if (si < 0 || si >= static_cast<int>(st.surfaces_local.size())) return;
+            if (si < 0 || si >= static_cast<int>(st.data.surfaces_local.size())) return;
             if (!section("Appearance", true)) return;
-            SurfaceOptions& o = st.surfaces_local[static_cast<std::size_t>(si)];
+            SurfaceOptions& o = st.data.surfaces_local[static_cast<std::size_t>(si)];
             auto push_surf = [&] {
                 edit_box.update3d(idx, [&](AxesEdit3D& e) {
                     for (auto& se: e.surfaces)
@@ -1089,7 +1089,7 @@ namespace sextant {
             // One name: the colorbar title with `colormap`, else the legend key.
             if (begin_field_table("surfname")) {
                 field_row("Name");
-                if (text_field("##surfname", o.name, st.name_buf, sizeof st.name_buf)) push_surf();
+                if (text_field("##surfname", o.name, st.data.name_buf, sizeof st.data.name_buf)) push_surf();
                 end_field_table();
             }
             if (ImGui::Checkbox("Legend key##surflg", &o.show_legend)) push_surf();
@@ -1140,9 +1140,9 @@ namespace sextant {
         // `p` is the snapshot's cloud (its error-bar data); null draws no error-bar block.
         void draw_scatter3d_appearance(PanelState& st, FigureEditBox& edit_box, int idx, int ci,
                                        const Scatter3DPlot* p) {
-            if (ci < 0 || ci >= static_cast<int>(st.scatter3d_local.size())) return;
+            if (ci < 0 || ci >= static_cast<int>(st.data.scatter3d_local.size())) return;
             if (!section("Appearance", true)) return;
-            Scatter3DOptions& o = st.scatter3d_local[static_cast<std::size_t>(ci)];
+            Scatter3DOptions& o = st.data.scatter3d_local[static_cast<std::size_t>(ci)];
             auto push_cloud = [&] {
                 edit_box.update3d(idx, [&](AxesEdit3D& e) {
                     for (auto& ce: e.scatter3d)
@@ -1156,7 +1156,7 @@ namespace sextant {
             // One name for the colorbar and the legend key.
             if (begin_field_table("cloudname")) {
                 field_row("Name");
-                if (text_field("##cloudname", o.name, st.name_buf, sizeof st.name_buf))
+                if (text_field("##cloudname", o.name, st.data.name_buf, sizeof st.data.name_buf))
                     push_cloud();
                 end_field_table();
             }
@@ -1199,9 +1199,9 @@ namespace sextant {
         // line style (Line3DOptions has none). `p` as for a cloud.
         void draw_line3d_appearance(PanelState& st, FigureEditBox& edit_box, int idx, int li,
                                     const Line3DPlot* p) {
-            if (li < 0 || li >= static_cast<int>(st.line3d_local.size())) return;
+            if (li < 0 || li >= static_cast<int>(st.data.line3d_local.size())) return;
             if (!section("Appearance", true)) return;
-            Line3DOptions& o = st.line3d_local[static_cast<std::size_t>(li)];
+            Line3DOptions& o = st.data.line3d_local[static_cast<std::size_t>(li)];
             auto push_path = [&] {
                 edit_box.update3d(idx, [&](AxesEdit3D& e) {
                     for (auto& le: e.lines3d)
@@ -1214,7 +1214,7 @@ namespace sextant {
             };
             if (begin_field_table("pathname")) {
                 field_row("Name");
-                if (text_field("##pathname", o.name, st.name_buf, sizeof st.name_buf))
+                if (text_field("##pathname", o.name, st.data.name_buf, sizeof st.data.name_buf))
                     push_path();
                 end_field_table();
             }
@@ -1257,9 +1257,9 @@ namespace sextant {
         // colormapped by having `colors`); vmin/vmax always shown.
         void draw_surface_tri_appearance(PanelState& st, FigureEditBox& edit_box,
                                          int idx, int mi) {
-            if (mi < 0 || mi >= static_cast<int>(st.surface_tri_local.size())) return;
+            if (mi < 0 || mi >= static_cast<int>(st.data.surface_tri_local.size())) return;
             if (!section("Appearance", true)) return;
-            SurfaceTriOptions& o = st.surface_tri_local[static_cast<std::size_t>(mi)];
+            SurfaceTriOptions& o = st.data.surface_tri_local[static_cast<std::size_t>(mi)];
             auto push_mesh = [&] {
                 edit_box.update3d(idx, [&](AxesEdit3D& e) {
                     for (auto& me: e.surface_tri)
@@ -1273,7 +1273,7 @@ namespace sextant {
             // One name: the colorbar title when colormapped, else the legend key.
             if (begin_field_table("meshname")) {
                 field_row("Name");
-                if (text_field("##meshname", o.name, st.name_buf, sizeof st.name_buf))
+                if (text_field("##meshname", o.name, st.data.name_buf, sizeof st.data.name_buf))
                     push_mesh();
                 end_field_table();
             }
@@ -1356,25 +1356,25 @@ namespace sextant {
         // the plot. Returns the format for this frame's cells.
         const char* draw_table_format(PanelState& st, char* fmt_buf, std::size_t n) {
             static const char* kNotations[] = {"General", "Fixed", "Scientific"};
-            int notation = static_cast<int>(st.value_format.notation);
+            int notation = static_cast<int>(st.data.value_format.notation);
             ImGui::SetNextItemWidth(130.0f);
             if (ImGui::Combo("Notation", &notation, kNotations, IM_ARRAYSIZE(kNotations)))
-                st.value_format.notation = static_cast<ValueFormat::Notation>(notation);
+                st.data.value_format.notation = static_cast<ValueFormat::Notation>(notation);
             ImGui::SameLine();
             ImGui::SetNextItemWidth(130.0f);
-            ImGui::SliderInt("Precision", &st.value_format.precision, 0, 17);
+            ImGui::SliderInt("Precision", &st.data.value_format.precision, 0, 17);
 
-            const char* fmt = format_spec(st.value_format, fmt_buf, n);
+            const char* fmt = format_spec(st.data.value_format, fmt_buf, n);
             ImGui::SameLine();
             ImGui::TextDisabled("(%s)", fmt);
 
-            ImGui::Checkbox("Shade cells", &st.shade_cells);
+            ImGui::Checkbox("Shade cells", &st.data.shade_cells);
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Tint each cell by where its value falls between the\n"
                     "low and high of its own column (light blue to light red).\n"
                     "A heatmap shades against the whole matrix instead,\n"
                     "over the data's own range rather than vmin/vmax.");
-            if (st.shade_cells) {
+            if (st.data.shade_cells) {
                 // A strip of the ramp (ranges are per column, so no numbers).
                 ImGui::SameLine(0.0f, 12.0f);
                 shade_legend();
@@ -1439,7 +1439,7 @@ namespace sextant {
         // Display format, shared by every cell (the widgets are drawn per tab,
         // just above its table: draw_table_format()).
         char fmt_buf[16];
-        const char* fmt = format_spec(st.value_format, fmt_buf, sizeof(fmt_buf));
+        const char* fmt = format_spec(st.data.value_format, fmt_buf, sizeof(fmt_buf));
 
         const auto tables = cur2d
                                 ? collect_plot_data_tables(*cur2d)

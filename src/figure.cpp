@@ -278,7 +278,7 @@ void Figure::Impl::apply_panel_edits_to_snapshot() {
 }
 
 std::shared_ptr<const FigureMeasure> Figure::Impl::on_screen_measure() const {
-    return open.load() ? panel_state.layout.load() : nullptr;
+    return open.load() ? panel_state.plot.layout.load() : nullptr;
 }
 
 void Figure::Impl::resolve_live_save_size(Figure& fig, int& w, int& h) {
@@ -287,12 +287,12 @@ void Figure::Impl::resolve_live_save_size(Figure& fig, int& w, int& h) {
 
     using namespace std::chrono;
     const auto deadline = steady_clock::now() + milliseconds(1000);
-    while (panel_state.live_plot_w.load(std::memory_order_relaxed) == 0 &&
+    while (panel_state.plot.live_plot_w.load(std::memory_order_relaxed) == 0 &&
            steady_clock::now() < deadline) {
         std::this_thread::sleep_for(milliseconds(2));
     }
-    if (w <= 0) w = panel_state.live_plot_w.load(std::memory_order_relaxed);
-    if (h <= 0) h = panel_state.live_plot_h.load(std::memory_order_relaxed);
+    if (w <= 0) w = panel_state.plot.live_plot_w.load(std::memory_order_relaxed);
+    if (h <= 0) h = panel_state.plot.live_plot_h.load(std::memory_order_relaxed);
     if (w <= 0) w = opts.width;   // window closed again / never rendered a frame
     if (h <= 0) h = opts.height;
 }
@@ -425,7 +425,7 @@ void Figure::show(bool pause) {
 
     // Registered before the thread runs, so the close callback always has a
     // registration to take back.
-    d->panel_state.events = d->events.get();
+    d->panel_state.plot.events = d->events.get();
     d->open.store(true);
     d->registered.store(true);
     register_open_window();
@@ -671,8 +671,8 @@ void Figure::resize(int width, int height) {
     d->opts.height = height;
     // The window resizes itself on its own thread next frame (GLFW is
     // thread-bound), adding menu bar and panel so the plot area gets the size.
-    d->panel_state.pending_plot_w.store(width,  std::memory_order_relaxed);
-    d->panel_state.pending_plot_h.store(height, std::memory_order_relaxed);
+    d->panel_state.shell.pending_plot_w.store(width,  std::memory_order_relaxed);
+    d->panel_state.shell.pending_plot_h.store(height, std::memory_order_relaxed);
 }
 
 FigureSize Figure::size_for_frame(int frame_w, int frame_h, int slot_index) const {

@@ -755,7 +755,7 @@ namespace lt {
         FigureEditBox edit_box;
         PanelState st;
         auto ch = EventChannel::create();
-        st.events = ch.get();
+        st.plot.events = ch.get();
 
         std::vector<Event> log;
         for (int k = 0; k <= static_cast<int>(EventKind::Pick); ++k)
@@ -807,7 +807,7 @@ namespace lt {
         for (int i = 0; i < 6; ++i) frame();
         drain();
         ImGuiWindow* plot = ImGui::FindWindowByName("Plot");
-        check(plot != nullptr && st.live_plot_w.load() > 0, "panel events: the Plot panel is drawn");
+        check(plot != nullptr && st.plot.live_plot_w.load() > 0, "panel events: the Plot panel is drawn");
         if (!plot) return;
         const ImVec2 mid((plot->ContentRegionRect.Min.x + plot->ContentRegionRect.Max.x) * 0.5f,
                          (plot->ContentRegionRect.Min.y + plot->ContentRegionRect.Max.y) * 0.5f);
@@ -844,8 +844,8 @@ namespace lt {
 
         // ---- Pick: a press on a data point, and one on empty plot.
         {
-            const FigureLayout fl = compute_figure_layout(fs, st.live_plot_w.load(),
-                                                          st.live_plot_h.load());
+            const FigureLayout fl = compute_figure_layout(fs, st.plot.live_plot_w.load(),
+                                                          st.plot.live_plot_h.load());
             const CoordTransform& tr = fl.cells[0].tr;
             const float to_plot = ImGui::GetIO().DisplayFramebufferScale.x / ctx.link().content_scale();
             auto at = [&](float px, float py) {
@@ -932,7 +932,7 @@ namespace lt {
 
         // ---- What sextant did with it.
         {
-            st.navigate_enabled = true;
+            st.plot.navigate_enabled = true;
             pos(mid.x, mid.y);
             step();
             button(0, true);
@@ -942,13 +942,13 @@ namespace lt {
                   "panel events: with Navigate on, a press on the selected subplot says Navigate");
             button(0, false);
             step();
-            st.navigate_enabled = false;
+            st.plot.navigate_enabled = false;
         }
 
         // ---- Nothing is queued for a kind nobody wants.
         {
             auto quiet = EventChannel::create();
-            st.events = quiet.get();
+            st.plot.events = quiet.get();
             pos(mid.x + 3, mid.y);
             frame();
             button(0, true);
@@ -956,7 +956,7 @@ namespace lt {
             button(0, false);
             frame();
             check(!quiet->has_pending(), "panel events: no callback, nothing queued");
-            st.events = ch.get();
+            st.plot.events = ch.get();
         }
     }
 

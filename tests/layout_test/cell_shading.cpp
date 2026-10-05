@@ -231,13 +231,13 @@ namespace lt {
         const ImU32 c_hi = sextant::shade_color(1.0f);
 
         sextant::PanelState off;
-        off.shade_cells = false;
+        off.data.shade_cells = false;
         const auto r_off = run_data_panel(off, fs_spread, 4);
         check(r_off.ramp_vertices == 0,
               "shading off: not one vertex in a ramp colour, legend included");
 
         sextant::PanelState on;
-        on.shade_cells = true;
+        on.data.shade_cells = true;
         const auto r_on = run_data_panel(on, fs_spread, 4);
         check(r_on.ramp_vertices > 0, "shading on: the cells are drawn in ramp colours");
         // The column's extremes get the ramp's extremes.
@@ -245,7 +245,7 @@ namespace lt {
               "  the column's min and max land on the ends of the ramp");
 
         sextant::PanelState flat;
-        flat.shade_cells = true;
+        flat.data.shade_cells = true;
         const auto r_flat = run_data_panel(flat, fs_flat, 4);
         check(r_flat.has(c_mid) && !r_flat.has(c_lo) && !r_flat.has(c_hi),
               "  a flat column is drawn entirely at the neutral middle");

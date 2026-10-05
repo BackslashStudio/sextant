@@ -48,7 +48,7 @@ struct Figure::Impl {
     std::vector<Slot>             slots;
     // Declared before window_thread, so it outlives it.
     FrameCounters                 frame_counters;
-    // The window thread pushes into it (through panel_state.events); the
+    // The window thread pushes into it (through panel_state.plot.events); the
     // callers' threads connect to it and drain it. Shared with the process-wide
     // list poll_events()/run() walk.
     std::shared_ptr<EventChannel> events = EventChannel::create();

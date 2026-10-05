@@ -278,7 +278,7 @@ namespace lt {
 
         // Hover: owns, shows the cursor, pushes nothing.
         GridDragOut o = update_grid_drag(st, fs, lay, GW, GH, ptr(col_bx, bot_y), 4.0f);
-        check(o.owns && o.cursor_ew && !o.col_ratios && !st.grid_drag.active,
+        check(o.owns && o.cursor_ew && !o.col_ratios && !st.plot.grid_drag.active,
               "drag: hovering a boundary owns the pointer and shows a resize cursor");
         o = update_grid_drag(st, fs, lay, GW, GH, ptr(mid_x0, bot_y), 4.0f);
         check(!o.owns, "drag: a cell's interior is left to selection and navigation");
@@ -293,7 +293,7 @@ namespace lt {
         PlotPointer press = ptr(col_bx, bot_y);
         press.pressed = press.active = true;
         o = update_grid_drag(st, fs, lay, GW, GH, press, 4.0f);
-        check(o.owns && st.grid_drag.active && !o.col_ratios, "drag: a press on it starts a drag");
+        check(o.owns && st.plot.grid_drag.active && !o.col_ratios, "drag: a press on it starts a drag");
         PlotPointer hold = ptr(col_bx + 60.0f, bot_y);
         hold.active = true;
         o = update_grid_drag(st, fs, lay, GW, GH, hold, 4.0f);
@@ -325,7 +325,7 @@ namespace lt {
         PlotPointer rel = ptr(col_bx, bot_y);
         rel.released = true;
         o = update_grid_drag(st, fs, lay, GW, GH, rel, 4.0f);
-        check(o.owns && !st.grid_drag.active, "drag: the release ends it, and is still the drag's");
+        check(o.owns && !st.plot.grid_drag.active, "drag: the release ends it, and is still the drag's");
 
         // Double-click: the two tracks get equal weight.
         FigureSnapshot skew = fs;
@@ -337,7 +337,7 @@ namespace lt {
         PanelState st2;
         o = update_grid_drag(st2, skew, ls, GW, GH, dbl, 4.0f);
         check(o.owns && o.row_ratios && *o.row_ratios == std::vector<float>{2.0f, 2.0f}
-              && !st2.grid_drag.active,
+              && !st2.plot.grid_drag.active,
               "drag: a double-click on a boundary gives its two tracks equal weight");
     }
 } // namespace lt
