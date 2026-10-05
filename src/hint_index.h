@@ -69,7 +69,7 @@ struct PointGrid {
 };
 
 // Per-window-thread cache of PointGrids, one per plot object; owned by
-// PanelState. Call set_frame_key() per hovered axes per frame, then grid() per
+// FigureWindowState. Call set_frame_key() per hovered axes per frame, then grid() per
 // plot. Stale entries are not evicted (bounded by the max plot count).
 class HintIndexCache {
 public:

@@ -99,7 +99,7 @@ namespace lt {
 
         const FigureSnapshot fs = line_and_surface();
         FigureEditBox box;
-        PanelState st;
+        FigureWindowState st;
         auto ch = EventChannel::create();
         st.plot.events = ch.get();
         std::vector<std::string> keys_seen;
@@ -179,7 +179,7 @@ namespace lt {
 
         // ---- The inspectors read the info: with none, the declared limits.
         {
-            PanelState blind;
+            FigureWindowState blind;
             FigureContext none{ fs, box, blind.selection, blind.slot_view, nullptr, 7 };
             ImGui::NewFrame();
             ImGui::Begin("Cosmetic");
@@ -218,7 +218,7 @@ namespace lt {
         const FigureSnapshot fa = one_line_snapshot({0.0, 1.0, 2.0}, {0.0, 1.0, 4.0});
         const FigureSnapshot fb = line_and_surface();
         FigureEditBox box_a, box_b;
-        PanelState st_a, st_b;
+        FigureWindowState st_a, st_b;
 
         // The number of hover positions that reported a duplicate id, with the
         // two views under `id_a` and `id_b`.

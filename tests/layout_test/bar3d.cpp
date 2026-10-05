@@ -967,7 +967,7 @@ namespace lt {
             io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures;
             io.Fonts->AddFontDefault();
 
-            PanelState st;
+            FigureWindowState st;
             FigureEditBox box;
             auto frame = [&] {
                 ImGui::NewFrame();

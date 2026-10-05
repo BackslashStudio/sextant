@@ -1,7 +1,6 @@
 #include "window_thread.h"
 #include "figure_export.h"
-#include "widgets/imgui_context.h"
-#include "widgets/plot_view.h"
+#include "widgets/figure_window_shell.h"
 #include "window_broker.h"
 #include "platform/platform.h"
 #include <chrono>
@@ -147,14 +146,14 @@ namespace sextant {
         // Drawing, on this thread's context (current since its construction);
         // destroyed before it, in reverse order.
         RenderDevice dev;
-        PlotView view;
 
         // Exports get their own DataRenderer (built on first use), so a different
         // export size doesn't invalidate the window's caches.
         std::optional<DataRenderer> export_data;
 
-        // Must be created after and destroyed before GLContext.
-        ImGuiPanelContext imgui_ctx(ctx, opts_);
+        // The window: its ImGui context and plot view. Must be created after and
+        // destroyed before GLContext.
+        FigureWindowShell shell(ctx, opts_);
 
         loop_thread_id_ = std::this_thread::get_id(); {
             std::lock_guard<std::mutex> lock(export_mutex_);
@@ -187,10 +186,9 @@ namespace sextant {
             ctx.poll_events();
             if (ctx.should_close()) break;
 
-            imgui_ctx.make_current(); // this thread's context, never a sibling's
-            // Before the frame (and after make_current()), so a monitor change
-            // applies to this frame.
-            imgui_ctx.sync_dpi_scale(ctx);
+            // This thread's ImGui context, never a sibling's, and the chrome
+            // scale followed before the frame, so a monitor change applies to it.
+            shell.begin_frame(ctx);
 
             // Held across render and swap: the same lock the window system takes
             // to resize this context's drawable from the pumping thread, so a
@@ -200,7 +198,7 @@ namespace sextant {
 
             // Time render work only; swap_buffers() blocks on vsync.
             const auto t0 = std::chrono::steady_clock::now();
-            render_fn_(ctx, dev, view);
+            render_fn_(ctx, dev, shell);
             const double ms = std::chrono::duration<double, std::milli>(
                 std::chrono::steady_clock::now() - t0).count();
 

@@ -11,8 +11,23 @@ namespace sextant {
     // Built from a default ImGuiStyle so repeated calls don't compound scaling.
     void apply_panel_style(PanelTheme theme, float scale);
 
-    // RAII owner of one ImGui context for one GLContext's window. Create and
-    // destroy on that thread, within the GLContext's lifetime; never for a headless
+    // What the kit's components need from an ImGui context, on the current one,
+    // with no platform or renderer backend (GUI-kit R7, M0 F4): the Roboto panel
+    // font, click-to-type drags (drag_double() relies on it) and the panel style
+    // at chrome scale `scale`. Call once, before the first frame. Any host: the
+    // library window (ImGuiPanelContext) or an app on its own backend.
+    void setup_panel_imgui(PanelTheme theme, float scale);
+
+    // Re-styles for a new chrome scale when `want` (> 0) differs from `current`,
+    // which it then becomes; true if it did. Exact compare: a scale read from the
+    // platform is the same float every frame until the monitor changes. Call
+    // before NewFrame().
+    bool follow_panel_scale(PanelTheme theme, float& current, float want);
+
+    // The library window's ImGui context: setup_panel_imgui() plus what is the
+    // shell's own -- docking, no imgui.ini, sextant's platform backend over the
+    // GLContext's WindowLink, and the GL3 renderer. Create and destroy on the
+    // window's thread, within the GLContext's lifetime; never for a headless
     // context. The theme is fixed; the DPI scale follows the window's monitor
     // (sync_dpi_scale()).
     class ImGuiPanelContext {

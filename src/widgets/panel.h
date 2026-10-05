@@ -3,14 +3,12 @@
 #include <optional>
 #include <vector>
 
+// The kit's inspector and dialogs (contents only) and the plot view's pure
+// helpers. The library window composing them is FigureWindowShell
+// (figure_window_shell.h, GUI-kit R7); the plot view itself is plot_view.h.
 namespace sextant {
-    class GLContext;
-    class RenderDevice;
-    class PlotView;
     struct FigureSnapshot;
-    struct FigureOptions;
     class FigureEditBox;
-    struct PanelState;
     struct FigureContext;
     struct CosmeticState;
     struct PlotViewState;
@@ -21,13 +19,6 @@ namespace sextant {
     struct FigureLayout;
     struct GridTracks;
     struct PlotPointer;
-
-    // One full ImGui frame of the docked layout: the plot view in the Plot panel
-    // at its size, then the side panels. The live window's only per-frame entry
-    // point; call on the GL/ImGui thread before swap_buffers().
-    void draw_widget_panel(GLContext& ctx, RenderDevice& dev, PlotView& view,
-                           const FigureSnapshot& fsnap, const FigureOptions& opts,
-                           FigureEditBox& edit_box, PanelState& state);
 
     // The Cosmetic inspector's contents, into the caller's current window (the
     // caller opens it, and pushes the figure id). `cosmetic` is the inspector's

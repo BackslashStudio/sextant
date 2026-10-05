@@ -16,7 +16,7 @@
 
 namespace sextant {
 struct FigureMeasure;
-class PlotView;
+class FigureWindowShell;
 
 // Render-loop timing, written by a window thread, read from any thread. Owned
 // by the Figure rather than the WindowThread, so a read never races the
@@ -50,9 +50,9 @@ struct FrameCounters {
 // Thread-safety: start() and stop() must be called from the same (caller) thread.
 class WindowThread {
 public:
-    // `view` is the window's plot view (its offscreen target and data caches),
-    // owned by this thread and made on its context.
-    using RenderFn = std::function<void(GLContext&, RenderDevice&, PlotView&)>;
+    // `shell` is the window (its ImGui context and plot view), made on this
+    // thread's context and owned by it.
+    using RenderFn = std::function<void(GLContext&, RenderDevice&, FigureWindowShell&)>;
     using CloseFn  = std::function<void()>;
 
     // `counters` is borrowed and must outlive this object.

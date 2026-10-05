@@ -32,7 +32,7 @@ struct PlotEventInfo {
     bool selected_now = false;  // a click selected a cell this frame
 };
 
-// Carried from frame to frame, in PanelState.
+// Carried from frame to frame, in FigureWindowState.
 struct PlotEventTracker {
     bool prev_down[3] = {};
     bool began[3] = {};                                  // the press started on the plot

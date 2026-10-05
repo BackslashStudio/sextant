@@ -232,12 +232,12 @@ namespace lt {
 
 namespace lt {
     sextant::FigureContext panel_ctx(const sextant::FigureSnapshot& fs, sextant::FigureEditBox& box,
-                                     sextant::PanelState& st) {
+                                     sextant::FigureWindowState& st) {
         return { fs, box, st.selection, st.slot_view, &st.plot_info, st.figure_id };
     }
 
     void draw_cosmetic_window(const sextant::FigureSnapshot& fs, sextant::FigureEditBox& box,
-                              sextant::PanelState& st) {
+                              sextant::FigureWindowState& st) {
         sextant::FigureContext ctx = panel_ctx(fs, box, st);
         ImGui::Begin("Cosmetic", nullptr, ImGuiWindowFlags_NoCollapse);
         sextant::push_figure_id(ctx.figure_id);
@@ -247,7 +247,7 @@ namespace lt {
     }
 
     void draw_data_window(const sextant::FigureSnapshot& fs, sextant::FigureEditBox& box,
-                          sextant::PanelState& st) {
+                          sextant::FigureWindowState& st) {
         sextant::FigureContext ctx = panel_ctx(fs, box, st);
         ImGui::Begin("Data", nullptr, ImGuiWindowFlags_NoCollapse);
         sextant::push_figure_id(ctx.figure_id);
@@ -257,7 +257,7 @@ namespace lt {
     }
 
     sextant::SlotViewState& pulled_slot_view(const sextant::FigureSnapshot& fs,
-                                             sextant::PanelState& st) {
+                                             sextant::FigureWindowState& st) {
         sextant::FigureEditBox unused;   // slot_view() never edits
         sextant::FigureContext ctx = panel_ctx(fs, unused, st);
         return sextant::slot_view(ctx);

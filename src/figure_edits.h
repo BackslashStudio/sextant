@@ -246,7 +246,7 @@ struct AxesEdit3D {
     std::optional<LegendOptions>   legend_opts;
     std::optional<ColorbarOptions> colorbar_opts;
 
-    // Camera edits go through here (not PanelState) so a dragged view survives
+    // Camera edits go through here (not FigureWindowState) so a dragged view survives
     // refresh().
     std::optional<Camera3D>   camera;
     // The camera_stamp of the snapshot it was navigated from (see TitleStamps).

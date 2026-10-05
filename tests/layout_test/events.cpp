@@ -8,7 +8,7 @@
 #include "key_names.h"
 #include "window_link.h"
 #include "platform/platform.h"
-#include "widgets/imgui_context.h"
+#include "widgets/figure_window_shell.h"
 #include <GLFW/glfw3.h>
 
 namespace lt {
@@ -735,8 +735,8 @@ namespace lt {
 
     // -------------------------------------------------------------------------
     // Through the panel: synthetic window input -> WindowLink -> ImGui backend ->
-    // draw_widget_panel() -> the channel. Everything a click takes except GLFW's
-    // own callbacks, on a hidden window.
+    // FigureWindowShell::frame() -> the channel. Everything a click takes except
+    // GLFW's own callbacks, on a hidden window.
     // -------------------------------------------------------------------------
     void test_plot_events_in_panel() {
         std::printf("\n[events: through the widget panel]\n");
@@ -746,12 +746,11 @@ namespace lt {
         opts.height = 600;
         GLContext ctx({.width = 800, .height = 600, .title = "events_panel", .visible = false});
         RenderDevice dev;
-        PlotView view;
-        ImGuiPanelContext imgui_ctx(ctx, opts);
+        FigureWindowShell shell(ctx, opts);
 
         FigureSnapshot fs = one_line_snapshot({0.0, 1.0, 2.0}, {0.0, 1.0, 4.0});
         FigureEditBox edit_box;
-        PanelState st;
+        FigureWindowState st;
         auto ch = EventChannel::create();
         st.plot.events = ch.get();
 
@@ -760,12 +759,10 @@ namespace lt {
             ch->connect(static_cast<EventKind>(k), [&log](const Event& e) { log.push_back(e); });
 
         auto frame = [&] {
-            imgui_ctx.make_current();
-            imgui_ctx.sync_dpi_scale(ctx);
+            shell.begin_frame(ctx);
             ctx.link().sync_state();
             platform::GLContextLock gl_lock;
-            glViewport(0, 0, ctx.width(), ctx.height());
-            draw_widget_panel(ctx, dev, view, fs, opts, edit_box, st);
+            shell.frame(ctx, dev, fs, edit_box, st);
             ctx.link().service_requests();
         };
         auto drain = [&] {

@@ -1,5 +1,8 @@
 #include "imgui_context.h"
 #include "../renderer/gl_context.h"
+// The only includer, and keep it so: the generated header's arrays are
+// `static`, so each including file gets its own 115 KB copy. Others call
+// setup_panel_imgui() instead (GUI-kit R7).
 #include "panel_font.h"
 #include "sextant/figure.h"
 #include "imgui_impl_sextant.h"
@@ -26,25 +29,13 @@ namespace sextant {
         // sync_dpi_scale().
         dpi_scale_ = ctx.link().chrome_scale();
         if (dpi_scale_ <= 0.0f) dpi_scale_ = 1.0f;
-        apply_panel_style(theme_, dpi_scale_);
+        setup_panel_imgui(theme_, dpi_scale_);
 
         ImGuiIO& io = ImGui::GetIO();
         io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
         // No imgui.ini: every show() starts from the default dock split, and two
         // Figures can't collide on one file.
         io.IniFilename = nullptr;
-
-        // Plain click on a Drag widget enters text input (see drag_double()).
-        io.ConfigDragClickToInputText = true;
-
-        // Added at base size: since imgui 1.92 glyphs rasterize on demand at the
-        // current FontScaleDpi, so the scale can change later. Roboto-Medium
-        // replaces the default ProggyClean.
-        ImFontConfig font_cfg;
-        io.Fonts->AddFontFromMemoryCompressedTTF(
-            panel_font::k_roboto_medium_compressed_data,
-            static_cast<int>(panel_font::k_roboto_medium_compressed_size),
-            13.0f, &font_cfg);
 
         ImGui_ImplSextant_Init(ctx.link());
         ImGui_ImplOpenGL3_Init("#version 410"); // matches the GL 4.1 core context
@@ -71,16 +62,35 @@ namespace sextant {
         ImGui::GetStyle() = s;
     }
 
+    void setup_panel_imgui(PanelTheme theme, float scale) {
+        ImGuiIO& io = ImGui::GetIO();
+
+        // Plain click on a Drag widget enters text input (see drag_double()).
+        io.ConfigDragClickToInputText = true;
+
+        // Added at base size: since imgui 1.92 glyphs rasterize on demand at the
+        // current FontScaleDpi, so the scale can change later. Roboto-Medium
+        // replaces the default ProggyClean.
+        ImFontConfig font_cfg;
+        io.Fonts->AddFontFromMemoryCompressedTTF(
+            panel_font::k_roboto_medium_compressed_data,
+            static_cast<int>(panel_font::k_roboto_medium_compressed_size),
+            13.0f, &font_cfg);
+
+        apply_panel_style(theme, scale > 0.0f ? scale : 1.0f);
+    }
+
+    bool follow_panel_scale(PanelTheme theme, float& current, float want) {
+        // Exact compare: the platform hands back the same float until the
+        // monitor changes.
+        if (want <= 0.0f || want == current) return false;
+        current = want;
+        apply_panel_style(theme, current);
+        return true;
+    }
+
     void ImGuiPanelContext::sync_dpi_scale(const GLContext& ctx) {
-        const float want = ctx.link().chrome_scale();
-        if (want <= 0.0f) return;
-
-        // Exact compare: both terms come from the platform unchanged, so a
-        // window that has not moved monitors gives the same float every frame.
-        if (want == dpi_scale_) return;
-
-        dpi_scale_ = want;
-        apply_panel_style(theme_, dpi_scale_);
+        follow_panel_scale(theme_, dpi_scale_, ctx.link().chrome_scale());
     }
 
     ImGuiPanelContext::~ImGuiPanelContext() {

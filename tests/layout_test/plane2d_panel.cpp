@@ -186,7 +186,7 @@ namespace lt {
             io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures;
             io.Fonts->AddFontDefault();
 
-            PanelState st;
+            FigureWindowState st;
             FigureEditBox box;
             int n = 0;
             // Three frames: a tab bar selects its tab a frame after first seeing it.

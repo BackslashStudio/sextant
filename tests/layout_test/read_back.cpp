@@ -268,7 +268,7 @@ namespace lt {
         r.camera.azimuth = 30.0;
         r.camera_stamp = 9;
         fs.axes.push_back({{1, 1, 1}, r});
-        PanelState st;
+        FigureWindowState st;
         pulled_slot_view(fs, st);
         check(st.slot_view.camera_local.azimuth == 30.0, "panel: navigation starts from the snapshot's camera");
         st.slot_view.camera_local.azimuth = 55.0;   // dragged, not yet folded in
@@ -647,7 +647,7 @@ namespace lt {
         r.ymin = 3.0; r.ymax = 4.0; r.ylim_auto = false;
         r.limit_stamps = {1, 1, 0};
         fs.axes.push_back({{1, 1, 1}, r});
-        PanelState st;
+        FigureWindowState st;
         pulled_slot_view(fs, st);
         check(st.slot_view.xmin_local == 1.0 && st.slot_view.ymin_local == 3.0, "panel: the fields seed from the snapshot");
         st.slot_view.xmin_local = 1.5;

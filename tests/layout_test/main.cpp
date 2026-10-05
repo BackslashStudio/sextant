@@ -208,6 +208,10 @@ int main() {
     test_plot_view_draw();
     test_plot_view_two_figures();
 
+    // window_shell.cpp
+    test_panel_imgui_setup();
+    test_figure_window_shell();
+
     // cell_shading.cpp
     test_cell_shading_ramp();
     test_cell_shading_range();

@@ -78,19 +78,19 @@ namespace lt {
     sextant::FigureSnapshot make_snapshot(int rows, int cols, int n_cells,
                                           double x_scale = 1.0, double y_scale = 1.0);
 
-    // GUI-kit R3: what draw_widget_panel() hands the components, over a test's
-    // PanelState; and the inspectors in their windows, as the shell draws them
-    // (window opened, figure id pushed).
+    // GUI-kit R3: what the window's shell hands the components, over a test's
+    // FigureWindowState; and the inspectors in their windows, as the shell draws
+    // them (window opened, figure id pushed).
     sextant::FigureContext panel_ctx(const sextant::FigureSnapshot& fs, sextant::FigureEditBox& box,
-                                     sextant::PanelState& st);
+                                     sextant::FigureWindowState& st);
     void draw_cosmetic_window(const sextant::FigureSnapshot& fs, sextant::FigureEditBox& box,
-                              sextant::PanelState& st);
+                              sextant::FigureWindowState& st);
     void draw_data_window(const sextant::FigureSnapshot& fs, sextant::FigureEditBox& box,
-                          sextant::PanelState& st);
+                          sextant::FigureWindowState& st);
 
     // The shared slot view after a pull: what a component reads or writes first.
     sextant::SlotViewState& pulled_slot_view(const sextant::FigureSnapshot& fs,
-                                             sextant::PanelState& st);
+                                             sextant::FigureWindowState& st);
 
     // The id an item labelled `label` gets directly inside panel window `w`, under
     // the figure id the shell pushes (for opening sections through window storage).
@@ -478,7 +478,7 @@ namespace lt {
 
     IdConflictScan scan_panel_for_id_conflicts(
         const sextant::FigureSnapshot& fsnap,
-        void (*draw)(const sextant::FigureSnapshot&, sextant::FigureEditBox&, sextant::PanelState&),
+        void (*draw)(const sextant::FigureSnapshot&, sextant::FigureEditBox&, sextant::FigureWindowState&),
         const char* window_name,
         std::initializer_list<const char *> sections);
 
@@ -502,6 +502,11 @@ namespace lt {
     void test_plot_view_draw();
 
     void test_plot_view_two_figures();
+
+    // window_shell.cpp (GUI-kit R7)
+    void test_panel_imgui_setup();
+
+    void test_figure_window_shell();
 
     // headless_export.cpp
     void test_headless_context();

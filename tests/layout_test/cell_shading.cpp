@@ -167,7 +167,7 @@ namespace lt {
         }
     };
 
-    PanelFrameColors run_data_panel(sextant::PanelState& st,
+    PanelFrameColors run_data_panel(sextant::FigureWindowState& st,
                                     const sextant::FigureSnapshot& fsnap, int frames) {
         ImGuiContext* ctx = ImGui::CreateContext();
         ImGui::SetCurrentContext(ctx);
@@ -230,13 +230,13 @@ namespace lt {
         const ImU32 c_mid = sextant::shade_color(0.5f);
         const ImU32 c_hi = sextant::shade_color(1.0f);
 
-        sextant::PanelState off;
+        sextant::FigureWindowState off;
         off.data.shade_cells = false;
         const auto r_off = run_data_panel(off, fs_spread, 4);
         check(r_off.ramp_vertices == 0,
               "shading off: not one vertex in a ramp colour, legend included");
 
-        sextant::PanelState on;
+        sextant::FigureWindowState on;
         on.data.shade_cells = true;
         const auto r_on = run_data_panel(on, fs_spread, 4);
         check(r_on.ramp_vertices > 0, "shading on: the cells are drawn in ramp colours");
@@ -244,7 +244,7 @@ namespace lt {
         check(r_on.has(c_lo) && r_on.has(c_hi),
               "  the column's min and max land on the ends of the ramp");
 
-        sextant::PanelState flat;
+        sextant::FigureWindowState flat;
         flat.data.shade_cells = true;
         const auto r_flat = run_data_panel(flat, fs_flat, 4);
         check(r_flat.has(c_mid) && !r_flat.has(c_lo) && !r_flat.has(c_hi),

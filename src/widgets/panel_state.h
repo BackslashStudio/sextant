@@ -16,10 +16,11 @@
 namespace sextant {
     class EventChannel;
 
-    // Render-thread-only UI state for the widget panel, used only inside
-    // draw_widget_panel() (exceptions are marked below). Split by owner (GUI-kit
-    // R2): one struct per component or shell, none referring to another, so a
-    // host can own each one; PanelState aggregates them for now.
+    // Render-thread-only UI state for the window's shell and the kit components,
+    // used only inside a frame (exceptions are marked below). Split by owner
+    // (GUI-kit R2): one struct per component or shell, none referring to
+    // another, so a host can own each one; the library window aggregates them
+    // in FigureWindowState.
     //
     // Shared per figure (see FigureContext): Selection and SlotViewState. Each
     // state seeded from the selected slot remembers the Selection generation it
@@ -92,7 +93,8 @@ namespace sextant {
         const char* pending_panel_focus = nullptr;
 
         // Requested plot size in logical pixels (> 0 = pending). Written from any
-        // thread (Figure::resize()) or the dialog; applied in draw_widget_panel().
+        // thread (Figure::resize()) or the dialog; applied by
+        // FigureWindowShell::frame().
         std::atomic<int> pending_plot_w{0};
         std::atomic<int> pending_plot_h{0};
     };
@@ -330,9 +332,12 @@ namespace sextant {
         int frame_h = 0;
     };
 
-    // The library window's state: everything its shell and components keep, for
-    // the one figure it shows.
-    struct PanelState {
+    // The library window's state (GUI-kit R7; was PanelState): its shell's own
+    // plus that of the components it hosts, for the one figure it shows. Lives in
+    // Figure::Impl, not in FigureWindowShell: other threads read its atomics and
+    // LayoutStore (Figure::resize(), savefig()), and it outlives a window (a
+    // second show() keeps the selection and the inspectors' scratch).
+    struct FigureWindowState {
         Selection         selection;
         SlotViewState     slot_view;
         ShellState        shell;

@@ -41,6 +41,12 @@ namespace sextant {
     // selection has moved, or when the slot's object counts changed.
     void pull_data_panel(DataPanelState& st, const Selection& sel, const FigureAxesSnapshot& fa);
 
+    // The measurements a plot view laid out with (`view`, from its last frame), or
+    // a fresh measure before its first frame or with no view: what a save or a
+    // frame-to-figure size conversion must match the screen with.
+    std::shared_ptr<const FigureMeasure> on_screen_measure(const PlotViewInfo* view,
+                                                           const FigureSnapshot& fsnap);
+
     // ImGui::PushID for a figure's widgets (see FigureContext::figure_id).
     void push_figure_id(std::uint64_t figure_id);
 } // namespace sextant

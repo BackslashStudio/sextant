@@ -48,7 +48,7 @@ struct Figure::Impl {
     std::vector<Slot>             slots;
     // Declared before window_thread, so it outlives it.
     FrameCounters                 frame_counters;
-    // The window thread pushes into it (through panel_state.plot.events); the
+    // The window thread pushes into it (through window_state.plot.events); the
     // callers' threads connect to it and drain it. Shared with the process-wide
     // list poll_events()/run() walk.
     std::shared_ptr<EventChannel> events = EventChannel::create();
@@ -60,7 +60,7 @@ struct Figure::Impl {
     std::atomic<bool>             registered{false};
     SnapshotBox                   snapshot_box;
     FigureEditBox                 edit_box;
-    PanelState                    panel_state;
+    FigureWindowState             window_state;
 
     // Retire this figure's registration, from the window thread or the caller,
     // whichever closes it first.

@@ -51,7 +51,7 @@ namespace lt {
         io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures;
         io.Fonts->AddFontDefault();
 
-        PanelState st;
+        FigureWindowState st;
         FigureEditBox box;
         std::size_t vertices = 0;
         for (int f = 0; f < 3; ++f) {
@@ -180,7 +180,7 @@ namespace lt {
         io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures;
         io.Fonts->AddFontDefault();
 
-        PanelState st;
+        FigureWindowState st;
         FigureEditBox box;
         auto frame = [&] {
             ImGui::NewFrame();
@@ -278,7 +278,7 @@ namespace lt {
     // position: the count is gathered in one frame and read in the next.
     IdConflictScan scan_panel_for_id_conflicts(
         const sextant::FigureSnapshot& fsnap,
-        void (*draw)(const sextant::FigureSnapshot&, sextant::FigureEditBox&, sextant::PanelState&),
+        void (*draw)(const sextant::FigureSnapshot&, sextant::FigureEditBox&, sextant::FigureWindowState&),
         const char* window_name,
         std::initializer_list<const char *> sections) {
         // Tall enough to submit every section (clipped items aren't checked).
@@ -294,7 +294,7 @@ namespace lt {
         io.ConfigDebugHighlightIdConflicts = true;
         io.Fonts->AddFontDefault();
 
-        sextant::PanelState st;
+        sextant::FigureWindowState st;
         sextant::FigureEditBox box;
 
         auto frame = [&] {
@@ -487,8 +487,8 @@ namespace lt {
     // a docked inspector per graph would put them (scan_panel_for_id_conflicts()
     // shape). `same_id` draws both under one id: the positive control.
     void draw_two_cosmetics(const sextant::FigureSnapshot& fs, sextant::FigureEditBox& box,
-                            sextant::PanelState& st, bool same_id) {
-        static sextant::PanelState other;   // the second figure's state
+                            sextant::FigureWindowState& st, bool same_id) {
+        static sextant::FigureWindowState other;   // the second figure's state
         other.figure_id = same_id ? st.figure_id : st.figure_id + 1;
         sextant::FigureContext a = panel_ctx(fs, box, st);
         sextant::FigureContext b = panel_ctx(fs, box, other);
@@ -502,11 +502,11 @@ namespace lt {
         ImGui::End();
     }
     void draw_two_cosmetics_own_ids(const sextant::FigureSnapshot& fs, sextant::FigureEditBox& box,
-                                    sextant::PanelState& st) {
+                                    sextant::FigureWindowState& st) {
         draw_two_cosmetics(fs, box, st, false);
     }
     void draw_two_cosmetics_one_id(const sextant::FigureSnapshot& fs, sextant::FigureEditBox& box,
-                                   sextant::PanelState& st) {
+                                   sextant::FigureWindowState& st) {
         draw_two_cosmetics(fs, box, st, true);
     }
 
@@ -563,7 +563,7 @@ namespace lt {
         io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures;
         io.Fonts->AddFontDefault();
 
-        // ---- The inspector with state no PanelState holds: a host's own.
+        // ---- The inspector with state no FigureWindowState holds: a host's own.
         {
             Selection sel;
             SlotViewState sv;
@@ -666,7 +666,7 @@ namespace lt {
 
         // Cells never overlap (spans are checked in test_subplot_spans()).
 
-        PanelState st;
+        FigureWindowState st;
         auto frame = [&](float x, float y, auto&& set) {
             PlotPointer in;
             in.x = x;
@@ -763,7 +763,7 @@ namespace lt {
         }
 
         // ---- A nonexistent selection is normalized to the first slot.
-        PanelState st2;
+        FigureWindowState st2;
         st2.selection.slot = 7;
         const FigureAxesSnapshot* norm = normalize_selection(st2.selection, fs);
         check(norm && norm->slot.index == 1 && st2.selection.slot == 1,
@@ -809,7 +809,7 @@ namespace lt {
 
         // Drives the Data panel alone, sweeping clicks until an appearance edit
         // matching `want` arrives. Popups are closed as they open.
-        auto sweep_for = [](const FigureSnapshot& fs, PanelState& st,
+        auto sweep_for = [](const FigureSnapshot& fs, FigureWindowState& st,
                             auto&& want) -> std::optional<AxesEdit3D> {
             ImGuiContext* ctx = ImGui::CreateContext();
             ImGui::SetCurrentContext(ctx);
@@ -868,7 +868,7 @@ namespace lt {
             pl.offset = 0.5;
             r.planes.push_back(std::move(pl));
             const FigureSnapshot fs = wrap(std::move(r));
-            PanelState st;
+            FigureWindowState st;
             const auto e = sweep_for(fs, st, [](const AxesEdit3D& a) { return !a.planes.empty(); });
             check(e.has_value(), "object tabs: an empty plane's tab has controls that edit it");
             check(e && e->planes[0].plane_index == 0 &&
@@ -882,7 +882,7 @@ namespace lt {
             RenderSnapshot3D r;
             r.bars3d.push_back(bar3d_grid());
             const FigureSnapshot fs = wrap(std::move(r));
-            PanelState st;
+            FigureWindowState st;
             const auto e = sweep_for(fs, st, [](const AxesEdit3D& a) { return !a.bars3d.empty(); });
             check(e && e->bars3d[0].plot_index == 0 && e->plot_ops.empty(),
                   "object tabs: a bar grid's Appearance block edits that grid on the appearance lane");
@@ -893,7 +893,7 @@ namespace lt {
             RenderSnapshot3D r;
             r.surfaces.push_back(ripple_surface());
             const FigureSnapshot fs = wrap(std::move(r));
-            PanelState st;
+            FigureWindowState st;
             const auto e = sweep_for(fs, st, [](const AxesEdit3D& a) { return !a.surfaces.empty(); });
             check(e && e->surfaces[0].plot_index == 0 && e->plot_ops.empty(),
                   "object tabs: and a surface's, on the surface lane");
@@ -908,7 +908,7 @@ namespace lt {
             c.z = std::vector<double>{7.0, 8.0, 9.0};
             r.scatter3d.push_back(std::move(c));
             const FigureSnapshot fs = wrap(std::move(r));
-            PanelState st;
+            FigureWindowState st;
             const auto e = sweep_for(fs, st, [](const AxesEdit3D& a) { return !a.scatter3d.empty(); });
             check(e && e->scatter3d[0].plot_index == 0 && e->plot_ops.empty(),
                   "object tabs: and a cloud's, on the scatter3d lane");
@@ -922,7 +922,7 @@ namespace lt {
             red.opts.color = {1.0f, 0.0f, 0.0f, 1.0f};
             r.bars3d.push_back(red);
             FigureSnapshot fs = wrap(std::move(r));
-            PanelState st;
+            FigureWindowState st;
             pull_data_panel(st.data, st.selection, *normalize_selection(st.selection, fs));
             check(st.data.bars3d_local.size() == 1 && st.data.bars3d_local[0].color.r == 1.0f,
                   "object tabs: the copies are seeded from the snapshot");
@@ -1188,7 +1188,7 @@ namespace lt {
             io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures;
             io.Fonts->AddFontDefault();
 
-            PanelState st;
+            FigureWindowState st;
             FigureEditBox box;
             auto frame = [&] {
                 ImGui::NewFrame();
@@ -1252,7 +1252,7 @@ namespace lt {
               static_cast<int>(AxisPosition::High) == 3,
               "panel: AxisPosition is in the order the combo names it");
 
-        auto run = [](const AxesStyle& seed, PanelState& st) {
+        auto run = [](const AxesStyle& seed, FigureWindowState& st) {
             FigureSnapshot fs = one_line_snapshot({0.0, 1.0, 2.0}, {0.0, 1.0, 4.0});
             fs.axes[0].snap2d()->axes_style = seed;
 
@@ -1287,7 +1287,7 @@ namespace lt {
             seed.origin_y = 3.5;
             seed.spine_top = false;
 
-            PanelState st;
+            FigureWindowState st;
             st.cosmetic.origin_x_scratch = 99.0; // a stale value the seed must overwrite
             run(seed, st);
 
@@ -1318,7 +1318,7 @@ namespace lt {
             io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures;
             io.Fonts->AddFontDefault();
 
-            PanelState st;
+            FigureWindowState st;
             FigureEditBox box;
             auto frame = [&] {
                 ImGui::NewFrame();
@@ -1420,7 +1420,7 @@ namespace lt {
             io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures;
             io.Fonts->AddFontDefault();
 
-            PanelState st;
+            FigureWindowState st;
             st.cosmetic.origin_z_scratch = 99.0;
             FigureEditBox box;
             auto frame = [&] {
@@ -1455,7 +1455,7 @@ namespace lt {
             io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures;
             io.Fonts->AddFontDefault();
 
-            PanelState st;
+            FigureWindowState st;
             FigureEditBox box;
             auto frame = [&] {
                 ImGui::NewFrame();

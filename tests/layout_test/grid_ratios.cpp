@@ -267,7 +267,7 @@ namespace lt {
               && !find_grid_boundary(fs, t, t.col_x[0] + t.col_w[0] - 6.0f, bot_y, 4.0f).found,
               "boundary: within the tolerance of the gap, and not beyond it");
 
-        PanelState st;
+        FigureWindowState st;
         auto ptr = [](float x, float y) {
             PlotPointer p;
             p.x = x;
@@ -334,7 +334,7 @@ namespace lt {
         const GridTracks ts = grid_tracks(skew, ls.suptitle_band, GW, GH);
         PlotPointer dbl = ptr(mid_x0, (ts.row_y[0] + ts.row_h[0] + ts.row_y[1]) * 0.5f);
         dbl.pressed = dbl.active = dbl.double_clicked = true;
-        PanelState st2;
+        FigureWindowState st2;
         o = update_grid_drag(st2.plot, skew, ls, GW, GH, dbl, 4.0f);
         check(o.owns && o.row_ratios && *o.row_ratios == std::vector<float>{2.0f, 2.0f}
               && !st2.plot.grid_drag.active,

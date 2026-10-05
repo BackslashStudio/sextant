@@ -376,7 +376,7 @@ namespace lt {
     namespace {
         // The dialogs as the shell draws them: in their own window, under the
         // figure's id, kept open (the scanner draws every frame).
-        void draw_save_window(const FigureSnapshot& fs, FigureEditBox& box, PanelState& st) {
+        void draw_save_window(const FigureSnapshot& fs, FigureEditBox& box, FigureWindowState& st) {
             FigureContext ctx = panel_ctx(fs, box, st);
             st.save.open = true;
             ImGui::Begin("Save Figure");
@@ -385,7 +385,7 @@ namespace lt {
             ImGui::PopID();
             ImGui::End();
         }
-        void draw_resize_window(const FigureSnapshot& fs, FigureEditBox& box, PanelState& st) {
+        void draw_resize_window(const FigureSnapshot& fs, FigureEditBox& box, FigureWindowState& st) {
             FigureContext ctx = panel_ctx(fs, box, st);
             st.resize.open = true;
             st.resize.frame_w = 300;
@@ -396,7 +396,7 @@ namespace lt {
             ImGui::PopID();
             ImGui::End();
         }
-        void draw_warning_window(const FigureSnapshot&, FigureEditBox&, PanelState& st) {
+        void draw_warning_window(const FigureSnapshot&, FigureEditBox&, FigureWindowState& st) {
             st.save.warning = "scene order: subplot 1 gave up";
             ImGui::Begin("Export warning###save_warning");
             push_figure_id(st.figure_id);
@@ -427,7 +427,7 @@ namespace lt {
             io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures;
             io.Fonts->AddFontDefault();
 
-            PanelState st;
+            FigureWindowState st;
             set_live(st.plot_info, 640, 480);
             FigureEditBox box;
             FigureContext ctx = panel_ctx(fs, box, st);

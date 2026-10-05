@@ -16,12 +16,11 @@
 #include "renderer/render_device.h"
 #include "renderer/data_renderer.h"
 #include "renderer/figure_layout.h"
-#include "widgets/plot_view.h"
+#include "widgets/figure_window_shell.h"
 #include "platform/platform.h"
 #include "messages.h"
 #include "output/file_write.h"
 #include "output/png_writer.h"
-#include <glad/glad.h>
 #include <algorithm>
 #include <iostream>
 #include <limits>
@@ -42,21 +41,6 @@ namespace {
 void warn_if_inexact(std::string_view path, const SvgSaveReport& r) {
     if (r.scene_order_exact || r.warning.empty()) return;
     emit_message(std::string(path) + ": " + r.warning);
-}
-
-// Renders one frame: the plot view renders into its offscreen target, sized to
-// its dock panel, and shows it via ImGui::Image(); render_frame() is dock-unaware.
-void render_and_composite(GLContext& ctx, RenderDevice& dev, PlotView& view,
-                          const FigureSnapshot& snap,
-                          const FigureOptions& opts, FigureEditBox& edit_box,
-                          PanelState& panel_state)
-{
-    // Base clear, to avoid undefined content before the docks are laid out.
-    glViewport(0, 0, ctx.width(), ctx.height());
-    glClearColor(0.93f, 0.93f, 0.93f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
-
-    draw_widget_panel(ctx, dev, view, snap, opts, edit_box, panel_state);
 }
 
 } // namespace
@@ -278,7 +262,7 @@ void Figure::Impl::apply_panel_edits_to_snapshot() {
 }
 
 std::shared_ptr<const FigureMeasure> Figure::Impl::on_screen_measure() const {
-    return open.load() ? panel_state.plot.layout.load() : nullptr;
+    return open.load() ? window_state.plot.layout.load() : nullptr;
 }
 
 void Figure::Impl::resolve_live_save_size(Figure& fig, int& w, int& h) {
@@ -287,12 +271,12 @@ void Figure::Impl::resolve_live_save_size(Figure& fig, int& w, int& h) {
 
     using namespace std::chrono;
     const auto deadline = steady_clock::now() + milliseconds(1000);
-    while (panel_state.plot.live_plot_w.load(std::memory_order_relaxed) == 0 &&
+    while (window_state.plot.live_plot_w.load(std::memory_order_relaxed) == 0 &&
            steady_clock::now() < deadline) {
         std::this_thread::sleep_for(milliseconds(2));
     }
-    if (w <= 0) w = panel_state.plot.live_plot_w.load(std::memory_order_relaxed);
-    if (h <= 0) h = panel_state.plot.live_plot_h.load(std::memory_order_relaxed);
+    if (w <= 0) w = window_state.plot.live_plot_w.load(std::memory_order_relaxed);
+    if (h <= 0) h = window_state.plot.live_plot_h.load(std::memory_order_relaxed);
     if (w <= 0) w = opts.width;   // window closed again / never rendered a frame
     if (h <= 0) h = opts.height;
 }
@@ -344,7 +328,7 @@ SvgRender Figure::Impl::render_svg(const SvgExportOptions& o, int w, int h) {
 Figure::Figure(FigureOptions opts) : d(std::make_unique<Impl>()) {
     // Process-unique, for ImGui::PushID: two figures' widgets never share ids.
     static std::atomic<std::uint64_t> s_next_figure_id{1};
-    d->panel_state.figure_id = s_next_figure_id.fetch_add(1, std::memory_order_relaxed);
+    d->window_state.figure_id = s_next_figure_id.fetch_add(1, std::memory_order_relaxed);
     if (!std::isfinite(opts.dpi) || opts.dpi <= 0.0f)
         throw std::invalid_argument("Figure: FigureOptions::dpi must be finite and positive");
     d->opts = std::move(opts);
@@ -411,12 +395,12 @@ void Figure::show(bool pause) {
 
     // render_fn captures `this`; safe because close()/~Figure() join the
     // thread first. It never touches live Axes::Impl.
-    auto render_fn = [this](GLContext& ctx, RenderDevice& dev, PlotView& view) {
+    auto render_fn = [this](GLContext& ctx, RenderDevice& dev, FigureWindowShell& shell) {
         d->apply_panel_edits_to_snapshot();
         auto snap = d->snapshot_box.load();  // loaded ONCE, reused for both draws below
         // Panel edits pushed this frame record this snapshot's stamps.
         d->edit_box.set_drawn(snap);
-        render_and_composite(ctx, dev, view, *snap, d->opts, d->edit_box, d->panel_state);
+        shell.frame(ctx, dev, *snap, d->edit_box, d->window_state);
     };
 
     auto wt = std::make_unique<WindowThread>(
@@ -428,7 +412,7 @@ void Figure::show(bool pause) {
 
     // Registered before the thread runs, so the close callback always has a
     // registration to take back.
-    d->panel_state.plot.events = d->events.get();
+    d->window_state.plot.events = d->events.get();
     d->open.store(true);
     d->registered.store(true);
     register_open_window();
@@ -674,8 +658,8 @@ void Figure::resize(int width, int height) {
     d->opts.height = height;
     // The window resizes itself on its own thread next frame (GLFW is
     // thread-bound), adding menu bar and panel so the plot area gets the size.
-    d->panel_state.shell.pending_plot_w.store(width,  std::memory_order_relaxed);
-    d->panel_state.shell.pending_plot_h.store(height, std::memory_order_relaxed);
+    d->window_state.shell.pending_plot_w.store(width,  std::memory_order_relaxed);
+    d->window_state.shell.pending_plot_h.store(height, std::memory_order_relaxed);
 }
 
 FigureSize Figure::size_for_frame(int frame_w, int frame_h, int slot_index) const {
