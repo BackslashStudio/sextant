@@ -277,26 +277,26 @@ namespace lt {
         };
 
         // Hover: owns, shows the cursor, pushes nothing.
-        GridDragOut o = update_grid_drag(st, fs, lay, GW, GH, ptr(col_bx, bot_y), 4.0f);
+        GridDragOut o = update_grid_drag(st.plot, fs, lay, GW, GH, ptr(col_bx, bot_y), 4.0f);
         check(o.owns && o.cursor_ew && !o.col_ratios && !st.plot.grid_drag.active,
               "drag: hovering a boundary owns the pointer and shows a resize cursor");
-        o = update_grid_drag(st, fs, lay, GW, GH, ptr(mid_x0, bot_y), 4.0f);
+        o = update_grid_drag(st.plot, fs, lay, GW, GH, ptr(mid_x0, bot_y), 4.0f);
         check(!o.owns, "drag: a cell's interior is left to selection and navigation");
 
         // A pan already in progress crossing the boundary keeps the pointer.
         PlotPointer panning = ptr(col_bx, bot_y);
         panning.active = true;
-        check(!update_grid_drag(st, fs, lay, GW, GH, panning, 4.0f).owns,
+        check(!update_grid_drag(st.plot, fs, lay, GW, GH, panning, 4.0f).owns,
               "drag: a drag that began elsewhere is not taken over by crossing a boundary");
 
         // Press, then move 60 px right.
         PlotPointer press = ptr(col_bx, bot_y);
         press.pressed = press.active = true;
-        o = update_grid_drag(st, fs, lay, GW, GH, press, 4.0f);
+        o = update_grid_drag(st.plot, fs, lay, GW, GH, press, 4.0f);
         check(o.owns && st.plot.grid_drag.active && !o.col_ratios, "drag: a press on it starts a drag");
         PlotPointer hold = ptr(col_bx + 60.0f, bot_y);
         hold.active = true;
-        o = update_grid_drag(st, fs, lay, GW, GH, hold, 4.0f);
+        o = update_grid_drag(st.plot, fs, lay, GW, GH, hold, 4.0f);
         bool moved = false;
         if (o.col_ratios) {
             FigureSnapshot next = fs;
@@ -306,13 +306,13 @@ namespace lt {
                     && near_px(tn.col_w[1], t.col_w[1] - 60.0f, 0.05f);
         }
         check(moved, "drag: moving 60 px moves the boundary 60 px, its neighbours' sum unchanged");
-        check(!update_grid_drag(st, fs, lay, GW, GH, hold, 4.0f).col_ratios,
+        check(!update_grid_drag(st.plot, fs, lay, GW, GH, hold, 4.0f).col_ratios,
               "drag: a still cursor pushes nothing");
 
         // Far past the neighbour's edge: clamped to its minimum.
         PlotPointer far = ptr(col_bx + 5000.0f, bot_y);
         far.active = true;
-        o = update_grid_drag(st, fs, lay, GW, GH, far, 4.0f);
+        o = update_grid_drag(st.plot, fs, lay, GW, GH, far, 4.0f);
         bool clamped = false;
         if (o.col_ratios) {
             FigureSnapshot next = fs;
@@ -324,7 +324,7 @@ namespace lt {
 
         PlotPointer rel = ptr(col_bx, bot_y);
         rel.released = true;
-        o = update_grid_drag(st, fs, lay, GW, GH, rel, 4.0f);
+        o = update_grid_drag(st.plot, fs, lay, GW, GH, rel, 4.0f);
         check(o.owns && !st.plot.grid_drag.active, "drag: the release ends it, and is still the drag's");
 
         // Double-click: the two tracks get equal weight.
@@ -335,7 +335,7 @@ namespace lt {
         PlotPointer dbl = ptr(mid_x0, (ts.row_y[0] + ts.row_h[0] + ts.row_y[1]) * 0.5f);
         dbl.pressed = dbl.active = dbl.double_clicked = true;
         PanelState st2;
-        o = update_grid_drag(st2, skew, ls, GW, GH, dbl, 4.0f);
+        o = update_grid_drag(st2.plot, skew, ls, GW, GH, dbl, 4.0f);
         check(o.owns && o.row_ratios && *o.row_ratios == std::vector<float>{2.0f, 2.0f}
               && !st2.plot.grid_drag.active,
               "drag: a double-click on a boundary gives its two tracks equal weight");

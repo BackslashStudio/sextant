@@ -11,6 +11,10 @@ namespace sextant {
     struct FigureOptions;
     class FigureEditBox;
     struct PanelState;
+    struct FigureContext;
+    struct CosmeticState;
+    struct PlotViewState;
+    struct Selection;
     struct AxesLayout;
     struct FigureLayout;
     struct GridTracks;
@@ -25,9 +29,10 @@ namespace sextant {
                            const FigureOptions& opts,
                            FigureEditBox& edit_box, PanelState& state);
 
-    // The Cosmetic panel alone, inside a caller's ImGui frame (for tests).
-    void draw_cosmetic_panel(const FigureSnapshot& fsnap, FigureEditBox& edit_box,
-                             PanelState& st);
+    // The Cosmetic inspector's contents, into the caller's current window (the
+    // caller opens it, and pushes the figure id). `cosmetic` is the inspector's
+    // own state, owned by the host.
+    void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic);
 
     // --- Subplot selection (GL-free, tested directly) ---------------------------
 
@@ -35,12 +40,8 @@ namespace sextant {
     // suptitle). Cells never overlap.
     const AxesLayout* find_cell_at(const std::vector<AxesLayout>& layout, float x, float y);
 
-    // Changes the selection and re-seeds the per-slot scratch fields.
-    void select_slot(PanelState& st, const FigureSnapshot& fsnap, int slot_index);
-
-    // Ensures the selection names an existing slot (else the first) with synced
-    // scratch fields. Returns it, or -1 with no axes.
-    int sync_selected_slot(PanelState& st, const FigureSnapshot& fsnap);
+    // Selection changes go through Selection::select(); each state seeded from
+    // the slot re-seeds on its next pull (see figure_context.h).
 
     // --- Grid boundary drag (GL-free) --------------------------------------------
 
@@ -66,7 +67,7 @@ namespace sextant {
         std::optional<std::vector<float>> col_ratios, row_ratios; // weights to push
     };
 
-    GridDragOut update_grid_drag(PanelState& st, const FigureSnapshot& fsnap,
+    GridDragOut update_grid_drag(PlotViewState& pv, const FigureSnapshot& fsnap,
                                  const FigureLayout& layout, int fig_w, int fig_h,
                                  const PlotPointer& in, float tol);
 
@@ -92,7 +93,8 @@ namespace sextant {
 
     // Click-to-select (a click without drag selects on release) plus the gate.
     // Runs whether or not Navigate is on.
-    PlotNavGate update_plot_selection(PanelState& st, const FigureSnapshot& fsnap,
+    PlotNavGate update_plot_selection(Selection& sel, PlotViewState& pv,
+                                      const FigureSnapshot& fsnap,
                                       const std::vector<AxesLayout>& layout,
                                       const PlotPointer& in);
 } // namespace sextant

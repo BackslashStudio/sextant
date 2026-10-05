@@ -8,6 +8,7 @@
 #include "../tick.h"
 #include "../renderer/figure_layout.h"
 #include <atomic>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -19,21 +20,54 @@ namespace sextant {
     // R2): one struct per component or shell, none referring to another, so a
     // host can own each one; PanelState aggregates them for now.
     //
+    // Shared per figure (see FigureContext): Selection and SlotViewState. Each
+    // state seeded from the selected slot remembers the Selection generation it
+    // last synced and re-seeds itself when that moves (GUI-kit R3), so no code
+    // has to know which components exist.
+    //
     // Accesses that still cross owners, through the aggregate -- the work list
     // for the later steps:
-    //   1. PlotView writes CosmeticState: pan/zoom/reset the x/y limit locals,
-    //      orbit/zoom/fly camera_local, so the fields follow a drag (R6).
-    //   2. CosmeticState reads PlotViewState: track_resolved_limits() reads
-    //      `resolved`, draw_layout_fields() reads live_plot_w/h (R6).
-    //   3. The shell's menu writes PlotViewState's hints/navigate toggles and
+    //   1. The shell's menu writes PlotViewState's hints/navigate toggles and
     //      reads its `layout` (Refit) and live_plot_* (Save/Resize) (R4).
-    //   4. sync_selected_slot() seeds CosmeticState and DataPanelState together,
-    //      through PanelState::last_synced_slot (R3).
-    //   5. The Save and Resize dialogs read Selection (shared by design).
+    //   2. The Save and Resize dialogs read Selection (shared by design).
+    // (Settled in R3: the plot view writing the camera/limit scratch, now the
+    // shared SlotViewState; Cosmetic reading PlotViewState, now through
+    // FigureContext::view; the shared re-seed, now per-state pulls.)
+
+    // A synced generation no Selection has: the first pull always seeds.
+    inline constexpr std::uint64_t kNeverSynced = ~std::uint64_t{0};
 
     // Which subplot the panels address; shared by every component.
     struct Selection {
         int slot = 1;
+        // Bumped by every real change of `slot` (select(), or normalization to an
+        // existing slot); the states seeded from the slot compare against it.
+        std::uint64_t generation = 0;
+
+        void select(int s) {
+            if (s == slot) return;
+            slot = s;
+            ++generation;
+        }
+    };
+
+    // The selected slot's view, written by both the plot view (pan/zoom/orbit)
+    // and the Cosmetic inspector (the Limits and camera fields). Reached only
+    // through slot_view(FigureContext&), which re-seeds it first when the
+    // selection has moved -- whoever touches it, drawn panels or not -- and
+    // otherwise follows limits and cameras the program set since.
+    struct SlotViewState {
+        bool xauto_local = true, yauto_local = true, zauto_local = true;
+        double xmin_local = 0, xmax_local = 1, ymin_local = 0, ymax_local = 1;
+        double zmin_local = 0, zmax_local = 1;
+        // The snapshot limit_stamps the limits were seeded from; an axis whose
+        // stamp changes was set by the program, so it is re-seeded.
+        LimitStamps limit_stamps_local;
+        Camera3D camera_local;
+        // The snapshot camera_stamp camera_local was seeded from; a new one means
+        // the program set the camera, so camera_local is re-seeded.
+        unsigned long long camera_stamp_local = 0;
+        std::uint64_t synced_generation = kNeverSynced;
     };
 
     // The library window's own chrome: docks, focus, pending resize.
@@ -146,11 +180,6 @@ namespace sextant {
         char ytitle_buf[128]{};
 
         bool grid_local = false;
-        bool xauto_local = true, yauto_local = true;
-        double xmin_local = 0, xmax_local = 1, ymin_local = 0, ymax_local = 1;
-        // The snapshot limit_stamps the limits were seeded from; an axis whose
-        // stamp changes was set by the program, so it is re-seeded.
-        LimitStamps limit_stamps_local;
         std::vector<Tick> xticks_scratch, yticks_scratch;
 
         // Live values for the optional origin_x/origin_y drag boxes; also restores
@@ -166,16 +195,10 @@ namespace sextant {
         LegendOptions legend_local;
         ColorbarOptions colorbar_local;
 
-        // 3D-only scratch (third axis, camera, box); shared fields above are reused
-        // and re-seeded via PanelState::last_synced_slot.
+        // 3D-only scratch (third axis, box); the shared fields above are reused.
+        // The limits and camera are in SlotViewState.
         char ztitle_buf[128]{};
-        double zmin_local = 0, zmax_local = 1;
-        bool zauto_local = true;
         std::vector<Tick> zticks_scratch;
-        Camera3D camera_local;
-        // The snapshot camera_stamp camera_local was seeded from; a new one means
-        // the program set the camera, so camera_local is re-seeded.
-        unsigned long long camera_stamp_local = 0;
         Box3DStyle box3d_local;
         BoxAspect aspect_local;
 
@@ -190,10 +213,13 @@ namespace sextant {
         float col_gap_local = 0.0f;
         float row_gap_local = 0.0f;
         bool layout_synced = false;
+
+        // The Selection generation the per-slot fields above were seeded at.
+        std::uint64_t synced_generation = kNeverSynced;
     };
 
     // The Data inspector: cell display, and the per-object appearance scratch its
-    // tabs edit (seeded by sync_selected_slot() in panel.cpp).
+    // tabs edit (re-seeded by pull_data_panel() in panel.cpp).
     struct DataPanelState {
         // Display format for Data-panel cells.
         ValueFormat value_format;
@@ -226,7 +252,7 @@ namespace sextant {
         std::vector<PlaneUi> planes_local;
 
         // The 3D kinds' appearance, scratch for the same reason; re-seeded in
-        // sync_selected_slot() on slot or count change.
+        // pull_data_panel() on a selection or count change.
         std::vector<Bar3DOptions> bars3d_local;
         std::vector<SurfaceOptions> surfaces_local;
         std::vector<Scatter3DOptions> scatter3d_local;
@@ -251,6 +277,10 @@ namespace sextant {
         // the op by a frame); re-read from the snapshot otherwise. One suffices,
         // since only one drag is active at a time.
         double width_held = 0.0;
+
+        // The Selection generation the per-object scratch was seeded at; object
+        // count changes re-seed on their own, every frame the panel draws.
+        std::uint64_t synced_generation = kNeverSynced;
     };
 
     // "File > Save" dialog. width/height <= 0 = the Plot panel's live size.
@@ -286,8 +316,11 @@ namespace sextant {
         int frame_h = 0;
     };
 
+    // The library window's state: everything its shell and components keep, for
+    // the one figure it shows.
     struct PanelState {
         Selection         selection;
+        SlotViewState     slot_view;
         ShellState        shell;
         PlotViewState     plot;
         CosmeticState     cosmetic;
@@ -295,9 +328,8 @@ namespace sextant {
         SaveDialogState   save;
         ResizeDialogState resize;
 
-        // Forces a re-sync of the Cosmetic and Data scratch whenever the selected
-        // slot changes (-1 = first frame). Read by sync_selected_slot(), which
-        // seeds both; replaced by a Selection generation pull in R3.
-        int last_synced_slot = -1;
+        // The figure's id for ImGui::PushID (FigureContext::figure_id); set once
+        // by Figure::Impl.
+        std::uint64_t     figure_id = 0;
     };
 } // namespace sextant

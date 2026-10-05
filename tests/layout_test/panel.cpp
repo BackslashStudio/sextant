@@ -57,7 +57,7 @@ namespace lt {
         for (int f = 0; f < 3; ++f) {
             ImGui::NewFrame();
             ImGui::SetNextWindowSize(ImVec2(420.0f, 820.0f));
-            draw_cosmetic_panel(fs, box, st);
+            draw_cosmetic_window(fs, box, st);
             ImGui::Render();
             vertices = 0;
             const ImDrawData* dd = ImGui::GetDrawData();
@@ -66,14 +66,23 @@ namespace lt {
         }
 
         check(vertices > 0, "3D panel: the panel draws for a 3D slot");
-        check(st.last_synced_slot == 1, "3D panel: the slot was synced");
-        check(st.cosmetic.camera_local.azimuth == 17.0 && st.cosmetic.camera_local.zoom == 1.5,
+        check(st.cosmetic.synced_generation == st.selection.generation &&
+              st.slot_view.synced_generation == st.selection.generation,
+              "3D panel: the panel pulled its own fields and the shared slot view");
+        check(st.slot_view.camera_local.azimuth == 17.0 && st.slot_view.camera_local.zoom == 1.5,
               "3D panel: the camera is seeded from the 3D snapshot, not left at its default");
-        check(st.cosmetic.zmin_local == -4.0 && st.cosmetic.zmax_local == 9.0,
+        check(st.slot_view.zmin_local == -4.0 && st.slot_view.zmax_local == 9.0,
               "3D panel: so is the third axis, which the 2D sync has no field for");
         check(std::string(st.cosmetic.ztitle_buf) == "counts",
               "3D panel: and the z title");
         check(st.cosmetic.aspect_local.x == 2.0, "3D panel: and the box aspect");
+
+        // The per-object rows are the Data panel's own state (GUI-kit R3): drawing
+        // Cosmetic alone leaves them to that panel's pull.
+        check(st.data.planes_local.empty() && st.data.bars3d_local.empty() &&
+              st.data.synced_generation == kNeverSynced,
+              "3D panel: Cosmetic alone does not seed the Data panel's scratch");
+        pull_data_panel(st.data, st.selection, *normalize_selection(st.selection, fs));
 
         // Plane rows seeded positionally (the planes differ in every field shown).
         check(st.data.planes_local.size() == 2, "3D panel: one Planes row per plane");
@@ -131,20 +140,21 @@ namespace lt {
         // hand here since no frame runs.
         st.plot.resolved.clear();
         st.plot.resolved.push_back({1, true, 400.0, 600.0, -1.5, 1.5, 0.0, 21.0});
-        st.last_synced_slot = -1; // force a re-seed, as a slot change would
+        // Force a re-seed, as a slot change would.
+        st.cosmetic.synced_generation = st.slot_view.synced_generation = kNeverSynced;
         for (int f = 0; f < 2; ++f) {
             ImGui::NewFrame();
             ImGui::SetNextWindowSize(ImVec2(420.0f, 820.0f));
-            draw_cosmetic_panel(fs, box, st);
+            draw_cosmetic_window(fs, box, st);
             ImGui::Render();
         }
-        check(st.cosmetic.xmin_local == 400.0 && st.cosmetic.xmax_local == 600.0,
+        check(st.slot_view.xmin_local == 400.0 && st.slot_view.xmax_local == 600.0,
               "3D panel: an automatic axis shows the limits it resolved to, not its declared ones");
-        check(st.cosmetic.ymin_local == -1.5 && st.cosmetic.ymax_local == 1.5,
+        check(st.slot_view.ymin_local == -1.5 && st.slot_view.ymax_local == 1.5,
               "3D panel: on every automatic axis");
 
         // ...and only for auto axes: explicit z limits must show as declared.
-        check(st.cosmetic.zmin_local == -4.0 && st.cosmetic.zmax_local == 9.0,
+        check(st.slot_view.zmin_local == -4.0 && st.slot_view.zmax_local == 9.0,
               "3D panel: while an axis with explicit limits keeps them");
 
         ImGui::DestroyContext(ctx);
@@ -177,7 +187,7 @@ namespace lt {
             ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
             // Tall enough that no group's contents are clipped.
             ImGui::SetNextWindowSize(ImVec2(430.0f, 3000.0f));
-            draw_cosmetic_panel(fs, box, st);
+            draw_cosmetic_window(fs, box, st);
             ImGui::Render();
             return ImGui::GetDrawData()->TotalVtxCount;
         };
@@ -193,9 +203,9 @@ namespace lt {
         check(w != nullptr, label("the panel window is called Cosmetic"));
         // All names closed, then `name` alone open (in the window's storage).
         auto only = [&](const char* name) {
-            for (const char* g: groups) w->StateStorage.SetInt(w->GetID(g), 0);
-            for (const char* o: old) w->StateStorage.SetInt(w->GetID(o), 0);
-            if (name) w->StateStorage.SetInt(w->GetID(name), 1);
+            for (const char* g: groups) w->StateStorage.SetInt(panel_item_id(w, st.figure_id, g), 0);
+            for (const char* o: old) w->StateStorage.SetInt(panel_item_id(w, st.figure_id, o), 0);
+            if (name) w->StateStorage.SetInt(panel_item_id(w, st.figure_id, name), 1);
             frame();
             return frame();
         };
@@ -308,7 +318,7 @@ namespace lt {
         // window, which is null between frames).
         if (ImGuiWindow* w = ImGui::FindWindowByName(window_name))
             for (const char* s: sections)
-                w->StateStorage.SetInt(w->GetID(s), 1);
+                w->StateStorage.SetInt(panel_item_id(w, st.figure_id, s), 1);
 
         IdConflictScan out;
         for (float y = 2.0f; y < H; y += 3.0f) {
@@ -352,7 +362,7 @@ namespace lt {
         fs3.generation = fs3.data_generation = 1;
 
         const IdConflictScan s3 = scan_panel_for_id_conflicts(
-            fs3, &draw_cosmetic_panel, "Cosmetic", sections);
+            fs3, &draw_cosmetic_window, "Cosmetic", sections);
         check(s3.conflicts == 0,
               "3D panel: no two widgets share an id (a checkbox labelled like its own header would)");
         if (s3.conflicts)
@@ -362,7 +372,7 @@ namespace lt {
         // The 2D panel through the same scan.
         const auto fs2 = one_line_snapshot({0.0, 1.0, 2.0}, {0.0, 1.0, 4.0});
         const IdConflictScan s2 = scan_panel_for_id_conflicts(
-            fs2, &draw_cosmetic_panel, "Cosmetic", sections);
+            fs2, &draw_cosmetic_window, "Cosmetic", sections);
         check(s2.conflicts == 0, "2D panel: likewise");
         if (s2.conflicts)
             std::printf("    2D: %d of %d cursor positions reported a conflict, first id %u\n",
@@ -371,7 +381,7 @@ namespace lt {
         // The Data panel over two planes that each hold a "line 0" (the "P0 "/
         // "P1 " prefixes and "##i" must keep tabs distinct).
         const IdConflictScan sd = scan_panel_for_id_conflicts(
-            fs3, &draw_data_panel, "Data", {});
+            fs3, &draw_data_window, "Data", {});
         check(sd.conflicts == 0,
               "Data panel: two planes holding objects of the same name keep distinct ids");
         if (sd.conflicts)
@@ -383,7 +393,7 @@ namespace lt {
         FigureSnapshot fsb = fs3;
         fsb.axes[0].snap3d()->bars3d.push_back(bar3d_grid());
         const IdConflictScan sb = scan_panel_for_id_conflicts(
-            fsb, &draw_data_panel, "Data", {});
+            fsb, &draw_data_window, "Data", {});
         check(sb.conflicts == 0,
               "Data panel: and a bar3d grid's own table, whose gutter and header rows are "
               "all new ids");
@@ -399,7 +409,7 @@ namespace lt {
             fss.generation = fss.data_generation = 1;
         }
         const IdConflictScan ss = scan_panel_for_id_conflicts(
-            fss, &draw_data_panel, "Data", {});
+            fss, &draw_data_window, "Data", {});
         check(ss.conflicts == 0,
               "Data panel: and a surface's tab, with its Appearance block above the table");
         if (ss.conflicts)
@@ -422,7 +432,7 @@ namespace lt {
             fsl.generation = fsl.data_generation = 1;
         }
         const IdConflictScan sl = scan_panel_for_id_conflicts(
-            fsl, &draw_data_panel, "Data", {});
+            fsl, &draw_data_window, "Data", {});
         check(sl.conflicts == 0,
               "Data panel: and a path's tab, whose Appearance block is a stroke's controls "
               "rather than a marker's");
@@ -445,7 +455,7 @@ namespace lt {
                 fk.axes.push_back({{1, 1, 1}, std::move(r)});
                 fk.generation = fk.data_generation = 1;
                 const IdConflictScan sk = scan_panel_for_id_conflicts(
-                    fk, &draw_data_panel, "Data", {});
+                    fk, &draw_data_window, "Data", {});
                 check(sk.conflicts == 0,
                       (std::string("Data panel: and a 2D ") + kind
                        + "'s tab, with every Appearance control drawn").c_str());
@@ -477,6 +487,138 @@ namespace lt {
         }
 
         std::printf("  swept %d cursor positions per panel\n", s3.probes);
+    }
+
+    // Two figures' Cosmetic panels in one window, as an app with two graphs and
+    // a docked inspector per graph would put them (scan_panel_for_id_conflicts()
+    // shape). `same_id` draws both under one id: the positive control.
+    void draw_two_cosmetics(const sextant::FigureSnapshot& fs, sextant::FigureEditBox& box,
+                            sextant::PanelState& st, bool same_id) {
+        static sextant::PanelState other;   // the second figure's state
+        other.figure_id = same_id ? st.figure_id : st.figure_id + 1;
+        sextant::FigureContext a = panel_ctx(fs, box, st);
+        sextant::FigureContext b = panel_ctx(fs, box, other);
+        ImGui::Begin("Cosmetic", nullptr, ImGuiWindowFlags_NoCollapse);
+        sextant::push_figure_id(a.figure_id);
+        sextant::draw_cosmetic_panel(a, st.cosmetic);
+        ImGui::PopID();
+        sextant::push_figure_id(b.figure_id);
+        sextant::draw_cosmetic_panel(b, other.cosmetic);
+        ImGui::PopID();
+        ImGui::End();
+    }
+    void draw_two_cosmetics_own_ids(const sextant::FigureSnapshot& fs, sextant::FigureEditBox& box,
+                                    sextant::PanelState& st) {
+        draw_two_cosmetics(fs, box, st, false);
+    }
+    void draw_two_cosmetics_one_id(const sextant::FigureSnapshot& fs, sextant::FigureEditBox& box,
+                                   sextant::PanelState& st) {
+        draw_two_cosmetics(fs, box, st, true);
+    }
+
+    // GUI-kit R3: the components draw into the caller's window under the figure's
+    // id, take host-owned state, and re-seed by pulling the Selection generation.
+    void test_figure_context() {
+        std::printf("\n[FigureContext: host-owned state, per-state pulls, figure ids]\n");
+
+        using namespace sextant;
+
+        // Slot 1 is 2D, slot 2 is 3D with a distinct camera and title.
+        FigureSnapshot fs = one_line_snapshot({0.0, 1.0, 2.0}, {0.0, 1.0, 4.0});
+        fs.axes[0].slot = AxesSlot{1, 2, 1};
+        fs.axes[0].snap2d()->title = "flat";
+        {
+            RenderSnapshot3D rs;
+            rs.title = "box";
+            rs.camera.azimuth = 71.0;
+            rs.camera_stamp = 3;
+            fs.axes.push_back({AxesSlot{1, 2, 2}, std::move(rs)});
+        }
+        fs.generation = fs.data_generation = 1;
+
+        // ---- With no panel drawn at all (both inspectors hidden), a slot change
+        // still re-seeds the slot view before navigation writes it.
+        {
+            Selection sel;
+            SlotViewState sv;
+            FigureEditBox box;
+            FigureContext ctx{ fs, box, sel, sv, nullptr, 1 };
+            check(slot_view(ctx).synced_generation == sel.generation,
+                  "hidden panels: the slot view seeds on its first access");
+            sel.select(2);   // a click, or the menu
+            Camera3D cam = slot_view(ctx).camera_local;
+            check(cam.azimuth == 71.0,
+                  "hidden panels: after a slot change, an orbit starts from the new slot's camera");
+            slot_view(ctx).camera_local = orbit_camera(cam, 10.0f, 0.0f);   // the drag
+            const double dragged = slot_view(ctx).camera_local.azimuth;
+            check(dragged != 71.0, "hidden panels: and the drag is kept across accesses");
+            fs.axes[1].snap3d()->camera.azimuth = 5.0;
+            fs.axes[1].snap3d()->camera_stamp = 4;
+            check(slot_view(ctx).camera_local.azimuth == 5.0,
+                  "hidden panels: a camera the program set since is followed on the next access");
+            fs.axes[1].snap3d()->camera.azimuth = 71.0;
+            fs.axes[1].snap3d()->camera_stamp = 3;
+        }
+
+        ImGuiContext* ictx = ImGui::CreateContext();
+        ImGui::SetCurrentContext(ictx);
+        ImGuiIO& io = ImGui::GetIO();
+        io.DisplaySize = ImVec2(1280.0f, 900.0f);
+        io.DeltaTime = 1.0f / 60.0f;
+        io.IniFilename = nullptr;
+        io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures;
+        io.Fonts->AddFontDefault();
+
+        // ---- The inspector with state no PanelState holds: a host's own.
+        {
+            Selection sel;
+            SlotViewState sv;
+            CosmeticState cosmetic;
+            FigureEditBox box;
+            FigureContext ctx{ fs, box, sel, sv, nullptr, 42 };
+            auto draw = [&] {
+                ImGui::NewFrame();
+                ImGui::SetNextWindowSize(ImVec2(420.0f, 820.0f));
+                ImGui::Begin("Host inspector");
+                push_figure_id(ctx.figure_id);
+                draw_cosmetic_panel(ctx, cosmetic);
+                ImGui::PopID();
+                ImGui::End();
+                ImGui::Render();
+            };
+            draw();
+            check(std::string(cosmetic.title_buf) == "flat" &&
+                  cosmetic.synced_generation == sel.generation,
+                  "host state: a standalone CosmeticState seeds from the selected slot");
+            sel.select(2);
+            check(std::string(cosmetic.title_buf) == "flat",
+                  "host state: a selection change alone touches no inspector state");
+            draw();
+            check(std::string(cosmetic.title_buf) == "box" &&
+                  cosmetic.synced_generation == sel.generation &&
+                  sv.camera_local.azimuth == 71.0,
+                  "host state: its next draw re-seeds it, and the shared slot view, from the new slot");
+            ImGuiWindow* w = ImGui::FindWindowByName("Host inspector");
+            check(w != nullptr, "host state: the inspector drew into the host's own window");
+        }
+        ImGui::DestroyContext(ictx);
+
+        // ---- Two figures in one window: their own ids keep every widget apart.
+        const std::initializer_list<const char *> sections = {
+            "View", "Figure", "Axis", "Ticks", "Legend & colorbar",
+        };
+        const auto fs2 = one_line_snapshot({0.0, 1.0, 2.0}, {0.0, 1.0, 4.0});
+        const IdConflictScan own = scan_panel_for_id_conflicts(
+            fs2, &draw_two_cosmetics_own_ids, "Cosmetic", sections);
+        check(own.conflicts == 0,
+              "figure ids: two figures' Cosmetic panels in one window share no widget id");
+        if (own.conflicts)
+            std::printf("    %d of %d cursor positions reported a conflict, first id %u\n",
+                        own.conflicts, own.probes, static_cast<unsigned>(own.first));
+        const IdConflictScan one = scan_panel_for_id_conflicts(
+            fs2, &draw_two_cosmetics_one_id, "Cosmetic", sections);
+        check(one.conflicts > 0,
+              "figure ids: (control) drawn under one id, the scan does report conflicts");
     }
 
     // Click-to-select and the navigation gate, driven through
@@ -537,7 +679,7 @@ namespace lt {
             in.y = y;
             in.hovered = true;
             set(in);
-            return update_plot_selection(st, fs, layout, in);
+            return update_plot_selection(st.selection, st.plot, fs, layout, in);
         };
         auto idle = [](PlotPointer&) {
         };
@@ -547,10 +689,12 @@ namespace lt {
         auto release = [](PlotPointer& p) { p.released = true; };
         auto drop = [](PlotPointer& p) { p.released = p.dragged = true; };
 
-        // ---- The first frame seeds the scratch from slot 1 with no panel drawn.
+        // ---- The first frame normalizes the selection with no panel drawn, and the
+        // slot view seeds on its first pull (what navigation does before a write).
         frame(in1x, in1y, idle);
-        check(st.selection.slot == 1 && st.last_synced_slot == 1,
-              "select: the selection is synced before any panel draws");
+        check(st.selection.slot == 1, "select: the selection is normalized before any panel draws");
+        check(pulled_slot_view(fs, st).synced_generation == st.selection.generation,
+              "select: and the slot view seeds on its first pull, with no panel drawn");
 
         // ---- Hovering the other cell lets nothing through to navigation.
         PlotNavGate g = frame(in2x, in2y, idle);
@@ -578,9 +722,11 @@ namespace lt {
         check(st.selection.slot == 1, "select: still not on the press");
         frame(in2x, in2y, release);
         check(st.selection.slot == 2, "select: a click selects on its release");
-        check(st.last_synced_slot == 2 && st.cosmetic.camera_local.azimuth == 71.0 &&
-              st.cosmetic.camera_local.zoom == 2.5,
-              "select: and the camera navigation starts from is the new slot's own");
+        {
+            const SlotViewState& sv = pulled_slot_view(fs, st);
+            check(sv.camera_local.azimuth == 71.0 && sv.camera_local.zoom == 2.5,
+                  "select: and the camera navigation starts from is the new slot's own");
+        }
 
         // ---- The double-click completing a selecting click doesn't reset...
         g = frame(in2x, in2y, dpress);
@@ -603,20 +749,33 @@ namespace lt {
         frame(in1x, in1y, drop);
         check(st.selection.slot == 2, "select: and does not select where it ends");
 
-        // ---- select_slot() (the menu) re-seeds as a click does.
-        select_slot(st, fs, 1);
-        check(st.selection.slot == 1 && st.last_synced_slot == 1 &&
-              std::string(st.cosmetic.title_buf).empty(),
-              "select: select_slot() moves the selection and re-seeds from that slot");
-        select_slot(st, fs, 2);
-        check(std::string(st.cosmetic.title_buf) == "box", "select: in either direction");
+        // ---- Selection::select() (the menu) moves the generation as a click does,
+        // and the slot view re-seeds from the new slot on its next pull.
+        {
+            const std::uint64_t g0 = st.selection.generation;
+            st.selection.select(1);
+            check(st.selection.slot == 1 && st.selection.generation == g0 + 1,
+                  "select: select() moves the selection and bumps the generation");
+            st.selection.select(1);
+            check(st.selection.generation == g0 + 1, "select: re-selecting the same slot does not");
+            const SlotViewState& sv1 = pulled_slot_view(fs, st);
+            check(sv1.synced_generation == st.selection.generation &&
+                  sv1.xmin_local == fs.axes[0].snap2d()->xmin &&
+                  sv1.ymax_local == fs.axes[0].snap2d()->ymax,
+                  "select: the next pull re-seeds the slot view from the new slot");
+            st.selection.select(2);
+            check(pulled_slot_view(fs, st).camera_local.azimuth == 71.0,
+                  "select: in either direction");
+        }
 
         // ---- A nonexistent selection is normalized to the first slot.
         PanelState st2;
         st2.selection.slot = 7;
-        check(sync_selected_slot(st2, fs) == 1 && st2.selection.slot == 1,
+        const FigureAxesSnapshot* norm = normalize_selection(st2.selection, fs);
+        check(norm && norm->slot.index == 1 && st2.selection.slot == 1,
               "select: a missing slot falls back to the first one");
-        check(sync_selected_slot(st2, FigureSnapshot{}) == -1, "select: and no axes is no slot");
+        check(st2.selection.generation == 1, "select: and normalizing counts as a change");
+        check(!normalize_selection(st2.selection, FigureSnapshot{}), "select: and no axes is no slot");
     }
 
     // A 3D object's controls live in its Data-panel tab: every plane gets a tab
@@ -672,7 +831,7 @@ namespace lt {
                 ImGui::NewFrame();
                 ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
                 ImGui::SetNextWindowSize(ImVec2(520.0f, 860.0f));
-                draw_data_panel(fs, box, st);
+                draw_data_window(fs, box, st);
                 if (ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel))
                     ImGui::ClosePopupToLevel(0, false);
                 ImGui::Render();
@@ -761,8 +920,8 @@ namespace lt {
                   "object tabs: and a cloud's, on the scatter3d lane");
         }
 
-        // ---- Scratch copies follow an object-count change without the Cosmetic
-        // panel.
+        // ---- Scratch copies follow an object-count change (the Data panel's pull)
+        // on their own.
         {
             RenderSnapshot3D r;
             Bar3DPlot red = bar3d_grid();
@@ -770,7 +929,7 @@ namespace lt {
             r.bars3d.push_back(red);
             FigureSnapshot fs = wrap(std::move(r));
             PanelState st;
-            sync_selected_slot(st, fs);
+            pull_data_panel(st.data, st.selection, *normalize_selection(st.selection, fs));
             check(st.data.bars3d_local.size() == 1 && st.data.bars3d_local[0].color.r == 1.0f,
                   "object tabs: the copies are seeded from the snapshot");
 
@@ -780,7 +939,7 @@ namespace lt {
             s3->bars3d.insert(s3->bars3d.begin(), blue);
             PlaneSnapshot pl;
             s3->planes.push_back(pl);
-            sync_selected_slot(st, fs);
+            pull_data_panel(st.data, st.selection, *normalize_selection(st.selection, fs));
             check(st.data.bars3d_local.size() == 2 && st.data.bars3d_local[0].color.b == 1.0f &&
                   st.data.bars3d_local[1].color.r == 1.0f,
                   "object tabs: a grid inserted ahead re-seeds them, so index 0 is the new grid");
@@ -1041,7 +1200,7 @@ namespace lt {
                 ImGui::NewFrame();
                 ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
                 ImGui::SetNextWindowSize(ImVec2(520.0f, 860.0f));
-                draw_data_panel(fs, box, st);
+                draw_data_window(fs, box, st);
                 if (ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel))
                     ImGui::ClosePopupToLevel(0, false);
                 ImGui::Render();
@@ -1117,7 +1276,7 @@ namespace lt {
                 ImGui::NewFrame();
                 ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
                 ImGui::SetNextWindowSize(ImVec2(430.0f, 3000.0f));
-                draw_cosmetic_panel(fs, box, st);
+                draw_cosmetic_window(fs, box, st);
                 ImGui::Render();
             };
             frame();
@@ -1171,7 +1330,7 @@ namespace lt {
                 ImGui::NewFrame();
                 ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
                 ImGui::SetNextWindowSize(ImVec2(430.0f, 3000.0f));
-                draw_cosmetic_panel(fs, box, st);
+                draw_cosmetic_window(fs, box, st);
                 // Close any combo popup so it doesn't cover later rows.
                 if (ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel))
                     ImGui::ClosePopupToLevel(0, false);
@@ -1184,7 +1343,7 @@ namespace lt {
             auto open_sections = [&] {
                 if (ImGuiWindow* w = ImGui::FindWindowByName("Cosmetic"))
                     for (const char* s: {"Figure", "Axis", "Ticks", "Legend & colorbar"})
-                        w->StateStorage.SetInt(w->GetID(s), 1);
+                        w->StateStorage.SetInt(panel_item_id(w, st.figure_id, s), 1);
             };
             open_sections();
             frame();
@@ -1274,7 +1433,7 @@ namespace lt {
                 ImGui::NewFrame();
                 ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
                 ImGui::SetNextWindowSize(ImVec2(430.0f, 3000.0f));
-                draw_cosmetic_panel(fs, box, st);
+                draw_cosmetic_window(fs, box, st);
                 ImGui::Render();
             };
             frame();
@@ -1308,7 +1467,7 @@ namespace lt {
                 ImGui::NewFrame();
                 ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
                 ImGui::SetNextWindowSize(ImVec2(430.0f, 3000.0f));
-                draw_cosmetic_panel(fs, box, st);
+                draw_cosmetic_window(fs, box, st);
                 if (ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel))
                     ImGui::ClosePopupToLevel(0, false);
                 ImGui::Render();
@@ -1318,7 +1477,7 @@ namespace lt {
             auto open_sections = [&] {
                 if (ImGuiWindow* w = ImGui::FindWindowByName("Cosmetic"))
                     for (const char* s: {"View", "Figure", "Axis", "Ticks", "Legend & colorbar"})
-                        w->StateStorage.SetInt(w->GetID(s), 1);
+                        w->StateStorage.SetInt(panel_item_id(w, st.figure_id, s), 1);
             };
             open_sections();
             frame();

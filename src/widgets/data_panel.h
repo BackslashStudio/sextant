@@ -7,10 +7,14 @@
 
 namespace sextant {
     class FigureEditBox;
-    struct PanelState;
+    struct FigureContext;
+    struct DataPanelState;
     struct PlotDataTable;
 
-    void draw_data_panel(const FigureSnapshot& fsnap, FigureEditBox& edit_box, PanelState& st);
+    // The Data inspector's contents, into the caller's current window (the caller
+    // opens it, and pushes the figure id). `st` is the inspector's own state,
+    // owned by the host.
+    void draw_data_panel(FigureContext& ctx, DataPanelState& st);
 
     // One Data-panel tab: a plot object's table (`table` indexes
     // collect_plot_data_tables()) or a plane (`table == -1`, `plane` its index).

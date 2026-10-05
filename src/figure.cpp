@@ -342,6 +342,9 @@ SvgRender Figure::Impl::render_svg(const SvgExportOptions& o, int w, int h) {
 }
 
 Figure::Figure(FigureOptions opts) : d(std::make_unique<Impl>()) {
+    // Process-unique, for ImGui::PushID: two figures' widgets never share ids.
+    static std::atomic<std::uint64_t> s_next_figure_id{1};
+    d->panel_state.figure_id = s_next_figure_id.fetch_add(1, std::memory_order_relaxed);
     if (!std::isfinite(opts.dpi) || opts.dpi <= 0.0f)
         throw std::invalid_argument("Figure: FigureOptions::dpi must be finite and positive");
     d->opts = std::move(opts);

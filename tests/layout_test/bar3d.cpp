@@ -973,7 +973,7 @@ namespace lt {
                 ImGui::NewFrame();
                 ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
                 ImGui::SetNextWindowSize(ImVec2(520.0f, 860.0f));
-                draw_data_panel(fs, box, st);
+                draw_data_window(fs, box, st);
                 ImGui::Render();
             };
             frame();

@@ -32,6 +32,7 @@
 #include "widgets/imgui_context.h"
 #include <imgui_internal.h>   // ImGuiWindow, TreeNodeSetOpen, the id-conflict detector
 #include "widgets/panel_state.h"
+#include "widgets/figure_context.h"
 
 #include <sextant/sextant.h>
 
@@ -74,6 +75,24 @@ namespace lt {
     // what layout keys on: font sizes, titles, tick overrides.
     sextant::FigureSnapshot make_snapshot(int rows, int cols, int n_cells,
                                           double x_scale = 1.0, double y_scale = 1.0);
+
+    // GUI-kit R3: what draw_widget_panel() hands the components, over a test's
+    // PanelState; and the inspectors in their windows, as the shell draws them
+    // (window opened, figure id pushed).
+    sextant::FigureContext panel_ctx(const sextant::FigureSnapshot& fs, sextant::FigureEditBox& box,
+                                     sextant::PanelState& st);
+    void draw_cosmetic_window(const sextant::FigureSnapshot& fs, sextant::FigureEditBox& box,
+                              sextant::PanelState& st);
+    void draw_data_window(const sextant::FigureSnapshot& fs, sextant::FigureEditBox& box,
+                          sextant::PanelState& st);
+
+    // The shared slot view after a pull: what a component reads or writes first.
+    sextant::SlotViewState& pulled_slot_view(const sextant::FigureSnapshot& fs,
+                                             sextant::PanelState& st);
+
+    // The id an item labelled `label` gets directly inside panel window `w`, under
+    // the figure id the shell pushes (for opening sections through window storage).
+    ImGuiID panel_item_id(ImGuiWindow* w, std::uint64_t figure_id, const char* label);
 
     // One 2D axes holding one line, in the public snapshot shape (for panel tests).
     sextant::FigureSnapshot one_line_snapshot(const std::vector<double>& x,
@@ -433,6 +452,8 @@ namespace lt {
     void test_cosmetic_groups_2d();
 
     void test_panel_id_conflicts();
+
+    void test_figure_context();
 
     void test_subplot_selection();
 

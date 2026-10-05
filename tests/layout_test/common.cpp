@@ -229,3 +229,45 @@ namespace lt {
         return s;
     }
 } // namespace lt
+
+namespace lt {
+    sextant::FigureContext panel_ctx(const sextant::FigureSnapshot& fs, sextant::FigureEditBox& box,
+                                     sextant::PanelState& st) {
+        return { fs, box, st.selection, st.slot_view, &st.plot, st.figure_id };
+    }
+
+    void draw_cosmetic_window(const sextant::FigureSnapshot& fs, sextant::FigureEditBox& box,
+                              sextant::PanelState& st) {
+        sextant::FigureContext ctx = panel_ctx(fs, box, st);
+        ImGui::Begin("Cosmetic", nullptr, ImGuiWindowFlags_NoCollapse);
+        sextant::push_figure_id(ctx.figure_id);
+        sextant::draw_cosmetic_panel(ctx, st.cosmetic);
+        ImGui::PopID();
+        ImGui::End();
+    }
+
+    void draw_data_window(const sextant::FigureSnapshot& fs, sextant::FigureEditBox& box,
+                          sextant::PanelState& st) {
+        sextant::FigureContext ctx = panel_ctx(fs, box, st);
+        ImGui::Begin("Data", nullptr, ImGuiWindowFlags_NoCollapse);
+        sextant::push_figure_id(ctx.figure_id);
+        sextant::draw_data_panel(ctx, st.data);
+        ImGui::PopID();
+        ImGui::End();
+    }
+
+    sextant::SlotViewState& pulled_slot_view(const sextant::FigureSnapshot& fs,
+                                             sextant::PanelState& st) {
+        sextant::FigureEditBox unused;   // slot_view() never edits
+        sextant::FigureContext ctx = panel_ctx(fs, unused, st);
+        return sextant::slot_view(ctx);
+    }
+
+    ImGuiID panel_item_id(ImGuiWindow* w, std::uint64_t figure_id, const char* label) {
+        // ImGui's own hashing, with the id push_figure_id() makes on top.
+        w->IDStack.push_back(w->GetID(static_cast<int>(figure_id)));
+        const ImGuiID id = w->GetID(label);
+        w->IDStack.pop_back();
+        return id;
+    }
+} // namespace lt

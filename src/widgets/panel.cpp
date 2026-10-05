@@ -1,6 +1,7 @@
 #include "panel.h"
 #include "data_panel.h"
 #include "panel_state.h"
+#include "figure_context.h"
 #include "panel_widgets.h"
 #include "../figure_edits.h"
 #include "../edit_box.h"
@@ -37,11 +38,12 @@ namespace sextant {
 
 namespace {
 
-// The plot panel's current measurements (a fresh measure before its first
-// frame).
-std::shared_ptr<const FigureMeasure> on_screen_measure(const PanelState& st,
+// The plot view's current measurements; a fresh measure before its first
+// frame, or with no plot view.
+std::shared_ptr<const FigureMeasure> on_screen_measure(const PlotViewState* view,
                                                        const FigureSnapshot& fsnap) {
-    if (auto m = st.plot.layout.load()) return m;
+    if (view)
+        if (auto m = view->layout.load()) return m;
     return std::make_shared<const FigureMeasure>(measure_figure(fsnap));
 }
 
@@ -68,131 +70,152 @@ bool sheet_counts_differ(const DataPanelState::SheetStyles& s, const RenderSnaps
         || s.scatter_z.size() != sn.scatter_z.size();
 }
 
-// Takes the 2D snapshot; never call with a 3D cell.
-void sync_from_snapshot(PanelState& st, int slot_index, const RenderSnapshot& sn) {
-    std::snprintf(st.cosmetic.title_buf,  sizeof(st.cosmetic.title_buf),  "%s", sn.title.c_str());
-    std::snprintf(st.cosmetic.xtitle_buf, sizeof(st.cosmetic.xtitle_buf), "%s", sn.xtitle.c_str());
-    std::snprintf(st.cosmetic.ytitle_buf, sizeof(st.cosmetic.ytitle_buf), "%s", sn.ytitle.c_str());
-    st.cosmetic.grid_local  = sn.grid_enabled;
-    st.cosmetic.xauto_local = sn.xlim_auto; st.cosmetic.xmin_local = sn.xmin; st.cosmetic.xmax_local = sn.xmax;
-    st.cosmetic.yauto_local = sn.ylim_auto; st.cosmetic.ymin_local = sn.ymin; st.cosmetic.ymax_local = sn.ymax;
-    st.cosmetic.limit_stamps_local = sn.limit_stamps;
-    st.cosmetic.xticks_scratch = sn.xticks_override.value_or(std::vector<Tick>{});
-    st.cosmetic.yticks_scratch = sn.yticks_override.value_or(std::vector<Tick>{});
-    st.cosmetic.axes_style_local = sn.axes_style;
-    st.cosmetic.origin_x_scratch = sn.axes_style.origin_x.value_or(0.0);
-    st.cosmetic.origin_y_scratch = sn.axes_style.origin_y.value_or(0.0);
-    st.cosmetic.grid_opts_local  = sn.grid_opts;
-    st.cosmetic.legend_enabled_local = sn.legend_enabled;
-    st.cosmetic.legend_local     = sn.legend_opts;
-    st.cosmetic.colorbar_local   = sn.colorbar_opts;
-    sync_sheet(st.data.sheet_local, sn);
-    st.last_synced_slot = slot_index;
+// Seeding from the selected slot, one owner at a time (GUI-kit R3). Each state
+// pulls when its user next runs: seed_* when the Selection generation moved,
+// the per-frame follows otherwise.
+
+// The Cosmetic inspector's per-slot fields. Takes the 2D snapshot; never call
+// with a 3D cell.
+void seed_cosmetic(CosmeticState& c, const RenderSnapshot& sn) {
+    std::snprintf(c.title_buf,  sizeof(c.title_buf),  "%s", sn.title.c_str());
+    std::snprintf(c.xtitle_buf, sizeof(c.xtitle_buf), "%s", sn.xtitle.c_str());
+    std::snprintf(c.ytitle_buf, sizeof(c.ytitle_buf), "%s", sn.ytitle.c_str());
+    c.grid_local = sn.grid_enabled;
+    c.xticks_scratch = sn.xticks_override.value_or(std::vector<Tick>{});
+    c.yticks_scratch = sn.yticks_override.value_or(std::vector<Tick>{});
+    c.axes_style_local = sn.axes_style;
+    c.origin_x_scratch = sn.axes_style.origin_x.value_or(0.0);
+    c.origin_y_scratch = sn.axes_style.origin_y.value_or(0.0);
+    c.grid_opts_local  = sn.grid_opts;
+    c.legend_enabled_local = sn.legend_enabled;
+    c.legend_local     = sn.legend_opts;
+    c.colorbar_local   = sn.colorbar_opts;
 }
 
-// The 3D counterpart: fills shared scratch fields and the 3D-only ones, via the
-// same last_synced_slot gate.
+// The 3D counterpart: the shared fields and the 3D-only ones.
+void seed_cosmetic(CosmeticState& c, const RenderSnapshot3D& sn) {
+    std::snprintf(c.title_buf,  sizeof(c.title_buf),  "%s", sn.title.c_str());
+    std::snprintf(c.xtitle_buf, sizeof(c.xtitle_buf), "%s", sn.xtitle.c_str());
+    std::snprintf(c.ytitle_buf, sizeof(c.ytitle_buf), "%s", sn.ytitle.c_str());
+    std::snprintf(c.ztitle_buf, sizeof(c.ztitle_buf), "%s", sn.ztitle.c_str());
+    c.grid_local = sn.grid_enabled;
+    c.xticks_scratch = sn.xticks_override.value_or(std::vector<Tick>{});
+    c.yticks_scratch = sn.yticks_override.value_or(std::vector<Tick>{});
+    c.zticks_scratch = sn.zticks_override.value_or(std::vector<Tick>{});
+    c.axes_style_local = sn.axes_style;
+    c.origin_x_scratch = sn.axes_style.origin_x.value_or(0.0);
+    c.origin_y_scratch = sn.axes_style.origin_y.value_or(0.0);
+    c.origin_z_scratch = sn.axes_style.origin_z.value_or(0.0);
+    c.grid_opts_local  = sn.grid_opts;
+    c.legend_enabled_local = sn.legend_enabled;
+    c.legend_local     = sn.legend_opts;
+    c.colorbar_local   = sn.colorbar_opts;
+    c.box3d_local      = sn.box_style;
+    c.aspect_local     = sn.aspect;
+}
+
+// The shared slot view: limits, and in 3D the camera.
+void seed_slot_view(SlotViewState& v, const RenderSnapshot& sn) {
+    v.xauto_local = sn.xlim_auto; v.xmin_local = sn.xmin; v.xmax_local = sn.xmax;
+    v.yauto_local = sn.ylim_auto; v.ymin_local = sn.ymin; v.ymax_local = sn.ymax;
+    v.limit_stamps_local = sn.limit_stamps;
+}
+
+void seed_slot_view(SlotViewState& v, const RenderSnapshot3D& sn) {
+    v.xauto_local = sn.xlim_auto; v.xmin_local = sn.xmin; v.xmax_local = sn.xmax;
+    v.yauto_local = sn.ylim_auto; v.ymin_local = sn.ymin; v.ymax_local = sn.ymax;
+    v.zauto_local = sn.zlim_auto; v.zmin_local = sn.zmin; v.zmax_local = sn.zmax;
+    v.limit_stamps_local = sn.limit_stamps;
+    v.camera_local       = sn.camera;
+    v.camera_stamp_local = sn.camera_stamp;
+}
+
 // The planes' scratch copy, also re-seeded when the plane count changes
 // (indices shift, so the whole list is re-read).
-void sync_planes(PanelState& st, const RenderSnapshot3D& sn) {
-    st.data.planes_local.clear();
-    st.data.planes_local.reserve(sn.planes.size());
+void sync_planes(DataPanelState& d, const RenderSnapshot3D& sn) {
+    d.planes_local.clear();
+    d.planes_local.reserve(sn.planes.size());
     for (const auto& p : sn.planes)
-        st.data.planes_local.push_back({ p.orient, p.offset, p.opts });
+        d.planes_local.push_back({ p.orient, p.offset, p.opts });
 }
 
 // Every plane's sheet, re-seeded as one list (like sync_planes()).
-void sync_plane_sheets(PanelState& st, const RenderSnapshot3D& sn) {
-    st.data.plane_sheets_local.resize(sn.planes.size());
+void sync_plane_sheets(DataPanelState& d, const RenderSnapshot3D& sn) {
+    d.plane_sheets_local.resize(sn.planes.size());
     for (std::size_t p = 0; p < sn.planes.size(); ++p)
-        sync_sheet(st.data.plane_sheets_local[p], sn.planes[p].sheet);
+        sync_sheet(d.plane_sheets_local[p], sn.planes[p].sheet);
 }
 
-bool plane_sheets_differ(const PanelState& st, const RenderSnapshot3D& sn) {
-    if (st.data.plane_sheets_local.size() != sn.planes.size()) return true;
+bool plane_sheets_differ(const DataPanelState& d, const RenderSnapshot3D& sn) {
+    if (d.plane_sheets_local.size() != sn.planes.size()) return true;
     for (std::size_t p = 0; p < sn.planes.size(); ++p)
-        if (sheet_counts_differ(st.data.plane_sheets_local[p], sn.planes[p].sheet)) return true;
+        if (sheet_counts_differ(d.plane_sheets_local[p], sn.planes[p].sheet)) return true;
     return false;
 }
 
 // The 3D kinds' appearance, on the same rule.
-void sync_scene_objects(PanelState& st, const RenderSnapshot3D& sn) {
-    st.data.bars3d_local.clear();
-    st.data.bars3d_local.reserve(sn.bars3d.size());
-    for (const auto& b : sn.bars3d) st.data.bars3d_local.push_back(b.opts);
-    st.data.surfaces_local.clear();
-    st.data.surfaces_local.reserve(sn.surfaces.size());
-    for (const auto& s : sn.surfaces) st.data.surfaces_local.push_back(s.opts);
-    st.data.scatter3d_local.clear();
-    st.data.scatter3d_local.reserve(sn.scatter3d.size());
-    for (const auto& c : sn.scatter3d) st.data.scatter3d_local.push_back(c.opts);
-    st.data.line3d_local.clear();
-    st.data.line3d_local.reserve(sn.lines3d.size());
-    for (const auto& l : sn.lines3d) st.data.line3d_local.push_back(l.opts);
-    st.data.surface_tri_local.clear();
-    st.data.surface_tri_local.reserve(sn.surface_tri.size());
-    for (const auto& m : sn.surface_tri) st.data.surface_tri_local.push_back(m.opts);
-}
-
-void sync_from_snapshot(PanelState& st, int slot_index, const RenderSnapshot3D& sn) {
-    std::snprintf(st.cosmetic.title_buf,  sizeof(st.cosmetic.title_buf),  "%s", sn.title.c_str());
-    std::snprintf(st.cosmetic.xtitle_buf, sizeof(st.cosmetic.xtitle_buf), "%s", sn.xtitle.c_str());
-    std::snprintf(st.cosmetic.ytitle_buf, sizeof(st.cosmetic.ytitle_buf), "%s", sn.ytitle.c_str());
-    std::snprintf(st.cosmetic.ztitle_buf, sizeof(st.cosmetic.ztitle_buf), "%s", sn.ztitle.c_str());
-    st.cosmetic.grid_local  = sn.grid_enabled;
-    st.cosmetic.xauto_local = sn.xlim_auto; st.cosmetic.xmin_local = sn.xmin; st.cosmetic.xmax_local = sn.xmax;
-    st.cosmetic.yauto_local = sn.ylim_auto; st.cosmetic.ymin_local = sn.ymin; st.cosmetic.ymax_local = sn.ymax;
-    st.cosmetic.zauto_local = sn.zlim_auto; st.cosmetic.zmin_local = sn.zmin; st.cosmetic.zmax_local = sn.zmax;
-    st.cosmetic.limit_stamps_local = sn.limit_stamps;
-    st.cosmetic.xticks_scratch = sn.xticks_override.value_or(std::vector<Tick>{});
-    st.cosmetic.yticks_scratch = sn.yticks_override.value_or(std::vector<Tick>{});
-    st.cosmetic.zticks_scratch = sn.zticks_override.value_or(std::vector<Tick>{});
-    st.cosmetic.axes_style_local = sn.axes_style;
-    st.cosmetic.origin_x_scratch = sn.axes_style.origin_x.value_or(0.0);
-    st.cosmetic.origin_y_scratch = sn.axes_style.origin_y.value_or(0.0);
-    st.cosmetic.origin_z_scratch = sn.axes_style.origin_z.value_or(0.0);
-    st.cosmetic.grid_opts_local  = sn.grid_opts;
-    st.cosmetic.legend_enabled_local = sn.legend_enabled;
-    st.cosmetic.legend_local     = sn.legend_opts;
-    st.cosmetic.colorbar_local   = sn.colorbar_opts;
-    st.cosmetic.camera_local     = sn.camera;
-    st.cosmetic.camera_stamp_local = sn.camera_stamp;
-    st.cosmetic.box3d_local      = sn.box_style;
-    st.cosmetic.aspect_local     = sn.aspect;
-    sync_planes(st, sn);
-    sync_plane_sheets(st, sn);
-    sync_scene_objects(st, sn);
-    st.last_synced_slot = slot_index;
+void sync_scene_objects(DataPanelState& d, const RenderSnapshot3D& sn) {
+    d.bars3d_local.clear();
+    d.bars3d_local.reserve(sn.bars3d.size());
+    for (const auto& b : sn.bars3d) d.bars3d_local.push_back(b.opts);
+    d.surfaces_local.clear();
+    d.surfaces_local.reserve(sn.surfaces.size());
+    for (const auto& s : sn.surfaces) d.surfaces_local.push_back(s.opts);
+    d.scatter3d_local.clear();
+    d.scatter3d_local.reserve(sn.scatter3d.size());
+    for (const auto& c : sn.scatter3d) d.scatter3d_local.push_back(c.opts);
+    d.line3d_local.clear();
+    d.line3d_local.reserve(sn.lines3d.size());
+    for (const auto& l : sn.lines3d) d.line3d_local.push_back(l.opts);
+    d.surface_tri_local.clear();
+    d.surface_tri_local.reserve(sn.surface_tri.size());
+    for (const auto& m : sn.surface_tri) d.surface_tri_local.push_back(m.opts);
 }
 
 // For axes on "auto", the limit fields track the resolved limits every frame
 // (the snapshot only has declared defaults). Dragging a field clears `auto`,
-// after which the declared value is correct.
-void track_resolved_limits(PanelState& st, int slot,
+// after which the declared value is correct. No view = no frame drawn (the
+// headless panel test, or a figure no plot view shows): declared values.
+void track_resolved_limits(SlotViewState& v, const PlotViewState* view, int slot,
                            bool xauto, bool yauto, bool zauto) {
-    const PlotViewState::ResolvedLimits* r = st.plot.resolved_for(slot);
-    if (!r) return;   // no frame drawn yet (the headless panel test)
-    if (xauto) { st.cosmetic.xmin_local = r->xmin; st.cosmetic.xmax_local = r->xmax; }
-    if (yauto) { st.cosmetic.ymin_local = r->ymin; st.cosmetic.ymax_local = r->ymax; }
-    if (zauto && r->is_3d) { st.cosmetic.zmin_local = r->zmin; st.cosmetic.zmax_local = r->zmax; }
+    const PlotViewState::ResolvedLimits* r = view ? view->resolved_for(slot) : nullptr;
+    if (!r) return;
+    if (xauto) { v.xmin_local = r->xmin; v.xmax_local = r->xmax; }
+    if (yauto) { v.ymin_local = r->ymin; v.ymax_local = r->ymax; }
+    if (zauto && r->is_3d) { v.zmin_local = r->zmin; v.zmax_local = r->zmax; }
 }
 
 // Figure-level: seeded once, not on slot change (would discard an edit).
-void sync_figure_from_snapshot(PanelState& st, const FigureSnapshot& fsnap) {
-    if (st.cosmetic.suptitle_synced) return;
-    std::snprintf(st.cosmetic.suptitle_buf, sizeof(st.cosmetic.suptitle_buf), "%s", fsnap.suptitle.c_str());
-    st.cosmetic.suptitle_local  = fsnap.suptitle_opts;
-    st.cosmetic.suptitle_synced = true;
+void sync_figure_from_snapshot(CosmeticState& c, const FigureSnapshot& fsnap) {
+    if (c.suptitle_synced) return;
+    std::snprintf(c.suptitle_buf, sizeof(c.suptitle_buf), "%s", fsnap.suptitle.c_str());
+    c.suptitle_local  = fsnap.suptitle_opts;
+    c.suptitle_synced = true;
 }
 
 // Same once-only rule, with its own flag.
-void sync_layout_from_snapshot(PanelState& st, const FigureSnapshot& fsnap) {
-    if (st.cosmetic.layout_synced) return;
-    st.cosmetic.margins_local = fsnap.margins;
-    st.cosmetic.col_gap_local = fsnap.col_gap;
-    st.cosmetic.row_gap_local = fsnap.row_gap;
-    st.cosmetic.layout_synced = true;
+void sync_layout_from_snapshot(CosmeticState& c, const FigureSnapshot& fsnap) {
+    if (c.layout_synced) return;
+    c.margins_local = fsnap.margins;
+    c.col_gap_local = fsnap.col_gap;
+    c.row_gap_local = fsnap.row_gap;
+    c.layout_synced = true;
 }
+
+// The Cosmetic inspector's own pull.
+void pull_cosmetic(CosmeticState& c, const Selection& sel, const FigureAxesSnapshot& fa) {
+    if (c.synced_generation == sel.generation) return;
+    std::visit([&](const auto& sn) { seed_cosmetic(c, sn); }, fa.snap);
+    c.synced_generation = sel.generation;
+}
+
+// What the Cosmetic helpers below reach: its own state, the shared slot view
+// (already pulled), and the plot view if one shows the figure.
+struct CosmeticRefs {
+    CosmeticState&       cosmetic;
+    SlotViewState&       slot_view;
+    const PlotViewState* view;
+};
 
 // A "position | label | remove" table for a tick override; true on change.
 bool draw_tick_table(const char* table_id, std::vector<Tick>& scratch) {
@@ -281,14 +304,14 @@ void ensure_layout(ImGuiID dockspace_id, float panel_width, PanelState& st) {
 // top never reports), the wheel, a size change, and the keys ImGui did not take
 // for a text field. Also empties the backend's key tap every frame, connected or
 // not.
-void report_plot_events(PanelState& st, const FigureSnapshot& fsnap,
+void report_plot_events(PlotViewState& pv, const FigureSnapshot& fsnap,
                         const std::vector<AxesLayout>& layout, bool hovered,
                         float x, float y, int plot_w, int plot_h,
                         const PlotEventInfo& what) {
     const ImGuiIO& io = ImGui::GetIO();
     std::vector<WindowEvent> keys;
     ImGui_ImplSextant_TakeKeys(keys);
-    EventChannel* ch = st.plot.events;
+    EventChannel* ch = pv.events;
     if (!ch) return;
 
     const std::uint32_t wanted = ch->wanted_mask();
@@ -314,8 +337,8 @@ void report_plot_events(PanelState& st, const FigureSnapshot& fsnap,
     in.height = plot_h;
 
     std::vector<Event> events;
-    collect_plot_events(st.plot.event_tracker, in, what, fsnap, layout, wanted, events,
-                        &st.plot.hint_index);
+    collect_plot_events(pv.event_tracker, in, what, fsnap, layout, wanted, events,
+                        &pv.hint_index);
 
     if (!io.WantTextInput) {
         for (const WindowEvent& k : keys) {
@@ -330,12 +353,13 @@ void report_plot_events(PanelState& st, const FigureSnapshot& fsnap,
 
 // Renders the plot into plot_fbo at the "Plot" panel's live size and shows it
 // via ImGui::Image(), making the plot a resizable dock panel.
+// Draws into the current window (the shell opens "Plot"); `pv` is this view's
+// own state.
 void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
-                     PlotFbo& plot_fbo, const FigureSnapshot& fsnap,
-                     FigureEditBox& edit_box, PanelState& st, int supersample) {
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-    ImGui::Begin("Plot", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-    ImGui::PopStyleVar();
+                     PlotFbo& plot_fbo, FigureContext& fig, PlotViewState& pv,
+                     int supersample) {
+    const FigureSnapshot& fsnap = fig.snap;
+    FigureEditBox& edit_box = fig.edits;
 
     // Three units meet here. ImGui's are window coordinates (points on macOS);
     // the FBO is framebuffer pixels (ImGui units x DisplayFramebufferScale);
@@ -350,10 +374,10 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
     const int fb_h = std::max(1, static_cast<int>(avail.y * fb_scale));
     const int render_w = std::max(1, static_cast<int>(std::lround(fb_w / display_scale)));
     const int render_h = std::max(1, static_cast<int>(std::lround(fb_h / display_scale)));
-    st.plot.live_plot_w.store(render_w, std::memory_order_relaxed);
-    st.plot.live_plot_h.store(render_h, std::memory_order_relaxed);
-    st.plot.live_plot_fb_w.store(fb_w, std::memory_order_relaxed);
-    st.plot.live_plot_fb_h.store(fb_h, std::memory_order_relaxed);
+    pv.live_plot_w.store(render_w, std::memory_order_relaxed);
+    pv.live_plot_h.store(render_h, std::memory_order_relaxed);
+    pv.live_plot_fb_w.store(fb_w, std::memory_order_relaxed);
+    pv.live_plot_fb_h.store(fb_h, std::memory_order_relaxed);
     // The FBO is framebuffer-sized, times the supersample factor; the layout
     // stays logical.
     plot_fbo.ensure_size(fb_w, fb_h, supersample);
@@ -361,7 +385,7 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
 
     // From stored measurements, re-measured on layout generation, size change
     // or File > Refit layout.
-    const FigureLayout fl = st.plot.layout.fit(fsnap, render_w, render_h);
+    const FigureLayout fl = pv.layout.fit(fsnap, render_w, render_h);
 
     std::vector<AxesLayout> layout;
     plot_fbo.bind();
@@ -370,8 +394,8 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
     plot_fbo.unbind();
 
     // Store the resolved auto limits for the Cosmetic panel.
-    st.plot.resolved.clear();
-    st.plot.resolved.reserve(layout.size());
+    pv.resolved.clear();
+    pv.resolved.reserve(layout.size());
     for (const AxesLayout& al : layout) {
         PlotViewState::ResolvedLimits r;
         r.slot = al.slot.index;
@@ -385,7 +409,7 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
             r.xmin = al.tr.xmin; r.xmax = al.tr.xmax;
             r.ymin = al.tr.ymin; r.ymax = al.tr.ymax;
         }
-        st.plot.resolved.push_back(r);
+        pv.resolved.push_back(r);
     }
 
     // GL textures are bottom-up; flip v.
@@ -416,7 +440,7 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
 
         // Grid boundary dragging first; what it owns doesn't select or
         // navigate.
-        GridDragOut grid = update_grid_drag(st, fsnap, fl, render_w, render_h, in,
+        GridDragOut grid = update_grid_drag(pv, fsnap, fl, render_w, render_h, in,
                                             4.0f * to_plot);
         if (grid.col_ratios || grid.row_ratios)
             edit_box.update_figure([&](FigureEdits& f) {
@@ -428,24 +452,24 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
         if (grid.owns) {
             in.hovered = in.active = in.pressed = in.double_clicked = in.released = false;
         }
-        const int selected_before = st.selection.slot;
-        gate = update_plot_selection(st, fsnap, layout, in);
+        const int selected_before = fig.selection.slot;
+        gate = update_plot_selection(fig.selection, pv, fsnap, layout, in);
 
         // Report what happened over the plot, now that it is known what the
         // panel did with it. Read-only: nothing below changes the input.
-        report_plot_events(st, fsnap, layout, in_hovered, in.x, in.y, render_w, render_h,
+        report_plot_events(pv, fsnap, layout, in_hovered, in.x, in.y, render_w, render_h,
                            PlotEventInfo{grid.owns,
-                                         st.plot.navigate_enabled && gate.drag,
-                                         st.plot.navigate_enabled && gate.wheel,
-                                         st.plot.navigate_enabled && gate.reset,
-                                         st.selection.slot != selected_before});
+                                         pv.navigate_enabled && gate.drag,
+                                         pv.navigate_enabled && gate.wheel,
+                                         pv.navigate_enabled && gate.reset,
+                                         fig.selection.slot != selected_before});
     }
 
     // Outline the selected subplot, drawn over the image (never saved). Only
     // with more than one subplot.
     if (fsnap.axes.size() > 1) {
         for (const AxesLayout& al : layout) {
-            if (al.slot.index != st.selection.slot) continue;
+            if (al.slot.index != fig.selection.slot) continue;
             const ImVec2 p0(image_pos.x + al.cell.x / to_plot + 1.0f,
                             image_pos.y + al.cell.y / to_plot + 1.0f);
             const ImVec2 p1(image_pos.x + (al.cell.x + al.cell.w) / to_plot - 1.0f,
@@ -460,7 +484,7 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
 
     // Hover hints over any subplot (independent of selection), drawn into the
     // already-rendered texture in a new NanoVG frame.
-    if (st.plot.hints_enabled && in_hovered) {
+    if (pv.hints_enabled && in_hovered) {
         const ImGuiIO& io = ImGui::GetIO();
         const float cursor_x = (io.MousePos.x - image_pos.x) * to_plot;
         const float cursor_y = (io.MousePos.y - image_pos.y) * to_plot;
@@ -472,13 +496,13 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
             // nearest plane hit.
             std::optional<HintResult> hint;
             if (fa && fa->snap2d()) {
-                st.plot.hint_index.set_frame_key(fsnap.data_generation, cell->slot.index);
+                pv.hint_index.set_frame_key(fsnap.data_generation, cell->slot.index);
                 hint = find_hint(*fa->snap2d(), cell->tr, cursor_x, cursor_y,
-                                 &st.plot.hint_index);
+                                 &pv.hint_index);
             } else if (fa && fa->snap3d() && cell->proj3d) {
-                st.plot.hint_index.set_frame_key(fsnap.data_generation, cell->slot.index);
+                pv.hint_index.set_frame_key(fsnap.data_generation, cell->slot.index);
                 hint = find_hint3d(*fa->snap3d(), *cell->proj3d, cursor_x, cursor_y,
-                                   &st.plot.hint_index);
+                                   &pv.hint_index);
             }
             if (hint) {
                 plot_fbo.bind();
@@ -491,10 +515,13 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
         }
     }
 
-    if (st.plot.navigate_enabled) {
+    if (pv.navigate_enabled) {
+        // Pulled here, after any selection change above: a drag starts from the
+        // selected slot's own camera and limits, whichever panels are drawn.
+        SlotViewState& sv = slot_view(fig);
         const AxesLayout* cur = nullptr;
         for (const auto& al : layout)
-            if (al.slot.index == st.selection.slot) { cur = &al; break; }
+            if (al.slot.index == fig.selection.slot) { cur = &al; break; }
 
         // A 3D slot navigates its camera, a 2D slot its limits. Both push
         // through FigureEditBox with the stamps they worked over, so the view
@@ -502,14 +529,14 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
         const RenderSnapshot3D* sel3d = nullptr;
         const RenderSnapshot*   sel2d = nullptr;
         for (const auto& a : fsnap.axes)
-            if (a.slot.index == st.selection.slot) {
+            if (a.slot.index == fig.selection.slot) {
                 sel3d = a.snap3d(); sel2d = a.snap2d(); break;
             }
 
         if (cur && sel3d) {
             const ImGuiIO& io = ImGui::GetIO();
             const int idx = cur->slot.index;
-            Camera3D cam = st.cosmetic.camera_local;
+            Camera3D cam = sv.camera_local;
             bool moved = false;
 
             if (gate.drag && (io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f)) {
@@ -553,7 +580,7 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
             }
 
             if (moved) {
-                st.cosmetic.camera_local = cam;
+                sv.camera_local = cam;
                 edit_box.update3d(idx, [&](AxesEdit3D& e) {
                     e.camera = cam;
                     e.camera_seen = sel3d->camera_stamp;
@@ -567,9 +594,9 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
             if (gate.drag && (io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f)) {
                 const auto lim = pan_limits(cur->tr,
                     io.MouseDelta.x * to_plot, io.MouseDelta.y * to_plot);
-                st.cosmetic.xmin_local = lim.xmin; st.cosmetic.xmax_local = lim.xmax;
-                st.cosmetic.ymin_local = lim.ymin; st.cosmetic.ymax_local = lim.ymax;
-                st.cosmetic.xauto_local = st.cosmetic.yauto_local = false;
+                sv.xmin_local = lim.xmin; sv.xmax_local = lim.xmax;
+                sv.ymin_local = lim.ymin; sv.ymax_local = lim.ymax;
+                sv.xauto_local = sv.yauto_local = false;
                 edit_box.update(idx, [&](AxesEdit& e) {
                     e.xmin = lim.xmin; e.xmax = lim.xmax; e.xlim_auto = false;
                     e.ymin = lim.ymin; e.ymax = lim.ymax; e.ylim_auto = false;
@@ -582,9 +609,9 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
                 const float cursor_y = (io.MousePos.y - image_pos.y) * to_plot;
                 const float factor = std::pow(0.9f, io.MouseWheel);
                 const auto lim = zoom_limits(cur->tr, cursor_x, cursor_y, factor);
-                st.cosmetic.xmin_local = lim.xmin; st.cosmetic.xmax_local = lim.xmax;
-                st.cosmetic.ymin_local = lim.ymin; st.cosmetic.ymax_local = lim.ymax;
-                st.cosmetic.xauto_local = st.cosmetic.yauto_local = false;
+                sv.xmin_local = lim.xmin; sv.xmax_local = lim.xmax;
+                sv.ymin_local = lim.ymin; sv.ymax_local = lim.ymax;
+                sv.xauto_local = sv.yauto_local = false;
                 edit_box.update(idx, [&](AxesEdit& e) {
                     e.xmin = lim.xmin; e.xmax = lim.xmax; e.xlim_auto = false;
                     e.ymin = lim.ymin; e.ymax = lim.ymax; e.ylim_auto = false;
@@ -593,7 +620,7 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
             }
 
             if (gate.reset) {
-                st.cosmetic.xauto_local = st.cosmetic.yauto_local = true;
+                sv.xauto_local = sv.yauto_local = true;
                 edit_box.update(idx, [&](AxesEdit& e) {
                     e.xlim_auto = true; e.ylim_auto = true;
                     e.lim_seen = seen;
@@ -605,13 +632,11 @@ void draw_plot_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
     // Box-filter the supersampled target into the texture Image() references
     // (sampled later, at RenderDrawData()).
     plot_fbo.resolve();
-
-    ImGui::End();
 }
 
 // The suptitle controls, figure-level and shared by the 2D and 3D panels
 // (under the Figure group's "Suptitle" heading).
-void draw_suptitle_fields(PanelState& st, FigureEditBox& edit_box) {
+void draw_suptitle_fields(CosmeticRefs& st, FigureEditBox& edit_box) {
     auto push = [&]{ edit_box.update_figure([&](FigureEdits& f){ f.suptitle_opts = st.cosmetic.suptitle_local; }); };
 
     // Three tables (the middle row has two pairs); matching first columns.
@@ -645,7 +670,7 @@ void draw_suptitle_fields(PanelState& st, FigureEditBox& edit_box) {
 
 // Margins and gaps: figure-level, shared by both panels (under "Layout").
 // Decoration space is measured from text, so there is no control for it.
-void draw_layout_fields(PanelState& st, const FigureSnapshot& fsnap,
+void draw_layout_fields(CosmeticRefs& st, const FigureSnapshot& fsnap,
                         FigureEditBox& edit_box, int idx) {
     auto push_margins = [&]{ edit_box.update_figure([&](FigureEdits& f){ f.margins = st.cosmetic.margins_local; }); };
     auto push_gaps    = [&]{ edit_box.update_figure([&](FigureEdits& f){
@@ -709,10 +734,10 @@ void draw_layout_fields(PanelState& st, const FigureSnapshot& fsnap,
 
     // Read-only: the selected axes' resulting plot frame, laid out from the
     // stored measurements.
-    const int live_w = st.plot.live_plot_w.load(std::memory_order_relaxed);
-    const int live_h = st.plot.live_plot_h.load(std::memory_order_relaxed);
+    const int live_w = st.view ? st.view->live_plot_w.load(std::memory_order_relaxed) : 0;
+    const int live_h = st.view ? st.view->live_plot_h.load(std::memory_order_relaxed) : 0;
     if (live_w > 0 && live_h > 0) {
-        const FigureLayout fl = compute_figure_layout(fsnap, *on_screen_measure(st, fsnap),
+        const FigureLayout fl = compute_figure_layout(fsnap, *on_screen_measure(st.view, fsnap),
                                                       live_w, live_h);
         for (const auto& c : fl.cells) {
             if (c.slot.index != idx) continue;
@@ -730,7 +755,7 @@ void draw_layout_fields(PanelState& st, const FigureSnapshot& fsnap,
 }
 
 // The Figure group, shared by both panels; closed by default.
-void draw_figure_group(PanelState& st, const FigureSnapshot& fsnap,
+void draw_figure_group(CosmeticRefs& st, const FigureSnapshot& fsnap,
                        FigureEditBox& edit_box, int idx) {
     if (!section("Figure")) return;
     ImGui::SeparatorText("Suptitle");
@@ -742,7 +767,7 @@ void draw_figure_group(PanelState& st, const FigureSnapshot& fsnap,
 // The Legend & colorbar group, shared by both panels, templated on the edit
 // struct (AxesEdit or AxesEdit3D).
 template <typename Edit, typename Push>
-void draw_legend_colorbar_group(PanelState& st, bool has_colorbar, Push&& push) {
+void draw_legend_colorbar_group(CosmeticRefs& st, bool has_colorbar, Push&& push) {
     auto push_legend   = [&]{ push([&](Edit& e){ e.legend_opts   = st.cosmetic.legend_local; }); };
     auto push_colorbar = [&]{ push([&](Edit& e){ e.colorbar_opts = st.cosmetic.colorbar_local; }); };
 
@@ -836,15 +861,15 @@ void draw_legend_colorbar_group(PanelState& st, bool has_colorbar, Push&& push) 
 
 // The Cosmetic panel for a 3D slot (separate from 2D: nearly every section
 // differs).
-void draw_cosmetic_3d(PanelState& st, const RenderSnapshot3D& sn,
+void draw_cosmetic_3d(CosmeticRefs& st, const RenderSnapshot3D& sn,
                       const FigureSnapshot& fsnap, FigureEditBox& edit_box, int idx) {
     auto& sty = st.cosmetic.axes_style_local;
 
     auto push_style  = [&]{ edit_box.update3d(idx, [&](AxesEdit3D& e){ e.axes_style = sty; }); };
     auto push_grid   = [&]{ edit_box.update3d(idx, [&](AxesEdit3D& e){ e.grid_opts  = st.cosmetic.grid_opts_local; }); };
-    auto push_camera = [&]{ st.cosmetic.camera_local = clamp_camera(st.cosmetic.camera_local);
+    auto push_camera = [&]{ st.slot_view.camera_local = clamp_camera(st.slot_view.camera_local);
                             edit_box.update3d(idx, [&](AxesEdit3D& e){
-                                e.camera = st.cosmetic.camera_local;
+                                e.camera = st.slot_view.camera_local;
                                 e.camera_seen = sn.camera_stamp;
                             }); };
     auto push_box    = [&]{ edit_box.update3d(idx, [&](AxesEdit3D& e){ e.box_style = st.cosmetic.box3d_local; }); };
@@ -866,37 +891,37 @@ void draw_cosmetic_3d(PanelState& st, const RenderSnapshot3D& sn,
     // ==== View ============================================================
     if (section("View", true)) {
         ImGui::SeparatorText("Camera");
-        const bool persp = st.cosmetic.camera_local.projection == Projection::Perspective;
+        const bool persp = st.slot_view.camera_local.projection == Projection::Perspective;
         if (begin_field_table("cam3d", 2)) {
             field_row("Azim");
-            if (drag_double("##azim", &st.cosmetic.camera_local.azimuth, 0.25f, "%.1f deg")) push_camera();
+            if (drag_double("##azim", &st.slot_view.camera_local.azimuth, 0.25f, "%.1f deg")) push_camera();
             field_next("Elev");
-            if (drag_double("##elev", &st.cosmetic.camera_local.elevation, 0.25f, "%.1f deg")) push_camera();
+            if (drag_double("##elev", &st.slot_view.camera_local.elevation, 0.25f, "%.1f deg")) push_camera();
             // FOV only under perspective.
             field_row("Zoom");
-            if (drag_double("##zoom3d", &st.cosmetic.camera_local.zoom, 0.005f, "%.2fx")) push_camera();
+            if (drag_double("##zoom3d", &st.slot_view.camera_local.zoom, 0.005f, "%.2fx")) push_camera();
             if (persp) {
                 field_next("FOV");
-                if (drag_double("##fov3d", &st.cosmetic.camera_local.fov, 0.1f, "%.0f deg")) push_camera();
+                if (drag_double("##fov3d", &st.slot_view.camera_local.fov, 0.1f, "%.0f deg")) push_camera();
             }
             end_field_table();
         }
         if (begin_field_table("cam3dp")) {
             field_row("Projection");
-            if (projection_combo("##proj3d", st.cosmetic.camera_local.projection)) push_camera();
+            if (projection_combo("##proj3d", st.slot_view.camera_local.projection)) push_camera();
             end_field_table();
         }
         // No distance control: the box is fitted every frame, and under
         // perspective fov determines the eye distance; zoom magnifies.
         ImGui::TextDisabled("Target %.2f, %.2f, %.2f",
-                            st.cosmetic.camera_local.target.x, st.cosmetic.camera_local.target.y,
-                            st.cosmetic.camera_local.target.z);
+                            st.slot_view.camera_local.target.x, st.slot_view.camera_local.target.y,
+                            st.slot_view.camera_local.target.z);
         if (persp)
             ImGui::TextDisabled("Wider fov = closer camera. The box fills the cell either way.");
         if (ImGui::SmallButton("Reset view")) {
-            st.cosmetic.camera_local = sn.default_camera;
+            st.slot_view.camera_local = sn.default_camera;
             edit_box.update3d(idx, [&](AxesEdit3D& e){
-                e.camera = st.cosmetic.camera_local;
+                e.camera = st.slot_view.camera_local;
                 e.camera_seen = sn.camera_stamp;
             });
         }
@@ -1052,9 +1077,9 @@ void draw_cosmetic_3d(PanelState& st, const RenderSnapshot3D& sn,
                 const double* hi;
             };
             const Org orgs[3] = {
-                { "at x", &sty.origin_x, &st.cosmetic.origin_x_scratch, &st.cosmetic.xmin_local, &st.cosmetic.xmax_local },
-                { "at y", &sty.origin_y, &st.cosmetic.origin_y_scratch, &st.cosmetic.ymin_local, &st.cosmetic.ymax_local },
-                { "at z", &sty.origin_z, &st.cosmetic.origin_z_scratch, &st.cosmetic.zmin_local, &st.cosmetic.zmax_local },
+                { "at x", &sty.origin_x, &st.cosmetic.origin_x_scratch, &st.slot_view.xmin_local, &st.slot_view.xmax_local },
+                { "at y", &sty.origin_y, &st.cosmetic.origin_y_scratch, &st.slot_view.ymin_local, &st.slot_view.ymax_local },
+                { "at z", &sty.origin_z, &st.cosmetic.origin_z_scratch, &st.slot_view.zmin_local, &st.slot_view.zmax_local },
             };
             if (begin_field_table("origin3d")) {
                 for (const Org& o : orgs) {
@@ -1095,11 +1120,11 @@ void draw_cosmetic_3d(PanelState& st, const RenderSnapshot3D& sn,
             std::optional<bool>   AxesEdit3D::*auto_field;
         };
         const AxisLim axes[3] = {
-            { "X", &st.cosmetic.xmin_local, &st.cosmetic.xmax_local,
+            { "X", &st.slot_view.xmin_local, &st.slot_view.xmax_local,
               &AxesEdit3D::xmin, &AxesEdit3D::xmax, &AxesEdit3D::xlim_auto },
-            { "Y", &st.cosmetic.ymin_local, &st.cosmetic.ymax_local,
+            { "Y", &st.slot_view.ymin_local, &st.slot_view.ymax_local,
               &AxesEdit3D::ymin, &AxesEdit3D::ymax, &AxesEdit3D::ylim_auto },
-            { "Z", &st.cosmetic.zmin_local, &st.cosmetic.zmax_local,
+            { "Z", &st.slot_view.zmin_local, &st.slot_view.zmax_local,
               &AxesEdit3D::zmin, &AxesEdit3D::zmax, &AxesEdit3D::zlim_auto },
         };
         if (begin_field_table("lim3d")) {
@@ -1195,74 +1220,97 @@ namespace {
 // An axis the program set since the limits were seeded (its stamp moved)
 // re-seeds from the snapshot, so the Limits fields show what is drawn.
 template <typename Snap>
-void follow_program_limits(PanelState& st, const Snap& sn) {
-    LimitStamps& have = st.cosmetic.limit_stamps_local;
+void follow_program_limits(SlotViewState& v, const Snap& sn) {
+    LimitStamps& have = v.limit_stamps_local;
     if (have.x != sn.limit_stamps.x) {
-        st.cosmetic.xauto_local = sn.xlim_auto; st.cosmetic.xmin_local = sn.xmin; st.cosmetic.xmax_local = sn.xmax;
+        v.xauto_local = sn.xlim_auto; v.xmin_local = sn.xmin; v.xmax_local = sn.xmax;
     }
     if (have.y != sn.limit_stamps.y) {
-        st.cosmetic.yauto_local = sn.ylim_auto; st.cosmetic.ymin_local = sn.ymin; st.cosmetic.ymax_local = sn.ymax;
+        v.yauto_local = sn.ylim_auto; v.ymin_local = sn.ymin; v.ymax_local = sn.ymax;
     }
     if constexpr (requires { sn.zmin; })
         if (have.z != sn.limit_stamps.z) {
-            st.cosmetic.zauto_local = sn.zlim_auto; st.cosmetic.zmin_local = sn.zmin; st.cosmetic.zmax_local = sn.zmax;
+            v.zauto_local = sn.zlim_auto; v.zmin_local = sn.zmin; v.zmax_local = sn.zmax;
         }
     have = sn.limit_stamps;
 }
 
 } // namespace
 
-int sync_selected_slot(PanelState& st, const FigureSnapshot& fsnap) {
-    if (fsnap.axes.empty()) return -1;
-    const FigureAxesSnapshot* fa = axes_for_slot(fsnap, st.selection.slot);
+const FigureAxesSnapshot* normalize_selection(Selection& sel, const FigureSnapshot& fsnap) {
+    if (fsnap.axes.empty()) return nullptr;
+    const FigureAxesSnapshot* fa = axes_for_slot(fsnap, sel.slot);
     if (!fa) fa = &fsnap.axes.front();
     // Normalized: File > Resize and the Save dialog read selection.slot.
-    st.selection.slot = fa->slot.index;
-    if (st.last_synced_slot != fa->slot.index) {
-        std::visit([&](const auto& sn) { sync_from_snapshot(st, fa->slot.index, sn); },
-                   fa->snap);
-        return fa->slot.index;
+    sel.select(fa->slot.index);
+    return fa;
+}
+
+SlotViewState& slot_view(FigureContext& ctx) {
+    SlotViewState& v = ctx.slot_view_state;
+    const FigureAxesSnapshot* fa = normalize_selection(ctx.selection, ctx.snap);
+    if (!fa) return v;
+    if (v.synced_generation != ctx.selection.generation) {
+        std::visit([&](const auto& sn) { seed_slot_view(v, sn); }, fa->snap);
+        v.synced_generation = ctx.selection.generation;
+        return v;
     }
-    std::visit([&](const auto& sn) { follow_program_limits(st, sn); }, fa->snap);
+    std::visit([&](const auto& sn) { follow_program_limits(v, sn); }, fa->snap);
     if (const RenderSnapshot3D* sn = fa->snap3d()) {
         // The program set the camera since it was seeded: follow it, or the next
         // drag would start from a view no longer on screen.
-        if (st.cosmetic.camera_stamp_local != sn->camera_stamp) {
-            st.cosmetic.camera_local = sn->camera;
-            st.cosmetic.camera_stamp_local = sn->camera_stamp;
+        if (v.camera_stamp_local != sn->camera_stamp) {
+            v.camera_local = sn->camera;
+            v.camera_stamp_local = sn->camera_stamp;
         }
-        // Object count changed: re-seed the lists (indices shifted). Done here
-        // so it happens even with the Cosmetic panel hidden.
-        if (st.data.planes_local.size() != sn->planes.size())
-            sync_planes(st, *sn);
-        if (plane_sheets_differ(st, *sn))
-            sync_plane_sheets(st, *sn);
-        if (st.data.bars3d_local.size() != sn->bars3d.size() ||
-            st.data.surfaces_local.size() != sn->surfaces.size() ||
-            st.data.scatter3d_local.size() != sn->scatter3d.size() ||
-            st.data.line3d_local.size() != sn->lines3d.size() ||
-            st.data.surface_tri_local.size() != sn->surface_tri.size())
-            sync_scene_objects(st, *sn);
-    } else if (const RenderSnapshot* sn = fa->snap2d()) {
-        if (sheet_counts_differ(st.data.sheet_local, *sn)) sync_sheet(st.data.sheet_local, *sn);
     }
-    return fa->slot.index;
+    return v;
 }
 
-void select_slot(PanelState& st, const FigureSnapshot& fsnap, int slot_index) {
-    st.selection.slot = slot_index;
-    sync_selected_slot(st, fsnap);
+void pull_data_panel(DataPanelState& d, const Selection& sel, const FigureAxesSnapshot& fa) {
+    if (d.synced_generation != sel.generation) {
+        if (const RenderSnapshot3D* sn = fa.snap3d()) {
+            sync_planes(d, *sn);
+            sync_plane_sheets(d, *sn);
+            sync_scene_objects(d, *sn);
+        } else if (const RenderSnapshot* sn = fa.snap2d()) {
+            sync_sheet(d.sheet_local, *sn);
+        }
+        d.synced_generation = sel.generation;
+        return;
+    }
+    // Object count changed: re-seed the lists (indices shifted).
+    if (const RenderSnapshot3D* sn = fa.snap3d()) {
+        if (d.planes_local.size() != sn->planes.size())
+            sync_planes(d, *sn);
+        if (plane_sheets_differ(d, *sn))
+            sync_plane_sheets(d, *sn);
+        if (d.bars3d_local.size() != sn->bars3d.size() ||
+            d.surfaces_local.size() != sn->surfaces.size() ||
+            d.scatter3d_local.size() != sn->scatter3d.size() ||
+            d.line3d_local.size() != sn->lines3d.size() ||
+            d.surface_tri_local.size() != sn->surface_tri.size())
+            sync_scene_objects(d, *sn);
+    } else if (const RenderSnapshot* sn = fa.snap2d()) {
+        if (sheet_counts_differ(d.sheet_local, *sn)) sync_sheet(d.sheet_local, *sn);
+    }
 }
 
-PlotNavGate update_plot_selection(PanelState& st, const FigureSnapshot& fsnap,
+void push_figure_id(std::uint64_t figure_id) {
+    // A process-wide counter: an int holds any id a run will reach.
+    ImGui::PushID(static_cast<int>(figure_id));
+}
+
+PlotNavGate update_plot_selection(Selection& sel, PlotViewState& pv, const FigureSnapshot& fsnap,
                                   const std::vector<AxesLayout>& layout,
                                   const PlotPointer& in) {
     PlotNavGate gate;
-    // First, so navigation starts from the selected slot's own camera/limits.
-    const int selected = sync_selected_slot(st, fsnap);
+    // Navigation pulls the shared slot view itself, after any change made here.
+    const FigureAxesSnapshot* cur = normalize_selection(sel, fsnap);
+    const int selected = cur ? cur->slot.index : -1;
     if (selected < 0) {
-        st.plot.press_slot = -1;
-        st.plot.press_on_selected = false;
+        pv.press_slot = -1;
+        pv.press_on_selected = false;
         return gate;
     }
 
@@ -1270,28 +1318,28 @@ PlotNavGate update_plot_selection(PanelState& st, const FigureSnapshot& fsnap,
     const int under_slot = under ? under->slot.index : -1;
 
     if (in.pressed) {
-        st.plot.press_slot        = under_slot;
-        st.plot.press_on_selected = under_slot == selected;
+        pv.press_slot        = under_slot;
+        pv.press_on_selected = under_slot == selected;
         // A double-click whose first click selected this cell doesn't reset it.
-        gate.reset = in.double_clicked && st.plot.press_on_selected
-                     && !st.plot.selected_by_last_click;
-        st.plot.selected_by_last_click = false;
+        gate.reset = in.double_clicked && pv.press_on_selected
+                     && !pv.selected_by_last_click;
+        pv.selected_by_last_click = false;
     }
 
-    gate.drag = in.active && st.plot.press_on_selected;
+    gate.drag = in.active && pv.press_on_selected;
     const bool over_selected = in.hovered && under_slot == selected;
     gate.wheel = over_selected;
     gate.keys  = over_selected || gate.drag;
 
     if (in.released) {
         // A click (not a drag) that ends in the cell it began in.
-        if (!in.dragged && st.plot.press_slot >= 0 && under_slot == st.plot.press_slot
-            && st.plot.press_slot != selected) {
-            select_slot(st, fsnap, st.plot.press_slot);
-            st.plot.selected_by_last_click = true;
+        if (!in.dragged && pv.press_slot >= 0 && under_slot == pv.press_slot
+            && pv.press_slot != selected) {
+            sel.select(pv.press_slot);
+            pv.selected_by_last_click = true;
         }
-        st.plot.press_slot        = -1;
-        st.plot.press_on_selected = false;
+        pv.press_slot        = -1;
+        pv.press_on_selected = false;
     }
     return gate;
 }
@@ -1338,11 +1386,11 @@ GridBoundary find_grid_boundary(const FigureSnapshot& fsnap, const GridTracks& t
     return {};
 }
 
-GridDragOut update_grid_drag(PanelState& st, const FigureSnapshot& fsnap,
+GridDragOut update_grid_drag(PlotViewState& pv, const FigureSnapshot& fsnap,
                              const FigureLayout& layout, int fig_w, int fig_h,
                              const PlotPointer& in, float tol) {
     GridDragOut out;
-    PlotViewState::GridDrag& g = st.plot.grid_drag;
+    PlotViewState::GridDrag& g = pv.grid_drag;
     const GridTracks t = grid_tracks(fsnap, layout.suptitle_band, fig_w, fig_h);
 
     auto emit = [&](bool cols, const std::vector<float>& w) {
@@ -1419,37 +1467,38 @@ GridDragOut update_grid_drag(PanelState& st, const FigureSnapshot& fsnap,
 }
 
 // Not file-local: the layout test drives it through a null-backend frame.
-void draw_cosmetic_panel(const FigureSnapshot& fsnap, FigureEditBox& edit_box, PanelState& st) {
-    ImGui::Begin("Cosmetic", nullptr, ImGuiWindowFlags_NoCollapse);
+void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
+    const FigureSnapshot& fsnap = ctx.snap;
+    FigureEditBox& edit_box = ctx.edits;
 
     // Navigate and Hints are in the Edit menu; this panel edits the selected
     // axes only.
-    if (fsnap.axes.empty()) {
+    const FigureAxesSnapshot* cur = normalize_selection(ctx.selection, fsnap);
+    if (!cur) {
         ImGui::TextDisabled("No axes yet.");
-        ImGui::End();
         return;
     }
 
-    // The selection comes from the menu bar or a click; synced here too so the
-    // panel works on its own (as in tests).
-    const FigureAxesSnapshot* cur = axes_for_slot(fsnap, sync_selected_slot(st, fsnap));
+    // The selection comes from the menu bar or a click. This panel's own fields
+    // re-seed when it has moved; the shared slot view re-seeds on access.
+    pull_cosmetic(cosmetic, ctx.selection, *cur);
+    CosmeticRefs st{ cosmetic, slot_view(ctx), ctx.view };
 
     // Separate functions per kind; they share the Figure group.
-    sync_figure_from_snapshot(st, fsnap);
-    sync_layout_from_snapshot(st, fsnap);
+    sync_figure_from_snapshot(st.cosmetic, fsnap);
+    sync_layout_from_snapshot(st.cosmetic, fsnap);
 
     const int idx = cur->slot.index;
 
     if (const RenderSnapshot3D* cur3d = cur->snap3d()) {
-        track_resolved_limits(st, idx, cur3d->xlim_auto, cur3d->ylim_auto,
+        track_resolved_limits(st.slot_view, st.view, idx, cur3d->xlim_auto, cur3d->ylim_auto,
                               cur3d->zlim_auto);
         draw_cosmetic_3d(st, *cur3d, fsnap, edit_box, idx);
-        ImGui::End();
         return;
     }
 
     const RenderSnapshot* cur2d = cur->snap2d();
-    track_resolved_limits(st, idx, cur2d->xlim_auto, cur2d->ylim_auto, false);
+    track_resolved_limits(st.slot_view, st.view, idx, cur2d->xlim_auto, cur2d->ylim_auto, false);
 
     // Each group republishes its whole options struct on change.
     auto& sty = st.cosmetic.axes_style_local;
@@ -1552,9 +1601,9 @@ void draw_cosmetic_panel(const FigureSnapshot& fsnap, FigureEditBox& edit_box, P
             };
             const AxisPos pos_axes[2] = {
                 { "X axis", "at y", &sty.xaxis_y, &sty.origin_y, &st.cosmetic.origin_y_scratch,
-                  &st.cosmetic.ymin_local, &st.cosmetic.ymax_local },
+                  &st.slot_view.ymin_local, &st.slot_view.ymax_local },
                 { "Y axis", "at x", &sty.yaxis_x, &sty.origin_x, &st.cosmetic.origin_x_scratch,
-                  &st.cosmetic.xmin_local, &st.cosmetic.xmax_local },
+                  &st.slot_view.xmin_local, &st.slot_view.xmax_local },
             };
             if (begin_field_table("axpos", 2)) {
                 for (const AxisPos& a : pos_axes) {
@@ -1614,9 +1663,9 @@ void draw_cosmetic_panel(const FigureSnapshot& fsnap, FigureEditBox& edit_box, P
             std::optional<bool>   AxesEdit::*auto_field;
         };
         const AxisLim axes[2] = {
-            { "X", &st.cosmetic.xauto_local, &st.cosmetic.xmin_local, &st.cosmetic.xmax_local,
+            { "X", &st.slot_view.xauto_local, &st.slot_view.xmin_local, &st.slot_view.xmax_local,
               &AxesEdit::xmin, &AxesEdit::xmax, &AxesEdit::xlim_auto },
-            { "Y", &st.cosmetic.yauto_local, &st.cosmetic.ymin_local, &st.cosmetic.ymax_local,
+            { "Y", &st.slot_view.yauto_local, &st.slot_view.ymin_local, &st.slot_view.ymax_local,
               &AxesEdit::ymin, &AxesEdit::ymax, &AxesEdit::ylim_auto },
         };
         if (begin_field_table("lim")) {
@@ -1681,7 +1730,6 @@ void draw_cosmetic_panel(const FigureSnapshot& fsnap, FigureEditBox& edit_box, P
         st, !find_colorbar_requests(*cur2d).empty(),
         [&](auto&& fn){ edit_box.update(idx, fn); });
 
-    ImGui::End();
 }
 
 namespace {
@@ -1706,7 +1754,7 @@ void draw_menu_bar(const FigureSnapshot& fsnap, PanelState& st) {
                     const int lh = st.plot.live_plot_h.load(std::memory_order_relaxed);
                     if (lw > 0 && lh > 0) {
                         const FigureLayout fl =
-                            compute_figure_layout(fsnap, *on_screen_measure(st, fsnap), lw, lh);
+                            compute_figure_layout(fsnap, *on_screen_measure(&st.plot, fsnap), lw, lh);
                         for (const auto& c : fl.cells) {
                             if (c.slot.index != st.selection.slot) continue;
                             st.resize.frame_w = static_cast<int>(std::lround(c.frame.w));
@@ -1746,7 +1794,7 @@ void draw_menu_bar(const FigureSnapshot& fsnap, PanelState& st) {
             int sel = st.selection.slot;
             ImGui::SetNextItemWidth(220.0f);
             if (axes_selector("##axessel", fsnap, sel))
-                select_slot(st, fsnap, sel);
+                st.selection.select(sel);
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("The subplot the panels edit and Navigate moves.\n"
                                   "Clicking a subplot selects it too.");
@@ -1771,7 +1819,7 @@ void size_mode_fields(const FigureSnapshot& fsnap, PanelState& st,
 
     if (mode == SaveDialogState::SizeMode::PlotFrame) {
         if (*w > 0 && *h > 0) {
-            const LayoutSize s = figure_size_for_frame(fsnap, *on_screen_measure(st, fsnap),
+            const LayoutSize s = figure_size_for_frame(fsnap, *on_screen_measure(&st.plot, fsnap),
                                                        st.selection.slot,
                                                        static_cast<float>(*w),
                                                        static_cast<float>(*h));
@@ -1879,7 +1927,7 @@ void draw_resize_dialog(const FigureSnapshot& fsnap, PanelState& st) {
 
     ImGui::BeginDisabled(st.resize.frame_w <= 0 || st.resize.frame_h <= 0);
     if (ImGui::Button("Apply")) {
-        const LayoutSize s = figure_size_for_frame(fsnap, *on_screen_measure(st, fsnap),
+        const LayoutSize s = figure_size_for_frame(fsnap, *on_screen_measure(&st.plot, fsnap),
                                                    st.selection.slot,
                                                    static_cast<float>(st.resize.frame_w),
                                                    static_cast<float>(st.resize.frame_h));
@@ -1953,11 +2001,31 @@ void draw_widget_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
                   opts.panel_width * ImGui::GetStyle().FontScaleDpi, st);
     ImGui::DockSpaceOverViewport(dockspace_id);
 
-    draw_plot_panel(ctx, nvg, data, plot_fbo, fsnap, edit_box, st, opts.supersample);
-    if (st.shell.cosmetic_visible)
-        draw_cosmetic_panel(fsnap, edit_box, st);
-    if (st.shell.data_visible)
-        draw_data_panel(fsnap, edit_box, st);
+    // The shell owns the windows (names and flags ensure_layout() docks); the
+    // components draw their contents under the figure's id.
+    FigureContext fig{ fsnap, edit_box, st.selection, st.slot_view, &st.plot, st.figure_id };
+
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+    ImGui::Begin("Plot", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+    ImGui::PopStyleVar();
+    push_figure_id(fig.figure_id);
+    draw_plot_panel(ctx, nvg, data, plot_fbo, fig, st.plot, opts.supersample);
+    ImGui::PopID();
+    ImGui::End();
+    if (st.shell.cosmetic_visible) {
+        ImGui::Begin("Cosmetic", nullptr, ImGuiWindowFlags_NoCollapse);
+        push_figure_id(fig.figure_id);
+        draw_cosmetic_panel(fig, st.cosmetic);
+        ImGui::PopID();
+        ImGui::End();
+    }
+    if (st.shell.data_visible) {
+        ImGui::Begin("Data", nullptr, ImGuiWindowFlags_NoCollapse);
+        push_figure_id(fig.figure_id);
+        draw_data_panel(fig, st.data);
+        ImGui::PopID();
+        ImGui::End();
+    }
     // After both side panels have begun (see ensure_layout()).
     if (st.shell.pending_panel_focus) {
         ImGui::SetWindowFocus(st.shell.pending_panel_focus);
@@ -1976,7 +2044,7 @@ void draw_widget_panel(GLContext& ctx, NvgRenderer& nvg, DataRenderer& data,
     // laid out with the window's measurements. Width/height <= 0 = live size.
     if (st.save.requested) {
         st.save.requested = false;
-        const auto on_screen = on_screen_measure(st, fsnap);
+        const auto on_screen = on_screen_measure(&st.plot, fsnap);
         int sw = st.save.width  > 0 ? st.save.width  : st.plot.live_plot_w.load(std::memory_order_relaxed);
         int sh = st.save.height > 0 ? st.save.height : st.plot.live_plot_h.load(std::memory_order_relaxed);
         if (st.save.size_mode == SaveDialogState::SizeMode::PlotFrame

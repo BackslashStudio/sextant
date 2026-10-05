@@ -269,16 +269,16 @@ namespace lt {
         r.camera_stamp = 9;
         fs.axes.push_back({{1, 1, 1}, r});
         PanelState st;
-        sync_selected_slot(st, fs);
-        check(st.cosmetic.camera_local.azimuth == 30.0, "panel: navigation starts from the snapshot's camera");
-        st.cosmetic.camera_local.azimuth = 55.0;   // dragged, not yet folded in
-        sync_selected_slot(st, fs);
-        check(st.cosmetic.camera_local.azimuth == 55.0,
+        pulled_slot_view(fs, st);
+        check(st.slot_view.camera_local.azimuth == 30.0, "panel: navigation starts from the snapshot's camera");
+        st.slot_view.camera_local.azimuth = 55.0;   // dragged, not yet folded in
+        pulled_slot_view(fs, st);
+        check(st.slot_view.camera_local.azimuth == 55.0,
               "panel: a snapshot with the same camera stamp keeps the dragged camera");
         fs.axes[0].snap3d()->camera.azimuth = 90.0;
         fs.axes[0].snap3d()->camera_stamp = 10;
-        sync_selected_slot(st, fs);
-        check(st.cosmetic.camera_local.azimuth == 90.0,
+        pulled_slot_view(fs, st);
+        check(st.slot_view.camera_local.azimuth == 90.0,
               "panel: a camera the program set is followed, so the next drag starts from it");
     }
 
@@ -648,14 +648,14 @@ namespace lt {
         r.limit_stamps = {1, 1, 0};
         fs.axes.push_back({{1, 1, 1}, r});
         PanelState st;
-        sync_selected_slot(st, fs);
-        check(st.cosmetic.xmin_local == 1.0 && st.cosmetic.ymin_local == 3.0, "panel: the fields seed from the snapshot");
-        st.cosmetic.xmin_local = 1.5;
-        st.cosmetic.ymin_local = 3.5;
+        pulled_slot_view(fs, st);
+        check(st.slot_view.xmin_local == 1.0 && st.slot_view.ymin_local == 3.0, "panel: the fields seed from the snapshot");
+        st.slot_view.xmin_local = 1.5;
+        st.slot_view.ymin_local = 3.5;
         fs.axes[0].snap2d()->xmin = 9.0;
         fs.axes[0].snap2d()->limit_stamps.x = 2;
-        sync_selected_slot(st, fs);
-        check(st.cosmetic.xmin_local == 9.0 && st.cosmetic.ymin_local == 3.5,
+        pulled_slot_view(fs, st);
+        check(st.slot_view.xmin_local == 9.0 && st.slot_view.ymin_local == 3.5,
               "panel: an axis the program set is re-seeded; the other keeps its edit");
     }
 

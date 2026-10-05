@@ -186,6 +186,7 @@ int main() {
     test_cosmetic_groups_2d();
     test_panel_id_conflicts();
     test_subplot_selection();
+    test_figure_context();
     test_data_panel_object_tabs();
     test_plot_style_lane();
     test_panel_axis_position();

@@ -191,7 +191,7 @@ namespace lt {
             ImGui::NewFrame();
             // A tall enough window, or the clipper draws almost no rows.
             ImGui::SetNextWindowSize(ImVec2(760.0f, 820.0f));
-            sextant::draw_data_panel(fsnap, box, st);
+            draw_data_window(fsnap, box, st);
             ImGui::Render();
 
             // Only the last frame counts (tab bar and clipper need a frame).
