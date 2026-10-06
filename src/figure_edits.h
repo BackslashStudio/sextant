@@ -27,6 +27,10 @@ struct PlotCellEdit {
     // The data_stamp of the plot as the panel showed it; the op is dropped if
     // the plot has been re-plotted or set_*_data()'d since. Every op has one.
     unsigned long long seen = ~0ull;
+    // The object and its plane (see ObjectId), resolved before the index:
+    // filled in by FigureEditBox from the drawn snapshot, 0 = by index alone.
+    ObjectId id = 0;
+    ObjectId plane_id = 0;
 };
 
 // Insert or remove one point, moving every parallel array of the plot (x/y/z,
@@ -41,6 +45,7 @@ struct PlotRowEdit {
     std::size_t row        = 0;
     int         plane_index = -1;   // see PlotCellEdit
     unsigned long long seen = ~0ull;   // see PlotCellEdit
+    ObjectId id = 0, plane_id = 0;    // see PlotCellEdit
 };
 
 // Appearance of one 2D plot object, from its Data-panel tab. Addressed like a
@@ -51,9 +56,7 @@ struct PlotStyleEdit {
     int plane_index = -1;
     std::variant<LineOptions, ScatterOptions, BarOptions,
                  HeatmapOptions, ScatterZOptions> opts;
-    // The `cleared` stamp of the axes or plane sheet it was made on (see
-    // StyleStamps); filled in by FigureEditBox.
-    unsigned long long seen = ~0ull;
+    ObjectId id = 0, plane_id = 0;   // see PlotCellEdit
 };
 
 // Insert or remove a whole row/column of a heatmap (or a bar3d/surface grid,
@@ -72,6 +75,7 @@ struct MatrixLineEdit {
     // Defaults to Heatmap.
     PlotKind    kind       = PlotKind::Heatmap;
     unsigned long long seen = ~0ull;   // see PlotCellEdit
+    ObjectId id = 0, plane_id = 0;    // see PlotCellEdit
 };
 
 // A plot's bar width (a per-plot scalar), journaled like other data. For
@@ -83,6 +87,7 @@ struct BarWidthEdit {
     PlotKind kind      = PlotKind::Bar;
     int    column      = 0;    // Bar3D: 0 = along u, 1 = along v
     unsigned long long seen = ~0ull;   // see PlotCellEdit
+    ObjectId id = 0, plane_id = 0;    // see PlotCellEdit
 };
 
 // One op in a plot's edit stream. Order matters: indices refer to the arrays
@@ -92,6 +97,11 @@ using PlotDataOp = std::variant<PlotCellEdit, PlotRowEdit, MatrixLineEdit, BarWi
 // The plane_index every op carries.
 inline int plot_op_plane(const PlotDataOp& op) {
     return std::visit([](const auto& o) { return o.plane_index; }, op);
+}
+
+// And its plane's id (see PlotCellEdit::plane_id).
+inline ObjectId plot_op_plane_id(const PlotDataOp& op) {
+    return std::visit([](const auto& o) { return o.plane_id; }, op);
 }
 
 // Titles typed in the panel, each with the stamp it was typed over. The
@@ -264,17 +274,19 @@ struct AxesEdit3D {
         std::optional<Plane2DOptions>   opts;
         // The plane's placement_stamp; filled in by FigureEditBox.
         unsigned long long seen = ~0ull;
+        // The plane's id (see ObjectId); filled in by FigureEditBox.
+        ObjectId id = 0;
     };
     std::vector<PlaneEdit> planes;
 
-    // Appearance of the axes' own 3D objects, positional. apply_axes3d_edit()
-    // preserves `hint_labels`, which are data edited elsewhere.
-    // `seen` is the axes' `cleared` stamp, as PlotStyleEdit's.
-    struct Bar3DEdit   { int plot_index = 0; std::optional<Bar3DOptions>   opts; unsigned long long seen = ~0ull; };
-    struct SurfaceEdit { int plot_index = 0; std::optional<SurfaceOptions> opts; unsigned long long seen = ~0ull; };
-    struct Scatter3DEdit { int plot_index = 0; std::optional<Scatter3DOptions> opts; unsigned long long seen = ~0ull; };
-    struct Line3DEdit  { int plot_index = 0; std::optional<Line3DOptions>  opts; unsigned long long seen = ~0ull; };
-    struct SurfaceTriEdit { int plot_index = 0; std::optional<SurfaceTriOptions> opts; unsigned long long seen = ~0ull; };
+    // Appearance of the axes' own 3D objects, addressed like PlotStyleEdit
+    // (`id` filled in by FigureEditBox). apply_axes3d_edit() preserves
+    // `hint_labels`, which are data edited elsewhere.
+    struct Bar3DEdit   { int plot_index = 0; std::optional<Bar3DOptions>   opts; ObjectId id = 0; };
+    struct SurfaceEdit { int plot_index = 0; std::optional<SurfaceOptions> opts; ObjectId id = 0; };
+    struct Scatter3DEdit { int plot_index = 0; std::optional<Scatter3DOptions> opts; ObjectId id = 0; };
+    struct Line3DEdit  { int plot_index = 0; std::optional<Line3DOptions>  opts; ObjectId id = 0; };
+    struct SurfaceTriEdit { int plot_index = 0; std::optional<SurfaceTriOptions> opts; ObjectId id = 0; };
     std::vector<Bar3DEdit>     bars3d;
     std::vector<SurfaceEdit>   surfaces;
     std::vector<Scatter3DEdit> scatter3d;
@@ -398,6 +410,41 @@ template <class T> std::vector<T>& mut_ref(std::vector<T>& v) { return v; }
 template <class P, class E>
 bool op_current(const P& p, const E& e) { return p.data_stamp <= e.seen; }
 
+// The object an edit addresses, or null when it is gone. With an id, the
+// object at `index` if it is that one, else a search (removal and reorder move
+// objects); without one (0), the index alone.
+template <class Vec>
+auto* find_object(Vec& v, int index, ObjectId id) {
+    using P = std::remove_reference_t<decltype(v[0])>;
+    P* at = index >= 0 && static_cast<std::size_t>(index) < v.size()
+                ? &v[static_cast<std::size_t>(index)] : nullptr;
+    if (id == 0 || (at && at->id == id)) return at;
+    for (auto& p : v)
+        if (p.id == id) return &p;
+    return static_cast<P*>(nullptr);
+}
+
+// The same for a plane of a 3D axes (Axes3D::Impl or RenderSnapshot3D).
+template <class T>
+auto* find_plane(T& t, int index, ObjectId id) {
+    using P = std::remove_reference_t<decltype(t.plane_at(std::size_t{0}))>;
+    const std::size_t n = t.plane_count();
+    P* at = index >= 0 && static_cast<std::size_t>(index) < n
+                ? &t.plane_at(static_cast<std::size_t>(index)) : nullptr;
+    if (id == 0 || (at && at->id == id)) return at;
+    for (std::size_t i = 0; i < n; ++i)
+        if (t.plane_at(i).id == id) return &t.plane_at(i);
+    return static_cast<P*>(nullptr);
+}
+
+// A data op's object, if it is still there and its data is the one the op was
+// made over.
+template <class Vec, class E>
+auto* op_target(Vec& v, const E& e) {
+    auto* p = find_object(v, e.plot_index, e.id);
+    return p && op_current(*p, e) ? p : nullptr;
+}
+
 } // namespace edits_detail
 
 template <class T>
@@ -405,30 +452,30 @@ void apply_plot_data_op(T& t, const PlotCellEdit& e) {
     auto put = [](CowVec<double>& v, std::size_t i, double value) {
         if (i < v.size()) v.mut()[i] = value;
     };
-    if (e.plot_index < 0) return;
-    const std::size_t pi = static_cast<std::size_t>(e.plot_index);
+    using edits_detail::op_target;
     switch (e.kind) {
         case PlotKind::Line:
-            if (pi >= t.lines.size() || !edits_detail::op_current(t.lines[pi], e)) return;
-            put(e.column == 0 ? t.lines[pi].x : t.lines[pi].y, e.element, e.value);
+            if (auto* lp = op_target(t.lines, e))
+                put(e.column == 0 ? lp->x : lp->y, e.element, e.value);
             return;
         case PlotKind::Scatter:
-            if (pi >= t.scatters.size() || !edits_detail::op_current(t.scatters[pi], e)) return;
-            put(e.column == 0 ? t.scatters[pi].x : t.scatters[pi].y, e.element, e.value);
+            if (auto* sp = op_target(t.scatters, e))
+                put(e.column == 0 ? sp->x : sp->y, e.element, e.value);
             return;
         case PlotKind::Bar:
-            if (pi >= t.bars.size() || !edits_detail::op_current(t.bars[pi], e)) return;
-            put(e.column == 0 ? t.bars[pi].centers : t.bars[pi].heights, e.element, e.value);
+            if (auto* bp = op_target(t.bars, e))
+                put(e.column == 0 ? bp->centers : bp->heights, e.element, e.value);
             return;
         case PlotKind::ScatterZ: {
-            if (pi >= t.scatter_z.size() || !edits_detail::op_current(t.scatter_z[pi], e)) return;
-            auto& sp = t.scatter_z[pi];
-            put(e.column == 0 ? sp.x : (e.column == 1 ? sp.y : sp.z), e.element, e.value);
+            auto* sp = op_target(t.scatter_z, e);
+            if (!sp) return;
+            put(e.column == 0 ? sp->x : (e.column == 1 ? sp->y : sp->z), e.element, e.value);
             return;
         }
         case PlotKind::Heatmap: {
-            if (pi >= t.heatmaps.size() || !edits_detail::op_current(t.heatmaps[pi], e)) return;
-            auto& hp = t.heatmaps[pi];
+            auto* hpp = op_target(t.heatmaps, e);
+            if (!hpp) return;
+            auto& hp = *hpp;
             // Re-check the shape; it may have changed since the panel saw it.
             if (hp.rows <= 0 || hp.cols <= 0) return;
             const std::size_t n = static_cast<std::size_t>(hp.rows)
@@ -449,10 +496,8 @@ void apply_plot_data_op(T& t, const PlotCellEdit& e) {
 
 template <class T>
 void apply_plot_data_op(T& t, const BarWidthEdit& e) {
-    if (e.kind != PlotKind::Bar || e.plot_index < 0) return;
-    const std::size_t pi = static_cast<std::size_t>(e.plot_index);
-    if (pi < t.bars.size() && edits_detail::op_current(t.bars[pi], e))
-        t.bars[pi].bar_width = e.width;
+    if (e.kind != PlotKind::Bar) return;
+    if (auto* bp = edits_detail::op_target(t.bars, e)) bp->bar_width = e.width;
 }
 
 namespace edits_detail {
@@ -480,8 +525,7 @@ void row_remove(V& v, std::size_t row) {
 // Adds or removes one data point.
 template <class T>
 void apply_plot_data_op(T& t, const PlotRowEdit& e) {
-    if (e.plot_index < 0) return;
-    const std::size_t pi = static_cast<std::size_t>(e.plot_index);
+    using edits_detail::op_target;
     const bool insert = (e.op == PlotRowEdit::Op::Insert);
 
     // Apply the change to all required parallel arrays; new points copy their
@@ -510,35 +554,31 @@ void apply_plot_data_op(T& t, const PlotRowEdit& e) {
 
     switch (e.kind) {
         case PlotKind::Line:
-            if (pi < t.lines.size() && edits_detail::op_current(t.lines[pi], e)) {
-                auto& lp = t.lines[pi];
-                required(lp.x, lp.y);
-                labels(lp.opts.hint_labels);
-                err_cols(lp.err);
+            if (auto* lp = op_target(t.lines, e)) {
+                required(lp->x, lp->y);
+                labels(lp->opts.hint_labels);
+                err_cols(lp->err);
             }
             break;
         case PlotKind::Scatter:
-            if (pi < t.scatters.size() && edits_detail::op_current(t.scatters[pi], e)) {
-                auto& sp = t.scatters[pi];
-                required(sp.x, sp.y);
-                labels(sp.opts.hint_labels);
-                err_cols(sp.err);
+            if (auto* sp = op_target(t.scatters, e)) {
+                required(sp->x, sp->y);
+                labels(sp->opts.hint_labels);
+                err_cols(sp->err);
             }
             break;
         case PlotKind::Bar:
-            if (pi < t.bars.size() && edits_detail::op_current(t.bars[pi], e)) {
-                auto& bp = t.bars[pi];
-                required(bp.centers, bp.heights);
-                labels(bp.opts.hint_labels);
-                err_cols(bp.err);
+            if (auto* bp = op_target(t.bars, e)) {
+                required(bp->centers, bp->heights);
+                labels(bp->opts.hint_labels);
+                err_cols(bp->err);
             }
             break;
         case PlotKind::ScatterZ:
-            if (pi < t.scatter_z.size() && edits_detail::op_current(t.scatter_z[pi], e)) {
-                auto& sp = t.scatter_z[pi];
-                required(sp.x, sp.y, sp.z);
-                labels(sp.opts.hint_labels);
-                err_cols(sp.err);
+            if (auto* sp = op_target(t.scatter_z, e)) {
+                required(sp->x, sp->y, sp->z);
+                labels(sp->opts.hint_labels);
+                err_cols(sp->err);
             }
             break;
         case PlotKind::Heatmap:
@@ -606,10 +646,10 @@ inline bool grid_line_ok(std::size_t rows, std::size_t cols,
 // Insert or remove a heatmap row/column, re-striding data and hint_labels.
 template <class T>
 void apply_plot_data_op(T& t, const MatrixLineEdit& e) {
-    if (e.kind != PlotKind::Heatmap || e.plot_index < 0) return;
-    const std::size_t pi = static_cast<std::size_t>(e.plot_index);
-    if (pi >= t.heatmaps.size() || !edits_detail::op_current(t.heatmaps[pi], e)) return;
-    auto& hp = t.heatmaps[pi];
+    if (e.kind != PlotKind::Heatmap) return;
+    auto* hpp = edits_detail::op_target(t.heatmaps, e);
+    if (!hpp) return;
+    auto& hp = *hpp;
     if (hp.rows <= 0 || hp.cols <= 0) return;
 
     const std::size_t rows = static_cast<std::size_t>(hp.rows);
@@ -661,12 +701,12 @@ inline void put_cell(CowVec<double>& v, std::size_t i, double value) {
 
 template <class T>
 void apply_axes3d_data_op(T& t, const PlotCellEdit& e) {
-    if (e.plot_index < 0) return;
-    const std::size_t pi = static_cast<std::size_t>(e.plot_index);
     using edits_detail::put_cell;
+    using edits_detail::op_target;
     if (e.kind == PlotKind::Bar3D) {
-        if (pi >= t.bars3d.size() || !edits_detail::op_current(t.bars3d[pi], e)) return;
-        auto& b = t.bars3d[pi];
+        auto* bp = op_target(t.bars3d, e);
+        if (!bp) return;
+        auto& b = *bp;
         switch (e.column) {
             case 0: put_cell(b.u, e.element, e.value);       return;
             case 1: put_cell(b.v, e.element, e.value);       return;
@@ -676,8 +716,9 @@ void apply_axes3d_data_op(T& t, const PlotCellEdit& e) {
         }
     }
     if (e.kind == PlotKind::Surface) {
-        if (pi >= t.surfaces.size() || !edits_detail::op_current(t.surfaces[pi], e)) return;
-        auto& s = t.surfaces[pi];
+        auto* sp = op_target(t.surfaces, e);
+        if (!sp) return;
+        auto& s = *sp;
         switch (e.column) {
             case 0: put_cell(s.u, e.element, e.value);       return;
             case 1: put_cell(s.v, e.element, e.value);       return;
@@ -688,8 +729,9 @@ void apply_axes3d_data_op(T& t, const PlotCellEdit& e) {
     // Scatter3D: x, y, z, colors (`element` is the point index; colors is empty
     // for a flat series).
     if (e.kind == PlotKind::Scatter3D) {
-        if (pi >= t.scatter3d.size() || !edits_detail::op_current(t.scatter3d[pi], e)) return;
-        auto& s = t.scatter3d[pi];
+        auto* sp = op_target(t.scatter3d, e);
+        if (!sp) return;
+        auto& s = *sp;
         switch (e.column) {
             case 0: put_cell(s.x, e.element, e.value);      return;
             case 1: put_cell(s.y, e.element, e.value);      return;
@@ -700,8 +742,9 @@ void apply_axes3d_data_op(T& t, const PlotCellEdit& e) {
     }
     // Line3D: same columns as Scatter3D.
     if (e.kind == PlotKind::Line3D) {
-        if (pi >= t.lines3d.size() || !edits_detail::op_current(t.lines3d[pi], e)) return;
-        auto& l = t.lines3d[pi];
+        auto* lp = op_target(t.lines3d, e);
+        if (!lp) return;
+        auto& l = *lp;
         switch (e.column) {
             case 0: put_cell(l.x, e.element, e.value);      return;
             case 1: put_cell(l.y, e.element, e.value);      return;
@@ -713,8 +756,9 @@ void apply_axes3d_data_op(T& t, const PlotCellEdit& e) {
     // SurfaceTri: same columns (vertex index). Topology is not editable, and
     // editing a vertex does not re-triangulate.
     if (e.kind == PlotKind::SurfaceTri) {
-        if (pi >= t.surface_tri.size() || !edits_detail::op_current(t.surface_tri[pi], e)) return;
-        auto& m = t.surface_tri[pi];
+        auto* mp = op_target(t.surface_tri, e);
+        if (!mp) return;
+        auto& m = *mp;
         switch (e.column) {
             case 0: put_cell(m.x, e.element, e.value);      return;
             case 1: put_cell(m.y, e.element, e.value);      return;
@@ -727,11 +771,11 @@ void apply_axes3d_data_op(T& t, const PlotCellEdit& e) {
 
 template <class T>
 void apply_axes3d_data_op(T& t, const BarWidthEdit& e) {
-    if (e.kind != PlotKind::Bar3D || e.plot_index < 0) return;
-    const std::size_t pi = static_cast<std::size_t>(e.plot_index);
-    if (pi >= t.bars3d.size() || !edits_detail::op_current(t.bars3d[pi], e)) return;
-    if (e.column == 0)      t.bars3d[pi].u_width = e.width;
-    else if (e.column == 1) t.bars3d[pi].v_width = e.width;
+    if (e.kind != PlotKind::Bar3D) return;
+    auto* b = edits_detail::op_target(t.bars3d, e);
+    if (!b) return;
+    if (e.column == 0)      b->u_width = e.width;
+    else if (e.column == 1) b->v_width = e.width;
 }
 
 namespace edits_detail {
@@ -770,18 +814,19 @@ void grid_line_apply(CowVec<double>& u, CowVec<double>& v,
 
 template <class T>
 void apply_axes3d_data_op(T& t, const MatrixLineEdit& e) {
-    if (e.plot_index < 0) return;
-    const std::size_t pi = static_cast<std::size_t>(e.plot_index);
+    using edits_detail::op_target;
     if (e.kind == PlotKind::Bar3D) {
-        if (pi >= t.bars3d.size() || !edits_detail::op_current(t.bars3d[pi], e)) return;
-        auto& b = t.bars3d[pi];
+        auto* bp = op_target(t.bars3d, e);
+        if (!bp) return;
+        auto& b = *bp;
         edits_detail::grid_line_apply(b.u, b.v, b.heights, b.bottoms,
                                       b.opts.hint_labels, e);
         return;
     }
     if (e.kind == PlotKind::Surface) {
-        if (pi >= t.surfaces.size() || !edits_detail::op_current(t.surfaces[pi], e)) return;
-        auto& s = t.surfaces[pi];
+        auto* sp = op_target(t.surfaces, e);
+        if (!sp) return;
+        auto& s = *sp;
         // No second matrix: pass an empty one.
         CowVec<double> none;
         edits_detail::grid_line_apply(s.u, s.v, s.heights, none,
@@ -815,8 +860,9 @@ void apply_plot_data_ops(T& t, const std::vector<PlotDataOp>& ops) {
             std::visit([&t](const auto& o) { apply_axes3d_data_op(t, o); }, op);
             continue;
         }
-        if (static_cast<std::size_t>(pi) >= t.plane_count()) continue;
-        auto& sheet = t.plane_at(static_cast<std::size_t>(pi)).sheet;
+        auto* plane = edits_detail::find_plane(t, pi, plot_op_plane_id(op));
+        if (!plane) continue;
+        auto& sheet = plane->sheet;
         std::visit([&sheet](const auto& o) { apply_plot_data_op(sheet, o); }, op);
     }
 }
@@ -825,25 +871,26 @@ void apply_plot_data_ops(T& t, const std::vector<PlotDataOp>& ops) {
 // Plot-object appearance
 // ---------------------------------------------------------------------------
 // Assign an object's options, keeping its current `hint_labels` (data owned by
-// the Data panel, which the options copy may have stale).
+// the Data panel, which the options copy may have stale). Edits name objects
+// as data ops do (find_object()).
 template <class Vec, class Opts>
-void assign_plot_opts(Vec& v, int idx, const Opts& o) {
-    if (idx < 0 || static_cast<std::size_t>(idx) >= v.size()) return;
-    auto labels = std::move(v[static_cast<std::size_t>(idx)].opts.hint_labels);
-    v[static_cast<std::size_t>(idx)].opts = o;
-    v[static_cast<std::size_t>(idx)].opts.hint_labels = std::move(labels);
+void assign_plot_opts(Vec& v, int idx, ObjectId id, const Opts& o) {
+    auto* p = edits_detail::find_object(v, idx, id);
+    if (!p) return;
+    auto labels = std::move(p->opts.hint_labels);
+    p->opts = o;
+    p->opts.hint_labels = std::move(labels);
 }
 
 // The variant alternative picks the vector.
 template <class T>
 void apply_plot_style_edit(T& t, const PlotStyleEdit& e) {
-    // Made before a cla() of this axes or plane: its index may name another object.
-    if (t.style_stamps.cleared > e.seen) return;
-    if (const auto* o = std::get_if<LineOptions>(&e.opts))          assign_plot_opts(t.lines,     e.plot_index, *o);
-    else if (const auto* o = std::get_if<ScatterOptions>(&e.opts))  assign_plot_opts(t.scatters,  e.plot_index, *o);
-    else if (const auto* o = std::get_if<BarOptions>(&e.opts))      assign_plot_opts(t.bars,      e.plot_index, *o);
-    else if (const auto* o = std::get_if<HeatmapOptions>(&e.opts))  assign_plot_opts(t.heatmaps,  e.plot_index, *o);
-    else if (const auto* o = std::get_if<ScatterZOptions>(&e.opts)) assign_plot_opts(t.scatter_z, e.plot_index, *o);
+    const int i = e.plot_index;
+    if (const auto* o = std::get_if<LineOptions>(&e.opts))          assign_plot_opts(t.lines,     i, e.id, *o);
+    else if (const auto* o = std::get_if<ScatterOptions>(&e.opts))  assign_plot_opts(t.scatters,  i, e.id, *o);
+    else if (const auto* o = std::get_if<BarOptions>(&e.opts))      assign_plot_opts(t.bars,      i, e.id, *o);
+    else if (const auto* o = std::get_if<HeatmapOptions>(&e.opts))  assign_plot_opts(t.heatmaps,  i, e.id, *o);
+    else if (const auto* o = std::get_if<ScatterZOptions>(&e.opts)) assign_plot_opts(t.scatter_z, i, e.id, *o);
 }
 
 // As apply_plot_data_ops(): 2D targets take plane -1 only; 3D targets take
@@ -861,12 +908,12 @@ template <class T>
 void apply_plot_style_edits(T& t, const std::vector<PlotStyleEdit>& es) {
     for (const auto& e : es) {
         if (e.plane_index < 0) continue;
-        if (static_cast<std::size_t>(e.plane_index) >= t.plane_count()) continue;
-        auto& plane = t.plane_at(static_cast<std::size_t>(e.plane_index));
-        apply_plot_style_edit(plane.sheet, e);
+        auto* plane = edits_detail::find_plane(t, e.plane_index, e.plane_id);
+        if (!plane) continue;
+        apply_plot_style_edit(plane->sheet, e);
         // Snapshot only: the plane's cached raster must redraw.
-        if constexpr (requires { plane.style_generation; })
-            plane.style_generation = next_snapshot_generation();
+        if constexpr (requires { plane->style_generation; })
+            plane->style_generation = next_snapshot_generation();
     }
 }
 
@@ -921,32 +968,24 @@ void apply_axes3d_edit(T& dst, const AxesEdit3D& e) {
     apply_style_edits(dst, e);
     if (e.camera && dst.camera_stamp <= e.camera_seen) dst.camera = *e.camera;
 
-    // Planes: re-validated, stale indices skipped.
+    // Plane-addressed edits: each finds its plane and object by id (or index).
     apply_plot_style_edits(dst, e.plot_styles);
 
     for (const auto& pe : e.planes) {
         if (pe.plane_index < 0) continue;
-        const std::size_t pi = static_cast<std::size_t>(pe.plane_index);
-        if (pi >= dst.plane_count()) continue;
-        auto& p = dst.plane_at(pi);
-        // A setter (or a new plane at this index) since the panel drew wins.
-        if (p.placement_stamp > pe.seen) continue;
-        if (pe.orient) p.orient = *pe.orient;
-        if (pe.offset) p.offset = *pe.offset;
-        if (pe.opts)   p.opts   = *pe.opts;
+        auto* p = edits_detail::find_plane(dst, pe.plane_index, pe.id);
+        if (!p) continue;
+        // A setter since the panel drew wins.
+        if (p->placement_stamp > pe.seen) continue;
+        if (pe.orient) p->orient = *pe.orient;
+        if (pe.offset) p->offset = *pe.offset;
+        if (pe.opts)   p->opts   = *pe.opts;
     }
 
-    // The axes' own 3D objects; `hint_labels` is kept (it is data). An edit made
-    // before a cla() is dropped, as for plot_styles.
-    auto objects = [&dst](auto& plots, const auto& edits) {
-        for (const auto& oe : edits) {
-            if (oe.plot_index < 0 || !oe.opts || dst.style_stamps.cleared > oe.seen) continue;
-            const std::size_t i = static_cast<std::size_t>(oe.plot_index);
-            if (i >= plots.size()) continue;
-            auto labels = std::move(plots[i].opts.hint_labels);
-            plots[i].opts = *oe.opts;
-            plots[i].opts.hint_labels = std::move(labels);
-        }
+    // The axes' own 3D objects; `hint_labels` is kept (it is data).
+    auto objects = [](auto& plots, const auto& edits) {
+        for (const auto& oe : edits)
+            if (oe.opts) assign_plot_opts(plots, oe.plot_index, oe.id, *oe.opts);
     };
     objects(dst.bars3d, e.bars3d);
     objects(dst.surfaces, e.surfaces);
@@ -978,6 +1017,14 @@ void upsert(Vec& dst, const typename Vec::value_type& v, Key key) {
     dst.push_back(v);
 }
 
+// What two edits share when they address the same object: its id, or without
+// one its position. Ids never collide, so across a reorder the edits of one
+// object still merge.
+inline std::tuple<int, int, ObjectId> object_key(int plane_index, int index, ObjectId id) {
+    if (id != 0) return { 0, 0, id };
+    return { plane_index, index, 0 };
+}
+
 } // namespace edits_detail
 
 // Titles, limits, the camera and plot_ops have lanes of their own and are
@@ -998,7 +1045,8 @@ void merge_style_edits(E& dst, const E& src) {
     take_latest(dst.yticks_override, src.yticks_override, ds.yticks, ss.yticks);
     for (const PlotStyleEdit& s : src.plot_styles)
         upsert(dst.plot_styles, s, [](const PlotStyleEdit& p) {
-            return std::tuple(p.plane_index, p.plot_index, p.opts.index());
+            return std::tuple(edits_detail::object_key(p.plane_index, p.plot_index, p.id),
+                              p.opts.index());
         });
     if constexpr (requires { src.box_style; }) {
         take_latest(dst.zticks_override, src.zticks_override, ds.zticks, ss.zticks);
@@ -1006,19 +1054,23 @@ void merge_style_edits(E& dst, const E& src) {
         take_latest(dst.aspect, src.aspect, ds.aspect, ss.aspect);
         for (const auto& pe : src.planes) {
             auto it = std::find_if(dst.planes.begin(), dst.planes.end(),
-                                   [&](const auto& d) { return d.plane_index == pe.plane_index; });
+                                   [&](const auto& d) {
+                                       return edits_detail::object_key(-1, d.plane_index, d.id)
+                                              == edits_detail::object_key(-1, pe.plane_index, pe.id);
+                                   });
             if (it == dst.planes.end()) { dst.planes.push_back(pe); continue; }
             if (pe.orient) it->orient = pe.orient;
             if (pe.offset) it->offset = pe.offset;
             if (pe.opts)   it->opts   = pe.opts;
             it->seen = pe.seen;
+            it->plane_index = pe.plane_index;   // the latest position of the same plane
         }
-        auto by_index = [](const auto& o) { return o.plot_index; };
-        for (const auto& o : src.bars3d)      upsert(dst.bars3d, o, by_index);
-        for (const auto& o : src.surfaces)    upsert(dst.surfaces, o, by_index);
-        for (const auto& o : src.scatter3d)   upsert(dst.scatter3d, o, by_index);
-        for (const auto& o : src.lines3d)     upsert(dst.lines3d, o, by_index);
-        for (const auto& o : src.surface_tri) upsert(dst.surface_tri, o, by_index);
+        auto by_object = [](const auto& o) { return edits_detail::object_key(-1, o.plot_index, o.id); };
+        for (const auto& o : src.bars3d)      upsert(dst.bars3d, o, by_object);
+        for (const auto& o : src.surfaces)    upsert(dst.surfaces, o, by_object);
+        for (const auto& o : src.scatter3d)   upsert(dst.scatter3d, o, by_object);
+        for (const auto& o : src.lines3d)     upsert(dst.lines3d, o, by_object);
+        for (const auto& o : src.surface_tri) upsert(dst.surface_tri, o, by_object);
     }
 }
 

@@ -15,6 +15,7 @@ namespace sextant {
         double offset = 0.0;
         Plane2DOptions opts;
         unsigned long long placement_stamp = 0;   // see PlaneSnapshot
+        ObjectId id = next_object_id();           // see ObjectId
 
         PlaneSnapshot build_snapshot() const {
             PlaneSnapshot p;
@@ -22,6 +23,7 @@ namespace sextant {
             p.offset = offset;
             p.opts = opts;
             p.placement_stamp = placement_stamp;
+            p.id = id;
             p.sheet = sheet.build_snapshot();
             return p;
         }

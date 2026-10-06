@@ -20,6 +20,22 @@ namespace sextant {
 enum class PlotKind { Line, Scatter, Bar, Heatmap, ScatterZ, Bar3D, Surface, Scatter3D, Line3D,
                       SurfaceTri };
 
+// A plot object's (or a plane's) identity: kept by set_*_data(), unchanged by
+// removing or reordering its siblings, never reused in a process. Edits carry
+// it beside their index (figure_edits.h), so an edit follows its object rather
+// than its position. 0 = none: objects of hand-built snapshots, and edits made
+// without a drawn snapshot, which are addressed by index alone.
+using ObjectId = std::uint64_t;
+
+// What an edit carries when the snapshot it was made over had nothing at its
+// index: it matches no object, so the edit drops.
+inline constexpr ObjectId kNoObject = ~ObjectId{0};
+
+inline ObjectId next_object_id() {
+    static std::atomic<ObjectId> counter{0};
+    return counter.fetch_add(1, std::memory_order_relaxed) + 1;
+}
+
 // Bulk data below is CowVec so snapshot copies share buffers (see cow_vec.h).
 // Every plot object carries a `data_stamp`, as TitleStamps does for titles:
 // plotting it and each set_*_data() take a fresh next_snapshot_generation(), so
@@ -93,6 +109,7 @@ struct LinePlot {
     ErrorBarData   err;
     LineOptions    opts;
     unsigned long long data_stamp = 0;
+    ObjectId id = 0;
 
     std::size_t count() const { return x.size(); }
 
@@ -114,6 +131,7 @@ struct ScatterPlot {
     ErrorBarData   err;
     ScatterOptions opts;
     unsigned long long data_stamp = 0;
+    ObjectId id = 0;
 };
 
 // bar_width is in data units, already resolved (spacing x width fraction for
@@ -125,6 +143,7 @@ struct BarPlot {
     ErrorBarData   err;
     BarOptions     opts;
     unsigned long long data_stamp = 0;
+    ObjectId id = 0;
 };
 
 // Row-major rows x cols values, mapped through vmin/vmax and the colormap. The
@@ -137,6 +156,7 @@ struct HeatmapPlot {
     Range          xrange{ 0.0, 1.0 }, yrange{ 0.0, 1.0 };
     HeatmapOptions opts;
     unsigned long long data_stamp = 0;
+    ObjectId id = 0;
 
     double cell_w() const { return cols > 0 ? (xrange.hi - xrange.lo) / cols : 0.0; }
     double cell_h() const { return rows > 0 ? (yrange.hi - yrange.lo) / rows : 0.0; }
@@ -162,6 +182,7 @@ struct ScatterZPlot {
     ErrorBarData    err;
     ScatterZOptions opts;
     unsigned long long data_stamp = 0;
+    ObjectId id = 0;
 };
 
 // Box axis index (into x, y, z) of each grid direction, for every consumer to
@@ -188,6 +209,7 @@ struct Bar3DPlot {
     PlaneOrientation orient = PlaneOrientation::XY;
     Bar3DOptions   opts;
     unsigned long long data_stamp = 0;
+    ObjectId id = 0;
 
     std::size_t count() const { return u.size() * v.size(); }
     std::size_t index_of(std::size_t i, std::size_t j) const { return i * v.size() + j; }
@@ -211,6 +233,7 @@ struct SurfacePlot {
     PlaneOrientation orient = PlaneOrientation::XY;
     SurfaceOptions opts;
     unsigned long long data_stamp = 0;
+    ObjectId id = 0;
 
     std::size_t count() const { return u.size() * v.size(); }
     std::size_t index_of(std::size_t i, std::size_t j) const { return i * v.size() + j; }
@@ -250,6 +273,7 @@ struct SurfaceTriPlot {
     CowVec<double> colors;
     SurfaceTriOptions opts;
     unsigned long long data_stamp = 0;
+    ObjectId id = 0;
 
     std::size_t count() const { return x.size(); }               // vertices
     std::size_t face_count() const { return tri.size() / 3; }
@@ -303,6 +327,7 @@ struct Scatter3DPlot {
     ErrorBar3DData err;
     Scatter3DOptions opts;
     unsigned long long data_stamp = 0;
+    ObjectId id = 0;
 
     std::size_t count() const { return x.size(); }
     bool colormapped() const { return !colors.empty(); }
@@ -335,6 +360,7 @@ struct Line3DPlot {
     ErrorBar3DData err;
     Line3DOptions opts;
     unsigned long long data_stamp = 0;
+    ObjectId id = 0;
 
     std::size_t count() const { return x.size(); }
     bool colormapped() const { return !colors.empty(); }
@@ -410,18 +436,16 @@ struct LimitStamps {
 
 // The same, for the setter groups that have no stamp of their own: each setter
 // stamps its group (grid() -> grid, set_axes_style() -> style, ...), cla()
-// resets them. `cleared` is the exception: cla() gives it a fresh stamp, and an
-// edit addressed to a plot object by index (its appearance) records it, so
-// after a cla() and re-plot it cannot land on whatever took that index.
+// resets them. An edit addressed to a plot object needs none: it carries the
+// object's ObjectId, which a cla() and re-plot never hands to another object.
 struct StyleStamps {
     unsigned long long style = 0, grid = 0, legend = 0, colorbar = 0;
     unsigned long long xticks = 0, yticks = 0, zticks = 0;
     unsigned long long box = 0, aspect = 0;   // 3D only
-    unsigned long long cleared = 0;
 
     static constexpr StyleStamps any() {
         constexpr auto m = ~0ull;
-        return { m, m, m, m, m, m, m, m, m, m };
+        return { m, m, m, m, m, m, m, m, m };
     }
 };
 
@@ -478,6 +502,8 @@ struct PlaneSnapshot {
     // Set when the plane is made and by set_offset()/set_alpha(); a plane edit
     // records it (as StyleStamps).
     unsigned long long placement_stamp = 0;
+    // The plane's identity (see ObjectId); plane-addressed edits carry it.
+    ObjectId id = 0;
     // Bumped when a Data-panel style edit patches `sheet` on the render thread
     // (which leaves data_generation alone); the plane's raster keys on it.
     unsigned long long style_generation = 0;
@@ -533,6 +559,112 @@ struct RenderSnapshot3D {
     PlaneSnapshot&  plane_at(std::size_t i)          { return planes[i]; }
     const PlaneSnapshot& plane_at(std::size_t i) const { return planes[i]; }
 };
+
+// Where an object is: its kind and its index within that kind's vector.
+struct ObjectRef {
+    PlotKind    kind  = PlotKind::Line;
+    std::size_t index = 0;
+};
+
+inline constexpr PlotKind kPlotKinds2D[] = { PlotKind::Line, PlotKind::Scatter, PlotKind::Bar,
+                                             PlotKind::Heatmap, PlotKind::ScatterZ };
+inline constexpr PlotKind kPlotKinds3D[] = { PlotKind::Bar3D, PlotKind::Surface,
+                                             PlotKind::Scatter3D, PlotKind::Line3D,
+                                             PlotKind::SurfaceTri };
+
+// Calls `f` with the vector holding `kind` in a 2D holder (RenderSnapshot,
+// Axes::Impl, a plane's sheet) and returns its result, or `none` for a kind
+// the holder has not. `f` returns one type for every vector.
+template <class S, class F, class R>
+    requires requires(S& s) { s.lines; s.scatter_z; }
+R with_kind(S& s, PlotKind kind, F&& f, R none) {
+    switch (kind) {
+        case PlotKind::Line:     return f(s.lines);
+        case PlotKind::Scatter:  return f(s.scatters);
+        case PlotKind::Bar:      return f(s.bars);
+        case PlotKind::Heatmap:  return f(s.heatmaps);
+        case PlotKind::ScatterZ: return f(s.scatter_z);
+        default:                 return none;
+    }
+}
+
+// The same for a 3D holder (RenderSnapshot3D, Axes3D::Impl): its own kinds.
+template <class S, class F, class R>
+    requires requires(S& s) { s.bars3d; s.surface_tri; }
+R with_kind(S& s, PlotKind kind, F&& f, R none) {
+    switch (kind) {
+        case PlotKind::Bar3D:      return f(s.bars3d);
+        case PlotKind::Surface:    return f(s.surfaces);
+        case PlotKind::Scatter3D:  return f(s.scatter3d);
+        case PlotKind::Line3D:     return f(s.lines3d);
+        case PlotKind::SurfaceTri: return f(s.surface_tri);
+        default:                   return none;
+    }
+}
+
+namespace objects_detail {
+template <class V>
+std::optional<std::size_t> index_of(const V& v, ObjectId id) {
+    for (std::size_t i = 0; i < v.size(); ++i)
+        if (v[i].id == id) return i;
+    return std::nullopt;
+}
+
+// Moves v[from] to position `to` (clamped to the last), keeping the others' order.
+template <class V>
+void move_to(V& v, std::size_t from, std::size_t to) {
+    if (from >= v.size()) return;
+    const std::size_t dst = std::min(to, v.size() - 1);
+    const auto at = [&v](std::size_t i) { return v.begin() + static_cast<std::ptrdiff_t>(i); };
+    if (from < dst)      std::rotate(at(from), at(from + 1), at(dst + 1));
+    else if (dst < from) std::rotate(at(dst), at(from), at(from + 1));
+}
+} // namespace objects_detail
+
+// The id of object `index` of `kind`, kNoObject when there is none.
+template <class S>
+ObjectId object_id_at(const S& s, PlotKind kind, int index) {
+    return with_kind(s, kind, [index](const auto& v) {
+        return index >= 0 && static_cast<std::size_t>(index) < v.size()
+                   ? v[static_cast<std::size_t>(index)].id : kNoObject;
+    }, kNoObject);
+}
+
+// Where object `id` is among `kinds` of a holder, if anywhere.
+template <class S, std::size_t N>
+std::optional<ObjectRef> find_object_in(const S& s, const PlotKind (&kinds)[N], ObjectId id) {
+    if (id == 0 || id == kNoObject) return std::nullopt;
+    for (PlotKind k : kinds) {
+        const auto i = with_kind(s, k, [id](const auto& v) {
+            return objects_detail::index_of(v, id);
+        }, std::optional<std::size_t>{});
+        if (i) return ObjectRef{ k, *i };
+    }
+    return std::nullopt;
+}
+
+// Removes object `id` from its kind's vector; false if it is not there.
+template <class S, std::size_t N>
+bool remove_object_in(S& s, const PlotKind (&kinds)[N], ObjectId id) {
+    const auto at = find_object_in(s, kinds, id);
+    if (!at) return false;
+    return with_kind(s, at->kind, [&at](auto& v) {
+        v.erase(v.begin() + static_cast<std::ptrdiff_t>(at->index));
+        return true;
+    }, false);
+}
+
+// Moves object `id` to position `to` among its kind (clamped to the last),
+// keeping the others' order; false if it is not there.
+template <class S, std::size_t N>
+bool move_object_in(S& s, const PlotKind (&kinds)[N], ObjectId id, std::size_t to) {
+    const auto at = find_object_in(s, kinds, id);
+    if (!at) return false;
+    return with_kind(s, at->kind, [&at, to](auto& v) {
+        objects_detail::move_to(v, at->index, to);
+        return true;
+    }, false);
+}
 
 // Grid position of one axes (1-based, row-major, like matplotlib). Covers cells
 // `index` (top-left) to `last` (bottom-right; 0 = just `index`). `index` is the

@@ -562,6 +562,9 @@ namespace lt {
     void test_figure_impl_access();
     void test_host_frame();
 
+    // object_id.cpp
+    void test_object_ids();
+
     // window_wait.cpp -- last: it opens real windows
     void test_wait_closed();
 

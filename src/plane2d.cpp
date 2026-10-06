@@ -10,10 +10,9 @@ namespace sextant {
         d->orient = orient;
         d->offset = offset;
         d->opts = opts;
-        // Fresh stamps, so an edit meant for a plane (or its objects) that a
-        // cla() removed cannot land on this one at the same index.
+        // Stamped as by set_offset(). An edit meant for a plane a cla() removed
+        // cannot land on this one: it carries that plane's id (see ObjectId).
         d->placement_stamp = next_snapshot_generation();
-        d->sheet.style_stamps.cleared = next_snapshot_generation();
     }
 
     Plane2D::~Plane2D() = default;
@@ -101,10 +100,9 @@ namespace sextant {
         return *this;
     }
 
-    // Clears the plane's data; placement stays.
+    // Clears the plane's data (its objects go, with their ids); placement stays.
     Plane2D& Plane2D::cla() {
         d->sheet = Axes::Impl{};
-        d->sheet.style_stamps.cleared = next_snapshot_generation();
         return *this;
     }
 

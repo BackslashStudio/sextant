@@ -31,6 +31,49 @@ std::shared_ptr<const FigureMeasure> on_screen_measure(const PlotViewInfo* view,
 
 namespace {
 
+// The ids of a holder's objects of `kinds`, kind by kind: what a scratch list is
+// seeded from, and compared against to tell when to re-seed (GUI-kit R9).
+template <class S, std::size_t N>
+std::vector<ObjectId> object_ids(const S& s, const PlotKind (&kinds)[N]) {
+    std::vector<ObjectId> ids;
+    for (PlotKind k : kinds)
+        with_kind(s, k, [&ids](const auto& v) {
+            for (const auto& p : v) ids.push_back(p.id);
+            return 0;
+        }, 0);
+    return ids;
+}
+
+// The same comparison without building the list, for every frame.
+template <class S, std::size_t N>
+bool same_objects(const std::vector<ObjectId>& ids, const S& s, const PlotKind (&kinds)[N]) {
+    std::size_t at = 0;
+    bool same = true;
+    for (PlotKind k : kinds)
+        with_kind(s, k, [&](const auto& v) {
+            for (const auto& p : v) {
+                if (at >= ids.size() || ids[at] != p.id) same = false;
+                ++at;
+            }
+            return 0;
+        }, 0);
+    return same && at == ids.size();
+}
+
+std::vector<ObjectId> plane_ids_of(const RenderSnapshot3D& sn) {
+    std::vector<ObjectId> ids;
+    ids.reserve(sn.planes.size());
+    for (const auto& p : sn.planes) ids.push_back(p.id);
+    return ids;
+}
+
+bool same_planes(const std::vector<ObjectId>& ids, const RenderSnapshot3D& sn) {
+    if (ids.size() != sn.planes.size()) return false;
+    for (std::size_t i = 0; i < ids.size(); ++i)
+        if (ids[i] != sn.planes[i].id) return false;
+    return true;
+}
+
 // A sheet's 2D appearance scratch, without hint_labels.
 void sync_sheet(DataPanelState::SheetStyles& dst, const RenderSnapshot& sn) {
     auto copy = [](auto& out, const auto& plots) {
@@ -46,12 +89,13 @@ void sync_sheet(DataPanelState::SheetStyles& dst, const RenderSnapshot& sn) {
     copy(dst.bars, sn.bars);
     copy(dst.heatmaps, sn.heatmaps);
     copy(dst.scatter_z, sn.scatter_z);
+    dst.ids = object_ids(sn, kPlotKinds2D);
 }
 
-bool sheet_counts_differ(const DataPanelState::SheetStyles& s, const RenderSnapshot& sn) {
-    return s.lines.size() != sn.lines.size() || s.scatters.size() != sn.scatters.size()
-        || s.bars.size() != sn.bars.size() || s.heatmaps.size() != sn.heatmaps.size()
-        || s.scatter_z.size() != sn.scatter_z.size();
+// Whether the sheet holds other objects than the scratch was seeded from (one
+// added, removed or moved), so the positional lists no longer line up.
+bool sheet_objects_differ(const DataPanelState::SheetStyles& s, const RenderSnapshot& sn) {
+    return !same_objects(s.ids, sn, kPlotKinds2D);
 }
 
 // Seeding from the selected slot, one owner at a time (GUI-kit R3). Each state
@@ -114,13 +158,14 @@ void seed_slot_view(SlotViewState& v, const RenderSnapshot3D& sn) {
     v.camera_stamp_local = sn.camera_stamp;
 }
 
-// The planes' scratch copy, also re-seeded when the plane count changes
-// (indices shift, so the whole list is re-read).
+// The planes' scratch copy, also re-seeded when the planes are no longer the
+// ones it was seeded from (indices shift, so the whole list is re-read).
 void sync_planes(DataPanelState& d, const RenderSnapshot3D& sn) {
     d.planes_local.clear();
     d.planes_local.reserve(sn.planes.size());
     for (const auto& p : sn.planes)
         d.planes_local.push_back({ p.orient, p.offset, p.opts });
+    d.plane_ids = plane_ids_of(sn);
 }
 
 // Every plane's sheet, re-seeded as one list (like sync_planes()).
@@ -133,7 +178,7 @@ void sync_plane_sheets(DataPanelState& d, const RenderSnapshot3D& sn) {
 bool plane_sheets_differ(const DataPanelState& d, const RenderSnapshot3D& sn) {
     if (d.plane_sheets_local.size() != sn.planes.size()) return true;
     for (std::size_t p = 0; p < sn.planes.size(); ++p)
-        if (sheet_counts_differ(d.plane_sheets_local[p], sn.planes[p].sheet)) return true;
+        if (sheet_objects_differ(d.plane_sheets_local[p], sn.planes[p].sheet)) return true;
     return false;
 }
 
@@ -154,6 +199,7 @@ void sync_scene_objects(DataPanelState& d, const RenderSnapshot3D& sn) {
     d.surface_tri_local.clear();
     d.surface_tri_local.reserve(sn.surface_tri.size());
     for (const auto& m : sn.surface_tri) d.surface_tri_local.push_back(m.opts);
+    d.scene_ids = object_ids(sn, kPlotKinds3D);
 }
 
 // For axes on "auto", the limit fields track the resolved limits every frame
@@ -885,20 +931,16 @@ void pull_data_panel(DataPanelState& d, const Selection& sel, const FigureAxesSn
         d.synced_generation = sel.generation;
         return;
     }
-    // Object count changed: re-seed the lists (indices shifted).
+    // Objects added, removed or moved: re-seed the lists (indices shifted).
     if (const RenderSnapshot3D* sn = fa.snap3d()) {
-        if (d.planes_local.size() != sn->planes.size())
+        if (!same_planes(d.plane_ids, *sn))
             sync_planes(d, *sn);
         if (plane_sheets_differ(d, *sn))
             sync_plane_sheets(d, *sn);
-        if (d.bars3d_local.size() != sn->bars3d.size() ||
-            d.surfaces_local.size() != sn->surfaces.size() ||
-            d.scatter3d_local.size() != sn->scatter3d.size() ||
-            d.line3d_local.size() != sn->lines3d.size() ||
-            d.surface_tri_local.size() != sn->surface_tri.size())
+        if (!same_objects(d.scene_ids, *sn, kPlotKinds3D))
             sync_scene_objects(d, *sn);
     } else if (const RenderSnapshot* sn = fa.snap2d()) {
-        if (sheet_counts_differ(d.sheet_local, *sn)) sync_sheet(d.sheet_local, *sn);
+        if (sheet_objects_differ(d.sheet_local, *sn)) sync_sheet(d.sheet_local, *sn);
     }
 }
 

@@ -4,6 +4,8 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <type_traits>
+#include <variant>
 #include <vector>
 
 namespace sextant {
@@ -42,10 +44,11 @@ public:
     }
 
     // The snapshot the panels are drawn from this frame. update() records its
-    // stamps (StyleStamps, placement and figure stamps) on every edit, so a push
-    // site need not. Exact because the render thread drains once per frame:
-    // everything pending was pushed over this one snapshot. Without one (tests,
-    // no window) edits keep their any() stamps.
+    // stamps (StyleStamps, placement and figure stamps) on every edit, and the
+    // ids of the objects and planes it names by index, so a push site need
+    // not. Exact because the render thread drains once per frame: everything
+    // pending was pushed over this one snapshot. Without one (tests, no window)
+    // edits keep their any() stamps and no ids, so they address by index.
     void set_drawn(std::shared_ptr<const FigureSnapshot> snap) {
         std::scoped_lock lk(mutex_);
         drawn_ = std::move(snap);
@@ -132,12 +135,17 @@ private:
         return pending_.per_axes3d.back().second;
     }
 
-    // The drawn snapshot's stamps for slot `idx`, onto a pending edit.
+    // The drawn snapshot's stamps for slot `idx`, onto a pending edit, and the
+    // ids of the objects and planes its entries address by index (GUI-kit R9),
+    // so each edit follows its object whatever moves before it is applied. An
+    // id already set (by an earlier update(), or by a host) is kept.
     void stamp_from_drawn(int idx, AxesEdit& e) const {
         const RenderSnapshot* s = drawn_axes<RenderSnapshot>(idx);
         if (!s) return;
         e.style_seen = s->style_stamps;
-        for (PlotStyleEdit& p : e.plot_styles) p.seen = s->style_stamps.cleared;
+        for (PlotDataOp& op : e.plot_ops)
+            std::visit([s](auto& o) { fill_id(o.id, *s, o.kind, o.plot_index); }, op);
+        for (PlotStyleEdit& p : e.plot_styles) fill_id(p.id, *s, style_kind(p), p.plot_index);
     }
 
     void stamp_from_drawn(int idx, AxesEdit3D& e) const {
@@ -148,18 +156,51 @@ private:
             return pi >= 0 && static_cast<std::size_t>(pi) < s->planes.size()
                        ? &s->planes[static_cast<std::size_t>(pi)] : nullptr;
         };
+        // An entry on a plane: the plane's id, then the object's on its sheet.
+        const auto on_plane = [&plane](ObjectId& id, ObjectId& plane_id, int pi,
+                                       PlotKind kind, int index) {
+            const PlaneSnapshot* p = plane(pi);
+            if (plane_id == 0) plane_id = p ? p->id : kNoObject;
+            if (p) fill_id(id, p->sheet, kind, index);
+            else if (id == 0) id = kNoObject;
+        };
         for (auto& pe : e.planes)
-            if (const PlaneSnapshot* p = plane(pe.plane_index)) pe.seen = p->placement_stamp;
+            if (const PlaneSnapshot* p = plane(pe.plane_index)) {
+                pe.seen = p->placement_stamp;
+                if (pe.id == 0) pe.id = p->id;
+            } else if (pe.id == 0) {
+                pe.id = kNoObject;
+            }
         for (PlotStyleEdit& ps : e.plot_styles)
-            if (const PlaneSnapshot* p = plane(ps.plane_index))
-                ps.seen = p->sheet.style_stamps.cleared;
-        const unsigned long long cleared = s->style_stamps.cleared;
-        auto objects = [cleared](auto& edits) { for (auto& o : edits) o.seen = cleared; };
-        objects(e.bars3d);
-        objects(e.surfaces);
-        objects(e.scatter3d);
-        objects(e.lines3d);
-        objects(e.surface_tri);
+            on_plane(ps.id, ps.plane_id, ps.plane_index, style_kind(ps), ps.plot_index);
+        for (PlotDataOp& op : e.plot_ops)
+            std::visit([&](auto& o) {
+                if (o.plane_index < 0) fill_id(o.id, *s, o.kind, o.plot_index);
+                else on_plane(o.id, o.plane_id, o.plane_index, o.kind, o.plot_index);
+            }, op);
+        const auto objects = [s](auto& edits, PlotKind kind) {
+            for (auto& o : edits) fill_id(o.id, *s, kind, o.plot_index);
+        };
+        objects(e.bars3d, PlotKind::Bar3D);
+        objects(e.surfaces, PlotKind::Surface);
+        objects(e.scatter3d, PlotKind::Scatter3D);
+        objects(e.lines3d, PlotKind::Line3D);
+        objects(e.surface_tri, PlotKind::SurfaceTri);
+    }
+
+    template <class Holder>
+    static void fill_id(ObjectId& id, const Holder& h, PlotKind kind, int index) {
+        if (id == 0) id = object_id_at(h, kind, index);
+    }
+
+    // PlotStyleEdit's alternatives are in PlotKind's 2D order.
+    static PlotKind style_kind(const PlotStyleEdit& p) {
+        using Opts = decltype(PlotStyleEdit::opts);
+        static_assert(static_cast<int>(PlotKind::Heatmap) == 3
+                      && std::is_same_v<std::variant_alternative_t<3, Opts>, HeatmapOptions>
+                      && static_cast<int>(PlotKind::ScatterZ) == 4
+                      && std::is_same_v<std::variant_alternative_t<4, Opts>, ScatterZOptions>);
+        return static_cast<PlotKind>(p.opts.index());
     }
 
     template <class Snap>

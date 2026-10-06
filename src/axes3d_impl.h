@@ -50,6 +50,35 @@ namespace sextant {
         // and PlaneSnapshot share member names so one edit body writes both.
         std::size_t plane_count() const { return planes.size(); }
         Plane2D::Impl& plane_at(std::size_t i) { return *planes[i]->d; }
+        const Plane2D::Impl& plane_at(std::size_t i) const { return *planes[i]->d; }
+
+        // The axes' own objects and its planes by identity, as Axes::Impl's (a
+        // plane's objects: through its sheet). A removed plane's Plane2D handle
+        // keeps working, detached: nothing it holds is drawn.
+        std::optional<ObjectRef> find_object(ObjectId id) const {
+            return find_object_in(*this, kPlotKinds3D, id);
+        }
+        bool remove_object(ObjectId id) { return remove_object_in(*this, kPlotKinds3D, id); }
+        bool move_object(ObjectId id, std::size_t to) {
+            return move_object_in(*this, kPlotKinds3D, id, to);
+        }
+        std::optional<std::size_t> find_plane(ObjectId id) const {
+            for (std::size_t i = 0; i < planes.size(); ++i)
+                if (plane_at(i).id == id) return i;
+            return std::nullopt;
+        }
+        bool remove_plane(ObjectId id) {
+            const auto i = find_plane(id);
+            if (!i) return false;
+            planes.erase(planes.begin() + static_cast<std::ptrdiff_t>(*i));
+            return true;
+        }
+        bool move_plane(ObjectId id, std::size_t to) {
+            const auto i = find_plane(id);
+            if (!i) return false;
+            objects_detail::move_to(planes, *i, to);
+            return true;
+        }
 
         RenderSnapshot3D build_snapshot() const {
             RenderSnapshot3D s;

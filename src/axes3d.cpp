@@ -153,6 +153,7 @@ namespace sextant {
         b.u_width = grid_spacing(u) * std::max(0.0f, b.opts.width);
         b.v_width = grid_spacing(v) * std::max(0.0f, b.opts.depth);
         b.data_stamp = next_snapshot_generation();
+        b.id = next_object_id();
         d->bars3d.push_back(std::move(b));
         return *this;
     }
@@ -171,6 +172,7 @@ namespace sextant {
         s.v = std::vector<double>(v.begin(), v.end());
         s.heights = std::vector<double>(heights.begin(), heights.end());
         s.data_stamp = next_snapshot_generation();
+        s.id = next_object_id();
         d->surfaces.push_back(std::move(s));
         return *this;
     }
@@ -231,6 +233,7 @@ namespace sextant {
             s.tri = std::move(tri);
             s.colors = copy_colors(colors);
             s.data_stamp = next_snapshot_generation();
+            s.id = next_object_id();
             return s;
         }
     } // namespace
@@ -320,6 +323,7 @@ namespace sextant {
         s.z = std::vector<double>(z.begin(), z.end());
         s.colors = copy_colors(colors);
         s.data_stamp = next_snapshot_generation();
+        s.id = next_object_id();
         d->scatter3d.push_back(std::move(s));
         return *this;
     }
@@ -358,6 +362,7 @@ namespace sextant {
         l.z = std::vector<double>(z.begin(), z.end());
         l.colors = copy_colors(colors);
         l.data_stamp = next_snapshot_generation();
+        l.id = next_object_id();
         d->lines3d.push_back(std::move(l));
         return *this;
     }
@@ -538,9 +543,7 @@ namespace sextant {
     }
 
     Axes3D& Axes3D::cla() {
-        *d = Impl{}; // reset to defaults
-        // As Axes::cla(): object- and plane-addressed edits made before it drop.
-        d->style_stamps.cleared = next_snapshot_generation();
+        *d = Impl{}; // reset to defaults; as Axes::cla(), planes go with their ids
         return *this;
     }
 

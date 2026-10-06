@@ -39,7 +39,18 @@ struct Axes::Impl {
     // widget panel's tick table). Absent = auto-generated ticks.
     std::optional<std::vector<Tick>> xticks_override, yticks_override;
 
-    // TODO: PlotObject list
+    // Plot objects by identity (GUI-kit R9; see ObjectId). Internal: the public
+    // API neither removes nor reorders objects. Each is a caller-thread change
+    // like a plotting call, reaching a window at the next publish; panel edits
+    // made over the old order follow their objects (or drop with them).
+    // Reorder is within a kind, which is what draw and legend order follow.
+    std::optional<ObjectRef> find_object(ObjectId id) const {
+        return find_object_in(*this, kPlotKinds2D, id);
+    }
+    bool remove_object(ObjectId id) { return remove_object_in(*this, kPlotKinds2D, id); }
+    bool move_object(ObjectId id, std::size_t to) {
+        return move_object_in(*this, kPlotKinds2D, id, to);
+    }
 
     // Copy for the render thread. Plot vectors are CowVec, so this shares
     // buffers instead of copying the data.

@@ -25,6 +25,8 @@ struct PlotDataTable {
     int         plot_index;   // index within the snapshot's per-kind vector
     // The plot's data_stamp; every op made from this table carries it.
     unsigned long long data_stamp = 0;
+    // The object's id (see ObjectId): what keeps its tab across a reorder.
+    ObjectId    id = 0;
     std::string label;        // opts.name when non-empty, else "line 0" etc.
 
     // 3D plane this object is on, or -1 (same addressing as PlotCellEdit).

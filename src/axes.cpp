@@ -81,6 +81,7 @@ void Axes::Impl::ingest_line(std::span<const double> x, std::span<const double> 
         std::move(err),
         std::move(opts),
         next_snapshot_generation(),
+        next_object_id(),
     });
 }
 
@@ -95,6 +96,7 @@ void Axes::Impl::ingest_scatter(std::span<const double> x, std::span<const doubl
         std::move(err),
         std::move(opts),
         next_snapshot_generation(),
+        next_object_id(),
     });
 }
 
@@ -111,6 +113,7 @@ void Axes::Impl::ingest_scatter_z(std::span<const double> x, std::span<const dou
         std::move(err),
         std::move(opts),
         next_snapshot_generation(),
+        next_object_id(),
     });
 }
 
@@ -126,6 +129,7 @@ void Axes::Impl::ingest_bar(std::span<const double> x, std::span<const double> h
         std::move(err),
         std::move(opts),
         next_snapshot_generation(),
+        next_object_id(),
     });
 }
 
@@ -224,6 +228,7 @@ Axes& Axes::hist(std::span<const double> data, int bins,
         ErrorBarData{},
         std::move(bar_opts),
         next_snapshot_generation(),
+        next_object_id(),
     });
     return *this;
 }
@@ -253,6 +258,7 @@ void Axes::Impl::ingest_heatmap(std::span<const double> data, int rows, int cols
         xrange, yrange,
         std::move(opts),
         next_snapshot_generation(),
+        next_object_id(),
     });
 }
 
@@ -322,9 +328,9 @@ Axes& Axes::set_yticks(std::span<const double> pos, std::vector<std::string> lab
     return *this;
 }
 Axes& Axes::cla() {
-    *d = Impl{};  // reset to defaults
-    // Object-addressed panel edits made before this must not land on new objects.
-    d->style_stamps.cleared = next_snapshot_generation();
+    // Reset to defaults. Panel edits made before it name objects by id, and the
+    // objects plotted after it get new ones, so none of those edits lands.
+    *d = Impl{};
     return *this;
 }
 

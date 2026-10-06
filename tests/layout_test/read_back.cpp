@@ -716,27 +716,37 @@ namespace lt {
         check(j && j->figure.suptitle == "sup" && j->figure.margins && j->figure.per_axes.empty(),
               "journal: the suptitle and margins are journaled");
 
-        // The drawn snapshot's stamps land on every pushed edit.
+        // The drawn snapshot's stamps, and the ids of what each edit names by
+        // index, land on every pushed edit.
         auto fs = std::make_shared<FigureSnapshot>();
         RenderSnapshot r2;
         r2.style_stamps.grid = 5;
-        r2.style_stamps.cleared = 3;
+        r2.lines.push_back(LinePlot{});
+        r2.lines[0].id = 21;
         RenderSnapshot3D r3;
         r3.style_stamps.box = 7;
-        r3.style_stamps.cleared = 4;
+        r3.surfaces.push_back(SurfacePlot{});
+        r3.surfaces[0].id = 41;
         PlaneSnapshot plane;
         plane.placement_stamp = 8;
-        plane.sheet.style_stamps.cleared = 9;
+        plane.id = 81;
+        plane.sheet.lines.push_back(LinePlot{});
+        plane.sheet.lines[0].id = 91;
         r3.planes.push_back(plane);
         fs->axes.push_back({{1, 2, 1}, r2});
         fs->axes.push_back({{1, 2, 2}, r3});
         fs->stamps.margins = 6;
         box.set_drawn(fs);
-        box.update(1, [&](AxesEdit& e) { e.grid_enabled = false; e.plot_styles.push_back({0, -1, red}); });
+        box.update(1, [&](AxesEdit& e) {
+            e.grid_enabled = false;
+            e.plot_styles.push_back({0, -1, red});
+            e.plot_styles.push_back({3, -1, red});   // nothing at index 3
+        });
         box.update3d(2, [&](AxesEdit3D& e) {
             e.planes.push_back({0, std::nullopt, 1.0, std::nullopt});
             e.plot_styles.push_back({0, 0, red});
             e.surfaces.push_back({0, SurfaceOptions{}});
+            e.plot_ops.push_back(PlotCellEdit{PlotKind::Line, 0, 1, 0, 2.0, 0});
         });
         box.update_figure([](FigureEdits& f) { f.margins = FigureMargins{}; });
         auto p = box.load_and_clear_journaled();
@@ -744,12 +754,15 @@ namespace lt {
         if (ok) {
             const AxesEdit& e2 = p->per_axes[0].second;
             const AxesEdit3D& e3 = p->per_axes3d[0].second;
-            ok = e2.style_seen.grid == 5 && e2.plot_styles[0].seen == 3
-                 && e3.style_seen.box == 7 && e3.planes[0].seen == 8
-                 && e3.plot_styles[0].seen == 9 && e3.surfaces[0].seen == 4
+            const auto& op = std::get<PlotCellEdit>(e3.plot_ops[0]);
+            ok = e2.style_seen.grid == 5 && e2.plot_styles[0].id == 21
+                 && e2.plot_styles[1].id == kNoObject
+                 && e3.style_seen.box == 7 && e3.planes[0].seen == 8 && e3.planes[0].id == 81
+                 && e3.plot_styles[0].id == 91 && e3.plot_styles[0].plane_id == 81
+                 && e3.surfaces[0].id == 41 && op.id == 91 && op.plane_id == 81
                  && p->fig_seen.margins == 6;
         }
-        check(ok, "stamps: edits record the drawn snapshot's group, cleared, plane and figure stamps");
+        check(ok, "stamps: edits record the drawn snapshot's stamps and the ids of what they name");
 
         // The stamp rule per group, on the snapshot types.
         RenderSnapshot s;
@@ -773,40 +786,54 @@ namespace lt {
         apply_axes_edit(s, e);
         check(s.grid_enabled, "stamps: after cla() the group stamps are 0 and the edit applies again");
 
-        // Object- and plane-addressed edits die with a cla().
+        // Object- and plane-addressed edits follow their object's id: past a
+        // reorder, and not onto whatever took the index after a removal or cla().
         LinePlot lp;
         s.lines.push_back(lp);
-        s.style_stamps.cleared = 20;
-        s.lines[0].opts.linewidth = 1.0f;
+        s.lines.push_back(lp);
+        s.lines[0].id = 2;   // the edited object, moved to the front
+        s.lines[1].id = 1;
+        s.lines[0].opts.linewidth = s.lines[1].opts.linewidth = 1.0f;
         LineOptions thick;
         thick.linewidth = 4.0f;
-        PlotStyleEdit ps{0, -1, thick};
-        ps.seen = 19;
+        PlotStyleEdit ps{1, -1, thick};
+        ps.id = 2;
         apply_plot_style_edits(s, {ps});
-        check(s.lines[0].opts.linewidth == 1.0f,
-              "cleared: a plot style edit made before a cla() is dropped");
-        ps.seen = 20;
+        check(s.lines[0].opts.linewidth == 4.0f && s.lines[1].opts.linewidth == 1.0f,
+              "ids: a plot style edit follows its object to its new index");
+        s.lines[0].opts.linewidth = 1.0f;
+        ps.id = 3;   // removed
         apply_plot_style_edits(s, {ps});
-        check(s.lines[0].opts.linewidth == 4.0f, "cleared: one made after it applies");
+        ps.id = kNoObject;   // there was nothing at its index when it was made
+        apply_plot_style_edits(s, {ps});
+        check(s.lines[0].opts.linewidth == 1.0f && s.lines[1].opts.linewidth == 1.0f,
+              "ids: one whose object is gone drops");
+        ps.id = 0;
+        apply_plot_style_edits(s, {ps});
+        check(s.lines[1].opts.linewidth == 4.0f, "ids: one without an id goes by its index");
 
         RenderSnapshot3D s3;
-        s3.style_stamps.cleared = 30;
         s3.bars3d.push_back(Bar3DPlot{});
+        s3.bars3d[0].id = 5;
         s3.planes.push_back(PlaneSnapshot{});
         s3.planes[0].placement_stamp = 31;
+        s3.planes[0].id = 7;
         AxesEdit3D e3;
         Bar3DOptions wide;
         wide.width = 0.25f;
-        e3.bars3d.push_back({0, wide, 29});
-        e3.planes.push_back({0, std::nullopt, 2.0, std::nullopt, 30});
+        e3.bars3d.push_back({0, wide, 6});
+        e3.planes.push_back({0, std::nullopt, 2.0, std::nullopt, 31, 8});
         apply_axes3d_edit(s3, e3);
         check(s3.bars3d[0].opts.width != 0.25f && s3.planes[0].offset == 0.0,
-              "cleared: a 3D object edit before a cla(), and a plane edit before set_offset(), drop");
-        e3.bars3d[0].seen = 30;
+              "ids: a 3D object edit and a plane edit for objects since removed drop");
+        e3.bars3d[0].id = 5;
+        e3.planes[0] = {0, std::nullopt, 2.0, std::nullopt, 30, 7};
+        apply_axes3d_edit(s3, e3);
+        check(s3.bars3d[0].opts.width == 0.25f && s3.planes[0].offset == 0.0,
+              "ids: on its own object, a 3D edit applies; a plane edit made before set_offset() drops");
         e3.planes[0].seen = 31;
         apply_axes3d_edit(s3, e3);
-        check(s3.bars3d[0].opts.width == 0.25f && s3.planes[0].offset == 2.0,
-              "cleared: made over the current ones, both apply");
+        check(s3.planes[0].offset == 2.0, "ids: made over the current placement, it applies");
 
         // Figure level.
         FigureEdits f;

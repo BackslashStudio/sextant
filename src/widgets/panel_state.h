@@ -259,7 +259,8 @@ namespace sextant {
         char name_buf[128]{};
 
         // One plane's Data-panel tab. Scratch copies keep drag values stable across
-        // a gesture; positional, re-seeded on slot or plane-count change.
+        // a gesture; positional, re-seeded on a slot change or when the planes
+        // (their ids, in order) are no longer the ones seeded from.
         struct PlaneUi {
             PlaneOrientation orient = PlaneOrientation::XY;
             double offset = 0.0;
@@ -267,14 +268,17 @@ namespace sextant {
         };
 
         std::vector<PlaneUi> planes_local;
+        std::vector<ObjectId> plane_ids;   // what planes_local was seeded from
 
         // The 3D kinds' appearance, scratch for the same reason; re-seeded in
-        // pull_data_panel() on a selection or count change.
+        // pull_data_panel() on the same rule (a remove and an add leave the
+        // count alone but not the ids).
         std::vector<Bar3DOptions> bars3d_local;
         std::vector<SurfaceOptions> surfaces_local;
         std::vector<Scatter3DOptions> scatter3d_local;
         std::vector<Line3DOptions> line3d_local;
         std::vector<SurfaceTriOptions> surface_tri_local;
+        std::vector<ObjectId> scene_ids;   // seeded from, kind by kind
 
         // The 2D kinds' appearance, for a 2D axes' own sheet and for each plane's
         // sheet in 3D; same rule. hint_labels are dropped (an edit keeps the
@@ -285,6 +289,7 @@ namespace sextant {
             std::vector<BarOptions> bars;
             std::vector<HeatmapOptions> heatmaps;
             std::vector<ScatterZOptions> scatter_z;
+            std::vector<ObjectId> ids;   // seeded from, kind by kind
         };
 
         SheetStyles sheet_local;
@@ -295,8 +300,8 @@ namespace sextant {
         // since only one drag is active at a time.
         double width_held = 0.0;
 
-        // The Selection generation the per-object scratch was seeded at; object
-        // count changes re-seed on their own, every frame the panel draws.
+        // The Selection generation the per-object scratch was seeded at; changed
+        // objects re-seed on their own, every frame the panel draws.
         std::uint64_t synced_generation = kNeverSynced;
     };
 

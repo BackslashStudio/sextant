@@ -29,6 +29,7 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot& snap) 
         t.kind = PlotKind::Line;
         t.plot_index = static_cast<int>(i);
         t.data_stamp = snap.lines[i].data_stamp;
+        t.id = snap.lines[i].id;
         t.label = pick_label(lp.opts.name, "line", static_cast<int>(i));
         t.columns.push_back({"x", lp.x.data(), lp.x.size()});
         t.columns.push_back({"y", lp.y.data(), lp.y.size()});
@@ -41,6 +42,7 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot& snap) 
         t.kind = PlotKind::Scatter;
         t.plot_index = static_cast<int>(i);
         t.data_stamp = snap.scatters[i].data_stamp;
+        t.id = snap.scatters[i].id;
         t.label = pick_label(sp.opts.name, "scatter", static_cast<int>(i));
         t.columns.push_back({"x", sp.x.data(), sp.x.size()});
         t.columns.push_back({"y", sp.y.data(), sp.y.size()});
@@ -53,6 +55,7 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot& snap) 
         t.kind = PlotKind::Bar;
         t.plot_index = static_cast<int>(i);
         t.data_stamp = snap.bars[i].data_stamp;
+        t.id = snap.bars[i].id;
         t.label = pick_label(bp.opts.name, "bar", static_cast<int>(i));
         t.columns.push_back({"center", bp.centers.data(), bp.centers.size()});
         t.columns.push_back({"height", bp.heights.data(), bp.heights.size()});
@@ -65,6 +68,7 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot& snap) 
         t.kind = PlotKind::Heatmap;
         t.plot_index = static_cast<int>(i);
         t.data_stamp = snap.heatmaps[i].data_stamp;
+        t.id = snap.heatmaps[i].id;
         t.label = synth_label("heatmap", static_cast<int>(i));
         t.heatmap = &snap.heatmaps[i];
         out.push_back(std::move(t));
@@ -76,6 +80,7 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot& snap) 
         t.kind = PlotKind::ScatterZ;
         t.plot_index = static_cast<int>(i);
         t.data_stamp = snap.scatter_z[i].data_stamp;
+        t.id = snap.scatter_z[i].id;
         t.label = synth_label("scatter_z", static_cast<int>(i));
         t.columns.push_back({"x", sp.x.data(), sp.x.size()});
         t.columns.push_back({"y", sp.y.data(), sp.y.size()});
@@ -107,6 +112,7 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot3D& snap
         t.kind = PlotKind::Bar3D;
         t.plot_index = static_cast<int>(i);
         t.data_stamp = snap.bars3d[i].data_stamp;
+        t.id = snap.bars3d[i].id;
         t.label = synth_label("bar3d", static_cast<int>(i));
         t.bars3d = &snap.bars3d[i];
         out.push_back(std::move(t));
@@ -118,6 +124,7 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot3D& snap
         t.kind = PlotKind::Surface;
         t.plot_index = static_cast<int>(i);
         t.data_stamp = snap.surfaces[i].data_stamp;
+        t.id = snap.surfaces[i].id;
         t.label = synth_label("surface", static_cast<int>(i));
         t.surface = &snap.surfaces[i];
         out.push_back(std::move(t));
@@ -130,6 +137,7 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot3D& snap
         t.kind = PlotKind::Scatter3D;
         t.plot_index = static_cast<int>(i);
         t.data_stamp = snap.scatter3d[i].data_stamp;
+        t.id = snap.scatter3d[i].id;
         t.label = pick_label(sp.opts.name, "scatter3d", static_cast<int>(i));
         t.columns.push_back({"x", sp.x.data(), sp.x.size()});
         t.columns.push_back({"y", sp.y.data(), sp.y.size()});
@@ -146,6 +154,7 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot3D& snap
         t.kind = PlotKind::Line3D;
         t.plot_index = static_cast<int>(i);
         t.data_stamp = snap.lines3d[i].data_stamp;
+        t.id = snap.lines3d[i].id;
         t.label = pick_label(lp.opts.name, "line3d", static_cast<int>(i));
         t.columns.push_back({"x", lp.x.data(), lp.x.size()});
         t.columns.push_back({"y", lp.y.data(), lp.y.size()});
@@ -162,6 +171,7 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot3D& snap
         t.kind = PlotKind::SurfaceTri;
         t.plot_index = static_cast<int>(i);
         t.data_stamp = snap.surface_tri[i].data_stamp;
+        t.id = snap.surface_tri[i].id;
         t.label = pick_label(sm.opts.name, "surface_tri", static_cast<int>(i));
         t.columns.push_back({"x", sm.x.data(), sm.x.size()});
         t.columns.push_back({"y", sm.y.data(), sm.y.size()});

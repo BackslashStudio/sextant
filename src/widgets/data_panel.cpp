@@ -1473,9 +1473,14 @@ namespace sextant {
         if (ImGui::BeginTabBar("##plots", ImGuiTabBarFlags_FittingPolicyScroll)) {
             for (const DataPanelTab& tb: tabs) {
                 if (tb.table < 0) {
-                    // "##plane" keeps it apart from an object labelled "P0".
-                    const std::string tab = "P" + std::to_string(tb.plane)
-                                            + "##plane" + std::to_string(tb.plane);
+                    // "###plane": apart from an object labelled "P0", and keyed by
+                    // the plane's id where it has one, so the open tab stays on
+                    // its plane when one before it is removed (GUI-kit R9).
+                    const ObjectId pid = static_cast<std::size_t>(tb.plane) < cur3d->planes.size()
+                                             ? cur3d->planes[static_cast<std::size_t>(tb.plane)].id : 0;
+                    const std::string tab = "P" + std::to_string(tb.plane) + "###plane"
+                                            + (pid != 0 ? "i" + std::to_string(pid)
+                                                        : std::to_string(tb.plane));
                     if (ImGui::BeginTabItem(tab.c_str())) {
                         const auto objects = std::count_if(tables.begin(), tables.end(),
                                                            [&](const PlotDataTable& t) {
@@ -1494,10 +1499,13 @@ namespace sextant {
                 const std::string name = t.plane_index >= 0
                                              ? "P" + std::to_string(t.plane_index) + " " + t.label
                                              : t.label;
-                // "###i": the ID is the index alone, so it survives a rename (the
-                // name is the label; with "##" each keystroke in the Name field
-                // re-IDs the tab and its widgets, dropping the field's focus).
-                const std::string tab = name + "###" + std::to_string(i);
+                // "###": the ID leaves the name out, so it survives a rename (with
+                // "##" each keystroke in the Name field re-IDs the tab and its
+                // widgets, dropping the field's focus). It is the object's id where
+                // it has one, so the open tab follows its object when objects
+                // before it go or move (GUI-kit R9); else the table index.
+                const std::string tab = name + "###"
+                                        + (t.id != 0 ? "i" + std::to_string(t.id) : std::to_string(i));
                 if (ImGui::BeginTabItem(tab.c_str())) {
                     if (!t.group.empty()) {
                         ImGui::TextDisabled("%s", t.group.c_str());

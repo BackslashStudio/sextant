@@ -260,6 +260,9 @@ int main() {
     test_figure_impl_access();
     test_host_frame();
 
+    // object_id.cpp
+    test_object_ids();
+
     // window_wait.cpp and the windowed memory export -- last, because they open
     // real windows
     test_memory_export_windowed();
