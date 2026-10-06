@@ -568,6 +568,9 @@ namespace lt {
     // undo.cpp
     void test_undo();
 
+    // describe.cpp
+    void test_describe();
+
     // window_wait.cpp -- last: it opens real windows
     void test_wait_closed();
 

@@ -266,6 +266,9 @@ int main() {
     // undo.cpp
     test_undo();
 
+    // describe.cpp
+    test_describe();
+
     // window_wait.cpp and the windowed memory export -- last, because they open
     // real windows
     test_memory_export_windowed();
