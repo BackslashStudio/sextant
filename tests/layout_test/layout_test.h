@@ -560,6 +560,7 @@ namespace lt {
 
     // figure_impl.cpp
     void test_figure_impl_access();
+    void test_host_frame();
 
     // window_wait.cpp -- last: it opens real windows
     void test_wait_closed();

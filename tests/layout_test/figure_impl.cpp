@@ -5,6 +5,7 @@
 #include "layout_test.h"
 #include "figure_impl.h"
 
+#include <stdexcept>
 #include <type_traits>
 
 namespace lt {
@@ -80,5 +81,83 @@ namespace lt {
               && a2->title == "newer",
               "stamps: a setter call made since the edit was typed wins");
         check(!fi.open.load(), "no window was opened along the way");
+    }
+
+    // The frame a host runs instead of show(): host_frame() patches and draws,
+    // the host publishes when it chooses (GUI-kit R8).
+    void test_host_frame() {
+        std::printf("\n[figure_impl.h: host_frame(), publishing on the host's call]\n");
+
+        auto fig = Figure::create();
+        auto ax  = fig->add_subplot(1, 1, 1);
+        ax->line(std::vector<double>{ 1.0, 3.0, 2.0 });
+        ax->set_title("caller");
+        auto& fi = detail::FigureAccess::impl(*fig);
+        detail::FigureAccess::Impl::AxesImpl* a2 = fi.find_slot_impl(1);
+
+        // has_journal() follows the journal alone, not what is pending.
+        fi.edit_box.update(1, [](AxesEdit& e) { e.title = "pending"; });
+        check(!fi.edit_box.has_journal(), "has_journal(): a pending edit is not journaled yet");
+        fi.edit_box.load_and_clear_journaled();
+        check(fi.edit_box.has_journal(), "has_journal(): true after a journaled drain");
+        fi.edit_box.take_journal();
+        check(!fi.edit_box.has_journal(), "has_journal(): false once the journal is taken");
+
+        auto s1 = fi.host_frame();
+        check(s1 && s1->axes.size() == 1 && s1->axes[0].snap2d()
+              && s1->axes[0].snap2d()->title == "caller",
+              "host_frame(): the first call publishes the initial snapshot");
+        check(fi.host_frame() == s1, "host_frame(): an idle frame returns the same snapshot");
+
+        // A typed title, stamped at the push site as the panel does.
+        const auto typed_over = s1->axes[0].snap2d()->title_stamps.title;
+        fi.edit_box.update(1, [typed_over](AxesEdit& e) {
+            e.title = "typed";
+            e.title_seen.title = typed_over;
+        });
+        auto s2 = fi.host_frame();
+        check(s2 != s1 && s2->axes[0].snap2d()->title == "typed",
+              "host_frame(): the next frame patches the edit onto the snapshot");
+        check(s2->data_generation == s1->data_generation && s2->layout_generation != s1->layout_generation,
+              "host_frame(): a title patch keeps the data caches");
+        check(a2->title == "caller" && fi.edit_box.has_journal(),
+              "host_frame(): never publishes on its own -- the live axes wait, journaled");
+        auto s3 = fi.host_frame();
+        check(s3 == s2 && fi.edit_box.has_journal() && a2->title == "caller",
+              "host_frame(): a quiet frame does not publish either");
+
+        // The host's publish.
+        fi.apply_edits_and_publish();
+        check(a2->title == "typed" && ax->title() == "typed" && !fi.edit_box.has_journal(),
+              "publish: the journal reaches the live axes and is cleared");
+        auto s4 = fi.host_frame();
+        check(s4 != s3 && s4->generation > s3->generation && s4->axes[0].snap2d()->title == "typed",
+              "publish: the next frame draws the rebuilt snapshot");
+
+        // A data op: one new data generation from the patch, replayed on publish.
+        fi.edit_box.update(1, [](AxesEdit& e) {
+            e.plot_ops.push_back(PlotCellEdit{PlotKind::Line, 0, 1, 2, 9.0});
+        });
+        auto s5 = fi.host_frame();
+        check(s5->data_generation != s4->data_generation && s5->axes[0].snap2d()->lines[0].y[2] == 9.0
+              && a2->lines[0].y[2] == 2.0,
+              "data op: patched onto the snapshot with a new data generation, live data untouched");
+        fi.apply_edits_and_publish();
+        check(a2->lines[0].y[2] == 9.0, "data op: the publish replays it into the live axes");
+
+        // Public-API changes reach the snapshot through the host's publish too.
+        ax->set_title("setter");
+        check(fi.host_frame()->axes[0].snap2d()->title == "typed",
+              "setter: not drawn before the host publishes");
+        fi.apply_edits_and_publish();
+        check(fi.host_frame()->axes[0].snap2d()->title == "setter",
+              "setter: drawn after it");
+
+        // One driver at a time.
+        bool threw = false;
+        fi.open.store(true);
+        try { fi.host_frame(); } catch (const std::logic_error&) { threw = true; }
+        fi.open.store(false);
+        check(threw, "host_frame(): throws while the figure is shown");
     }
 } // namespace lt

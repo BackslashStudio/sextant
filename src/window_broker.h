@@ -38,6 +38,14 @@ namespace sextant {
         std::shared_ptr<WindowLink> link;
     };
 
+    // Initialises GLFW once per process, with the library's init hints (X11 on
+    // Linux, no resource-dir chdir on macOS). The first glfwInit() in a process
+    // fixes the hints, so a host that owns a GLFW window calls this instead of
+    // glfwInit() itself. Throws std::runtime_error when GLFW cannot start. The
+    // library never calls glfwTerminate(); a host does, at exit, once its
+    // figures are closed.
+    void ensure_glfw_init();
+
     // Makes a window with its link attached. Inline when this thread may own one
     // -- always, outside macOS. Otherwise the request is queued for the pump and
     // this blocks until the window arrives, warning once (the message handler,

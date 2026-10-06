@@ -45,30 +45,34 @@ namespace sextant {
             throw std::runtime_error(msg);
         }
 
-        void ensure_glfw_init() {
-            static std::once_flag s_init;
-            std::call_once(s_init, [] {
+    } // namespace
+
+    void ensure_glfw_init() {
+        static std::once_flag s_init;
+        std::call_once(s_init, [] {
 #if defined(__linux__)
-                glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
+            glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
 #endif
 #if defined(__APPLE__)
-                // An app bundle's working directory belongs to the program that
-                // started, not to us: savefig("plot.png") has to land where the
-                // caller thinks it will.
-                glfwInitHint(GLFW_COCOA_CHDIR_RESOURCES, GLFW_FALSE);
+            // An app bundle's working directory belongs to the program that
+            // started, not to us: savefig("plot.png") has to land where the
+            // caller thinks it will.
+            glfwInitHint(GLFW_COCOA_CHDIR_RESOURCES, GLFW_FALSE);
 #endif
-                if (!glfwInit()) {
+            if (!glfwInit()) {
 #if defined(__linux__)
-                    throw_glfw_error("glfwInit failed",
-                                     " (sextant's windows use X11 -- XWayland on a Wayland "
-                                     "desktop -- so DISPLAY must name an X server)");
+                throw_glfw_error("glfwInit failed",
+                                 " (sextant's windows use X11 -- XWayland on a Wayland "
+                                 "desktop -- so DISPLAY must name an X server)");
 #else
-                    throw_glfw_error("glfwInit failed", "");
+                throw_glfw_error("glfwInit failed", "");
 #endif
-                }
-                glfw_ready.store(true);
-            });
-        }
+            }
+            glfw_ready.store(true);
+        });
+    }
+
+    namespace {
 
         struct Live {
             GLFWwindow* window = nullptr;

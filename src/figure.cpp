@@ -261,6 +261,24 @@ void Figure::Impl::apply_panel_edits_to_snapshot() {
     snapshot_box.store(std::move(next));
 }
 
+std::shared_ptr<const FigureSnapshot> Figure::Impl::begin_panel_frame() {
+    apply_panel_edits_to_snapshot();
+    auto snap = snapshot_box.load();
+    // Panel edits pushed this frame record this snapshot's stamps.
+    edit_box.set_drawn(snap);
+    return snap;
+}
+
+std::shared_ptr<const FigureSnapshot> Figure::Impl::host_frame() {
+    if (open.load())
+        throw std::logic_error(
+            "Figure::Impl::host_frame(): the figure is shown, and its window thread "
+            "drives it (close() it first)");
+    ensure_any_axes();
+    if (!snapshot_box.load()) apply_edits_and_publish();
+    return begin_panel_frame();
+}
+
 std::shared_ptr<const FigureMeasure> Figure::Impl::on_screen_measure() const {
     return open.load() ? window_state.plot.layout.load() : nullptr;
 }
@@ -396,10 +414,7 @@ void Figure::show(bool pause) {
     // render_fn captures `this`; safe because close()/~Figure() join the
     // thread first. It never touches live Axes::Impl.
     auto render_fn = [this](GLContext& ctx, RenderDevice& dev, FigureWindowShell& shell) {
-        d->apply_panel_edits_to_snapshot();
-        auto snap = d->snapshot_box.load();  // loaded ONCE, reused for both draws below
-        // Panel edits pushed this frame record this snapshot's stamps.
-        d->edit_box.set_drawn(snap);
+        auto snap = d->begin_panel_frame();  // loaded ONCE, reused for both draws below
         shell.frame(ctx, dev, *snap, d->edit_box, d->window_state);
     };
 

@@ -258,6 +258,7 @@ int main() {
 
     // figure_impl.cpp
     test_figure_impl_access();
+    test_host_frame();
 
     // window_wait.cpp and the windowed memory export -- last, because they open
     // real windows

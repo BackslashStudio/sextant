@@ -93,6 +93,14 @@ public:
         if (rows) { pending_.row_ratios.reset(); journal_.row_ratios.reset(); }
     }
 
+    // Whether a replay is waiting for the caller thread. Pending edits are not
+    // counted: a host driving the figure itself asks after the frame's drain,
+    // which journals them (see Figure::Impl::host_frame()).
+    bool has_journal() {
+        std::scoped_lock lk(mutex_);
+        return !journal_.empty();
+    }
+
     std::optional<PlotDataJournal> take_journal() {
         std::scoped_lock lk(mutex_);
         if (journal_.empty()) return std::nullopt;

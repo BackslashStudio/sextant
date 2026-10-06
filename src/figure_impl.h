@@ -180,6 +180,36 @@ struct Figure::Impl {
     // journaled for the caller thread to replay, so it survives refresh().
     void apply_panel_edits_to_snapshot();
 
+    // The start of every frame that draws components, in this order: patch the
+    // edits pushed last frame onto the snapshot, load it, and record it as the
+    // one this frame's edits are pushed over. Returns that snapshot. Never
+    // touches live Axes::Impl, so the window thread runs it too.
+    std::shared_ptr<const FigureSnapshot> begin_panel_frame();
+
+    // A host driving this figure on its own thread instead of show(): once
+    // per frame, before its components, then draw them from the result. The
+    // first call publishes the initial snapshot, as show() does.
+    //
+    // Publishing is the host's call, never automatic: apply_edits_and_publish()
+    // replays the journal into the live axes and rebuilds the snapshot, which
+    // bumps every generation (a re-render, data caches dropped), so not every
+    // frame. Do it when edit_box.has_journal() and the host's own rule agree
+    // (e.g. no ImGui item active), before reading the live axes back, and after
+    // changing the figure through the public API (refresh() throws on a figure
+    // that is not open). Until then panel edits live only on the snapshot.
+    //
+    // Stamps: set_drawn() stamps styles, plot styles, plane placements and 3D
+    // objects. Titles (title_seen), limits (lim_seen) and the camera
+    // (camera_seen) take the drawn snapshot's stamp at the push site, as
+    // panel.cpp and plot_view.cpp do; a host pushing those must too, or a
+    // setter call made since loses to the edit.
+    //
+    // Not on a host-driven figure: show(), refresh(), savefig_*_live() (which
+    // opens a window); save through perform_save(). One driver at a time:
+    // throws std::logic_error while `open`. A host owning the GLFW loop initialises GLFW with
+    // ensure_glfw_init() (window_broker.h), not glfwInit().
+    std::shared_ptr<const FigureSnapshot> host_frame();
+
     // The open window's layout measurements, so an export keeps them; null
     // without a window.
     std::shared_ptr<const FigureMeasure> on_screen_measure() const;
