@@ -178,13 +178,20 @@ struct Figure::Impl {
     // Render-thread counterpart: never touches live Axes::Impl. Patches a copy
     // of the published snapshot and republishes it. Every edit is also
     // journaled for the caller thread to replay, so it survives refresh().
-    void apply_panel_edits_to_snapshot();
+    // `inv`, if given, receives what undoes the patch (see patch_snapshot()).
+    void apply_panel_edits_to_snapshot(FigureEdits* inv = nullptr);
+
+    // Applies `edits` to a copy of the published snapshot and publishes it;
+    // with `inv`, records in it what undoes them, from the snapshot the user
+    // saw (GUI-kit R10): only what was actually written, every entry addressed
+    // by id, data ops last-first. The journal is the caller's business.
+    void patch_snapshot(const FigureEdits& edits, FigureEdits* inv);
 
     // The start of every frame that draws components, in this order: patch the
     // edits pushed last frame onto the snapshot, load it, and record it as the
     // one this frame's edits are pushed over. Returns that snapshot. Never
     // touches live Axes::Impl, so the window thread runs it too.
-    std::shared_ptr<const FigureSnapshot> begin_panel_frame();
+    std::shared_ptr<const FigureSnapshot> begin_panel_frame(FigureEdits* inv = nullptr);
 
     // A host driving this figure on its own thread instead of show(): once
     // per frame, before its components, then draw them from the result. The
@@ -208,7 +215,20 @@ struct Figure::Impl {
     // opens a window); save through perform_save(). One driver at a time:
     // throws std::logic_error while `open`. A host owning the GLFW loop initialises GLFW with
     // ensure_glfw_init() (window_broker.h), not glfwInit().
-    std::shared_ptr<const FigureSnapshot> host_frame();
+    //
+    // Undo (GUI-kit R10): `inverse`, if given, receives what undoes the edits
+    // this frame drained (empty when none), for the host's own undo stack; a
+    // gesture spanning frames folds them with compose_inverse().
+    std::shared_ptr<const FigureSnapshot> host_frame(FigureEdits* inverse = nullptr);
+
+    // Applies an edit now, outside the edit box, so the edits components push
+    // this frame never mix into it: stamps it and fills its ids from the
+    // current snapshot (an undo wins over a setter called before it; ids
+    // already set are kept), patches the snapshot, journals it as a drain
+    // would (publish as after any drain), and returns its inverse. For an undo
+    // that is the redo, and the other way round. Host-driven figures only:
+    // throws std::logic_error while `open`.
+    FigureEdits apply_edits(FigureEdits edits);
 
     // The open window's layout measurements, so an export keeps them; null
     // without a window.

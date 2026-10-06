@@ -214,9 +214,13 @@ void Figure::Impl::apply_edits_and_publish() {
     snapshot_box.store(std::make_shared<const FigureSnapshot>(build_figure_snapshot()));
 }
 
-void Figure::Impl::apply_panel_edits_to_snapshot() {
+void Figure::Impl::apply_panel_edits_to_snapshot(FigureEdits* inv) {
     auto edits = edit_box.load_and_clear_journaled();
     if (!edits) return;
+    patch_snapshot(*edits, inv);
+}
+
+void Figure::Impl::patch_snapshot(const FigureEdits& edits, FigureEdits* inv) {
     auto prev = snapshot_box.load();
     if (!prev) return;
 
@@ -227,56 +231,85 @@ void Figure::Impl::apply_panel_edits_to_snapshot() {
 
     // Bump data_generation only for data ops, so pan/zoom keeps the caches.
     bool data_changed = false;
-    for (const auto& [idx, e] : edits->per_axes)
+    for (const auto& [idx, e] : edits.per_axes)
         if (!e.plot_ops.empty()) { data_changed = true; break; }
     if (!data_changed)
-        for (const auto& [idx, e] : edits->per_axes3d)
+        for (const auto& [idx, e] : edits.per_axes3d)
             if (!e.plot_ops.empty()) { data_changed = true; break; }
     if (data_changed) next->data_generation = next_snapshot_generation();
-    if (!is_navigation_only(*edits)) next->layout_generation = next_snapshot_generation();
+    if (!is_navigation_only(edits)) next->layout_generation = next_snapshot_generation();
 
-    for (const auto& [idx, e] : edits->per_axes) {
+    for (const auto& [idx, e] : edits.per_axes) {
         for (auto& fa : next->axes) {
             if (fa.slot.index != idx) continue;
             RenderSnapshot* sp = fa.snap2d();
             if (!sp) break;   // a 3D slot is addressed on the other lane
-            apply_axes_edit(*sp, e);
+            AxesEdit undo;
+            apply_axes_edit(*sp, e, inv ? &undo : nullptr);
+            if (inv && !axes_edit_empty(undo)) inv->per_axes.push_back({idx, std::move(undo)});
             break;
         }
     }
 
-    for (const auto& [idx, e] : edits->per_axes3d) {
+    for (const auto& [idx, e] : edits.per_axes3d) {
         for (auto& fa : next->axes) {
             if (fa.slot.index != idx) continue;
-            if (RenderSnapshot3D* s3 = fa.snap3d()) apply_axes3d_edit(*s3, e);
+            if (RenderSnapshot3D* s3 = fa.snap3d()) {
+                AxesEdit3D undo;
+                apply_axes3d_edit(*s3, e, inv ? &undo : nullptr);
+                if (inv && !axes_edit_empty(undo))
+                    inv->per_axes3d.push_back({idx, std::move(undo)});
+            }
             break;
         }
     }
     // Figure-level edits, patched on the snapshot (also applied in
     // apply_edits_and_publish()) so they take effect without refresh().
-    apply_figure_edits(*edits, next->stamps, next->suptitle, next->suptitle_opts,
-                       next->margins, next->col_gap, next->row_gap);
-    if (edits->col_ratios)    next->col_ratios    = *edits->col_ratios;
-    if (edits->row_ratios)    next->row_ratios    = *edits->row_ratios;
+    apply_figure_edits(edits, next->stamps, next->suptitle, next->suptitle_opts,
+                       next->margins, next->col_gap, next->row_gap, inv);
+    if (edits.col_ratios) {
+        if (inv) inv->col_ratios = next->col_ratios;
+        next->col_ratios = *edits.col_ratios;
+    }
+    if (edits.row_ratios) {
+        if (inv) inv->row_ratios = next->row_ratios;
+        next->row_ratios = *edits.row_ratios;
+    }
     snapshot_box.store(std::move(next));
 }
 
-std::shared_ptr<const FigureSnapshot> Figure::Impl::begin_panel_frame() {
-    apply_panel_edits_to_snapshot();
+std::shared_ptr<const FigureSnapshot> Figure::Impl::begin_panel_frame(FigureEdits* inv) {
+    apply_panel_edits_to_snapshot(inv);
     auto snap = snapshot_box.load();
     // Panel edits pushed this frame record this snapshot's stamps.
     edit_box.set_drawn(snap);
     return snap;
 }
 
-std::shared_ptr<const FigureSnapshot> Figure::Impl::host_frame() {
+std::shared_ptr<const FigureSnapshot> Figure::Impl::host_frame(FigureEdits* inverse) {
     if (open.load())
         throw std::logic_error(
             "Figure::Impl::host_frame(): the figure is shown, and its window thread "
             "drives it (close() it first)");
     ensure_any_axes();
     if (!snapshot_box.load()) apply_edits_and_publish();
-    return begin_panel_frame();
+    if (inverse) *inverse = FigureEdits{};
+    return begin_panel_frame(inverse);
+}
+
+FigureEdits Figure::Impl::apply_edits(FigureEdits edits) {
+    if (open.load())
+        throw std::logic_error(
+            "Figure::Impl::apply_edits(): the figure is shown, and its window thread "
+            "drives it (close() it first)");
+    ensure_any_axes();
+    if (!snapshot_box.load()) apply_edits_and_publish();
+    FigureEdits inv;
+    if (edits.empty()) return inv;
+    stamp_figure_edits(edits, *snapshot_box.load());
+    edit_box.journal(edits);
+    patch_snapshot(edits, &inv);
+    return inv;
 }
 
 std::shared_ptr<const FigureMeasure> Figure::Impl::on_screen_measure() const {

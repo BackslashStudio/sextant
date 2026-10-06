@@ -9,6 +9,7 @@
 #include <cmath>
 #include <limits>
 #include <optional>
+#include <type_traits>
 #include <variant>
 #include <vector>
 
@@ -643,27 +644,69 @@ std::optional<ObjectRef> find_object_in(const S& s, const PlotKind (&kinds)[N], 
     return std::nullopt;
 }
 
-// Removes object `id` from its kind's vector; false if it is not there.
-template <class S, std::size_t N>
-bool remove_object_in(S& s, const PlotKind (&kinds)[N], ObjectId id) {
+// A plot object taken out by remove_object(), for putting back (GUI-kit R10):
+// where it was among its kind, and the whole object, its id included.
+using PlotObject2D = std::variant<LinePlot, ScatterPlot, BarPlot, HeatmapPlot, ScatterZPlot>;
+using PlotObject3D = std::variant<Bar3DPlot, SurfacePlot, Scatter3DPlot, Line3DPlot,
+                                  SurfaceTriPlot>;
+template <class Object>
+struct RemovedObject {
+    std::size_t index = 0;
+    Object      object;
+};
+
+// Removes object `id` from its kind's vector and returns it; nothing if it is
+// not there.
+template <class Object, class S, std::size_t N>
+std::optional<RemovedObject<Object>> remove_object_in(S& s, const PlotKind (&kinds)[N],
+                                                      ObjectId id) {
+    using R = std::optional<RemovedObject<Object>>;
     const auto at = find_object_in(s, kinds, id);
-    if (!at) return false;
-    return with_kind(s, at->kind, [&at](auto& v) {
-        v.erase(v.begin() + static_cast<std::ptrdiff_t>(at->index));
-        return true;
-    }, false);
+    if (!at) return std::nullopt;
+    return with_kind(s, at->kind, [&at](auto& v) -> R {
+        const auto it = v.begin() + static_cast<std::ptrdiff_t>(at->index);
+        RemovedObject<Object> r{ at->index, Object(std::move(*it)) };
+        v.erase(it);
+        return r;
+    }, R{});
+}
+
+// Puts a removed object back at its index (clamped to the end of its kind),
+// with its id; false if an object with that id is there already.
+template <class S, std::size_t N, class Object>
+bool restore_object_in(S& s, const PlotKind (&kinds)[N], RemovedObject<Object> r) {
+    const ObjectId id = std::visit([](const auto& p) { return p.id; }, r.object);
+    if (find_object_in(s, kinds, id)) return false;
+    return std::visit([&](auto& p) {
+        using P = std::decay_t<decltype(p)>;
+        bool done = false;
+        for (PlotKind k : kinds)
+            done = done || with_kind(s, k, [&](auto& v) {
+                if constexpr (std::is_same_v<typename std::decay_t<decltype(v)>::value_type, P>) {
+                    const std::size_t at = std::min(r.index, v.size());
+                    v.insert(v.begin() + static_cast<std::ptrdiff_t>(at), std::move(p));
+                    return true;
+                } else {
+                    return false;
+                }
+            }, false);
+        return done;
+    }, r.object);
 }
 
 // Moves object `id` to position `to` among its kind (clamped to the last),
-// keeping the others' order; false if it is not there.
+// keeping the others' order; returns where it was (a move back undoes it), or
+// nothing if it is not there.
 template <class S, std::size_t N>
-bool move_object_in(S& s, const PlotKind (&kinds)[N], ObjectId id, std::size_t to) {
+std::optional<std::size_t> move_object_in(S& s, const PlotKind (&kinds)[N], ObjectId id,
+                                          std::size_t to) {
     const auto at = find_object_in(s, kinds, id);
-    if (!at) return false;
-    return with_kind(s, at->kind, [&at, to](auto& v) {
+    if (!at) return std::nullopt;
+    with_kind(s, at->kind, [&at, to](auto& v) {
         objects_detail::move_to(v, at->index, to);
         return true;
     }, false);
+    return at->index;
 }
 
 // Grid position of one axes (1-based, row-major, like matplotlib). Covers cells

@@ -3,6 +3,7 @@
 #include "plot_objects.h"
 #include "tick.h"
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <optional>
 #include <string>
@@ -46,6 +47,16 @@ struct PlotRowEdit {
     int         plane_index = -1;   // see PlotCellEdit
     unsigned long long seen = ~0ull;   // see PlotCellEdit
     ObjectId id = 0, plane_id = 0;    // see PlotCellEdit
+
+    // The removed point, on the Insert that undoes a Remove (GUI-kit R10):
+    // Insert writes these values instead of copying row-1, and puts a value
+    // into an optional column only where the point had one.
+    struct Restore {
+        std::vector<double> cols;                   // the kind's required columns, in order
+        std::optional<std::string> label;           // its hint label
+        std::array<std::optional<double>, 8> err;   // see edits_detail::err_columns()
+    };
+    std::optional<Restore> restore;
 };
 
 // Appearance of one 2D plot object, from its Data-panel tab. Addressed like a
@@ -76,6 +87,18 @@ struct MatrixLineEdit {
     PlotKind    kind       = PlotKind::Heatmap;
     unsigned long long seen = ~0ull;   // see PlotCellEdit
     ObjectId id = 0, plane_id = 0;    // see PlotCellEdit
+
+    // The removed line, on the Insert that undoes a Remove (as PlotRowEdit's).
+    struct Restore {
+        std::vector<double> values;        // of the data matrix
+        std::vector<double> alt;           // of bar3d's bottoms; empty = none
+        std::vector<std::string> labels;   // of hint_labels; empty = none
+        double coord = 0.0;                // grid kinds: the line's coordinate
+    };
+    std::optional<Restore> restore;
+    // On the inverse of an op that padded (or cut) hint_labels to rows x cols:
+    // the size they are put back to afterwards.
+    std::optional<std::size_t> labels_size;
 };
 
 // A plot's bar width (a per-plot scalar), journaled like other data. For
@@ -129,17 +152,28 @@ void merge_title_edits(TitleEdits& dst, const E& e) {
 
 // Applies each title `e` carries unless dst's was set after the snapshot it was
 // typed over. For Axes::Impl, Axes3D::Impl and both snapshot kinds.
+//
+// Undo (GUI-kit R10): every apply_* below takes an optional `inv`, the same
+// type as the edit, and records in it the value each field it writes replaced;
+// a field it skips (a newer setter, a gone object) leaves nothing there.
 template <typename T, typename E>
-void apply_title_edits(T& dst, const E& e) {
+void apply_title_edits(T& dst, const E& e, E* inv = nullptr) {
     auto one = [](std::string& text, unsigned long long have,
-                  const std::optional<std::string>& v, unsigned long long seen) {
-        if (v && have <= seen) text = *v;
+                  const std::optional<std::string>& v, unsigned long long seen,
+                  std::optional<std::string>* old) {
+        if (!v || have > seen) return;
+        if (old) *old = text;
+        text = *v;
     };
-    one(dst.title,  dst.title_stamps.title,  e.title,  e.title_seen.title);
-    one(dst.xtitle, dst.title_stamps.xtitle, e.xtitle, e.title_seen.xtitle);
-    one(dst.ytitle, dst.title_stamps.ytitle, e.ytitle, e.title_seen.ytitle);
+    one(dst.title,  dst.title_stamps.title,  e.title,  e.title_seen.title,
+        inv ? &inv->title : nullptr);
+    one(dst.xtitle, dst.title_stamps.xtitle, e.xtitle, e.title_seen.xtitle,
+        inv ? &inv->xtitle : nullptr);
+    one(dst.ytitle, dst.title_stamps.ytitle, e.ytitle, e.title_seen.ytitle,
+        inv ? &inv->ytitle : nullptr);
     if constexpr (requires { dst.ztitle; e.ztitle; })
-        one(dst.ztitle, dst.title_stamps.ztitle, e.ztitle, e.title_seen.ztitle);
+        one(dst.ztitle, dst.title_stamps.ztitle, e.ztitle, e.title_seen.ztitle,
+            inv ? &inv->ztitle : nullptr);
 }
 
 // Limits from pan/zoom or the Limits fields, per axis with the stamp they were
@@ -190,24 +224,33 @@ void merge_limit_edits(LimitEdits& dst, const E& e) {
 // Applies each axis `e` carries unless dst's was set after the snapshot it was
 // made over, as apply_title_edits().
 template <typename T, typename E>
-void apply_limit_edits(T& dst, const E& e) {
+void apply_limit_edits(T& dst, const E& e, E* inv = nullptr) {
     using edits_detail::LimitAxis;
     using OB = const std::optional<bool>;
     using OD = const std::optional<double>;
-    auto one = [](LimitAxis<bool, double> d, unsigned long long have,
-                  LimitAxis<OB, OD> v, unsigned long long seen) {
-        if (have > seen) return;
+    using RB = std::optional<bool>;
+    using RD = std::optional<double>;
+    // The inverse takes the whole axis, so an undo puts auto and both bounds back.
+    auto one = [inv](LimitAxis<bool, double> d, unsigned long long have,
+                     LimitAxis<OB, OD> v, unsigned long long seen,
+                     RB E::* old_auto, RD E::* old_lo, RD E::* old_hi) {
+        if (have > seen || (!v.autoscale && !v.lo && !v.hi)) return;
+        if (inv) {
+            inv->*old_auto = d.autoscale;
+            inv->*old_lo   = d.lo;
+            inv->*old_hi   = d.hi;
+        }
         if (v.autoscale) d.autoscale = *v.autoscale;
         if (v.lo) d.lo = *v.lo;
         if (v.hi) d.hi = *v.hi;
     };
     one({dst.xlim_auto, dst.xmin, dst.xmax}, dst.limit_stamps.x,
-        {e.xlim_auto, e.xmin, e.xmax}, e.lim_seen.x);
+        {e.xlim_auto, e.xmin, e.xmax}, e.lim_seen.x, &E::xlim_auto, &E::xmin, &E::xmax);
     one({dst.ylim_auto, dst.ymin, dst.ymax}, dst.limit_stamps.y,
-        {e.ylim_auto, e.ymin, e.ymax}, e.lim_seen.y);
+        {e.ylim_auto, e.ymin, e.ymax}, e.lim_seen.y, &E::ylim_auto, &E::ymin, &E::ymax);
     if constexpr (requires { dst.zmin; e.zmin; })
         one({dst.zlim_auto, dst.zmin, dst.zmax}, dst.limit_stamps.z,
-            {e.zlim_auto, e.zmin, e.zmax}, e.lim_seen.z);
+            {e.zlim_auto, e.zmin, e.zmax}, e.lim_seen.z, &E::zlim_auto, &E::zmin, &E::zmax);
 }
 
 // One axes slot's pending panel edits; absent = untouched. For the tick
@@ -398,6 +441,11 @@ struct PlotDataJournal {
 // re-validated and stale ops silently skipped (the panel indexed an older
 // frame; the render thread cannot throw). Validate before mut() to avoid a
 // needless clone.
+//
+// Each applier returns the op that undoes it (GUI-kit R10), or nothing when it
+// changed nothing. The inverse addresses the object where it is now (index,
+// id, and its current data_stamp as `seen`, so a later set_*_data() makes the
+// undo drop); a list's inverse runs in reverse order.
 // ---------------------------------------------------------------------------
 
 namespace edits_detail {
@@ -437,6 +485,14 @@ auto* find_plane(T& t, int index, ObjectId id) {
     return static_cast<P*>(nullptr);
 }
 
+// Where plane `p` (found by find_plane()) is now.
+template <class T, class P>
+int plane_index_of(const T& t, const P* p) {
+    for (std::size_t i = 0; i < t.plane_count(); ++i)
+        if (&t.plane_at(i) == p) return static_cast<int>(i);
+    return -1;
+}
+
 // A data op's object, if it is still there and its data is the one the op was
 // made over.
 template <class Vec, class E>
@@ -445,44 +501,78 @@ auto* op_target(Vec& v, const E& e) {
     return p && op_current(*p, e) ? p : nullptr;
 }
 
+// A copy of `e` addressed to object `p` of `v` as it is now: the start of
+// every inverse.
+template <class E, class Vec, class P>
+E retarget(const E& e, const Vec& v, const P& p) {
+    E inv = e;
+    inv.plot_index = static_cast<int>(&p - v.data());
+    inv.id = p.id;
+    inv.seen = p.data_stamp;
+    return inv;
+}
+
+// Writes one cell; returns the value it replaced, or nothing out of range.
+inline std::optional<double> put_cell(CowVec<double>& v, std::size_t i, double value) {
+    if (i >= v.size()) return std::nullopt;
+    const double old = v[i];
+    v.mut()[i] = value;
+    return old;
+}
+
+// The same cell with the value it held: a PlotCellEdit's inverse.
+template <class Vec, class P>
+std::optional<PlotDataOp> cell_undo(const PlotCellEdit& e, const Vec& v, const P& p,
+                                    std::optional<double> old) {
+    if (!old) return std::nullopt;
+    PlotCellEdit inv = retarget(e, v, p);
+    inv.value = *old;
+    return inv;
+}
+
 } // namespace edits_detail
 
 template <class T>
-void apply_plot_data_op(T& t, const PlotCellEdit& e) {
-    auto put = [](CowVec<double>& v, std::size_t i, double value) {
-        if (i < v.size()) v.mut()[i] = value;
-    };
+std::optional<PlotDataOp> apply_plot_data_op(T& t, const PlotCellEdit& e) {
+    using edits_detail::cell_undo;
     using edits_detail::op_target;
+    using edits_detail::put_cell;
     switch (e.kind) {
         case PlotKind::Line:
             if (auto* lp = op_target(t.lines, e))
-                put(e.column == 0 ? lp->x : lp->y, e.element, e.value);
-            return;
+                return cell_undo(e, t.lines, *lp,
+                                 put_cell(e.column == 0 ? lp->x : lp->y, e.element, e.value));
+            return std::nullopt;
         case PlotKind::Scatter:
             if (auto* sp = op_target(t.scatters, e))
-                put(e.column == 0 ? sp->x : sp->y, e.element, e.value);
-            return;
+                return cell_undo(e, t.scatters, *sp,
+                                 put_cell(e.column == 0 ? sp->x : sp->y, e.element, e.value));
+            return std::nullopt;
         case PlotKind::Bar:
             if (auto* bp = op_target(t.bars, e))
-                put(e.column == 0 ? bp->centers : bp->heights, e.element, e.value);
-            return;
+                return cell_undo(e, t.bars, *bp,
+                                 put_cell(e.column == 0 ? bp->centers : bp->heights,
+                                          e.element, e.value));
+            return std::nullopt;
         case PlotKind::ScatterZ: {
             auto* sp = op_target(t.scatter_z, e);
-            if (!sp) return;
-            put(e.column == 0 ? sp->x : (e.column == 1 ? sp->y : sp->z), e.element, e.value);
-            return;
+            if (!sp) return std::nullopt;
+            return cell_undo(e, t.scatter_z, *sp,
+                             put_cell(e.column == 0 ? sp->x : (e.column == 1 ? sp->y : sp->z),
+                                      e.element, e.value));
         }
         case PlotKind::Heatmap: {
             auto* hpp = op_target(t.heatmaps, e);
-            if (!hpp) return;
+            if (!hpp) return std::nullopt;
             auto& hp = *hpp;
             // Re-check the shape; it may have changed since the panel saw it.
-            if (hp.rows <= 0 || hp.cols <= 0) return;
+            if (hp.rows <= 0 || hp.cols <= 0) return std::nullopt;
             const std::size_t n = static_cast<std::size_t>(hp.rows)
                                 * static_cast<std::size_t>(hp.cols);
-            if (e.element >= n || e.element >= hp.data.size()) return;
+            if (e.element >= n || e.element >= hp.data.size()) return std::nullopt;
+            const double old = hp.data[e.element];
             hp.data.mut()[e.element] = static_cast<float>(e.value);
-            return;
+            return cell_undo(e, t.heatmaps, hp, old);
         }
         case PlotKind::Bar3D:
         case PlotKind::Surface:
@@ -490,14 +580,20 @@ void apply_plot_data_op(T& t, const PlotCellEdit& e) {
         case PlotKind::Line3D:
         case PlotKind::SurfaceTri:
             // 3D-native; see apply_axes3d_data_op().
-            return;
+            return std::nullopt;
     }
+    return std::nullopt;
 }
 
 template <class T>
-void apply_plot_data_op(T& t, const BarWidthEdit& e) {
-    if (e.kind != PlotKind::Bar) return;
-    if (auto* bp = edits_detail::op_target(t.bars, e)) bp->bar_width = e.width;
+std::optional<PlotDataOp> apply_plot_data_op(T& t, const BarWidthEdit& e) {
+    if (e.kind != PlotKind::Bar) return std::nullopt;
+    auto* bp = edits_detail::op_target(t.bars, e);
+    if (!bp) return std::nullopt;
+    BarWidthEdit inv = edits_detail::retarget(e, t.bars, *bp);
+    inv.width = bp->bar_width;
+    bp->bar_width = e.width;
+    return inv;
 }
 
 namespace edits_detail {
@@ -513,6 +609,14 @@ void row_insert(V& v, std::size_t row, bool copy_prev) {
     vv.insert(vv.begin() + static_cast<std::ptrdiff_t>(row), seed);
 }
 
+// Insert a given value at `row`; no-op when the index doesn't fit.
+template <class V>
+void row_insert_value(V& v, std::size_t row, typename V::value_type value) {
+    if (row > v.size()) return;
+    auto& vv = mut_ref(v);
+    vv.insert(vv.begin() + static_cast<std::ptrdiff_t>(row), std::move(value));
+}
+
 template <class V>
 void row_remove(V& v, std::size_t row) {
     if (row >= v.size()) return;
@@ -520,96 +624,118 @@ void row_remove(V& v, std::size_t row) {
     vv.erase(vv.begin() + static_cast<std::ptrdiff_t>(row));
 }
 
+// The value at `row`, if there is one.
+template <class V>
+std::optional<typename V::value_type> value_at(const V& v, std::size_t row) {
+    if (row >= v.size()) return std::nullopt;
+    return v[row];
+}
+
+// ErrorBarData's columns in PlotRowEdit::Restore::err's order.
+inline std::array<CowVec<double>*, 8> err_columns(ErrorBarData& e) {
+    return { &e.x_cap_lo, &e.x_cap_hi, &e.x_box_lo, &e.x_box_hi,
+             &e.y_cap_lo, &e.y_cap_hi, &e.y_box_lo, &e.y_box_hi };
+}
+
+// One point in or out of object `p` of `v`: its required columns `cols` (the
+// first gives the point count) and the optional index-aligned ones
+// (hint_labels, error bars), which move only where they reach the row; empty
+// ones are left alone. A new point copies its predecessor, except for a blank
+// label, unless `e` restores a removed one.
+template <class Vec, class P, class... Cols>
+std::optional<PlotDataOp> row_op(const PlotRowEdit& e, const Vec& v, P& p, Cols&... cols) {
+    const std::size_t n = std::get<0>(std::tie(cols...)).size();
+    const bool insert = (e.op == PlotRowEdit::Op::Insert);
+    if (insert ? e.row > n : e.row >= n) return std::nullopt;
+
+    PlotRowEdit inv = retarget(e, v, p);
+    inv.restore.reset();
+    auto& labels = p.opts.hint_labels;
+    const auto err = err_columns(p.err);
+    if (insert && e.restore) {
+        const PlotRowEdit::Restore& r = *e.restore;
+        std::size_t i = 0;
+        ((row_insert_value(cols, e.row, i < r.cols.size() ? r.cols[i] : 0.0), ++i), ...);
+        if (r.label) row_insert_value(labels, e.row, *r.label);
+        for (std::size_t k = 0; k < err.size(); ++k)
+            if (r.err[k]) row_insert_value(*err[k], e.row, *r.err[k]);
+    } else if (insert) {
+        (row_insert(cols, e.row, true), ...);
+        if (!labels.empty()) row_insert(labels, e.row, false);
+        for (CowVec<double>* c : err)
+            if (!c->empty()) row_insert(*c, e.row, true);
+    } else {
+        PlotRowEdit::Restore r;
+        (r.cols.push_back(cols[e.row]), ...);
+        r.label = value_at(labels, e.row);
+        for (std::size_t k = 0; k < err.size(); ++k) r.err[k] = value_at(*err[k], e.row);
+        inv.restore = std::move(r);
+        (row_remove(cols, e.row), ...);
+        row_remove(labels, e.row);
+        for (CowVec<double>* c : err) row_remove(*c, e.row);
+    }
+    inv.op = insert ? PlotRowEdit::Op::Remove : PlotRowEdit::Op::Insert;
+    return inv;
+}
+
 } // namespace edits_detail
 
 // Adds or removes one data point.
 template <class T>
-void apply_plot_data_op(T& t, const PlotRowEdit& e) {
+std::optional<PlotDataOp> apply_plot_data_op(T& t, const PlotRowEdit& e) {
     using edits_detail::op_target;
-    const bool insert = (e.op == PlotRowEdit::Op::Insert);
-
-    // Apply the change to all required parallel arrays; new points copy their
-    // predecessor.
-    auto required = [&](auto&... cols) {
-        if (insert) (edits_detail::row_insert(cols, e.row, true), ...);
-        else        (edits_detail::row_remove(cols, e.row), ...);
-    };
-
-    // Optional index-aligned arrays (hint_labels, error bars) move too; empty
-    // ones are left alone. New points get a blank label but copy the
-    // neighbour's error data.
-    auto optional_cols = [&](bool copy_prev, auto&... cols) {
-        auto one = [&](auto& c) {
-            if (c.empty()) return;
-            if (insert) edits_detail::row_insert(c, e.row, copy_prev);
-            else        edits_detail::row_remove(c, e.row);
-        };
-        (one(cols), ...);
-    };
-    auto labels   = [&](auto& c)          { optional_cols(false, c); };
-    auto err_cols = [&](ErrorBarData& err) {
-        optional_cols(true, err.x_cap_lo, err.x_cap_hi, err.x_box_lo, err.x_box_hi,
-                            err.y_cap_lo, err.y_cap_hi, err.y_box_lo, err.y_box_hi);
-    };
-
+    using edits_detail::row_op;
     switch (e.kind) {
         case PlotKind::Line:
-            if (auto* lp = op_target(t.lines, e)) {
-                required(lp->x, lp->y);
-                labels(lp->opts.hint_labels);
-                err_cols(lp->err);
-            }
-            break;
+            if (auto* lp = op_target(t.lines, e)) return row_op(e, t.lines, *lp, lp->x, lp->y);
+            return std::nullopt;
         case PlotKind::Scatter:
-            if (auto* sp = op_target(t.scatters, e)) {
-                required(sp->x, sp->y);
-                labels(sp->opts.hint_labels);
-                err_cols(sp->err);
-            }
-            break;
+            if (auto* sp = op_target(t.scatters, e))
+                return row_op(e, t.scatters, *sp, sp->x, sp->y);
+            return std::nullopt;
         case PlotKind::Bar:
-            if (auto* bp = op_target(t.bars, e)) {
-                required(bp->centers, bp->heights);
-                labels(bp->opts.hint_labels);
-                err_cols(bp->err);
-            }
-            break;
+            if (auto* bp = op_target(t.bars, e))
+                return row_op(e, t.bars, *bp, bp->centers, bp->heights);
+            return std::nullopt;
         case PlotKind::ScatterZ:
-            if (auto* sp = op_target(t.scatter_z, e)) {
-                required(sp->x, sp->y, sp->z);
-                labels(sp->opts.hint_labels);
-                err_cols(sp->err);
-            }
-            break;
+            if (auto* sp = op_target(t.scatter_z, e))
+                return row_op(e, t.scatter_z, *sp, sp->x, sp->y, sp->z);
+            return std::nullopt;
         case PlotKind::Heatmap:
         case PlotKind::Bar3D:
             // Not point-addressable; MatrixLineEdit handles these.
-            break;
+            return std::nullopt;
         case PlotKind::Surface:
         case PlotKind::Scatter3D:
         case PlotKind::Line3D:
         case PlotKind::SurfaceTri:
             // 3D-native; see apply_axes3d_data_op().
-            break;
+            return std::nullopt;
     }
+    return std::nullopt;
 }
 
 namespace edits_detail {
 
 // Insert or remove one line of a rows x cols row-major buffer. `row_axis`: a
-// row is `cols` contiguous elements. Empty buffers are left alone.
-template <class V>
+// row is `cols` contiguous elements. Empty buffers are left alone. An inserted
+// line takes `given` when it has the line's length, else copies its
+// predecessor (zero-filled at index 0).
+template <class V, class G = std::vector<typename V::value_type>>
 void grid_reshape(V& v, std::size_t rows, std::size_t cols,
-                  bool row_axis, bool insert, std::size_t index) {
+                  bool row_axis, bool insert, std::size_t index, const G* given = nullptr) {
     using Value = typename std::decay_t<decltype(v)>::value_type;
     if (v.empty()) return;
+    if (given && given->size() != (row_axis ? cols : rows)) given = nullptr;
     auto& vv = mut_ref(v);
     if (row_axis) {
         const std::size_t at = index * cols;
         if (insert) {
             // Seed from the row above; zero-filled at row 0.
             std::vector<Value> seed(cols);
-            if (index > 0)
+            if (given)
+                for (std::size_t c = 0; c < cols; ++c) seed[c] = static_cast<Value>((*given)[c]);
+            else if (index > 0)
                 seed.assign(vv.begin() + static_cast<std::ptrdiff_t>(at - cols),
                             vv.begin() + static_cast<std::ptrdiff_t>(at));
             vv.insert(vv.begin() + static_cast<std::ptrdiff_t>(at),
@@ -623,13 +749,27 @@ void grid_reshape(V& v, std::size_t rows, std::size_t cols,
         for (std::size_t r = rows; r-- > 0; ) {
             const std::size_t at = r * cols + index;
             if (insert) {
-                Value seed = (index > 0) ? vv[at - 1] : Value{};
+                Value seed = given ? static_cast<Value>((*given)[r])
+                                   : (index > 0) ? vv[at - 1] : Value{};
                 vv.insert(vv.begin() + static_cast<std::ptrdiff_t>(at), std::move(seed));
             } else {
                 vv.erase(vv.begin() + static_cast<std::ptrdiff_t>(at));
             }
         }
     }
+}
+
+// Line `index` of a rows x cols row-major buffer; empty for an empty buffer.
+template <class Out, class V>
+std::vector<Out> line_of(const V& v, std::size_t rows, std::size_t cols,
+                         bool row_axis, std::size_t index) {
+    std::vector<Out> out;
+    if (v.empty()) return out;
+    const std::size_t n = row_axis ? cols : rows;
+    out.reserve(n);
+    for (std::size_t k = 0; k < n; ++k)
+        out.push_back(static_cast<Out>(v[row_axis ? index * cols + k : k * cols + index]));
+    return out;
 }
 
 // Whether a structural grid edit is allowed; never below 1x1.
@@ -641,44 +781,6 @@ inline bool grid_line_ok(std::size_t rows, std::size_t cols,
     return insert || extent > 1;
 }
 
-} // namespace edits_detail
-
-// Insert or remove a heatmap row/column, re-striding data and hint_labels.
-template <class T>
-void apply_plot_data_op(T& t, const MatrixLineEdit& e) {
-    if (e.kind != PlotKind::Heatmap) return;
-    auto* hpp = edits_detail::op_target(t.heatmaps, e);
-    if (!hpp) return;
-    auto& hp = *hpp;
-    if (hp.rows <= 0 || hp.cols <= 0) return;
-
-    const std::size_t rows = static_cast<std::size_t>(hp.rows);
-    const std::size_t cols = static_cast<std::size_t>(hp.cols);
-    // A buffer not matching its shape is left alone.
-    if (hp.data.size() != rows * cols) return;
-
-    const bool insert = (e.op == MatrixLineEdit::Op::Insert);
-    const bool row_ax = (e.axis == MatrixLineEdit::Axis::Row);
-    if (!edits_detail::grid_line_ok(rows, cols, row_ax, insert, e.index)) return;
-
-    // Non-empty hint_labels are padded to rows*cols first so they stay aligned.
-    auto& labels = hp.opts.hint_labels;
-    if (!labels.empty()) labels.resize(rows * cols);
-
-    edits_detail::grid_reshape(hp.data, rows, cols, row_ax, insert, e.index);
-    edits_detail::grid_reshape(labels,  rows, cols, row_ax, insert, e.index);
-    if (row_ax) hp.rows += insert ? 1 : -1;
-    else        hp.cols += insert ? 1 : -1;
-}
-
-// ---------------------------------------------------------------------------
-// Applying data ops to a 3D axes' own plot objects (plane index -1). The
-// `kind` guard keeps these and the 2D bodies from both firing. Same
-// re-validation rules as above.
-// ---------------------------------------------------------------------------
-
-namespace edits_detail {
-
 // Coordinate for a new grid line: midway between neighbours, or one spacing
 // past the end.
 inline double grid_coord_seed(const CowVec<double>& c, std::size_t at) {
@@ -689,231 +791,321 @@ inline double grid_coord_seed(const CowVec<double>& c, std::size_t at) {
     return 0.5 * (c[at - 1] + c[at]);
 }
 
+// The body of every MatrixLineEdit, checked by the caller: line e.index of
+// `primary` and the buffers laid out like it (`alt`, null or empty = none;
+// `labels`), plus the grid coordinate (`coord`, null for heatmaps), in or out.
+// Fills the rest of `inv`. Non-empty hint_labels are padded to rows x cols
+// first so they stay aligned; the inverse puts their size back.
+template <class Prim, class Labels>
+void matrix_line(const MatrixLineEdit& e, MatrixLineEdit& inv, std::size_t rows,
+                 std::size_t cols, Prim& primary, CowVec<double>* alt, Labels& labels,
+                 CowVec<double>* coord) {
+    const bool insert = (e.op == MatrixLineEdit::Op::Insert);
+    const bool row_ax = (e.axis == MatrixLineEdit::Axis::Row);
+    const MatrixLineEdit::Restore* r = insert && e.restore ? &*e.restore : nullptr;
+
+    inv.op = insert ? MatrixLineEdit::Op::Remove : MatrixLineEdit::Op::Insert;
+    inv.restore.reset();
+    inv.labels_size.reset();
+    if (!labels.empty() && labels.size() != rows * cols) {
+        inv.labels_size = labels.size();
+        labels.resize(rows * cols);
+    }
+    if (!insert) {
+        MatrixLineEdit::Restore made;
+        made.values = line_of<double>(primary, rows, cols, row_ax, e.index);
+        if (alt) made.alt = line_of<double>(*alt, rows, cols, row_ax, e.index);
+        made.labels = line_of<std::string>(labels, rows, cols, row_ax, e.index);
+        if (coord) made.coord = (*coord)[e.index];
+        inv.restore = std::move(made);
+    }
+
+    // Coordinate first, while rows/cols still describe the buffers.
+    if (coord) {
+        if (insert) {
+            const double at = r ? r->coord : grid_coord_seed(*coord, e.index);
+            auto& cv = coord->mut();
+            cv.insert(cv.begin() + static_cast<std::ptrdiff_t>(e.index), at);
+        } else {
+            row_remove(*coord, e.index);
+        }
+    }
+    grid_reshape(primary, rows, cols, row_ax, insert, e.index, r ? &r->values : nullptr);
+    if (alt) grid_reshape(*alt, rows, cols, row_ax, insert, e.index, r ? &r->alt : nullptr);
+    grid_reshape(labels, rows, cols, row_ax, insert, e.index, r ? &r->labels : nullptr);
+    if (e.labels_size) labels.resize(*e.labels_size);
+}
+
 } // namespace edits_detail
+
+// Insert or remove a heatmap row/column, re-striding data and hint_labels.
+template <class T>
+std::optional<PlotDataOp> apply_plot_data_op(T& t, const MatrixLineEdit& e) {
+    if (e.kind != PlotKind::Heatmap) return std::nullopt;
+    auto* hpp = edits_detail::op_target(t.heatmaps, e);
+    if (!hpp) return std::nullopt;
+    auto& hp = *hpp;
+    if (hp.rows <= 0 || hp.cols <= 0) return std::nullopt;
+
+    const std::size_t rows = static_cast<std::size_t>(hp.rows);
+    const std::size_t cols = static_cast<std::size_t>(hp.cols);
+    // A buffer not matching its shape is left alone.
+    if (hp.data.size() != rows * cols) return std::nullopt;
+
+    const bool insert = (e.op == MatrixLineEdit::Op::Insert);
+    const bool row_ax = (e.axis == MatrixLineEdit::Axis::Row);
+    if (!edits_detail::grid_line_ok(rows, cols, row_ax, insert, e.index)) return std::nullopt;
+
+    MatrixLineEdit inv = edits_detail::retarget(e, t.heatmaps, hp);
+    edits_detail::matrix_line(e, inv, rows, cols, hp.data, nullptr, hp.opts.hint_labels, nullptr);
+    if (row_ax) hp.rows += insert ? 1 : -1;
+    else        hp.cols += insert ? 1 : -1;
+    return inv;
+}
+
+// ---------------------------------------------------------------------------
+// Applying data ops to a 3D axes' own plot objects (plane index -1). The
+// `kind` guard keeps these and the 2D bodies from both firing. Same
+// re-validation and inverse rules as above.
+// ---------------------------------------------------------------------------
 
 // Bar3D columns: 0 = u, 1 = v (`element` indexes the vector), 2 = heights,
 // 3 = bottoms (`element` is i * |v| + j). Surfaces use columns 0-2.
-namespace edits_detail {
-inline void put_cell(CowVec<double>& v, std::size_t i, double value) {
-    if (i < v.size()) v.mut()[i] = value;
-}
-} // namespace edits_detail
-
 template <class T>
-void apply_axes3d_data_op(T& t, const PlotCellEdit& e) {
-    using edits_detail::put_cell;
+std::optional<PlotDataOp> apply_axes3d_data_op(T& t, const PlotCellEdit& e) {
+    using edits_detail::cell_undo;
     using edits_detail::op_target;
-    if (e.kind == PlotKind::Bar3D) {
-        auto* bp = op_target(t.bars3d, e);
-        if (!bp) return;
-        auto& b = *bp;
+    using edits_detail::put_cell;
+    // The column's vector of `p`, or null for a column it has not.
+    auto cell = [&e](const auto& v, auto* p, auto pick) -> std::optional<PlotDataOp> {
+        if (!p) return std::nullopt;
+        CowVec<double>* col = pick(*p);
+        if (!col) return std::nullopt;
+        return cell_undo(e, v, *p, put_cell(*col, e.element, e.value));
+    };
+    if (e.kind == PlotKind::Bar3D)
+        return cell(t.bars3d, op_target(t.bars3d, e), [&e](auto& b) -> CowVec<double>* {
+            switch (e.column) {
+                case 0: return &b.u;
+                case 1: return &b.v;
+                case 2: return &b.heights;
+                case 3: return &b.bottoms;
+                default: return nullptr;
+            }
+        });
+    if (e.kind == PlotKind::Surface)
+        return cell(t.surfaces, op_target(t.surfaces, e), [&e](auto& s) -> CowVec<double>* {
+            switch (e.column) {
+                case 0: return &s.u;
+                case 1: return &s.v;
+                case 2: return &s.heights;
+                default: return nullptr;
+            }
+        });
+    // Scatter3D, Line3D and SurfaceTri: x, y, z, colors (`element` is the
+    // point or vertex index; colors is empty for a flat series). Editing a
+    // vertex does not re-triangulate; topology is not editable.
+    auto xyzc = [&e](auto& p) -> CowVec<double>* {
         switch (e.column) {
-            case 0: put_cell(b.u, e.element, e.value);       return;
-            case 1: put_cell(b.v, e.element, e.value);       return;
-            case 2: put_cell(b.heights, e.element, e.value); return;
-            case 3: put_cell(b.bottoms, e.element, e.value); return;
-            default: return;
+            case 0: return &p.x;
+            case 1: return &p.y;
+            case 2: return &p.z;
+            case 3: return &p.colors;
+            default: return nullptr;
         }
-    }
-    if (e.kind == PlotKind::Surface) {
-        auto* sp = op_target(t.surfaces, e);
-        if (!sp) return;
-        auto& s = *sp;
-        switch (e.column) {
-            case 0: put_cell(s.u, e.element, e.value);       return;
-            case 1: put_cell(s.v, e.element, e.value);       return;
-            case 2: put_cell(s.heights, e.element, e.value); return;
-            default: return;
-        }
-    }
-    // Scatter3D: x, y, z, colors (`element` is the point index; colors is empty
-    // for a flat series).
-    if (e.kind == PlotKind::Scatter3D) {
-        auto* sp = op_target(t.scatter3d, e);
-        if (!sp) return;
-        auto& s = *sp;
-        switch (e.column) {
-            case 0: put_cell(s.x, e.element, e.value);      return;
-            case 1: put_cell(s.y, e.element, e.value);      return;
-            case 2: put_cell(s.z, e.element, e.value);      return;
-            case 3: put_cell(s.colors, e.element, e.value); return;
-            default: return;
-        }
-    }
-    // Line3D: same columns as Scatter3D.
-    if (e.kind == PlotKind::Line3D) {
-        auto* lp = op_target(t.lines3d, e);
-        if (!lp) return;
-        auto& l = *lp;
-        switch (e.column) {
-            case 0: put_cell(l.x, e.element, e.value);      return;
-            case 1: put_cell(l.y, e.element, e.value);      return;
-            case 2: put_cell(l.z, e.element, e.value);      return;
-            case 3: put_cell(l.colors, e.element, e.value); return;
-            default: return;
-        }
-    }
-    // SurfaceTri: same columns (vertex index). Topology is not editable, and
-    // editing a vertex does not re-triangulate.
-    if (e.kind == PlotKind::SurfaceTri) {
-        auto* mp = op_target(t.surface_tri, e);
-        if (!mp) return;
-        auto& m = *mp;
-        switch (e.column) {
-            case 0: put_cell(m.x, e.element, e.value);      return;
-            case 1: put_cell(m.y, e.element, e.value);      return;
-            case 2: put_cell(m.z, e.element, e.value);      return;
-            case 3: put_cell(m.colors, e.element, e.value); return;
-            default: return;
-        }
-    }
+    };
+    if (e.kind == PlotKind::Scatter3D) return cell(t.scatter3d, op_target(t.scatter3d, e), xyzc);
+    if (e.kind == PlotKind::Line3D)    return cell(t.lines3d, op_target(t.lines3d, e), xyzc);
+    if (e.kind == PlotKind::SurfaceTri)
+        return cell(t.surface_tri, op_target(t.surface_tri, e), xyzc);
+    return std::nullopt;
 }
 
 template <class T>
-void apply_axes3d_data_op(T& t, const BarWidthEdit& e) {
-    if (e.kind != PlotKind::Bar3D) return;
+std::optional<PlotDataOp> apply_axes3d_data_op(T& t, const BarWidthEdit& e) {
+    if (e.kind != PlotKind::Bar3D || (e.column != 0 && e.column != 1)) return std::nullopt;
     auto* b = edits_detail::op_target(t.bars3d, e);
-    if (!b) return;
-    if (e.column == 0)      b->u_width = e.width;
-    else if (e.column == 1) b->v_width = e.width;
+    if (!b) return std::nullopt;
+    double& w = e.column == 0 ? b->u_width : b->v_width;
+    BarWidthEdit inv = edits_detail::retarget(e, t.bars3d, *b);
+    inv.width = w;
+    w = e.width;
+    return inv;
 }
 
 namespace edits_detail {
 
-// Move a grid's coordinate vector and every matrix striding against it
-// together. `alt` is an optional second matrix (bar bottoms); empty stays empty.
-template <class Labels>
-void grid_line_apply(CowVec<double>& u, CowVec<double>& v,
-                     CowVec<double>& primary, CowVec<double>& alt, Labels& labels,
-                     const MatrixLineEdit& e) {
-    const std::size_t rows = u.size(), cols = v.size();
+// A grid kind's MatrixLineEdit: its coordinate vector and every matrix
+// striding against it move together. `alt` is a second matrix (bar bottoms),
+// null for none; an empty one stays empty.
+template <class Vec, class P>
+std::optional<PlotDataOp> grid_line_op(const MatrixLineEdit& e, const Vec& v, P& p,
+                                       CowVec<double>& primary, CowVec<double>* alt) {
+    const std::size_t rows = p.u.size(), cols = p.v.size();
     const bool insert = (e.op == MatrixLineEdit::Op::Insert);
     const bool row_ax = (e.axis == MatrixLineEdit::Axis::Row);
-    if (!grid_line_ok(rows, cols, row_ax, insert, e.index)) return;
+    if (!grid_line_ok(rows, cols, row_ax, insert, e.index)) return std::nullopt;
     // A mismatched buffer is left alone, as for heatmaps.
-    if (primary.size() != rows * cols) return;
-    if (!alt.empty() && alt.size() != rows * cols) return;
+    if (primary.size() != rows * cols) return std::nullopt;
+    if (alt && !alt->empty() && alt->size() != rows * cols) return std::nullopt;
 
-    if (!labels.empty()) labels.resize(rows * cols);
-
-    // Coordinate first, while rows/cols still describe the buffers.
-    CowVec<double>& coord = row_ax ? u : v;
-    if (insert) {
-        const double at = grid_coord_seed(coord, e.index);
-        auto& cv = coord.mut();
-        cv.insert(cv.begin() + static_cast<std::ptrdiff_t>(e.index), at);
-    } else {
-        row_remove(coord, e.index);
-    }
-    grid_reshape(primary, rows, cols, row_ax, insert, e.index);
-    grid_reshape(alt,     rows, cols, row_ax, insert, e.index);
-    grid_reshape(labels,  rows, cols, row_ax, insert, e.index);
+    MatrixLineEdit inv = retarget(e, v, p);
+    matrix_line(e, inv, rows, cols, primary, alt, p.opts.hint_labels, row_ax ? &p.u : &p.v);
+    return inv;
 }
 
 } // namespace edits_detail
 
 template <class T>
-void apply_axes3d_data_op(T& t, const MatrixLineEdit& e) {
+std::optional<PlotDataOp> apply_axes3d_data_op(T& t, const MatrixLineEdit& e) {
     using edits_detail::op_target;
     if (e.kind == PlotKind::Bar3D) {
         auto* bp = op_target(t.bars3d, e);
-        if (!bp) return;
-        auto& b = *bp;
-        edits_detail::grid_line_apply(b.u, b.v, b.heights, b.bottoms,
-                                      b.opts.hint_labels, e);
-        return;
+        if (!bp) return std::nullopt;
+        return edits_detail::grid_line_op(e, t.bars3d, *bp, bp->heights, &bp->bottoms);
     }
     if (e.kind == PlotKind::Surface) {
         auto* sp = op_target(t.surfaces, e);
-        if (!sp) return;
-        auto& s = *sp;
-        // No second matrix: pass an empty one.
-        CowVec<double> none;
-        edits_detail::grid_line_apply(s.u, s.v, s.heights, none,
-                                      s.opts.hint_labels, e);
-        return;
+        if (!sp) return std::nullopt;
+        return edits_detail::grid_line_op(e, t.surfaces, *sp, sp->heights, nullptr);
     }
+    return std::nullopt;
 }
 
 template <class T>
-void apply_axes3d_data_op(T&, const PlotRowEdit&) {
+std::optional<PlotDataOp> apply_axes3d_data_op(T&, const PlotRowEdit&) {
     // Not point-addressable for grids; MatrixLineEdit handles them.
+    return std::nullopt;
 }
 
-// Applies an ordered op stream. The 2D overload skips plane-addressed ops; the
-// 3D overload (targets with planes) routes plane -1 to the axes' own objects
-// and others to the plane's sheet.
+// Applies an ordered op stream, prepending each op's inverse to `inv` (so it
+// runs last-first). The 2D overload skips plane-addressed ops; the 3D overload
+// (targets with planes) routes plane -1 to the axes' own objects and others to
+// the plane's sheet.
 template <class T>
-void apply_plot_data_ops(T& t, const std::vector<PlotDataOp>& ops) {
+void apply_plot_data_ops(T& t, const std::vector<PlotDataOp>& ops,
+                         std::vector<PlotDataOp>* inv = nullptr) {
     for (const auto& op : ops) {
         if (plot_op_plane(op) >= 0) continue;
-        std::visit([&t](const auto& o) { apply_plot_data_op(t, o); }, op);
+        auto undo = std::visit([&t](const auto& o) { return apply_plot_data_op(t, o); }, op);
+        if (inv && undo) inv->insert(inv->begin(), std::move(*undo));
     }
 }
 
 template <class T>
     requires requires(T& t) { t.plane_at(std::size_t{0}).sheet; }
-void apply_plot_data_ops(T& t, const std::vector<PlotDataOp>& ops) {
+void apply_plot_data_ops(T& t, const std::vector<PlotDataOp>& ops,
+                         std::vector<PlotDataOp>* inv = nullptr) {
     for (const auto& op : ops) {
         const int pi = plot_op_plane(op);
+        std::optional<PlotDataOp> undo;
         if (pi < 0) {
-            std::visit([&t](const auto& o) { apply_axes3d_data_op(t, o); }, op);
-            continue;
+            undo = std::visit([&t](const auto& o) { return apply_axes3d_data_op(t, o); }, op);
+        } else {
+            auto* plane = edits_detail::find_plane(t, pi, plot_op_plane_id(op));
+            if (!plane) continue;
+            auto& sheet = plane->sheet;
+            undo = std::visit([&sheet](const auto& o) { return apply_plot_data_op(sheet, o); }, op);
+            if (undo)
+                std::visit([&](auto& u) {
+                    u.plane_index = edits_detail::plane_index_of(t, plane);
+                    u.plane_id = plane->id;
+                }, *undo);
         }
-        auto* plane = edits_detail::find_plane(t, pi, plot_op_plane_id(op));
-        if (!plane) continue;
-        auto& sheet = plane->sheet;
-        std::visit([&sheet](const auto& o) { apply_plot_data_op(sheet, o); }, op);
+        if (inv && undo) inv->insert(inv->begin(), std::move(*undo));
     }
 }
 
 // ---------------------------------------------------------------------------
 // Plot-object appearance
 // ---------------------------------------------------------------------------
+// What assign_plot_opts() replaced: where the object is now, its id, and its
+// old options (`hint_labels` left empty: the apply keeps them anyway).
+template <class Opts>
+struct ReplacedOpts {
+    int      index = 0;
+    ObjectId id    = 0;
+    Opts     old;
+};
+
 // Assign an object's options, keeping its current `hint_labels` (data owned by
 // the Data panel, which the options copy may have stale). Edits name objects
-// as data ops do (find_object()).
+// as data ops do (find_object()). Nothing when the object is gone.
 template <class Vec, class Opts>
-void assign_plot_opts(Vec& v, int idx, ObjectId id, const Opts& o) {
+std::optional<ReplacedOpts<Opts>> assign_plot_opts(Vec& v, int idx, ObjectId id, const Opts& o) {
     auto* p = edits_detail::find_object(v, idx, id);
-    if (!p) return;
+    if (!p) return std::nullopt;
     auto labels = std::move(p->opts.hint_labels);
+    ReplacedOpts<Opts> r{ static_cast<int>(p - v.data()), p->id, std::move(p->opts) };
+    r.old.hint_labels.clear();
     p->opts = o;
     p->opts.hint_labels = std::move(labels);
+    return r;
 }
 
-// The variant alternative picks the vector.
+namespace edits_detail {
+
+// The vector of a 2D holder that options type `O` styles.
+template <class O, class T>
+auto& styled_vector(T& t) {
+    if constexpr (std::is_same_v<O, LineOptions>)         return t.lines;
+    else if constexpr (std::is_same_v<O, ScatterOptions>) return t.scatters;
+    else if constexpr (std::is_same_v<O, BarOptions>)     return t.bars;
+    else if constexpr (std::is_same_v<O, HeatmapOptions>) return t.heatmaps;
+    else                                                  return t.scatter_z;
+}
+
+// Prepends `v` to `*inv`, if there is one: an inverse list runs last-first.
+template <class V>
+void prepend(std::vector<V>* inv, V v) {
+    if (inv) inv->insert(inv->begin(), std::move(v));
+}
+
+} // namespace edits_detail
+
+// The variant alternative picks the vector. Returns the inverse, addressed to
+// the object as it is now (the caller fills in the plane).
 template <class T>
-void apply_plot_style_edit(T& t, const PlotStyleEdit& e) {
-    const int i = e.plot_index;
-    if (const auto* o = std::get_if<LineOptions>(&e.opts))          assign_plot_opts(t.lines,     i, e.id, *o);
-    else if (const auto* o = std::get_if<ScatterOptions>(&e.opts))  assign_plot_opts(t.scatters,  i, e.id, *o);
-    else if (const auto* o = std::get_if<BarOptions>(&e.opts))      assign_plot_opts(t.bars,      i, e.id, *o);
-    else if (const auto* o = std::get_if<HeatmapOptions>(&e.opts))  assign_plot_opts(t.heatmaps,  i, e.id, *o);
-    else if (const auto* o = std::get_if<ScatterZOptions>(&e.opts)) assign_plot_opts(t.scatter_z, i, e.id, *o);
+std::optional<PlotStyleEdit> apply_plot_style_edit(T& t, const PlotStyleEdit& e) {
+    return std::visit([&](const auto& o) -> std::optional<PlotStyleEdit> {
+        using O = std::decay_t<decltype(o)>;
+        auto r = assign_plot_opts(edits_detail::styled_vector<O>(t), e.plot_index, e.id, o);
+        if (!r) return std::nullopt;
+        PlotStyleEdit inv = e;
+        inv.plot_index = r->index;
+        inv.id = r->id;
+        inv.opts = std::move(r->old);
+        return inv;
+    }, e.opts);
 }
 
 // As apply_plot_data_ops(): 2D targets take plane -1 only; 3D targets take
 // plane-addressed edits only (their own objects use AxesEdit3D's lanes).
 template <class T>
-void apply_plot_style_edits(T& t, const std::vector<PlotStyleEdit>& es) {
+void apply_plot_style_edits(T& t, const std::vector<PlotStyleEdit>& es,
+                            std::vector<PlotStyleEdit>* inv = nullptr) {
     for (const auto& e : es) {
         if (e.plane_index >= 0) continue;
-        apply_plot_style_edit(t, e);
+        if (auto undo = apply_plot_style_edit(t, e)) edits_detail::prepend(inv, std::move(*undo));
     }
 }
 
 template <class T>
     requires requires(T& t) { t.plane_at(std::size_t{0}).sheet; }
-void apply_plot_style_edits(T& t, const std::vector<PlotStyleEdit>& es) {
+void apply_plot_style_edits(T& t, const std::vector<PlotStyleEdit>& es,
+                            std::vector<PlotStyleEdit>* inv = nullptr) {
     for (const auto& e : es) {
         if (e.plane_index < 0) continue;
         auto* plane = edits_detail::find_plane(t, e.plane_index, e.plane_id);
         if (!plane) continue;
-        apply_plot_style_edit(plane->sheet, e);
+        auto undo = apply_plot_style_edit(plane->sheet, e);
         // Snapshot only: the plane's cached raster must redraw.
         if constexpr (requires { plane->style_generation; })
             plane->style_generation = next_snapshot_generation();
+        if (!undo) continue;
+        undo->plane_index = edits_detail::plane_index_of(t, plane);
+        undo->plane_id = plane->id;
+        edits_detail::prepend(inv, std::move(*undo));
     }
 }
 
@@ -921,55 +1113,74 @@ void apply_plot_style_edits(T& t, const std::vector<PlotStyleEdit>& es) {
 // aspect), each group applied unless its setter ran after the snapshot the
 // panel drew (StyleStamps). For Axes::Impl, Axes3D::Impl and both snapshots.
 template <typename T, typename E>
-void apply_style_edits(T& dst, const E& e) {
+void apply_style_edits(T& dst, const E& e, E* inv = nullptr) {
     const StyleStamps& have = dst.style_stamps;
     const StyleStamps& seen = e.style_seen;
+    // The inverse's field for member `m`, or null.
+    auto undo = [inv](auto E::* m) { return inv ? &(inv->*m) : nullptr; };
+    auto put = [](auto& d, const auto& v, auto* old) {
+        if (!v) return;
+        if (old) *old = d;
+        d = *v;
+    };
     // Empty = back to auto; absent = unchanged.
-    auto ticks = [](auto& d, const std::optional<std::vector<Tick>>& v) {
-        if (v) d = v->empty() ? std::nullopt : std::optional(*v);
+    auto ticks = [](auto& d, const std::optional<std::vector<Tick>>& v,
+                    std::optional<std::vector<Tick>>* old) {
+        if (!v) return;
+        if (old) *old = d ? *d : std::vector<Tick>{};
+        d = v->empty() ? std::nullopt : std::optional(*v);
     };
     if (have.grid <= seen.grid) {
-        if (e.grid_enabled) dst.grid_enabled = *e.grid_enabled;
-        if (e.grid_opts)    dst.grid_opts    = *e.grid_opts;
+        put(dst.grid_enabled, e.grid_enabled, undo(&E::grid_enabled));
+        put(dst.grid_opts,    e.grid_opts,    undo(&E::grid_opts));
     }
-    if (e.axes_style && have.style <= seen.style) dst.axes_style = *e.axes_style;
+    if (have.style <= seen.style) put(dst.axes_style, e.axes_style, undo(&E::axes_style));
     if (have.legend <= seen.legend) {
-        if (e.legend_enabled) dst.legend_enabled = *e.legend_enabled;
-        if (e.legend_opts)    dst.legend_opts    = *e.legend_opts;
+        put(dst.legend_enabled, e.legend_enabled, undo(&E::legend_enabled));
+        put(dst.legend_opts,    e.legend_opts,    undo(&E::legend_opts));
     }
-    if (e.colorbar_opts && have.colorbar <= seen.colorbar) dst.colorbar_opts = *e.colorbar_opts;
-    if (have.xticks <= seen.xticks) ticks(dst.xticks_override, e.xticks_override);
-    if (have.yticks <= seen.yticks) ticks(dst.yticks_override, e.yticks_override);
+    if (have.colorbar <= seen.colorbar)
+        put(dst.colorbar_opts, e.colorbar_opts, undo(&E::colorbar_opts));
+    if (have.xticks <= seen.xticks)
+        ticks(dst.xticks_override, e.xticks_override, undo(&E::xticks_override));
+    if (have.yticks <= seen.yticks)
+        ticks(dst.yticks_override, e.yticks_override, undo(&E::yticks_override));
     if constexpr (requires { dst.zticks_override; e.zticks_override; })
-        if (have.zticks <= seen.zticks) ticks(dst.zticks_override, e.zticks_override);
+        if (have.zticks <= seen.zticks)
+            ticks(dst.zticks_override, e.zticks_override, undo(&E::zticks_override));
     if constexpr (requires { dst.box_style; e.box_style; }) {
-        if (e.box_style && have.box <= seen.box)    dst.box_style = *e.box_style;
-        if (e.aspect && have.aspect <= seen.aspect) dst.aspect    = *e.aspect;
+        if (have.box <= seen.box)       put(dst.box_style, e.box_style, undo(&E::box_style));
+        if (have.aspect <= seen.aspect) put(dst.aspect,    e.aspect,    undo(&E::aspect));
     }
 }
 
 // Apply a 2D edit to Axes::Impl (caller thread) or RenderSnapshot (render
-// thread), as apply_axes3d_edit() does for 3D.
+// thread), as apply_axes3d_edit() does for 3D. The lanes' inverses commute:
+// a style edit keeps `hint_labels`, a data op never touches options, and both
+// find their object by id.
 template <typename T>
-void apply_axes_edit(T& dst, const AxesEdit& e) {
-    apply_title_edits(dst, e);
-    apply_limit_edits(dst, e);
-    apply_style_edits(dst, e);
-    apply_plot_data_ops(dst, e.plot_ops);
-    apply_plot_style_edits(dst, e.plot_styles);
+void apply_axes_edit(T& dst, const AxesEdit& e, AxesEdit* inv = nullptr) {
+    apply_title_edits(dst, e, inv);
+    apply_limit_edits(dst, e, inv);
+    apply_style_edits(dst, e, inv);
+    apply_plot_data_ops(dst, e.plot_ops, inv ? &inv->plot_ops : nullptr);
+    apply_plot_style_edits(dst, e.plot_styles, inv ? &inv->plot_styles : nullptr);
 }
 
 // Apply a 3D edit to Axes3D::Impl (caller thread) or RenderSnapshot3D (render
 // thread); one template so both paths stay identical.
 template <typename T>
-void apply_axes3d_edit(T& dst, const AxesEdit3D& e) {
-    apply_title_edits(dst, e);
-    apply_limit_edits(dst, e);
-    apply_style_edits(dst, e);
-    if (e.camera && dst.camera_stamp <= e.camera_seen) dst.camera = *e.camera;
+void apply_axes3d_edit(T& dst, const AxesEdit3D& e, AxesEdit3D* inv = nullptr) {
+    apply_title_edits(dst, e, inv);
+    apply_limit_edits(dst, e, inv);
+    apply_style_edits(dst, e, inv);
+    if (e.camera && dst.camera_stamp <= e.camera_seen) {
+        if (inv) inv->camera = dst.camera;
+        dst.camera = *e.camera;
+    }
 
     // Plane-addressed edits: each finds its plane and object by id (or index).
-    apply_plot_style_edits(dst, e.plot_styles);
+    apply_plot_style_edits(dst, e.plot_styles, inv ? &inv->plot_styles : nullptr);
 
     for (const auto& pe : e.planes) {
         if (pe.plane_index < 0) continue;
@@ -977,22 +1188,34 @@ void apply_axes3d_edit(T& dst, const AxesEdit3D& e) {
         if (!p) continue;
         // A setter since the panel drew wins.
         if (p->placement_stamp > pe.seen) continue;
-        if (pe.orient) p->orient = *pe.orient;
-        if (pe.offset) p->offset = *pe.offset;
-        if (pe.opts)   p->opts   = *pe.opts;
+        AxesEdit3D::PlaneEdit undo;
+        undo.plane_index = edits_detail::plane_index_of(dst, p);
+        undo.id = p->id;
+        if (pe.orient) { undo.orient = p->orient; p->orient = *pe.orient; }
+        if (pe.offset) { undo.offset = p->offset; p->offset = *pe.offset; }
+        if (pe.opts)   { undo.opts   = p->opts;   p->opts   = *pe.opts; }
+        if (inv) edits_detail::prepend(&inv->planes, std::move(undo));
     }
 
     // The axes' own 3D objects; `hint_labels` is kept (it is data).
-    auto objects = [](auto& plots, const auto& edits) {
-        for (const auto& oe : edits)
-            if (oe.opts) assign_plot_opts(plots, oe.plot_index, oe.id, *oe.opts);
+    auto objects = [](auto& plots, const auto& edits, auto* undo) {
+        for (const auto& oe : edits) {
+            if (!oe.opts) continue;
+            auto r = assign_plot_opts(plots, oe.plot_index, oe.id, *oe.opts);
+            if (!r || !undo) continue;
+            auto u = oe;
+            u.plot_index = r->index;
+            u.id = r->id;
+            u.opts = std::move(r->old);
+            edits_detail::prepend(undo, std::move(u));
+        }
     };
-    objects(dst.bars3d, e.bars3d);
-    objects(dst.surfaces, e.surfaces);
-    objects(dst.scatter3d, e.scatter3d);
-    objects(dst.lines3d, e.lines3d);
-    objects(dst.surface_tri, e.surface_tri);
-    apply_plot_data_ops(dst, e.plot_ops);
+    objects(dst.bars3d, e.bars3d, inv ? &inv->bars3d : nullptr);
+    objects(dst.surfaces, e.surfaces, inv ? &inv->surfaces : nullptr);
+    objects(dst.scatter3d, e.scatter3d, inv ? &inv->scatter3d : nullptr);
+    objects(dst.lines3d, e.lines3d, inv ? &inv->lines3d : nullptr);
+    objects(dst.surface_tri, e.surface_tri, inv ? &inv->surface_tri : nullptr);
+    apply_plot_data_ops(dst, e.plot_ops, inv ? &inv->plot_ops : nullptr);
 }
 
 // ---------------------------------------------------------------------------
@@ -1102,18 +1325,142 @@ inline void merge_figure_edits(FigureEdits& dst, const FigureEdits& src) {
 
 // Applies the figure-level fields to Figure::Impl's (or a FigureSnapshot's)
 // members, each unless its setter ran after the snapshot the panel drew.
-// `have` is the destination's FigureStamps.
+// `have` is the destination's FigureStamps. Grid ratios are applied by the
+// caller (they need the grid shape).
 template <class Suptitle, class Opts, class Margins, class Gap>
 void apply_figure_edits(const FigureEdits& e, const FigureStamps& have,
                         Suptitle& suptitle, Opts& suptitle_opts, Margins& margins,
-                        Gap& col_gap, Gap& row_gap) {
+                        Gap& col_gap, Gap& row_gap, FigureEdits* inv = nullptr) {
     const FigureStamps& seen = e.fig_seen;
-    if (e.suptitle && have.suptitle <= seen.suptitle) suptitle = *e.suptitle;
+    auto put = [](auto& d, const auto& v, auto* old) {
+        if (old) *old = d;
+        d = *v;
+    };
+    if (e.suptitle && have.suptitle <= seen.suptitle)
+        put(suptitle, e.suptitle, inv ? &inv->suptitle : nullptr);
     if (e.suptitle_opts && have.suptitle_style <= seen.suptitle_style)
-        suptitle_opts = *e.suptitle_opts;
-    if (e.margins && have.margins <= seen.margins) margins = *e.margins;
-    if (e.col_gap) col_gap = *e.col_gap;
-    if (e.row_gap) row_gap = *e.row_gap;
+        put(suptitle_opts, e.suptitle_opts, inv ? &inv->suptitle_opts : nullptr);
+    if (e.margins && have.margins <= seen.margins)
+        put(margins, e.margins, inv ? &inv->margins : nullptr);
+    if (e.col_gap) put(col_gap, e.col_gap, inv ? &inv->col_gap : nullptr);
+    if (e.row_gap) put(row_gap, e.row_gap, inv ? &inv->row_gap : nullptr);
+}
+
+// True if a per-axes edit (or inverse) carries nothing at all.
+template <class E>
+bool axes_edit_empty(const E& e) {
+    TitleEdits t;
+    merge_title_edits(t, e);
+    LimitEdits l;
+    merge_limit_edits(l, e);
+    bool empty = t.empty() && l.empty() && style_edits_empty(e) && e.plot_ops.empty();
+    if constexpr (requires { e.camera; }) empty = empty && !e.camera;
+    return empty;
+}
+
+// ---------------------------------------------------------------------------
+// Composing inverses (GUI-kit R10). A host coalescing a gesture that spans
+// frames folds each frame's inverse into the gesture's: `older` undoes the
+// earlier frames, `newer` the latest. The result undoes both: the older value
+// of every field wins, and the newer data ops run first. When a gesture ends
+// is the host's call.
+// ---------------------------------------------------------------------------
+
+namespace edits_detail {
+
+template <class V>
+void keep_older(std::optional<V>& older, const std::optional<V>& newer) {
+    if (!older) older = newer;
+}
+
+// Entries addressed to an object: the older one for an object wins; the newer
+// entries for other objects run first.
+template <class Vec, class Key>
+void compose_entries(Vec& older, const Vec& newer, Key key) {
+    Vec made;
+    for (const auto& n : newer) {
+        const bool covered = std::any_of(older.begin(), older.end(),
+                                         [&](const auto& o) { return key(o) == key(n); });
+        if (!covered) made.push_back(n);
+    }
+    older.insert(older.begin(), made.begin(), made.end());
+}
+
+} // namespace edits_detail
+
+template <class E>
+void compose_axes_inverse(E& older, const E& newer) {
+    using edits_detail::keep_older;
+    keep_older(older.title, newer.title);
+    keep_older(older.xtitle, newer.xtitle);
+    keep_older(older.ytitle, newer.ytitle);
+    keep_older(older.xlim_auto, newer.xlim_auto);
+    keep_older(older.ylim_auto, newer.ylim_auto);
+    keep_older(older.xmin, newer.xmin);
+    keep_older(older.xmax, newer.xmax);
+    keep_older(older.ymin, newer.ymin);
+    keep_older(older.ymax, newer.ymax);
+    keep_older(older.grid_enabled, newer.grid_enabled);
+    keep_older(older.grid_opts, newer.grid_opts);
+    keep_older(older.axes_style, newer.axes_style);
+    keep_older(older.legend_enabled, newer.legend_enabled);
+    keep_older(older.legend_opts, newer.legend_opts);
+    keep_older(older.colorbar_opts, newer.colorbar_opts);
+    keep_older(older.xticks_override, newer.xticks_override);
+    keep_older(older.yticks_override, newer.yticks_override);
+    older.plot_ops.insert(older.plot_ops.begin(), newer.plot_ops.begin(), newer.plot_ops.end());
+    edits_detail::compose_entries(older.plot_styles, newer.plot_styles,
+                                  [](const PlotStyleEdit& p) {
+        return std::tuple(edits_detail::object_key(p.plane_index, p.plot_index, p.id),
+                          p.opts.index());
+    });
+    if constexpr (requires { older.box_style; }) {
+        keep_older(older.ztitle, newer.ztitle);
+        keep_older(older.zlim_auto, newer.zlim_auto);
+        keep_older(older.zmin, newer.zmin);
+        keep_older(older.zmax, newer.zmax);
+        keep_older(older.zticks_override, newer.zticks_override);
+        keep_older(older.box_style, newer.box_style);
+        keep_older(older.aspect, newer.aspect);
+        keep_older(older.camera, newer.camera);
+        // A plane's fields one by one: the older entry may hold only some.
+        for (const auto& pe : newer.planes) {
+            auto it = std::find_if(older.planes.begin(), older.planes.end(), [&](const auto& o) {
+                return edits_detail::object_key(-1, o.plane_index, o.id)
+                       == edits_detail::object_key(-1, pe.plane_index, pe.id);
+            });
+            if (it == older.planes.end()) { older.planes.insert(older.planes.begin(), pe); continue; }
+            keep_older(it->orient, pe.orient);
+            keep_older(it->offset, pe.offset);
+            keep_older(it->opts, pe.opts);
+        }
+        auto by_object = [](const auto& o) { return edits_detail::object_key(-1, o.plot_index, o.id); };
+        edits_detail::compose_entries(older.bars3d, newer.bars3d, by_object);
+        edits_detail::compose_entries(older.surfaces, newer.surfaces, by_object);
+        edits_detail::compose_entries(older.scatter3d, newer.scatter3d, by_object);
+        edits_detail::compose_entries(older.lines3d, newer.lines3d, by_object);
+        edits_detail::compose_entries(older.surface_tri, newer.surface_tri, by_object);
+    }
+}
+
+inline void compose_inverse(FigureEdits& older, const FigureEdits& newer) {
+    using edits_detail::keep_older;
+    auto lane = [](auto& o, const auto& n) {
+        for (const auto& [idx, e] : n) {
+            auto it = std::find_if(o.begin(), o.end(), [idx](const auto& p) { return p.first == idx; });
+            if (it == o.end()) o.push_back({idx, e});
+            else compose_axes_inverse(it->second, e);
+        }
+    };
+    lane(older.per_axes, newer.per_axes);
+    lane(older.per_axes3d, newer.per_axes3d);
+    keep_older(older.suptitle, newer.suptitle);
+    keep_older(older.suptitle_opts, newer.suptitle_opts);
+    keep_older(older.margins, newer.margins);
+    keep_older(older.col_gap, newer.col_gap);
+    keep_older(older.row_gap, newer.row_gap);
+    keep_older(older.col_ratios, newer.col_ratios);
+    keep_older(older.row_ratios, newer.row_ratios);
 }
 
 } // namespace sextant

@@ -565,6 +565,9 @@ namespace lt {
     // object_id.cpp
     void test_object_ids();
 
+    // undo.cpp
+    void test_undo();
+
     // window_wait.cpp -- last: it opens real windows
     void test_wait_closed();
 

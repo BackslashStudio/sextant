@@ -44,11 +44,18 @@ struct Axes::Impl {
     // like a plotting call, reaching a window at the next publish; panel edits
     // made over the old order follow their objects (or drop with them).
     // Reorder is within a kind, which is what draw and legend order follow.
+    // Each returns what undoes it (GUI-kit R10): the removed object for
+    // restore_object(), the old index for a move back.
     std::optional<ObjectRef> find_object(ObjectId id) const {
         return find_object_in(*this, kPlotKinds2D, id);
     }
-    bool remove_object(ObjectId id) { return remove_object_in(*this, kPlotKinds2D, id); }
-    bool move_object(ObjectId id, std::size_t to) {
+    std::optional<RemovedObject<PlotObject2D>> remove_object(ObjectId id) {
+        return remove_object_in<PlotObject2D>(*this, kPlotKinds2D, id);
+    }
+    bool restore_object(RemovedObject<PlotObject2D> r) {
+        return restore_object_in(*this, kPlotKinds2D, std::move(r));
+    }
+    std::optional<std::size_t> move_object(ObjectId id, std::size_t to) {
         return move_object_in(*this, kPlotKinds2D, id, to);
     }
 

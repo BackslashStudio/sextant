@@ -4,6 +4,7 @@
 #include "plane2d_impl.h"
 #include "plot_objects.h"
 #include "tick.h"
+#include <algorithm>
 #include <memory>
 #include <optional>
 #include <string>
@@ -54,12 +55,18 @@ namespace sextant {
 
         // The axes' own objects and its planes by identity, as Axes::Impl's (a
         // plane's objects: through its sheet). A removed plane's Plane2D handle
-        // keeps working, detached: nothing it holds is drawn.
+        // keeps working, detached: nothing it holds is drawn; restore_plane()
+        // attaches it again (GUI-kit R10).
         std::optional<ObjectRef> find_object(ObjectId id) const {
             return find_object_in(*this, kPlotKinds3D, id);
         }
-        bool remove_object(ObjectId id) { return remove_object_in(*this, kPlotKinds3D, id); }
-        bool move_object(ObjectId id, std::size_t to) {
+        std::optional<RemovedObject<PlotObject3D>> remove_object(ObjectId id) {
+            return remove_object_in<PlotObject3D>(*this, kPlotKinds3D, id);
+        }
+        bool restore_object(RemovedObject<PlotObject3D> r) {
+            return restore_object_in(*this, kPlotKinds3D, std::move(r));
+        }
+        std::optional<std::size_t> move_object(ObjectId id, std::size_t to) {
             return move_object_in(*this, kPlotKinds3D, id, to);
         }
         std::optional<std::size_t> find_plane(ObjectId id) const {
@@ -67,17 +74,32 @@ namespace sextant {
                 if (plane_at(i).id == id) return i;
             return std::nullopt;
         }
-        bool remove_plane(ObjectId id) {
+
+        // A plane taken out by remove_plane(): where it was, and the plane.
+        struct RemovedPlane {
+            std::size_t              index = 0;
+            std::shared_ptr<Plane2D> plane;
+        };
+        std::optional<RemovedPlane> remove_plane(ObjectId id) {
             const auto i = find_plane(id);
-            if (!i) return false;
+            if (!i) return std::nullopt;
+            RemovedPlane r{ *i, planes[*i] };
             planes.erase(planes.begin() + static_cast<std::ptrdiff_t>(*i));
+            return r;
+        }
+        // Back at its index (clamped to the end); false if it is there already.
+        bool restore_plane(RemovedPlane r) {
+            if (!r.plane || find_plane(r.plane->d->id)) return false;
+            const std::size_t at = std::min(r.index, planes.size());
+            planes.insert(planes.begin() + static_cast<std::ptrdiff_t>(at), std::move(r.plane));
             return true;
         }
-        bool move_plane(ObjectId id, std::size_t to) {
+        // Returns where it was, for a move back.
+        std::optional<std::size_t> move_plane(ObjectId id, std::size_t to) {
             const auto i = find_plane(id);
-            if (!i) return false;
+            if (!i) return std::nullopt;
             objects_detail::move_to(planes, *i, to);
-            return true;
+            return i;
         }
 
         RenderSnapshot3D build_snapshot() const {
