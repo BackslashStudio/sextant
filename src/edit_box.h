@@ -21,13 +21,15 @@ void fill_id(ObjectId& id, const Holder& h, PlotKind kind, int index) {
     if (id == 0) id = object_id_at(h, kind, index);
 }
 
-// PlotStyleEdit's alternatives are in PlotKind's 2D order.
+// PlotStyleEdit's alternatives are in PlotKind's 2D order, then a text's.
 inline PlotKind style_kind(const PlotStyleEdit& p) {
     using Opts = decltype(PlotStyleEdit::opts);
     static_assert(static_cast<int>(PlotKind::Heatmap) == 3
                   && std::is_same_v<std::variant_alternative_t<3, Opts>, HeatmapOptions>
                   && static_cast<int>(PlotKind::ScatterZ) == 4
-                  && std::is_same_v<std::variant_alternative_t<4, Opts>, ScatterZOptions>);
+                  && std::is_same_v<std::variant_alternative_t<4, Opts>, ScatterZOptions>
+                  && std::is_same_v<std::variant_alternative_t<5, Opts>, TextStyle>);
+    if (p.opts.index() == 5) return PlotKind::Text;
     return static_cast<PlotKind>(p.opts.index());
 }
 
@@ -79,6 +81,7 @@ inline void stamp_edit(AxesEdit3D& e, const RenderSnapshot3D& s) {
     objects(e.scatter3d, PlotKind::Scatter3D);
     objects(e.lines3d, PlotKind::Line3D);
     objects(e.surface_tri, PlotKind::SurfaceTri);
+    objects(e.texts, PlotKind::Text);
 }
 
 // The stamps a push site records itself (titles, limits, the camera), from

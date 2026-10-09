@@ -279,6 +279,7 @@ namespace sextant {
         std::vector<Scatter3DOptions> scatter3d_local;
         std::vector<Line3DOptions> line3d_local;
         std::vector<SurfaceTriOptions> surface_tri_local;
+        std::vector<TextStyle> texts_local;
         std::vector<ObjectId> scene_ids;   // seeded from, kind by kind
 
         // The 2D kinds' appearance, for a 2D axes' own sheet and for each plane's
@@ -290,6 +291,7 @@ namespace sextant {
             std::vector<BarOptions> bars;
             std::vector<HeatmapOptions> heatmaps;
             std::vector<ScatterZOptions> scatter_z;
+            std::vector<TextStyle> texts;
             std::vector<ObjectId> ids;   // seeded from, kind by kind
         };
 
@@ -300,6 +302,11 @@ namespace sextant {
         // the op by a frame); re-read from the snapshot otherwise. One suffices,
         // since only one drag is active at a time.
         double width_held = 0.0;
+
+        // The open text tab's string and placement while one of its fields is
+        // active (the snapshot otherwise), and the string's edit buffer.
+        TextContent text_local;
+        char text_buf[1024]{};
 
         // The Selection generation the per-object scratch was seeded at; changed
         // objects re-seed on their own, every frame the panel draws.

@@ -404,6 +404,73 @@ namespace sextant {
         }
     }
 
+    void NvgRenderer::draw_texts(const std::vector<TextDraw>& texts, const PlotRect& frame) {
+        auto rgba = [](const Color& c) { return nvgRGBAf(c.r, c.g, c.b, c.a); };
+        for (const TextDraw& t: texts) {
+            nvgSave(vg_);
+            if (t.clip) nvgScissor(vg_, frame.x, frame.y, frame.w, frame.h);
+
+            // The arrow first, so the box covers its start.
+            if (t.shaft.size() >= 4 && t.linewidth > 0.0f) {
+                nvgStrokeColor(vg_, rgba(t.arrow_color));
+                nvgStrokeWidth(vg_, t.linewidth);
+                for (std::size_t i = 0; i + 3 < t.shaft.size(); i += 2) {
+                    begin_styled_segment(vg_, t.shaft[i], t.shaft[i + 1], t.shaft[i + 2], t.shaft[i + 3],
+                                         t.linestyle);
+                    nvgStroke(vg_);
+                }
+            }
+            for (const TextDraw::Head& h: t.heads) {
+                nvgBeginPath(vg_);
+                nvgMoveTo(vg_, h.xy[0], h.xy[1]);
+                nvgLineTo(vg_, h.xy[2], h.xy[3]);
+                if (h.kind == ArrowHead::Bar) {
+                    nvgStrokeColor(vg_, rgba(t.arrow_color));
+                    nvgStrokeWidth(vg_, std::max(t.linewidth, 1.0f));
+                    nvgStroke(vg_);
+                    continue;
+                }
+                nvgLineTo(vg_, h.xy[4], h.xy[5]);
+                if (h.kind == ArrowHead::Filled) {
+                    nvgClosePath(vg_);
+                    nvgFillColor(vg_, rgba(t.arrow_color));
+                    nvgFill(vg_);
+                } else {
+                    nvgStrokeColor(vg_, rgba(t.arrow_color));
+                    nvgStrokeWidth(vg_, std::max(t.linewidth, 1.0f));
+                    nvgStroke(vg_);
+                }
+            }
+
+            nvgTranslate(vg_, t.ax, t.ay);
+            if (t.angle != 0.0f) nvgRotate(vg_, t.angle);
+            if (t.has_box) {
+                nvgBeginPath(vg_);
+                nvgRect(vg_, t.box.x, t.box.y, t.box.w, t.box.h);
+                if (t.fill.a > 0.0f) {
+                    nvgFillColor(vg_, rgba(t.fill));
+                    nvgFill(vg_);
+                }
+                if (t.edge_width > 0.0f) {
+                    nvgStrokeColor(vg_, rgba(t.edge));
+                    nvgStrokeWidth(vg_, t.edge_width);
+                    nvgStroke(vg_);
+                }
+            }
+            if (font_ != -1 && !t.lines.empty()) {
+                nvgFontFaceId(vg_, font_for_path(t.font_path));
+                nvgFontSize(vg_, t.fontsize);
+                nvgFillColor(vg_, rgba(t.color));
+                const int h = t.ha == HAlign::Left ? NVG_ALIGN_LEFT
+                            : t.ha == HAlign::Right ? NVG_ALIGN_RIGHT : NVG_ALIGN_CENTER;
+                nvgTextAlign(vg_, h | NVG_ALIGN_BASELINE);
+                for (const TextDraw::Line& l: t.lines)
+                    if (!l.text.empty()) nvgText(vg_, l.x, l.y, l.text.c_str(), nullptr);
+            }
+            nvgRestore(vg_);
+        }
+    }
+
     // Entries, box size and constants come from figure_layout.h.
     void NvgRenderer::draw_legend(const CellLayout& cell, const LegendOptions& opts) {
         if (font_ == -1 || cell.legend_entries.empty()) return;

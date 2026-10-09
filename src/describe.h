@@ -83,6 +83,13 @@ namespace sextant {
     SEXTANT_DESCRIBE(SuptitleOptions,
                      F(fontsize) F(color) F(font_path) F(align) F(offset_x) F(offset_y))
     SEXTANT_DESCRIBE(FigureMargins, F(left) F(right) F(top) F(bottom))
+    SEXTANT_DESCRIBE(TextOptions,
+                     F(fontsize) F(color) F(alpha) F(font_path) F(ha) F(va) F(rotation) F(dx) F(dy)
+                     F(linespacing) F(background) F(edgecolor) F(edge_linewidth) F(pad)
+                     F(clip_to_frame))
+    SEXTANT_DESCRIBE(ArrowOptions,
+                     F(head) F(tail) F(head_length) F(head_width) F(linewidth) F(color) F(linestyle)
+                     F(gap_text) F(gap_point) F(arc))
 
     // figure.h
     SEXTANT_DESCRIBE(FigureOptions,
@@ -216,6 +223,13 @@ namespace sextant {
     SEXTANT_ENUM_NAMES(HAlign,
                        {"left", HAlign::Left}, {"center", HAlign::Center},
                        {"right", HAlign::Right})
+    SEXTANT_ENUM_NAMES(VAlign,
+                       {"top", VAlign::Top}, {"center", VAlign::Center},
+                       {"baseline", VAlign::Baseline}, {"bottom", VAlign::Bottom})
+    SEXTANT_ENUM_NAMES(Coords, {"data", Coords::Data}, {"fraction", Coords::Fraction})
+    SEXTANT_ENUM_NAMES(ArrowHead,
+                       {"none", ArrowHead::None}, {"open", ArrowHead::Open},
+                       {"filled", ArrowHead::Filled}, {"bar", ArrowHead::Bar})
     SEXTANT_ENUM_NAMES(PanelTheme,
                        {"dark", PanelTheme::Dark}, {"light", PanelTheme::Light},
                        {"classic", PanelTheme::Classic})

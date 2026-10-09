@@ -188,6 +188,7 @@ std::string render_figure_svg(const FigureSnapshot& fsnap,
             // Boxes come from compute_figure_layout(); only cosmetics here.
             sd.colorbar_opts   = s3->colorbar_opts;
             sd.legend_opts     = s3->legend_opts;
+            sd.texts           = plan_texts3d(s3->texts, b.proj, sd.layout.frame);
             fd.axes.push_back(std::move(sd));
             continue;
         }
@@ -208,6 +209,7 @@ std::string render_figure_svg(const FigureSnapshot& fsnap,
         sd.axes_style      = snap.axes_style;
         sd.legend_opts     = snap.legend_opts;
         sd.colorbar_opts   = snap.colorbar_opts;
+        sd.texts           = plan_texts(snap.texts, sd.layout.tr, sd.layout.frame);
 
         fd.axes.push_back(std::move(sd));
     }

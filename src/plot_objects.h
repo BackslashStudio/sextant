@@ -16,10 +16,11 @@
 namespace sextant {
 
 // Names a plot object's per-kind vector; objects are addressed as (kind, index).
-// The first five are 2D (also held by planes); the rest are native 3D kinds,
-// always addressed at the axes (plane -1). Append new kinds to keep values stable.
+// The first five are 2D (also held by planes); then the native 3D kinds,
+// always addressed at the axes (plane -1). Text is held by both 2D and 3D
+// axes (never by a plane). Append new kinds to keep values stable.
 enum class PlotKind { Line, Scatter, Bar, Heatmap, ScatterZ, Bar3D, Surface, Scatter3D, Line3D,
-                      SurfaceTri };
+                      SurfaceTri, Text };
 
 // A plot object's (or a plane's) identity: kept by set_*_data(), unchanged by
 // removing or reordering its siblings, never reused in a process. Edits carry
@@ -399,6 +400,34 @@ inline void line3d_value_range(const Line3DPlot& l, double& vmin, double& vmax) 
     vmax = hi;
 }
 
+// A text's string and placement, the part a Data-panel op replaces.
+//   2D:  (x, y) the text; with `arrow`, (px, py) the point it points at (data).
+//   3D:  (x, y, z) the data point it is drawn at (x and y in Coords::Data), or
+//        with x and y frame fractions a text2d() (z unused); with `arrow`,
+//        (x, y, z) is the point and the text sits (dx, dy) pixels from it, y up.
+struct TextContent {
+    std::string text;
+    Pos x, y;
+    double z = 0.0;
+    bool arrow = false;
+    double px = 0.0, py = 0.0;
+    double dx = 0.0, dy = 0.0;
+};
+
+// A text's appearance, the part a style edit replaces (ArrowOptions is read
+// only with `arrow`).
+struct TextStyle {
+    TextOptions  text;
+    ArrowOptions arrow;
+};
+
+struct TextPlot {
+    TextContent content;
+    TextStyle   opts;
+    unsigned long long data_stamp = 0;
+    ObjectId id = 0;
+};
+
 struct AllPlotData {
     const std::vector<LinePlot>&     lines;
     const std::vector<ScatterPlot>&  scatters;
@@ -470,6 +499,8 @@ struct RenderSnapshot {
     std::vector<BarPlot>      bars;
     std::vector<HeatmapPlot>  heatmaps;
     std::vector<ScatterZPlot> scatter_z;
+    // A plane's sheet holds none (planes have no text API).
+    std::vector<TextPlot>     texts;
 
     // Font sizes live in axes_style.
     std::string title, xtitle, ytitle;
@@ -520,6 +551,7 @@ struct RenderSnapshot3D {
     std::vector<Scatter3DPlot> scatter3d;
     std::vector<Line3DPlot> lines3d;
     std::vector<SurfaceTriPlot> surface_tri;
+    std::vector<TextPlot> texts;
     // In insertion order; draw order is resolved per frame, this only breaks ties.
     std::vector<PlaneSnapshot> planes;
 
@@ -569,10 +601,10 @@ struct ObjectRef {
 };
 
 inline constexpr PlotKind kPlotKinds2D[] = { PlotKind::Line, PlotKind::Scatter, PlotKind::Bar,
-                                             PlotKind::Heatmap, PlotKind::ScatterZ };
+                                             PlotKind::Heatmap, PlotKind::ScatterZ, PlotKind::Text };
 inline constexpr PlotKind kPlotKinds3D[] = { PlotKind::Bar3D, PlotKind::Surface,
                                              PlotKind::Scatter3D, PlotKind::Line3D,
-                                             PlotKind::SurfaceTri };
+                                             PlotKind::SurfaceTri, PlotKind::Text };
 
 // Calls `f` with the vector holding `kind` in a 2D holder (RenderSnapshot,
 // Axes::Impl, a plane's sheet) and returns its result, or `none` for a kind
@@ -586,6 +618,7 @@ R with_kind(S& s, PlotKind kind, F&& f, R none) {
         case PlotKind::Bar:      return f(s.bars);
         case PlotKind::Heatmap:  return f(s.heatmaps);
         case PlotKind::ScatterZ: return f(s.scatter_z);
+        case PlotKind::Text:     return f(s.texts);
         default:                 return none;
     }
 }
@@ -600,6 +633,7 @@ R with_kind(S& s, PlotKind kind, F&& f, R none) {
         case PlotKind::Scatter3D:  return f(s.scatter3d);
         case PlotKind::Line3D:     return f(s.lines3d);
         case PlotKind::SurfaceTri: return f(s.surface_tri);
+        case PlotKind::Text:       return f(s.texts);
         default:                   return none;
     }
 }
@@ -647,9 +681,10 @@ std::optional<ObjectRef> find_object_in(const S& s, const PlotKind (&kinds)[N], 
 
 // A plot object taken out by remove_object(), for putting back (GUI-kit R10):
 // where it was among its kind, and the whole object, its id included.
-using PlotObject2D = std::variant<LinePlot, ScatterPlot, BarPlot, HeatmapPlot, ScatterZPlot>;
+using PlotObject2D = std::variant<LinePlot, ScatterPlot, BarPlot, HeatmapPlot, ScatterZPlot,
+                                  TextPlot>;
 using PlotObject3D = std::variant<Bar3DPlot, SurfacePlot, Scatter3DPlot, Line3DPlot,
-                                  SurfaceTriPlot>;
+                                  SurfaceTriPlot, TextPlot>;
 template <class Object>
 struct RemovedObject {
     std::size_t index = 0;

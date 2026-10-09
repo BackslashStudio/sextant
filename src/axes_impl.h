@@ -17,6 +17,7 @@ struct Axes::Impl {
     std::vector<BarPlot>      bars;
     std::vector<HeatmapPlot>  heatmaps;
     std::vector<ScatterZPlot> scatter_z;
+    std::vector<TextPlot>     texts;
     // Font sizes for these live in axes_style, so the panel edits them via AxesEdit.
     std::string   title, xtitle, ytitle;
     TitleStamps   title_stamps;
@@ -65,6 +66,7 @@ struct Axes::Impl {
         RenderSnapshot s;
         s.lines = lines; s.scatters = scatters; s.bars = bars; s.heatmaps = heatmaps;
         s.scatter_z = scatter_z;
+        s.texts = texts;
         s.title = title; s.xtitle = xtitle; s.ytitle = ytitle;
         s.title_stamps = title_stamps;
         s.grid_enabled   = grid_enabled;   s.grid_opts   = grid_opts;
@@ -107,6 +109,10 @@ struct Axes::Impl {
                       const char* who);
     void set_heatmap_data(std::size_t i, std::span<const double> data, int rows, int cols,
                           Range xrange, Range yrange, const char* who);
+
+    // Text (Axes only; a plane has none). Throw on a non-finite number.
+    void ingest_text(TextContent c, TextStyle style, const char* who);
+    void set_text_data(std::size_t i, TextContent c, const char* who);
 };
 
 } // namespace sextant

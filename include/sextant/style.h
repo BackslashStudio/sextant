@@ -373,8 +373,107 @@ namespace sextant {
         std::string font_path; // "" = renderer default; see LegendOptions
     };
 
-    // Horizontal placement of a piece of figure-level text.
+    // Horizontal placement of a piece of text: the suptitle, or a text's block
+    // against its anchor (TextOptions::ha).
     enum class HAlign { Left, Center, Right };
+
+    // Vertical placement of a text's block against its anchor. Baseline is the
+    // last line's baseline.
+    enum class VAlign { Top, Center, Baseline, Bottom };
+
+    // What one coordinate of a text's position is measured in: data units, or
+    // a fraction of the plot frame from its left (x) or bottom (y) edge.
+    enum class Coords { Data, Fraction };
+
+    // One coordinate of a text's position (Axes::text(), Axes::annotate()). A
+    // bare number converts to a data value; Pos::fraction() makes a frame
+    // fraction. x and y each take their own, so a text can sit at a data x
+    // and the top of the frame:
+    //
+    //     ax.text("threshold", 2.5, Pos::fraction(0.95));
+    //
+    // Pixels from a frame corner are a fraction of 0 or 1 plus TextOptions::dx/dy.
+    struct Pos {
+        double v = 0.0;
+        Coords space = Coords::Data;
+
+        Pos() = default;
+
+        Pos(double value) : v(value) {}
+
+        static Pos fraction(double f) {
+            Pos p(f);
+            p.space = Coords::Fraction;
+            return p;
+        }
+    };
+
+    // An arrow end: none, an open chevron, a filled triangle, or a bar across
+    // the shaft.
+    enum class ArrowHead { None, Open, Filled, Bar };
+
+    // A text's look (Axes::text(), annotate(), and the Axes3D ones). Sizes are
+    // pixels as drawn; a text keeps its size under zoom and in 3D at any
+    // distance.
+    struct TextOptions {
+        float fontsize = 12.0f;
+        Color color = Color::Black;
+        // Opacity of everything the text draws (text, box and arrow), on top of
+        // each color's own alpha.
+        float alpha = 1.0f;
+        std::string font_path; // "" = renderer default
+
+        // Where the block of lines sits against its anchor.
+        HAlign ha = HAlign::Left;
+        VAlign va = VAlign::Baseline;
+
+        // Degrees counter-clockwise, about the anchor.
+        float rotation = 0.0f;
+
+        // Pixel nudge of the whole text (box included) from where its position
+        // puts it, y up.
+        float dx = 0.0f, dy = 0.0f;
+
+        // '\n' starts a new line, each aligned by `ha`; lines are `linespacing`
+        // x fontsize apart.
+        float linespacing = 1.2f;
+
+        // A box around the text, `pad` pixels out from it: filled with
+        // `background` (alpha 0 = no fill) and outlined `edge_linewidth` pixels
+        // wide (0 = no outline) in `edgecolor` (unset = the text's color).
+        Color background = {1.0f, 1.0f, 1.0f, 0.0f};
+        std::optional<Color> edgecolor;
+        float edge_linewidth = 0.0f;
+        float pad = 4.0f;
+
+        // Cut the text (and its arrow) at the plot frame. Off by default: a text
+        // whose data position leaves the view is hidden whole instead.
+        bool clip_to_frame = false;
+    };
+
+    // The arrow annotate() draws from its text to the point.
+    struct ArrowOptions {
+        // At the point, and at the text.
+        ArrowHead head = ArrowHead::Filled;
+        ArrowHead tail = ArrowHead::None;
+        float head_length = 10.0f;
+        float head_width = 7.0f;
+
+        float linewidth = 1.25f;
+        // Unset = the text's color.
+        std::optional<Color> color;
+        LineStyle linestyle = LineStyle::Solid;
+
+        // Pixels left clear between the arrow and the text's box, and before
+        // the point.
+        float gap_text = 2.0f;
+        float gap_point = 0.0f;
+
+        // 0 draws a straight arrow. Otherwise it bows to one side: the control
+        // point sits `arc` x the arrow's length off its midpoint (negative bows
+        // the other way), as matplotlib's arc3.
+        float arc = 0.0f;
+    };
 
     // Cosmetics for Figure::suptitle(), which spans the whole grid.
     struct SuptitleOptions {
@@ -427,5 +526,14 @@ namespace sextant {
         std::vector<double> data;
         int rows = 0, cols = 0;
         Range xrange, yrange;
+    };
+
+    // Axes::text() and annotate(): the string and where it is. `arrow` is set
+    // for annotate(), whose arrow points at (px, py) in data coordinates.
+    struct TextData {
+        std::string text;
+        Pos x, y;
+        bool arrow = false;
+        double px = 0.0, py = 0.0;
     };
 } // namespace sextant

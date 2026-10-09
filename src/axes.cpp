@@ -278,6 +278,33 @@ Axes& Axes::imshow(std::span<const double> data, int rows, int cols,
     return heatmap(data, rows, cols, xr, yr, std::move(opts));
 }
 
+void Axes::Impl::ingest_text(TextContent c, TextStyle style, const char* who) {
+    read_back::check_text(c, who);
+    texts.push_back({ std::move(c), std::move(style), next_snapshot_generation(), next_object_id() });
+}
+
+Axes& Axes::text(std::string_view s, Pos x, Pos y, TextOptions opts) {
+    TextContent c;
+    c.text = s;
+    c.x = x;
+    c.y = y;
+    d->ingest_text(std::move(c), { std::move(opts), ArrowOptions{} }, "text");
+    return *this;
+}
+
+Axes& Axes::annotate(double px, double py, std::string_view s, Pos tx, Pos ty,
+                     TextOptions opts, ArrowOptions arrow) {
+    TextContent c;
+    c.text = s;
+    c.x = tx;
+    c.y = ty;
+    c.arrow = true;
+    c.px = px;
+    c.py = py;
+    d->ingest_text(std::move(c), { std::move(opts), std::move(arrow) }, "annotate");
+    return *this;
+}
+
 Axes& Axes::set_title(std::string_view text, float fontsize) {
     d->title = text; d->title_stamps.title = next_snapshot_generation();
     d->axes_style.title_fontsize = fontsize; return *this;
@@ -372,6 +399,34 @@ BarData Axes::bar_data(std::size_t i) const {
 }
 HeatmapData Axes::heatmap_data(std::size_t i) const {
     return read_back::to_data(read_back::at(d->heatmaps, i, "heatmap_data"));
+}
+
+std::size_t Axes::text_count() const      { return d->texts.size(); }
+
+TextData Axes::text_data(std::size_t i) const {
+    return read_back::to_data(read_back::at(d->texts, i, "text_data"));
+}
+
+// The content is replaced whole; the style stays.
+void Axes::Impl::set_text_data(std::size_t i, TextContent c, const char* who) {
+    TextPlot& p = read_back::at(texts, i, who);
+    read_back::check_text(c, who);
+    p.content = std::move(c);
+    p.data_stamp = next_snapshot_generation();
+}
+
+Axes& Axes::set_text_data(std::size_t i, const TextData& data) {
+    d->set_text_data(i, read_back::content_of(data), "set_text_data");
+    return *this;
+}
+
+Axes& Axes::set_text_data(std::size_t i, std::string_view s, Pos x, Pos y) {
+    TextContent c = read_back::at(d->texts, i, "set_text_data").content;
+    c.text = s;
+    c.x = x;
+    c.y = y;
+    d->set_text_data(i, std::move(c), "set_text_data");
+    return *this;
 }
 
 // set_*_data(): find object i, validate the new data as plotting it would, then

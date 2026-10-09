@@ -227,7 +227,7 @@ namespace lt {
         STRUCT(ErrorBarOptions) STRUCT(LineOptions) STRUCT(ScatterOptions) STRUCT(ScatterZOptions)
         STRUCT(BarOptions) STRUCT(HistOptions) STRUCT(HeatmapOptions) STRUCT(GridOptions)
         STRUCT(AxesStyle) STRUCT(LegendOptions) STRUCT(ColorbarOptions) STRUCT(SuptitleOptions)
-        STRUCT(FigureMargins)
+        STRUCT(FigureMargins) STRUCT(TextOptions) STRUCT(ArrowOptions)
         STRUCT(FigureOptions) STRUCT(SvgExportOptions) STRUCT(PngExportOptions)
         STRUCT(Camera3D) STRUCT(Plane2DOptions) STRUCT(Bar3DOptions) STRUCT(SurfaceOptions)
         STRUCT(SurfaceTriOptions) STRUCT(ErrorBar3DOptions) STRUCT(Scatter3DOptions)
@@ -237,7 +237,7 @@ namespace lt {
 #define ENUM(E) check_enum<E>(#E);
         ENUM(LineStyle) ENUM(MarkerStyle) ENUM(Colormap) ENUM(CapStyle) ENUM(AxisPosition)
         ENUM(LegendAnchor) ENUM(ColorbarAnchor) ENUM(HAlign) ENUM(PanelTheme) ENUM(Projection)
-        ENUM(PlaneOrientation)
+        ENUM(PlaneOrientation) ENUM(VAlign) ENUM(Coords) ENUM(ArrowHead)
 #undef ENUM
 
         // Nesting flattens to dotted paths; a const struct walks too.

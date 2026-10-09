@@ -5,6 +5,7 @@
 #include "renderer/data_renderer.h"
 #include "renderer/figure_layout.h"
 #include "renderer/box3d.h"
+#include "renderer/text_plan.h"
 #include <cmath>
 #include <glad/glad.h>
 #include <algorithm>
@@ -96,7 +97,7 @@ void render_frame(RenderDevice& dev, DataRenderer& data,
         data.draw_scatter_z(all.scatter_z, c.tr, c.frame);
     }
 
-    // Pass 3 — NanoVG: borders, ticks, labels, legend, colorbar, suptitle.
+    // Pass 3 — NanoVG: borders, ticks, labels, texts, legend, colorbar, suptitle.
     dev.begin_nvg_frame(iw, ih, ratio);
     for (std::size_t i = 0; i < layout.cells.size(); ++i) {
         const auto& c = layout.cells[i];
@@ -106,6 +107,9 @@ void render_frame(RenderDevice& dev, DataRenderer& data,
             nvg.draw_contours3d(c, *s3, data.contour_cache(), fsnap.data_generation, c.slot.index);
             nvg.draw_box3d_frame(box_plans[i], *s3);
             nvg.draw_title3d(c, *s3);
+            // Texts over the box furniture, under the legend.
+            if (!s3->texts.empty())
+                nvg.draw_texts(plan_texts3d(s3->texts, c.box3d->proj, c.frame), c.frame);
             // Legend then colorbar, beside the frame, as in 2D.
             if (c.has_legend())   nvg.draw_legend(c, s3->legend_opts);
             // The axes' colorbar styling applies to every bar.
@@ -119,6 +123,8 @@ void render_frame(RenderDevice& dev, DataRenderer& data,
         nvg.draw_axes_border(c.frame, snap.axes_style);
         nvg.draw_ticks(c, snap.axes_style, snap.grid_enabled, snap.grid_opts);
         nvg.draw_titles(c, snap);
+        // Texts over the frame furniture, under the legend and colorbar.
+        if (!snap.texts.empty()) nvg.draw_texts(plan_texts(snap.texts, c.tr, c.frame), c.frame);
         if (c.has_legend())   nvg.draw_legend(c, snap.legend_opts);
         for (const auto& cb : c.colorbars) nvg.draw_colorbar(cb, snap.colorbar_opts);
     }

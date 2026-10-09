@@ -9,6 +9,7 @@
 #include "../contour.h"
 #include "../renderer/figure_layout.h"
 #include "../renderer/plot_rect.h"
+#include "../renderer/text_plan.h"
 #include "../coord_transform.h"
 #include "sextant/style.h"
 #include <optional>
@@ -36,6 +37,9 @@ namespace sextant {
         // Presence and boxes are in `layout`; only the cosmetics are here.
         LegendOptions legend_opts;
         ColorbarOptions colorbar_opts;
+
+        // Texts in pixels (plan_texts() or plan_texts3d()), 2D and 3D cells alike.
+        std::vector<TextDraw> texts;
 
         // 3D cells only (plot vectors above are then empty): the box, already in
         // pixels via plan_box3d(). The writer never sees a camera.

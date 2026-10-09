@@ -56,12 +56,15 @@ struct PlotDataTable {
 
     // Bar only: the plot's shared bar width.
     const double* bar_width = nullptr;
+
+    // Non-null => a text: no table, a form over its string and placement.
+    const TextPlot* text = nullptr;
 };
 
 // Every plot object in `snap`, in RenderSnapshot member order.
 std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot& snap);
 
-// 3D: the axes' own bar3d grids first (plane_index -1), then each plane's
+// 3D: the axes' own objects first (plane_index -1, texts last), then each plane's
 // sheet with `plane_index`/`group` set. Same lifetime rule.
 std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot3D& snap);
 

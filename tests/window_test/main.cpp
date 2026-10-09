@@ -172,6 +172,9 @@ static void test_axes_gallery() {
                       .color = sextant::Color::Green, .linewidth = 3.0f,
                       .name = "loop", .loop = true
                   })
+            // Text (step 31): an annotation whose text sits in the frame, not the data.
+            .annotate(M_PI / 2.0, 1.0, "sin peak", sextant::Pos::fraction(0.55), sextant::Pos::fraction(0.93),
+                      {.va = sextant::VAlign::Top, .background = {1.0f, 1.0f, 0.85f, 1.0f}, .edge_linewidth = 1.0f})
             .set_title("Line").legend().grid();
 
     fig->add_subplot(3, 4, 2)
@@ -376,13 +379,23 @@ static void test_axes3d_gallery() {
     fig->suptitle("What Axes3D draws");
 
     // 1 — bar3d: a 2D histogram standing up, keyed in the legend.
-    fig->add_subplot3d(2, 4, 1)
-            ->bar3d(sextant::PlaneOrientation::XY, gu, gv, gauss,
-                    {.color = sextant::Color::Blue, .name = "counts"})
+    auto bars_ax = fig->add_subplot3d(2, 4, 1);
+    bars_ax->bar3d(sextant::PlaneOrientation::XY, gu, gv, gauss,
+                   {.color = sextant::Color::Blue, .name = "counts"})
             .set_title("bar3d")
+            .text2d("text2d: stays put", 0.02, 0.98, {.va = sextant::VAlign::Top})
             .set_xtitle("wavelength (nm)").set_ytitle("offset").set_ztitle("counts")
             .set_view(-55.0, 25.0)
             .legend();
+    // A 3D annotation on the tallest bar's top: its arrow and text keep their
+    // pixel size as the box turns and zooms.
+    {
+        const auto top = std::max_element(gauss.begin(), gauss.end()) - gauss.begin();
+        const std::size_t ti = static_cast<std::size_t>(top) / gv.size();
+        const std::size_t tj = static_cast<std::size_t>(top) % gv.size();
+        bars_ax->annotate(gu[ti], gv[tj], gauss[static_cast<std::size_t>(top)], "peak", 50.0, 40.0,
+                      {.background = {1.0f, 1.0f, 0.85f, 1.0f}, .edge_linewidth = 1.0f});
+    }
 
     // 2 — surface colored by height through the diverging Coolwarm, with a
     // named colorbar.

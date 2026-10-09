@@ -4,6 +4,7 @@
 #include "sextant/axes3d.h"
 #include "plot_objects.h"
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <span>
 #include <stdexcept>
@@ -68,5 +69,50 @@ namespace sextant::read_back {
 
     inline Line3DData to_data(const Line3DPlot& p) {
         return { p.x.get(), p.y.get(), p.z.get(), p.colors.get() };
+    }
+
+    // A text, as Axes and Axes3D read it.
+    inline TextData to_data(const TextPlot& p) {
+        const TextContent& c = p.content;
+        return { c.text, c.x, c.y, c.arrow, c.px, c.py };
+    }
+
+    inline Text3DData to_data3d(const TextPlot& p) {
+        const TextContent& c = p.content;
+        return { c.text, c.x.v, c.y.v, c.z, c.x.space == Coords::Fraction, c.arrow, c.dx, c.dy };
+    }
+
+    inline TextContent content_of(const TextData& d) {
+        TextContent c;
+        c.text = d.text;
+        c.x = d.x;
+        c.y = d.y;
+        c.arrow = d.arrow;
+        c.px = d.px;
+        c.py = d.py;
+        return c;
+    }
+
+    // `who` names the setter in the error.
+    inline TextContent content_of(const Text3DData& d, const char* who) {
+        if (d.arrow && d.in_frame)
+            throw std::invalid_argument(std::string(who) + ": a text with an arrow is placed in "
+                                        "the scene, not in the frame (arrow and in_frame both set)");
+        TextContent c;
+        c.text = d.text;
+        c.x = d.in_frame ? Pos::fraction(d.x) : Pos(d.x);
+        c.y = d.in_frame ? Pos::fraction(d.y) : Pos(d.y);
+        c.z = d.z;
+        c.arrow = d.arrow;
+        c.dx = d.dx;
+        c.dy = d.dy;
+        return c;
+    }
+
+    // Every number a text is placed by must be finite.
+    inline void check_text(const TextContent& c, const char* who) {
+        for (double v : { c.x.v, c.y.v, c.z, c.px, c.py, c.dx, c.dy })
+            if (!std::isfinite(v))
+                throw std::invalid_argument(std::string(who) + ": text coordinates must be finite");
     }
 } // namespace sextant::read_back

@@ -4,6 +4,7 @@
 #include "../plot_objects.h"
 #include "../contour.h"
 #include "box3d.h"
+#include "text_plan.h"
 #include <vector>
 #include <string>
 #include <map>
@@ -54,6 +55,10 @@ public:
                     bool grid_enabled, const GridOptions& grid_opts);
 
     void draw_titles(const CellLayout& cell, const RenderSnapshot& snap);
+
+    // Texts from plan_texts()/plan_texts3d(): over the frame furniture, under
+    // the legend and colorbar. `frame` is what clip_to_frame scissors to.
+    void draw_texts(const std::vector<TextDraw>& texts, const PlotRect& frame);
 
     // The legend in its reserved box; call only when cell.has_legend().
     void draw_legend(const CellLayout& cell, const LegendOptions& opts);

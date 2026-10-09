@@ -89,6 +89,8 @@ void sync_sheet(DataPanelState::SheetStyles& dst, const RenderSnapshot& sn) {
     copy(dst.bars, sn.bars);
     copy(dst.heatmaps, sn.heatmaps);
     copy(dst.scatter_z, sn.scatter_z);
+    dst.texts.clear();
+    for (const auto& t : sn.texts) dst.texts.push_back(t.opts);
     dst.ids = object_ids(sn, kPlotKinds2D);
 }
 
@@ -199,6 +201,8 @@ void sync_scene_objects(DataPanelState& d, const RenderSnapshot3D& sn) {
     d.surface_tri_local.clear();
     d.surface_tri_local.reserve(sn.surface_tri.size());
     for (const auto& m : sn.surface_tri) d.surface_tri_local.push_back(m.opts);
+    d.texts_local.clear();
+    for (const auto& t : sn.texts) d.texts_local.push_back(t.opts);
     d.scene_ids = object_ids(sn, kPlotKinds3D);
 }
 

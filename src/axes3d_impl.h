@@ -18,6 +18,7 @@ namespace sextant {
         std::vector<Scatter3DPlot> scatter3d;
         std::vector<Line3DPlot> lines3d;
         std::vector<SurfaceTriPlot> surface_tri;
+        std::vector<TextPlot> texts;
 
         // shared_ptr: plane() returns the plane for the caller to draw on.
         std::vector<std::shared_ptr<Plane2D>> planes;
@@ -102,6 +103,10 @@ namespace sextant {
             return i;
         }
 
+        // Text, as Axes::Impl's. Throw on a non-finite number.
+        void ingest_text(TextContent c, TextStyle style, const char* who);
+        void set_text_data(std::size_t i, TextContent c, const char* who);
+
         RenderSnapshot3D build_snapshot() const {
             RenderSnapshot3D s;
             s.bars3d = bars3d;
@@ -109,6 +114,7 @@ namespace sextant {
             s.scatter3d = scatter3d;
             s.lines3d = lines3d;
             s.surface_tri = surface_tri;
+            s.texts = texts;
             s.planes.reserve(planes.size());
             for (const auto& p: planes) s.planes.push_back(p->d->build_snapshot());
             s.title = title;

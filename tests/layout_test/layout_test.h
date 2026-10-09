@@ -577,6 +577,9 @@ namespace lt {
     // edge_markers.cpp (v1.1 step 35)
     void test_edge_markers();
 
+    // text.cpp (v1.1 step 31)
+    void test_text();
+
     // describe.cpp
     void test_describe();
 

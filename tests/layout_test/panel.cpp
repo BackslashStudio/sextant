@@ -410,6 +410,42 @@ namespace lt {
             std::printf("    surface: %d of %d cursor positions reported a conflict, first id %u\n",
                         ss.conflicts, ss.probes, static_cast<unsigned>(ss.first));
 
+        // A text tab (step 31): an annotation with an outlined box and its own
+        // arrow colour, so every row of the form is drawn; in 2D and in 3D.
+        {
+            TextPlot tp;
+            tp.content.text = "peak\nhere";
+            tp.content.x = 1.0;
+            tp.content.y = Pos::fraction(0.5);
+            tp.content.arrow = true;
+            tp.content.px = 2.0;
+            tp.content.py = 3.0;
+            tp.opts.text.edge_linewidth = 1.0f;
+            tp.opts.text.edgecolor = Color::Red;
+            tp.opts.arrow.color = Color::Blue;
+            tp.id = 7;
+            FigureSnapshot fst;
+            RenderSnapshot r;
+            r.texts.push_back(tp);
+            fst.axes.push_back({{1, 1, 1}, std::move(r)});
+            fst.generation = fst.data_generation = 1;
+            const IdConflictScan st2 = scan_panel_for_id_conflicts(fst, &draw_data_window, "Data", {});
+            FigureSnapshot fst3;
+            RenderSnapshot3D r3t;
+            tp.content.y = 0.5;
+            tp.content.z = 0.5;
+            tp.content.dx = 30.0;
+            r3t.texts.push_back(tp);
+            fst3.axes.push_back({{1, 1, 1}, std::move(r3t)});
+            fst3.generation = fst3.data_generation = 1;
+            const IdConflictScan st3 = scan_panel_for_id_conflicts(fst3, &draw_data_window, "Data", {});
+            check(st2.conflicts == 0 && st3.conflicts == 0 && st2.probes > 0 && st3.probes > 0,
+                  "Data panel: a text's tab (string, placement, box, arrow) in 2D and 3D");
+            if (st2.conflicts || st3.conflicts)
+                std::printf("    text: %d / %d conflicts, first id %u / %u\n", st2.conflicts, st3.conflicts,
+                            static_cast<unsigned>(st2.first), static_cast<unsigned>(st3.first));
+        }
+
         // A path alone, so its Appearance block is drawn and swept.
         FigureSnapshot fsl; {
             RenderSnapshot3D r;

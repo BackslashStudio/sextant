@@ -391,6 +391,19 @@ namespace sextant {
         std::vector<double> colors;
     };
 
+    // Axes3D::text(), text2d() and annotate(): the string and where it is.
+    //   text()      (x, y, z) the data point it is drawn at.
+    //   text2d()    `in_frame`: (x, y) fractions of the frame; z unused.
+    //   annotate()  `arrow`: (x, y, z) the point, the text (dx, dy) pixels from
+    //               it, y up.
+    struct Text3DData {
+        std::string text;
+        double x = 0.0, y = 0.0, z = 0.0;
+        bool in_frame = false;
+        bool arrow = false;
+        double dx = 0.0, dy = 0.0;
+    };
+
     // A 2D plane in the 3D scene: one of the three orientations, at an offset along
     // its normal, carrying the 2D plot kinds. In-plane coordinates are the parent's
     // data coordinates (a plane at XY, offset 0.5 spans x and y at z = 0.5), and
@@ -638,6 +651,24 @@ namespace sextant {
         std::shared_ptr<Plane2D> plane_at(std::size_t i) const;
 
         // ----------------------------------------------------------------
+        // Text -- as Axes::text(); drawn over the scene at a fixed pixel
+        // size whatever the camera, and never hidden behind geometry
+        // ----------------------------------------------------------------
+        // `s` at the data point (x, y, z), projected. Hidden while the point is
+        // outside the limits or behind the camera. Throws std::invalid_argument
+        // for a non-finite coordinate.
+        Axes3D& text(std::string_view s, double x, double y, double z, TextOptions opts = {});
+
+        // `s` at (fx, fy), fractions of the frame from its bottom-left corner,
+        // whatever the camera does.
+        Axes3D& text2d(std::string_view s, double fx, double fy, TextOptions opts = {});
+
+        // `s` dx, dy pixels (y up) from the projected point (x, y, z), with an
+        // arrow to the point. Hidden as text() is.
+        Axes3D& annotate(double x, double y, double z, std::string_view s, double dx, double dy,
+                         TextOptions opts = {}, ArrowOptions arrow = {});
+
+        // ----------------------------------------------------------------
         // Decoration -- all return *this for chaining, like Axes
         // ----------------------------------------------------------------
         Axes3D& set_title(std::string_view text, float fontsize = 18.0f);
@@ -740,6 +771,10 @@ namespace sextant {
         std::size_t line3d_count() const;
         Line3DData line3d_data(std::size_t i) const;
 
+        // text(), text2d() and annotate() alike.
+        std::size_t text_count() const;
+        Text3DData text_data(std::size_t i) const;
+
         // ----------------------------------------------------------------
         // Updating plotted data
         // ----------------------------------------------------------------
@@ -797,6 +832,16 @@ namespace sextant {
         Axes3D& set_line3d_data(std::size_t i, std::span<const double> x,
                                 std::span<const double> y, std::span<const double> z,
                                 std::span<const double> colors);
+
+        // A text's string and placement, which may turn it into any of the
+        // three (setting `arrow` on a text gives it default ArrowOptions).
+        // Throws std::invalid_argument for a non-finite number, or `arrow` with
+        // `in_frame`.
+        Axes3D& set_text_data(std::size_t i, const Text3DData& data);
+
+        // The string and (x, y, z) only, keeping the rest: a text2d() reads x, y
+        // as fractions and ignores z; an annotate() keeps its offset.
+        Axes3D& set_text_data(std::size_t i, std::string_view s, double x, double y, double z);
 
     private:
         struct Impl;

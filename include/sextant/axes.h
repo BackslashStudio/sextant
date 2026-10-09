@@ -68,6 +68,21 @@ namespace sextant {
                      HeatmapOptions opts = {});
 
         // ----------------------------------------------------------------
+        // Text
+        // ----------------------------------------------------------------
+        // `s` at (x, y): each a data value or Pos::fraction() of the plot frame.
+        // Drawn over the data at a fixed pixel size; it never widens the auto
+        // limits and reserves no room. A text with a data coordinate is hidden
+        // while that coordinate is out of view (see TextOptions::clip_to_frame).
+        // Throws std::invalid_argument for a non-finite coordinate.
+        Axes& text(std::string_view s, Pos x, Pos y, TextOptions opts = {});
+
+        // `s` at (tx, ty) as text() places it, with an arrow to the point
+        // (px, py) in data coordinates. Hidden while the point is out of view.
+        Axes& annotate(double px, double py, std::string_view s, Pos tx, Pos ty,
+                       TextOptions opts = {}, ArrowOptions arrow = {});
+
+        // ----------------------------------------------------------------
         // Decoration
         // ----------------------------------------------------------------
 
@@ -138,6 +153,10 @@ namespace sextant {
         std::size_t heatmap_count() const;
         HeatmapData heatmap_data(std::size_t i) const;
 
+        // text() and annotate() alike.
+        std::size_t text_count() const;
+        TextData text_data(std::size_t i) const;
+
         // ----------------------------------------------------------------
         // Updating plotted data
         // ----------------------------------------------------------------
@@ -175,6 +194,13 @@ namespace sextant {
         // As heatmap() takes it: row-major rows x cols over xrange x yrange.
         Axes& set_heatmap_data(std::size_t i, std::span<const double> data, int rows, int cols,
                                Range xrange, Range yrange);
+
+        // A text's string and position, and whether it has an arrow and to
+        // where (setting `arrow` on a text() gives it default ArrowOptions).
+        Axes& set_text_data(std::size_t i, const TextData& data);
+
+        // The string and position only; an annotation keeps its arrow and point.
+        Axes& set_text_data(std::size_t i, std::string_view s, Pos x, Pos y);
 
     private:
         struct Impl;

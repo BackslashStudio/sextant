@@ -377,6 +377,44 @@ namespace sextant {
         return p;
     }
 
+    void Axes3D::Impl::ingest_text(TextContent c, TextStyle style, const char* who) {
+        read_back::check_text(c, who);
+        texts.push_back({std::move(c), std::move(style), next_snapshot_generation(), next_object_id()});
+    }
+
+    Axes3D& Axes3D::text(std::string_view s, double x, double y, double z, TextOptions opts) {
+        TextContent c;
+        c.text = s;
+        c.x = x;
+        c.y = y;
+        c.z = z;
+        d->ingest_text(std::move(c), {std::move(opts), ArrowOptions{}}, "Axes3D::text");
+        return *this;
+    }
+
+    Axes3D& Axes3D::text2d(std::string_view s, double fx, double fy, TextOptions opts) {
+        TextContent c;
+        c.text = s;
+        c.x = Pos::fraction(fx);
+        c.y = Pos::fraction(fy);
+        d->ingest_text(std::move(c), {std::move(opts), ArrowOptions{}}, "Axes3D::text2d");
+        return *this;
+    }
+
+    Axes3D& Axes3D::annotate(double x, double y, double z, std::string_view s, double dx, double dy,
+                             TextOptions opts, ArrowOptions arrow) {
+        TextContent c;
+        c.text = s;
+        c.x = x;
+        c.y = y;
+        c.z = z;
+        c.arrow = true;
+        c.dx = dx;
+        c.dy = dy;
+        d->ingest_text(std::move(c), {std::move(opts), std::move(arrow)}, "Axes3D::annotate");
+        return *this;
+    }
+
     std::size_t Axes3D::plane_count() const { return d->planes.size(); }
 
     std::shared_ptr<Plane2D> Axes3D::plane_at(std::size_t i) const {
@@ -587,6 +625,37 @@ namespace sextant {
     }
     Line3DData Axes3D::line3d_data(std::size_t i) const {
         return read_back::to_data(read_back::at(d->lines3d, i, "line3d_data"));
+    }
+
+    std::size_t Axes3D::text_count() const { return d->texts.size(); }
+
+    Text3DData Axes3D::text_data(std::size_t i) const {
+        return read_back::to_data3d(read_back::at(d->texts, i, "Axes3D::text_data"));
+    }
+
+    // The content is replaced whole; the style stays.
+    void Axes3D::Impl::set_text_data(std::size_t i, TextContent c, const char* who) {
+        TextPlot& p = read_back::at(texts, i, who);
+        read_back::check_text(c, who);
+        p.content = std::move(c);
+        p.data_stamp = next_snapshot_generation();
+    }
+
+    Axes3D& Axes3D::set_text_data(std::size_t i, const Text3DData& data) {
+        const char* who = "Axes3D::set_text_data";
+        d->set_text_data(i, read_back::content_of(data, who), who);
+        return *this;
+    }
+
+    Axes3D& Axes3D::set_text_data(std::size_t i, std::string_view s, double x, double y, double z) {
+        const char* who = "Axes3D::set_text_data";
+        TextContent c = read_back::at(d->texts, i, who).content;
+        c.text = s;
+        c.x.v = x;   // keeps each coordinate's space: a text2d() stays one
+        c.y.v = y;
+        c.z = z;
+        d->set_text_data(i, std::move(c), who);
+        return *this;
     }
 
     // set_*_data(): find object i, validate as plotting would, then swap the data

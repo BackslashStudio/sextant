@@ -10,6 +10,7 @@
 #include <imgui_internal.h>  // GetActiveID/GetInputTextState — not stable public API
 #include <algorithm>
 #include <cfloat>
+#include <cmath>
 #include <cstdio>
 #include <functional>
 #include <optional>
@@ -1384,6 +1385,247 @@ namespace sextant {
             ImGui::Separator();
         }
 
+        // ---- Texts ---------------------------------------------------------------
+
+        // A multi-line string field; `buf` is re-seeded from `s` while inactive.
+        bool text_area(const char* id, std::string& s, char* buf, std::size_t n) {
+            if (ImGui::GetActiveID() != ImGui::GetID(id))
+                std::snprintf(buf, n, "%s", s.c_str());
+            if (ImGui::InputTextMultiline(id, buf, n, ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 3.5f))) {
+                s = buf;
+                return true;
+            }
+            return false;
+        }
+
+        // A combo over an enum's values in declaration order.
+        template<class E, std::size_t N>
+        bool enum_combo(const char* label, E& v, const char* const (&names)[N]) {
+            int cur = static_cast<int>(v);
+            if (ImGui::Combo(label, &cur, names, static_cast<int>(N))) {
+                v = static_cast<E>(cur);
+                return true;
+            }
+            return false;
+        }
+
+        // A position coordinate: its value and, in 2D, what it is measured in.
+        bool pos_field(const char* id, Pos& p, bool with_space) {
+            static const char* kSpaces[] = {"data", "fraction"};
+            const float speed = p.space == Coords::Fraction
+                                    ? 0.002f
+                                    : static_cast<float>(std::max(std::abs(p.v), 1.0) * 0.005);
+            bool changed = false;
+            if (with_space) split_begin(2);
+            ImGui::PushID(id);
+            changed |= drag_double("##v", &p.v, speed, "%.4g");
+            if (with_space) {
+                split_next();
+                changed |= enum_combo("##space", p.space, kSpaces);
+                split_end();
+            }
+            ImGui::PopID();
+            return changed;
+        }
+
+        // A text's tab: its string and placement (a data op, journaled), then its
+        // look. While a field is active it edits DataPanelState::text_local; the
+        // snapshot is read otherwise, so a set_text_data() or an undo shows.
+        void draw_text_tab(DataPanelState& st, FigureEditBox& edit_box, int idx, bool is3d,
+                           const PlotDataTable& t) {
+            const int pi = t.plot_index;
+            if (!t.text || pi < 0) return;
+            if (!ImGui::IsAnyItemActive()) st.text_local = t.text->content;
+            TextContent& c = st.text_local;
+
+            // One op per frame at most: a drag's frames replace the pending one.
+            auto push_content = [&] {
+                TextDataEdit op{pi, c};
+                op.seen = t.data_stamp;
+                auto merge = [&](std::vector<PlotDataOp>& ops) {
+                    if (!ops.empty())
+                        if (auto* last = std::get_if<TextDataEdit>(&ops.back()))
+                            if (last->plot_index == pi && last->plane_index < 0) {
+                                last->content = c;
+                                return;
+                            }
+                    ops.push_back(op);
+                };
+                if (is3d) edit_box.update3d(idx, [&](AxesEdit3D& e) { merge(e.plot_ops); });
+                else edit_box.update(idx, [&](AxesEdit& e) { merge(e.plot_ops); });
+            };
+
+            ImGui::TextUnformatted("Text");
+            if (text_area("##textstr", c.text, st.text_buf, sizeof st.text_buf)) push_content();
+
+            const bool in_frame = is3d && c.x.space == Coords::Fraction;
+            if (begin_field_table("textpos")) {
+                if (!is3d) {
+                    field_row("X");
+                    if (pos_field("tx", c.x, true)) push_content();
+                    field_row("Y");
+                    if (pos_field("ty", c.y, true)) push_content();
+                } else if (in_frame) {
+                    field_row("X (frame)");
+                    if (pos_field("tx", c.x, false)) push_content();
+                    field_row("Y (frame)");
+                    if (pos_field("ty", c.y, false)) push_content();
+                } else {
+                    field_row(c.arrow ? "Point X" : "X");
+                    if (pos_field("tx", c.x, false)) push_content();
+                    field_row(c.arrow ? "Point Y" : "Y");
+                    if (pos_field("ty", c.y, false)) push_content();
+                    field_row(c.arrow ? "Point Z" : "Z");
+                    if (drag_double("##tz", &c.z, static_cast<float>(std::max(std::abs(c.z), 1.0) * 0.005)))
+                        push_content();
+                }
+                end_field_table();
+            }
+            if (!is3d) {
+                if (ImGui::Checkbox("Arrow##textarrow", &c.arrow)) {
+                    // A new arrow points at the text's own data position.
+                    if (c.arrow && c.px == 0.0 && c.py == 0.0) {
+                        c.px = c.x.space == Coords::Data ? c.x.v : 0.0;
+                        c.py = c.y.space == Coords::Data ? c.y.v : 0.0;
+                    }
+                    push_content();
+                }
+                if (c.arrow && begin_field_table("textpoint")) {
+                    field_row("Point X");
+                    if (drag_double("##tpx", &c.px, static_cast<float>(std::max(std::abs(c.px), 1.0) * 0.005)))
+                        push_content();
+                    field_row("Point Y");
+                    if (drag_double("##tpy", &c.py, static_cast<float>(std::max(std::abs(c.py), 1.0) * 0.005)))
+                        push_content();
+                    end_field_table();
+                }
+            } else if (c.arrow && begin_field_table("textoff")) {
+                field_row("Offset X");
+                if (drag_double("##tdx", &c.dx, 0.5f, "%.1f px")) push_content();
+                field_row("Offset Y");
+                if (drag_double("##tdy", &c.dy, 0.5f, "%.1f px")) push_content();
+                end_field_table();
+            }
+            if (!is3d)
+                ImGui::TextDisabled("Hidden while a data coordinate (or the arrow's point) is out of view.");
+            else if (!in_frame)
+                ImGui::TextDisabled("Hidden while the point is outside the limits or behind the camera.");
+            ImGui::Separator();
+
+            // Appearance, from the scratch copy seeded by pull_data_panel().
+            std::vector<TextStyle>& styles = is3d ? st.texts_local : st.sheet_local.texts;
+            if (static_cast<std::size_t>(pi) >= styles.size()) return;
+            if (!section("Appearance", true)) return;
+            TextStyle& s = styles[static_cast<std::size_t>(pi)];
+            auto push_style = [&] {
+                if (!is3d) {
+                    push_plot_style(edit_box, idx, false, -1, pi, s);
+                    return;
+                }
+                edit_box.update3d(idx, [&](AxesEdit3D& e) {
+                    for (auto& te: e.texts)
+                        if (te.plot_index == pi) {
+                            te.opts = s;
+                            return;
+                        }
+                    e.texts.push_back({pi, s});
+                });
+            };
+            static const char* kVAligns[] = {"Top", "Center", "Baseline", "Bottom"};
+            TextOptions& o = s.text;
+            if (begin_field_table("textstyle")) {
+                field_row("Font");
+                ImGui::SetNextItemWidth(-FLT_MIN);
+                if (font_combo("##tfont", o.font_path)) push_style();
+                field_row("Size");
+                if (drag_float("##tsize", &o.fontsize, 1.0f, 200.0f, 0.1f, "%.1f px")) push_style();
+                field_row("Color");
+                if (color_swatch("##tcol", o.color)) push_style();
+                field_row("Alpha");
+                if (drag_float("##talpha", &o.alpha, 0.0f, 1.0f, 0.005f, "%.2f")) push_style();
+                field_row("Align");
+                split_begin(2);
+                if (halign_combo("##tha", o.ha)) push_style();
+                split_next();
+                if (enum_combo("##tva", o.va, kVAligns)) push_style();
+                split_end();
+                field_row("Rotation");
+                if (drag_float("##trot", &o.rotation, -360.0f, 360.0f, 0.5f, "%.1f deg")) push_style();
+                field_row("Nudge");
+                split_begin(2);
+                if (drag_float("##tdxo", &o.dx, -2000.0f, 2000.0f, 0.5f, "x %.1f")) push_style();
+                split_next();
+                if (drag_float("##tdyo", &o.dy, -2000.0f, 2000.0f, 0.5f, "y %.1f")) push_style();
+                split_end();
+                field_row("Line spacing");
+                if (drag_float("##tls", &o.linespacing, 0.5f, 4.0f, 0.01f, "%.2f")) push_style();
+                end_field_table();
+            }
+            if (ImGui::Checkbox("Clip to the frame##tclip", &o.clip_to_frame)) push_style();
+
+            ImGui::SeparatorText("Box");
+            if (begin_field_table("textbox")) {
+                field_row("Fill");
+                if (color_swatch("##tbg", o.background)) push_style();
+                field_row("Outline");
+                if (drag_float("##tbw", &o.edge_linewidth, 0.0f, 20.0f, 0.05f, "%.2f px")) push_style();
+                field_row("Pad");
+                if (drag_float("##tpad", &o.pad, 0.0f, 100.0f, 0.1f, "%.1f px")) push_style();
+                end_field_table();
+            }
+            bool own_edge = o.edgecolor.has_value();
+            if (o.edge_linewidth > 0.0f && ImGui::Checkbox("Own outline colour##tbown", &own_edge)) {
+                o.edgecolor = own_edge ? std::optional<Color>(o.color) : std::nullopt;
+                push_style();
+            }
+            if (o.edge_linewidth > 0.0f && o.edgecolor && begin_field_table("textboxe")) {
+                field_row("Outline color");
+                if (color_swatch("##tbcol", *o.edgecolor)) push_style();
+                end_field_table();
+            }
+            ImGui::TextDisabled("Fill alpha 0 and outline 0 draw no box.");
+
+            if (!c.arrow) return;
+            static const char* kHeads[] = {"None", "Open", "Filled", "Bar"};
+            ArrowOptions& a = s.arrow;
+            ImGui::SeparatorText("Arrow");
+            if (begin_field_table("textarrow")) {
+                field_row("Head");
+                if (enum_combo("##ahead", a.head, kHeads)) push_style();
+                field_row("Tail");
+                if (enum_combo("##atail", a.tail, kHeads)) push_style();
+                field_row("Head size");
+                split_begin(2);
+                if (drag_float("##ahl", &a.head_length, 0.0f, 100.0f, 0.1f, "long %.1f")) push_style();
+                split_next();
+                if (drag_float("##ahw", &a.head_width, 0.0f, 100.0f, 0.1f, "wide %.1f")) push_style();
+                split_end();
+                field_row("Width");
+                if (drag_float("##aw", &a.linewidth, 0.0f, 20.0f, 0.05f, "%.2f px")) push_style();
+                field_row("Style");
+                if (linestyle_combo("##als", a.linestyle)) push_style();
+                field_row("Gaps");
+                split_begin(2);
+                if (drag_float("##agt", &a.gap_text, 0.0f, 200.0f, 0.1f, "text %.1f")) push_style();
+                split_next();
+                if (drag_float("##agp", &a.gap_point, 0.0f, 200.0f, 0.1f, "point %.1f")) push_style();
+                split_end();
+                field_row("Arc");
+                if (drag_float("##aarc", &a.arc, -2.0f, 2.0f, 0.005f, "%.3f")) push_style();
+                end_field_table();
+            }
+            bool own_arrow = a.color.has_value();
+            if (ImGui::Checkbox("Own arrow colour##aown", &own_arrow)) {
+                a.color = own_arrow ? std::optional<Color>(o.color) : std::nullopt;
+                push_style();
+            }
+            if (a.color && begin_field_table("textarrowc")) {
+                field_row("Arrow color");
+                if (color_swatch("##acol", *a.color)) push_style();
+                end_field_table();
+            }
+        }
+
         // The table's display controls (notation, precision, shading), between an
         // object's Appearance block and its table. Display-only; nothing reaches
         // the plot. Returns the format for this frame's cells.
@@ -1459,7 +1701,7 @@ namespace sextant {
         const RenderSnapshot3D* cur3d = cur->snap3d();
         if (cur3d && cur3d->planes.empty() && cur3d->bars3d.empty() && cur3d->surfaces.empty()
             && cur3d->scatter3d.empty() && cur3d->lines3d.empty()
-            && cur3d->surface_tri.empty()) {
+            && cur3d->surface_tri.empty() && cur3d->texts.empty()) {
             ImGui::TextDisabled("3D axes: no plot data.");
             return;
         }
@@ -1549,6 +1791,12 @@ namespace sextant {
                         return cur3d && t.plot_index >= 0 && k < v.size() ? &v[k] : nullptr;
                     };
                     const OpSink sink = sink_for(t);
+                    if (t.text) {
+                        // A form, not a table.
+                        draw_text_tab(st, edit_box, idx, is3d, t);
+                        ImGui::EndTabItem();
+                        continue;
+                    }
                     // Appearance above the data (tables take the remaining height).
                     if (t.kind == PlotKind::Bar3D)
                         draw_bar3d_appearance(st, edit_box, idx, t.plot_index,

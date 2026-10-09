@@ -61,12 +61,12 @@ struct PlotRowEdit {
 
 // Appearance of one 2D plot object, from its Data-panel tab. Addressed like a
 // PlotDataOp; the variant alternative is the kind. Carries the whole options
-// struct.
+// struct (a text's TextOptions and ArrowOptions together).
 struct PlotStyleEdit {
     int plot_index  = 0;
     int plane_index = -1;
     std::variant<LineOptions, ScatterOptions, BarOptions,
-                 HeatmapOptions, ScatterZOptions> opts;
+                 HeatmapOptions, ScatterZOptions, TextStyle> opts;
     ObjectId id = 0, plane_id = 0;   // see PlotCellEdit
 };
 
@@ -113,9 +113,21 @@ struct BarWidthEdit {
     ObjectId id = 0, plane_id = 0;    // see PlotCellEdit
 };
 
+// A text's string and placement, replaced whole from its Data-panel tab and
+// journaled like other data (a text is one row, not a table).
+struct TextDataEdit {
+    int         plot_index  = 0;
+    TextContent content;
+    int         plane_index = -1;   // see PlotCellEdit
+    PlotKind    kind        = PlotKind::Text;
+    unsigned long long seen = ~0ull;   // see PlotCellEdit
+    ObjectId id = 0, plane_id = 0;    // see PlotCellEdit
+};
+
 // One op in a plot's edit stream. Order matters: indices refer to the arrays
 // as they were when recorded, so ops must replay in sequence.
-using PlotDataOp = std::variant<PlotCellEdit, PlotRowEdit, MatrixLineEdit, BarWidthEdit>;
+using PlotDataOp = std::variant<PlotCellEdit, PlotRowEdit, MatrixLineEdit, BarWidthEdit,
+                                TextDataEdit>;
 
 // The plane_index every op carries.
 inline int plot_op_plane(const PlotDataOp& op) {
@@ -330,11 +342,14 @@ struct AxesEdit3D {
     struct Scatter3DEdit { int plot_index = 0; std::optional<Scatter3DOptions> opts; ObjectId id = 0; };
     struct Line3DEdit  { int plot_index = 0; std::optional<Line3DOptions>  opts; ObjectId id = 0; };
     struct SurfaceTriEdit { int plot_index = 0; std::optional<SurfaceTriOptions> opts; ObjectId id = 0; };
+    // A text's look (its content is a TextDataEdit in plot_ops).
+    struct TextEdit    { int plot_index = 0; std::optional<TextStyle> opts; ObjectId id = 0; };
     std::vector<Bar3DEdit>     bars3d;
     std::vector<SurfaceEdit>   surfaces;
     std::vector<Scatter3DEdit> scatter3d;
     std::vector<Line3DEdit>    lines3d;
     std::vector<SurfaceTriEdit> surface_tri;
+    std::vector<TextEdit>      texts;
 
     // Data panel ops, appended in order.
     std::vector<PlotDataOp> plot_ops;
@@ -394,7 +409,7 @@ inline bool is_navigation_only(const FigureEdits& f) {
             || e.axes_style || e.grid_opts || e.legend_enabled || e.legend_opts
             || e.colorbar_opts || e.box_style || e.aspect || !e.planes.empty()
             || !e.bars3d.empty() || !e.surfaces.empty() || !e.scatter3d.empty()
-            || !e.lines3d.empty() || !e.surface_tri.empty()
+            || !e.lines3d.empty() || !e.surface_tri.empty() || !e.texts.empty()
             || !e.plot_ops.empty() || !e.plot_styles.empty())
             return false;
     }
@@ -583,8 +598,32 @@ std::optional<PlotDataOp> apply_plot_data_op(T& t, const PlotCellEdit& e) {
         case PlotKind::SurfaceTri:
             // 3D-native; see apply_axes3d_data_op().
             return std::nullopt;
+        case PlotKind::Text:
+            // One row; see TextDataEdit.
+            return std::nullopt;
     }
     return std::nullopt;
+}
+
+namespace edits_detail {
+
+// Swaps a text's content in, from a 2D or 3D holder's `texts`.
+template <class Vec>
+std::optional<PlotDataOp> text_op(Vec& v, const TextDataEdit& e) {
+    if (e.kind != PlotKind::Text) return std::nullopt;
+    auto* tp = op_target(v, e);
+    if (!tp) return std::nullopt;
+    TextDataEdit inv = retarget(e, v, *tp);
+    inv.content = std::move(tp->content);
+    tp->content = e.content;
+    return inv;
+}
+
+} // namespace edits_detail
+
+template <class T>
+std::optional<PlotDataOp> apply_plot_data_op(T& t, const TextDataEdit& e) {
+    return edits_detail::text_op(t.texts, e);
 }
 
 template <class T>
@@ -712,6 +751,9 @@ std::optional<PlotDataOp> apply_plot_data_op(T& t, const PlotRowEdit& e) {
         case PlotKind::Line3D:
         case PlotKind::SurfaceTri:
             // 3D-native; see apply_axes3d_data_op().
+            return std::nullopt;
+        case PlotKind::Text:
+            // One row; see TextDataEdit.
             return std::nullopt;
     }
     return std::nullopt;
@@ -980,6 +1022,11 @@ std::optional<PlotDataOp> apply_axes3d_data_op(T&, const PlotRowEdit&) {
     return std::nullopt;
 }
 
+template <class T>
+std::optional<PlotDataOp> apply_axes3d_data_op(T& t, const TextDataEdit& e) {
+    return edits_detail::text_op(t.texts, e);
+}
+
 // Applies an ordered op stream, prepending each op's inverse to `inv` (so it
 // runs last-first). The 2D overload skips plane-addressed ops; the 3D overload
 // (targets with planes) routes plane -1 to the axes' own objects and others to
@@ -1037,12 +1084,19 @@ template <class Vec, class Opts>
 std::optional<ReplacedOpts<Opts>> assign_plot_opts(Vec& v, int idx, ObjectId id, const Opts& o) {
     auto* p = edits_detail::find_object(v, idx, id);
     if (!p) return std::nullopt;
-    auto labels = std::move(p->opts.hint_labels);
-    ReplacedOpts<Opts> r{ static_cast<int>(p - v.data()), p->id, std::move(p->opts) };
-    r.old.hint_labels.clear();
-    p->opts = o;
-    p->opts.hint_labels = std::move(labels);
-    return r;
+    if constexpr (!requires { p->opts.hint_labels; }) {
+        // A text: nothing in its style is data.
+        ReplacedOpts<Opts> r{ static_cast<int>(p - v.data()), p->id, std::move(p->opts) };
+        p->opts = o;
+        return r;
+    } else {
+        auto labels = std::move(p->opts.hint_labels);
+        ReplacedOpts<Opts> r{ static_cast<int>(p - v.data()), p->id, std::move(p->opts) };
+        r.old.hint_labels.clear();
+        p->opts = o;
+        p->opts.hint_labels = std::move(labels);
+        return r;
+    }
 }
 
 namespace edits_detail {
@@ -1054,6 +1108,7 @@ auto& styled_vector(T& t) {
     else if constexpr (std::is_same_v<O, ScatterOptions>) return t.scatters;
     else if constexpr (std::is_same_v<O, BarOptions>)     return t.bars;
     else if constexpr (std::is_same_v<O, HeatmapOptions>) return t.heatmaps;
+    else if constexpr (std::is_same_v<O, TextStyle>)      return t.texts;
     else                                                  return t.scatter_z;
 }
 
@@ -1217,6 +1272,7 @@ void apply_axes3d_edit(T& dst, const AxesEdit3D& e, AxesEdit3D* inv = nullptr) {
     objects(dst.scatter3d, e.scatter3d, inv ? &inv->scatter3d : nullptr);
     objects(dst.lines3d, e.lines3d, inv ? &inv->lines3d : nullptr);
     objects(dst.surface_tri, e.surface_tri, inv ? &inv->surface_tri : nullptr);
+    objects(dst.texts, e.texts, inv ? &inv->texts : nullptr);
     apply_plot_data_ops(dst, e.plot_ops, inv ? &inv->plot_ops : nullptr);
 }
 
@@ -1296,6 +1352,7 @@ void merge_style_edits(E& dst, const E& src) {
         for (const auto& o : src.scatter3d)   upsert(dst.scatter3d, o, by_object);
         for (const auto& o : src.lines3d)     upsert(dst.lines3d, o, by_object);
         for (const auto& o : src.surface_tri) upsert(dst.surface_tri, o, by_object);
+        for (const auto& o : src.texts)       upsert(dst.texts, o, by_object);
     }
 }
 
@@ -1308,7 +1365,7 @@ bool style_edits_empty(const E& e) {
     if constexpr (requires { e.box_style; })
         empty = empty && !e.zticks_override && !e.box_style && !e.aspect && e.planes.empty()
                 && e.bars3d.empty() && e.surfaces.empty() && e.scatter3d.empty()
-                && e.lines3d.empty() && e.surface_tri.empty();
+                && e.lines3d.empty() && e.surface_tri.empty() && e.texts.empty();
     return empty;
 }
 
@@ -1446,6 +1503,7 @@ void compose_axes_inverse(E& older, const E& newer) {
         edits_detail::compose_entries(older.scatter3d, newer.scatter3d, by_object);
         edits_detail::compose_entries(older.lines3d, newer.lines3d, by_object);
         edits_detail::compose_entries(older.surface_tri, newer.surface_tri, by_object);
+        edits_detail::compose_entries(older.texts, newer.texts, by_object);
     }
 }
 

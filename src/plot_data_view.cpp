@@ -16,6 +16,20 @@ std::string pick_label(const std::string& user_label, const char* kind_name, int
     return user_label.empty() ? synth_label(kind_name, index) : user_label;
 }
 
+// A text's tab: no columns, the form reads `text`.
+void push_text_tables(std::vector<PlotDataTable>& out, const std::vector<TextPlot>& texts) {
+    for (std::size_t i = 0; i < texts.size(); ++i) {
+        PlotDataTable t;
+        t.kind = PlotKind::Text;
+        t.plot_index = static_cast<int>(i);
+        t.data_stamp = texts[i].data_stamp;
+        t.id = texts[i].id;
+        t.label = synth_label(texts[i].content.arrow ? "annotation" : "text", static_cast<int>(i));
+        t.text = &texts[i];
+        out.push_back(std::move(t));
+    }
+}
+
 } // namespace
 
 std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot& snap) {
@@ -88,6 +102,7 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot& snap) 
         out.push_back(std::move(t));
     }
 
+    push_text_tables(out, snap.texts);
     return out;
 }
 
@@ -182,6 +197,8 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot3D& snap
         t.rows_fixed = true;
         out.push_back(std::move(t));
     }
+
+    push_text_tables(out, snap.texts);
 
     for (std::size_t i = 0; i < snap.planes.size(); ++i) {
         const PlaneSnapshot& p = snap.planes[i];

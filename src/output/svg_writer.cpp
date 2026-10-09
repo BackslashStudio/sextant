@@ -591,6 +591,56 @@ static void emit_titles(std::ostringstream& o, const SvgAxesData& d) {
     }
 }
 
+// Texts from the plan (positions, baselines and arrow already in pixels), in
+// render_frame()'s order: over the frame furniture, under the legend.
+static void emit_texts(std::ostringstream& o, const SvgAxesData& d, std::size_t idx) {
+    for (const TextDraw& t : d.texts) {
+        o << (t.clip ? "  <g clip-path=\"url(#plotArea" + std::to_string(idx) + ")\">\n" : "  <g>\n");
+        if (t.shaft.size() >= 4 && t.linewidth > 0.0f) {
+            o << "    <polyline fill=\"none\" stroke=\"" << rgb(t.arrow_color)
+              << "\" stroke-opacity=\"" << t.arrow_color.a << "\" stroke-width=\"" << t.linewidth
+              << "\"" << dash_attr(t.linestyle) << " points=\"";
+            for (std::size_t i = 0; i + 1 < t.shaft.size(); i += 2)
+                o << (i ? " " : "") << t.shaft[i] << "," << t.shaft[i + 1];
+            o << "\"/>\n";
+        }
+        for (const TextDraw::Head& h : t.heads) {
+            const int n = h.kind == ArrowHead::Bar ? 2 : 3;
+            if (h.kind == ArrowHead::Filled)
+                o << "    <polygon fill=\"" << rgb(t.arrow_color) << "\" fill-opacity=\"" << t.arrow_color.a
+                  << "\" points=\"";
+            else
+                o << "    <polyline fill=\"none\" stroke=\"" << rgb(t.arrow_color) << "\" stroke-opacity=\""
+                  << t.arrow_color.a << "\" stroke-width=\"" << std::max(t.linewidth, 1.0f) << "\" points=\"";
+            for (int k = 0; k < n; ++k)
+                o << (k ? " " : "") << h.xy[2 * k] << "," << h.xy[2 * k + 1];
+            o << "\"/>\n";
+        }
+        o << "    <g transform=\"translate(" << t.ax << "," << t.ay << ")";
+        if (t.angle != 0.0f) o << " rotate(" << t.angle * 57.2957795f << ")";
+        o << "\">\n";
+        if (t.has_box) {
+            o << "      <rect x=\"" << t.box.x << "\" y=\"" << t.box.y << "\" width=\"" << t.box.w
+              << "\" height=\"" << t.box.h << "\"";
+            if (t.fill.a > 0.0f) o << " fill=\"" << rgb(t.fill) << "\" fill-opacity=\"" << t.fill.a << "\"";
+            else o << " fill=\"none\"";
+            if (t.edge_width > 0.0f)
+                o << " stroke=\"" << rgb(t.edge) << "\" stroke-opacity=\"" << t.edge.a
+                  << "\" stroke-width=\"" << t.edge_width << "\"";
+            o << "/>\n";
+        }
+        const char* anchor = t.ha == HAlign::Left ? "start" : t.ha == HAlign::Right ? "end" : "middle";
+        for (const TextDraw::Line& l : t.lines) {
+            if (l.text.empty()) continue;
+            o << "      <text x=\"" << l.x << "\" y=\"" << l.y << "\" text-anchor=\"" << anchor
+              << "\" font-family=\"" << svg_font_family_for(t.font_path) << "\" font-size=\"" << t.fontsize
+              << "\" fill=\"" << rgb(t.color) << "\" fill-opacity=\"" << t.color.a << "\">"
+              << xml_escape(l.text) << "</text>\n";
+        }
+        o << "    </g>\n  </g>\n";
+    }
+}
+
 // Entries and box come from the layout (collect_legend_entries()).
 static void emit_legend(std::ostringstream& o, const SvgAxesData& d, std::size_t idx) {
     if (!d.layout.has_legend()) return;
@@ -1136,6 +1186,7 @@ static void emit_one_axes(std::ostringstream& o, const SvgAxesData& d, std::size
         emit_box3d(o, d, idx);
         // The axes title uses the shared 2D path; axis titles are in the plan.
         emit_titles(o, d);
+        emit_texts(o, d, idx);
         // Legend and colorbar, as in 2D.
         emit_legend(o, d, idx);
         emit_colorbar(o, d, idx);
@@ -1169,6 +1220,7 @@ static void emit_one_axes(std::ostringstream& o, const SvgAxesData& d, std::size
     // After the grid, as in NanoVG: an interior axis line goes over the grid.
     emit_interior_axes(o, d);
     emit_titles(o, d);
+    emit_texts(o, d, idx);
     emit_legend(o, d, idx);
     emit_colorbar(o, d, idx);
 }

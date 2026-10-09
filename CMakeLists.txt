@@ -373,6 +373,7 @@ set(SEXTANT_SOURCES
     src/renderer/scatter3d.cpp
     src/renderer/line3d.cpp
     src/renderer/error_bar3d.cpp
+    src/renderer/text_plan.cpp
     src/renderer/painter3d.cpp
     src/output/file_write.cpp
     src/output/png_writer.cpp
@@ -798,6 +799,7 @@ if(SEXTANT_BUILD_TESTS)
             tests/layout_test/background.cpp
             tests/layout_test/ticks_hidden.cpp
             tests/layout_test/edge_markers.cpp
+            tests/layout_test/text.cpp
             tests/layout_test/window_wait.cpp
             tests/layout_test/events.cpp)
         # cell_shading.h names ImU32/IM_COL32, so it needs the library's
