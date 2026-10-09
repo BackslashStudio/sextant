@@ -1,6 +1,7 @@
 // See glyph_boxes.h. Part of sextant_layout_test.
 #include "glyph_boxes.h"
 
+#include "font_discovery.h"
 #include "text_metrics.h"
 
 // A private copy: static, so it cannot collide with the library's.
@@ -14,28 +15,42 @@
 #include <vector>
 
 namespace lt {
+    namespace {
+        struct Face {
+            std::vector<unsigned char> data;
+            stbtt_fontinfo info{};
+            bool ok = false;
+
+            explicit Face(const std::string& file) {
+                std::ifstream in(file, std::ios::binary);
+                data.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+                if (data.empty()) return;
+                const int offset = stbtt_GetFontOffsetForIndex(data.data(), 0);
+                ok = offset >= 0 && stbtt_InitFont(&info, data.data(), offset);
+            }
+        };
+    } // namespace
+
     struct GlyphBoxes::Impl {
-        std::vector<unsigned char> data;
-        stbtt_fontinfo info{};
-        bool ok = false;
+        std::unique_ptr<Face> face;
+        std::vector<std::unique_ptr<Face>> fallbacks;
     };
 
     GlyphBoxes::GlyphBoxes(const std::string& font_file) : impl_(std::make_unique<Impl>()) {
-        std::ifstream in(font_file, std::ios::binary);
-        impl_->data.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
-        if (impl_->data.empty()) return;
-        const int offset = stbtt_GetFontOffsetForIndex(impl_->data.data(), 0);
-        impl_->ok = offset >= 0 && stbtt_InitFont(&impl_->info, impl_->data.data(), offset);
+        impl_->face = std::make_unique<Face>(font_file);
+        for (const sextant::FontEntry* e: sextant::fallback_fonts()) {
+            if (e->path == font_file) continue;
+            auto f = std::make_unique<Face>(e->path);
+            if (f->ok) impl_->fallbacks.push_back(std::move(f));
+        }
     }
 
     GlyphBoxes::~GlyphBoxes() = default;
 
-    bool GlyphBoxes::ok() const { return impl_->ok; }
+    bool GlyphBoxes::ok() const { return impl_->face->ok; }
 
     float GlyphBoxes::ink_overhang(const std::string& path, float size, const std::string& s) const {
-        if (!impl_->ok) return 0.0f;
-        const stbtt_fontinfo& info = impl_->info;
-        const float scale = stbtt_ScaleForMappingEmToPixels(&info, size);
+        if (!impl_->face->ok) return 0.0f;
 
         // The extent starts at the pen origin, as fonsTextBounds' does.
         float minx = 0.0f, maxx = 0.0f;
@@ -55,9 +70,18 @@ namespace lt {
             // after any kerning against the glyph before it.
             const float pen = sextant::text_width(path, size, s.substr(0, i + n)) -
                               sextant::text_width(path, size, glyph);
+            const stbtt_fontinfo* info = &impl_->face->info;
+            int g = stbtt_FindGlyphIndex(info, cp);
+            if (g == 0)
+                for (const auto& fb: impl_->fallbacks)
+                    if (const int k = stbtt_FindGlyphIndex(&fb->info, cp); k != 0) {
+                        info = &fb->info;
+                        g = k;
+                        break;
+                    }
+            const float scale = stbtt_ScaleForMappingEmToPixels(info, size);
             int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
-            stbtt_GetGlyphBitmapBox(&info, stbtt_FindGlyphIndex(&info, cp), scale, scale,
-                                    &x0, &y0, &x1, &y1);
+            stbtt_GetGlyphBitmapBox(info, g, scale, scale, &x0, &y0, &x1, &y1);
             if (x1 > x0) {
                 minx = std::min(minx, pen + static_cast<float>(x0));
                 maxx = std::max(maxx, pen + static_cast<float>(x1));

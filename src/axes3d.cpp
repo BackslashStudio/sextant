@@ -1,6 +1,7 @@
 #include "axes3d_impl.h"
 #include "axis_limits.h"
 #include "read_back.h"
+#include "rich_text.h"
 #include "plane2d_impl.h"
 #include "coord_transform3d.h"   // clamp_camera
 #include "delaunay.h"
@@ -141,6 +142,7 @@ namespace sextant {
                           std::span<const double> heights,
                           std::span<const double> bottoms, Bar3DOptions opts) {
         check_bar3d("Axes3D::bar3d", u, v, heights, bottoms);
+        warn_math(d->mathtext, "Axes3D::bar3d", opts.name);
 
         Bar3DPlot b;
         b.orient = orient;
@@ -164,6 +166,7 @@ namespace sextant {
         check_surface("Axes3D::surface", u, v, heights);
         if (!std::isfinite(opts.vmin) || !std::isfinite(opts.vmax))
             throw std::invalid_argument("Axes3D::surface: vmin and vmax must be finite");
+        warn_math(d->mathtext, "Axes3D::surface", opts.name);
 
         SurfacePlot s;
         s.orient = orient;
@@ -251,6 +254,7 @@ namespace sextant {
         check_mesh_vertices("Axes3D::surface_tri", x, y, z, colors);
         check_mesh_opts(opts);
         check_tri("Axes3D::surface_tri", tri, x.size());
+        warn_math(d->mathtext, "Axes3D::surface_tri", opts.name);
 
         // Degenerate triangles are kept so face counts match the caller's; the
         // normal is guarded in surface_tri_face().
@@ -284,6 +288,7 @@ namespace sextant {
                 "distinct. Rendering a blank box would be the worse answer; pick a "
                 "different orientation, or pass the topology explicitly");
 
+        warn_math(d->mathtext, "Axes3D::surface_tri", opts.name);
         // A concave domain gets its convex hull filled (no masking yet).
         d->surface_tri.push_back(make_mesh(x, y, z, std::move(tri), colors,
                                            std::move(opts)));
@@ -314,6 +319,7 @@ namespace sextant {
         if (!std::isfinite(opts.vmin) || !std::isfinite(opts.vmax))
             throw std::invalid_argument("Axes3D::scatter3d: vmin and vmax must be finite");
         ErrorBar3DData eb = take_error_bars3d(err, x.size(), "Axes3D::scatter3d");
+        warn_math(d->mathtext, "Axes3D::scatter3d", opts.name);
 
         Scatter3DPlot s;
         s.err = std::move(eb);
@@ -353,6 +359,7 @@ namespace sextant {
         if (!std::isfinite(opts.vmin) || !std::isfinite(opts.vmax))
             throw std::invalid_argument("Axes3D::line3d: vmin and vmax must be finite");
         ErrorBar3DData eb = take_error_bars3d(err, x.size(), "Axes3D::line3d");
+        warn_math(d->mathtext, "Axes3D::line3d", opts.name);
 
         Line3DPlot l;
         l.err = std::move(eb);
@@ -373,12 +380,14 @@ namespace sextant {
             throw std::invalid_argument("Axes3D::plane: offset must be finite");
         opts.alpha = std::clamp(opts.alpha, 0.0f, 1.0f);
         auto p = std::shared_ptr<Plane2D>(new Plane2D(orient, offset, opts));
+        p->d->sheet.mathtext = d->mathtext;
         d->planes.push_back(p);
         return p;
     }
 
     void Axes3D::Impl::ingest_text(TextContent c, TextStyle style, const char* who) {
         read_back::check_text(c, who);
+        warn_math(mathtext, who, c.text);
         texts.push_back({std::move(c), std::move(style), next_snapshot_generation(), next_object_id()});
     }
 
@@ -426,6 +435,7 @@ namespace sextant {
     }
 
     Axes3D& Axes3D::set_title(std::string_view text, float fontsize) {
+        warn_math(d->mathtext, "Axes3D::set_title", text);
         d->title = text;
         d->title_stamps.title = next_snapshot_generation();
         d->axes_style.title_fontsize = fontsize;
@@ -433,6 +443,7 @@ namespace sextant {
     }
 
     Axes3D& Axes3D::set_xtitle(std::string_view text, float fontsize) {
+        warn_math(d->mathtext, "Axes3D::set_xtitle", text);
         d->xtitle = text;
         d->title_stamps.xtitle = next_snapshot_generation();
         d->axes_style.xtitle_fontsize = fontsize;
@@ -440,6 +451,7 @@ namespace sextant {
     }
 
     Axes3D& Axes3D::set_ytitle(std::string_view text, float fontsize) {
+        warn_math(d->mathtext, "Axes3D::set_ytitle", text);
         d->ytitle = text;
         d->title_stamps.ytitle = next_snapshot_generation();
         d->axes_style.ytitle_fontsize = fontsize;
@@ -447,6 +459,7 @@ namespace sextant {
     }
 
     Axes3D& Axes3D::set_ztitle(std::string_view text, float fontsize) {
+        warn_math(d->mathtext, "Axes3D::set_ztitle", text);
         d->ztitle = text;
         d->title_stamps.ztitle = next_snapshot_generation();
         d->axes_style.ztitle_fontsize = fontsize;
@@ -481,6 +494,7 @@ namespace sextant {
     }
 
     Axes3D& Axes3D::set_xticks(std::span<const double> pos, std::vector<std::string> labels) {
+        for (const auto& l : labels) warn_math(d->mathtext, "Axes3D::set_xticks", l);
         if (pos.empty()) d->xticks_override.reset();
         else d->xticks_override = make_tick_override(pos, labels);
         d->style_stamps.xticks = next_snapshot_generation();
@@ -488,6 +502,7 @@ namespace sextant {
     }
 
     Axes3D& Axes3D::set_yticks(std::span<const double> pos, std::vector<std::string> labels) {
+        for (const auto& l : labels) warn_math(d->mathtext, "Axes3D::set_yticks", l);
         if (pos.empty()) d->yticks_override.reset();
         else d->yticks_override = make_tick_override(pos, labels);
         d->style_stamps.yticks = next_snapshot_generation();
@@ -495,6 +510,7 @@ namespace sextant {
     }
 
     Axes3D& Axes3D::set_zticks(std::span<const double> pos, std::vector<std::string> labels) {
+        for (const auto& l : labels) warn_math(d->mathtext, "Axes3D::set_zticks", l);
         if (pos.empty()) d->zticks_override.reset();
         else d->zticks_override = make_tick_override(pos, labels);
         d->style_stamps.zticks = next_snapshot_generation();
@@ -581,7 +597,9 @@ namespace sextant {
     }
 
     Axes3D& Axes3D::cla() {
+        const bool mathtext = d->mathtext;
         *d = Impl{}; // reset to defaults; as Axes::cla(), planes go with their ids
+        d->mathtext = mathtext;
         return *this;
     }
 
@@ -637,6 +655,7 @@ namespace sextant {
     void Axes3D::Impl::set_text_data(std::size_t i, TextContent c, const char* who) {
         TextPlot& p = read_back::at(texts, i, who);
         read_back::check_text(c, who);
+        warn_math(mathtext, who, c.text);
         p.content = std::move(c);
         p.data_stamp = next_snapshot_generation();
     }

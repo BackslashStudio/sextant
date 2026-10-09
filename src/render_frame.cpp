@@ -6,6 +6,7 @@
 #include "renderer/figure_layout.h"
 #include "renderer/box3d.h"
 #include "renderer/text_plan.h"
+#include "rich_text.h"
 #include <cmath>
 #include <glad/glad.h>
 #include <algorithm>
@@ -30,6 +31,8 @@ void render_frame(RenderDevice& dev, DataRenderer& data,
                   float pixel_ratio, std::vector<AxesLayout>* out_layout,
                   const FigureLayout* given)
 {
+    // FigureOptions::mathtext for every label measured and drawn below.
+    const MathTextScope math(fsnap.mathtext);
     NvgRenderer& nvg = dev.renderer();
     const int iw = std::max(1, target_w);
     const int ih = std::max(1, target_h);

@@ -278,6 +278,9 @@ int main() {
     // text.cpp
     test_text();
 
+    // rich_text.cpp
+    test_rich_text();
+
     // describe.cpp
     test_describe();
 

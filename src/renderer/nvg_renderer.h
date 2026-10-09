@@ -85,9 +85,21 @@ private:
     // loads return the default font (failures are cached).
     int font_for_path(const std::string& path);
 
+    // The fallback fonts (font_discovery.h), registered on `font`, which was
+    // loaded from `path`.
+    void add_fallbacks(int font, const std::string& path);
+
+    // A user's string (title, tick label, legend name, text) at (x, y) under
+    // NanoVG alignment `align`, in the current face and fill colour: plain text
+    // through nvgText() as always, a string with math (rich_text.h) run by run.
+    // Leaves the font size at `size`.
+    void label(float x, float y, int align, const std::string& text,
+               const std::string& font_path, float size);
+
     NVGcontext* vg_;
     int         font_ = -1;
     std::unordered_map<std::string, int> font_cache_;
+    std::vector<std::pair<std::string, int>> fallbacks_;   // path, handle
 
     // Colorbar gradient images, cached by colormap and orientation (true =
     // horizontal) for the renderer's lifetime.

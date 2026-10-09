@@ -42,6 +42,15 @@ namespace sextant {
         // set_background().
         Color background = {0.93f, 0.93f, 0.93f, 1.0f};
 
+        // Math in text (v1.1 step 32): a string with an even, nonzero count of
+        // `$` not preceded by a backslash draws its $...$ spans as math, a
+        // subset of matplotlib's mathtext (x^2, x_i, \alpha, \pm, ...). Titles,
+        // tick labels, legend and colorbar names, suptitle and text()/annotate()
+        // all take it. Math that does not parse draws as written, with a warning
+        // through set_message_handler() from the call that set it. false draws
+        // every string as written.
+        bool mathtext = true;
+
         // Initial width of the docked Cosmetic panel (show() only, never exported).
         float panel_width = 240.0f;
 

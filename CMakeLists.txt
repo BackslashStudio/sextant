@@ -343,6 +343,7 @@ set(SEXTANT_SOURCES
     src/plot_data_view.cpp
     src/font_discovery.cpp
     src/text_metrics.cpp
+    src/rich_text.cpp
     src/axes.cpp
     src/axes3d.cpp
     src/plane2d.cpp
@@ -799,6 +800,7 @@ if(SEXTANT_BUILD_TESTS)
             tests/layout_test/background.cpp
             tests/layout_test/ticks_hidden.cpp
             tests/layout_test/edge_markers.cpp
+            tests/layout_test/rich_text.cpp
             tests/layout_test/text.cpp
             tests/layout_test/window_wait.cpp
             tests/layout_test/events.cpp)

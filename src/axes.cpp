@@ -1,6 +1,7 @@
 #include "axes_impl.h"
 #include "axis_limits.h"
 #include "read_back.h"
+#include "rich_text.h"
 #include <stdexcept>
 #include <string>
 #include <algorithm>
@@ -75,6 +76,7 @@ void Axes::Impl::ingest_line(std::span<const double> x, std::span<const double> 
     if (x.size() != y.size())
         throw std::invalid_argument(std::string(who) + ": x and y must have the same length");
     ErrorBarData err = take_error_bars(eb, x.size(), who);
+    warn_math(mathtext, who, opts.name);
     lines.push_back({
         std::vector<double>(x.begin(), x.end()),
         std::vector<double>(y.begin(), y.end()),
@@ -90,6 +92,7 @@ void Axes::Impl::ingest_scatter(std::span<const double> x, std::span<const doubl
     if (x.size() != y.size())
         throw std::invalid_argument(std::string(who) + ": x and y must have the same length");
     ErrorBarData err = take_error_bars(eb, x.size(), who);
+    warn_math(mathtext, who, opts.name);
     scatters.push_back({
         std::vector<double>(x.begin(), x.end()),
         std::vector<double>(y.begin(), y.end()),
@@ -106,6 +109,7 @@ void Axes::Impl::ingest_scatter_z(std::span<const double> x, std::span<const dou
     if (x.size() != y.size() || x.size() != z.size())
         throw std::invalid_argument(std::string(who) + ": x, y, and z must have the same length");
     ErrorBarData err = take_error_bars(eb, x.size(), who);
+    warn_math(mathtext, who, opts.name);
     scatter_z.push_back({
         std::vector<double>(x.begin(), x.end()),
         std::vector<double>(y.begin(), y.end()),
@@ -122,6 +126,7 @@ void Axes::Impl::ingest_bar(std::span<const double> x, std::span<const double> h
     if (x.size() != height.size())
         throw std::invalid_argument(std::string(who) + ": x and height must have the same length");
     ErrorBarData err = take_error_bars(eb, x.size(), who);
+    warn_math(mathtext, who, opts.name);
     bars.push_back({
         std::vector<double>(x.begin(), x.end()),
         std::vector<double>(height.begin(), height.end()),
@@ -220,6 +225,7 @@ Axes& Axes::hist(std::span<const double> data, int bins,
 
     // bar_opts passes through; `width` is relative to the bin width. No error
     // bars for histograms.
+    warn_math(d->mathtext, "hist", bar_opts.name);
 
     d->bars.push_back({
         std::move(centers),
@@ -252,6 +258,7 @@ void Axes::Impl::ingest_heatmap(std::span<const double> data, int rows, int cols
     opts.contours.erase(std::unique(opts.contours.begin(), opts.contours.end()),
                         opts.contours.end());
 
+    warn_math(mathtext, who, opts.name);
     heatmaps.push_back({
         std::move(cells),
         rows, cols,
@@ -280,6 +287,7 @@ Axes& Axes::imshow(std::span<const double> data, int rows, int cols,
 
 void Axes::Impl::ingest_text(TextContent c, TextStyle style, const char* who) {
     read_back::check_text(c, who);
+    warn_math(mathtext, who, c.text);
     texts.push_back({ std::move(c), std::move(style), next_snapshot_generation(), next_object_id() });
 }
 
@@ -306,14 +314,17 @@ Axes& Axes::annotate(double px, double py, std::string_view s, Pos tx, Pos ty,
 }
 
 Axes& Axes::set_title(std::string_view text, float fontsize) {
+    warn_math(d->mathtext, "set_title", text);
     d->title = text; d->title_stamps.title = next_snapshot_generation();
     d->axes_style.title_fontsize = fontsize; return *this;
 }
 Axes& Axes::set_xtitle(std::string_view text, float fontsize) {
+    warn_math(d->mathtext, "set_xtitle", text);
     d->xtitle = text; d->title_stamps.xtitle = next_snapshot_generation();
     d->axes_style.xtitle_fontsize = fontsize; return *this;
 }
 Axes& Axes::set_ytitle(std::string_view text, float fontsize) {
+    warn_math(d->mathtext, "set_ytitle", text);
     d->ytitle = text; d->title_stamps.ytitle = next_snapshot_generation();
     d->axes_style.ytitle_fontsize = fontsize; return *this;
 }
@@ -343,12 +354,14 @@ Axes& Axes::set_colorbar_style(ColorbarOptions opts) {
 }
 
 Axes& Axes::set_xticks(std::span<const double> pos, std::vector<std::string> labels) {
+    for (const auto& l : labels) warn_math(d->mathtext, "set_xticks", l);
     if (pos.empty()) d->xticks_override.reset();
     else             d->xticks_override = make_tick_override(pos, labels);
     d->style_stamps.xticks = next_snapshot_generation();
     return *this;
 }
 Axes& Axes::set_yticks(std::span<const double> pos, std::vector<std::string> labels) {
+    for (const auto& l : labels) warn_math(d->mathtext, "set_yticks", l);
     if (pos.empty()) d->yticks_override.reset();
     else             d->yticks_override = make_tick_override(pos, labels);
     d->style_stamps.yticks = next_snapshot_generation();
@@ -356,8 +369,11 @@ Axes& Axes::set_yticks(std::span<const double> pos, std::vector<std::string> lab
 }
 Axes& Axes::cla() {
     // Reset to defaults. Panel edits made before it name objects by id, and the
-    // objects plotted after it get new ones, so none of those edits lands.
+    // objects plotted after it get new ones, so none of those edits lands. The
+    // figure's setting stays.
+    const bool mathtext = d->mathtext;
     *d = Impl{};
+    d->mathtext = mathtext;
     return *this;
 }
 
@@ -411,6 +427,7 @@ TextData Axes::text_data(std::size_t i) const {
 void Axes::Impl::set_text_data(std::size_t i, TextContent c, const char* who) {
     TextPlot& p = read_back::at(texts, i, who);
     read_back::check_text(c, who);
+    warn_math(mathtext, who, c.text);
     p.content = std::move(c);
     p.data_stamp = next_snapshot_generation();
 }

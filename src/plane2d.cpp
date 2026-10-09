@@ -100,9 +100,12 @@ namespace sextant {
         return *this;
     }
 
-    // Clears the plane's data (its objects go, with their ids); placement stays.
+    // Clears the plane's data (its objects go, with their ids); placement and
+    // the figure's mathtext setting stay.
     Plane2D& Plane2D::cla() {
+        const bool mathtext = d->sheet.mathtext;
         d->sheet = Axes::Impl{};
+        d->sheet.mathtext = mathtext;
         return *this;
     }
 

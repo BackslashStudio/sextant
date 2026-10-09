@@ -1,6 +1,6 @@
 #include "box3d.h"
 #include "../axis_placement.h"
-#include "../text_metrics.h"
+#include "../rich_text.h"
 #include "figure_layout.h"   // kTickLabelGap, kTitleGap
 #include <algorithm>
 #include <cmath>
@@ -19,8 +19,8 @@ namespace sextant {
         // Half the extent of `text` along `dir`, so labels clear their tick by the
         // same gap in any direction.
         float half_extent_along(const Box3DPlan::Label& l, Px2 dir) {
-            const float w = text_width(l.font_path, l.fontsize, l.text);
-            const float h = font_vmetrics(l.font_path, l.fontsize).line_height;
+            const float w = label_width(l.font_path, l.fontsize, l.text);
+            const float h = label_vmetrics(l.font_path, l.fontsize, l.text).line_height;
             return 0.5f * (std::fabs(dir.x) * w + std::fabs(dir.y) * h);
         }
 

@@ -184,8 +184,10 @@ float kern_advance([[maybe_unused]] const stbtt_fontinfo& info,
 
 // fontstash's exact arithmetic: per-glyph advance truncated to tenths of a
 // pixel in a short, each pen step rounded to a whole pixel. Both truncations
-// matter for matching NanoVG.
-float measure(const LoadedFont& f, float size, std::string_view text) {
+// matter for matching NanoVG. A glyph `f` lacks comes from the first of
+// `fallbacks` that has it, at that font's scale, as fons__getGlyph() does.
+float measure(const LoadedFont& f, const std::vector<const LoadedFont*>& fallbacks,
+              float size, std::string_view text) {
     // fons__getGlyph bails below 0.2 px, so nothing advances at all there.
     if (size * 10.0f < 2.0f) return 0.0f;
 
@@ -194,14 +196,26 @@ float measure(const LoadedFont& f, float size, std::string_view text) {
     int   prev = -1;
 
     for_each_codepoint(text, [&](int cp) {
-        // Missing glyphs measure as glyph 0 (.notdef), as fontstash draws them.
-        const int g = stbtt_FindGlyphIndex(&f.info, cp);
+        // Missing everywhere, a glyph measures as the font's glyph 0 (.notdef),
+        // as fontstash draws it.
+        int g = stbtt_FindGlyphIndex(&f.info, cp);
+        const LoadedFont* from = &f;
+        if (g == 0)
+            for (const LoadedFont* fb : fallbacks)
+                if (const int k = stbtt_FindGlyphIndex(&fb->info, cp); k != 0) {
+                    g = k;
+                    from = fb;
+                    break;
+                }
 
+        // fontstash kerns with the string's own font, whichever font the glyph
+        // came from.
         x += kern_advance(f.info, prev, g, scale);
 
         int advance = 0, lsb = 0;
-        stbtt_GetGlyphHMetrics(&f.info, g, &advance, &lsb);
-        const short xadv = static_cast<short>(scale * static_cast<float>(advance) * 10.0f);
+        stbtt_GetGlyphHMetrics(&from->info, g, &advance, &lsb);
+        const float gscale = from == &f ? scale : stbtt_ScaleForMappingEmToPixels(&from->info, size);
+        const short xadv = static_cast<short>(gscale * static_cast<float>(advance) * 10.0f);
         x += static_cast<float>(static_cast<int>(xadv / 10.0f + 0.5f));
 
         prev = g;
@@ -233,7 +247,13 @@ float text_width(const std::string& font_path, float px_size, std::string_view t
     // Heterogeneous find; only a miss allocates.
     if (auto it = bucket.find(text); it != bucket.end()) return it->second;
 
-    const float w = measure(f, size, text);
+    std::vector<const LoadedFont*> fallbacks;
+    for (const FontEntry* e : fallback_fonts()) {
+        if (e->path == path) continue;
+        const LoadedFont& fb = get_font(e->path);   // map nodes never move
+        if (fb.ok) fallbacks.push_back(&fb);
+    }
+    const float w = measure(f, fallbacks, size, text);
     if (f.width_entries >= kWidthCacheCap) {
         f.widths.clear();
         f.width_entries = 0;

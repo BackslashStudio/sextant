@@ -1,7 +1,7 @@
 #include "figure_layout.h"
 #include "../axis_limits.h"
 #include "../axis_placement.h"
-#include "../text_metrics.h"
+#include "../rich_text.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -12,14 +12,28 @@ namespace sextant {
         float widest_label(const std::vector<Tick>& ticks, const std::string& font_path, float fontsize) {
             float w = 0.0f;
             for (const auto& t: ticks)
-                w = std::max(w, text_width(font_path, fontsize, t.label));
+                w = std::max(w, label_width(font_path, fontsize, t.label));
             return w;
         }
 
         float half_label_width(const std::vector<Tick>& ticks, std::size_t i,
                                const std::string& font_path, float fontsize) {
             if (i >= ticks.size()) return 0.0f;
-            return text_width(font_path, fontsize, ticks[i].label) * 0.5f;
+            return label_width(font_path, fontsize, ticks[i].label) * 0.5f;
+        }
+
+        // The tallest label in a tick list: the font's line height unless a label
+        // has math reaching past it.
+        float tallest_label(const std::vector<Tick>& ticks, const std::string& font_path, float fontsize) {
+            float h = font_vmetrics(font_path, fontsize).line_height;
+            for (const auto& t: ticks)
+                h = std::max(h, label_vmetrics(font_path, fontsize, t.label).line_height);
+            return h;
+        }
+
+        // A title's line height (its own extent when it has math).
+        float title_height(const std::string& text, const std::string& font_path, float fontsize) {
+            return label_vmetrics(font_path, fontsize, text).line_height;
         }
 
         std::string colorbar_number(float v) {
@@ -82,14 +96,15 @@ namespace sextant {
         // axes title is a separate band (title_band()).
         PlotInsets insets_for(const RenderSnapshot& snap, const CellPrep& prep) {
             const auto& st = snap.axes_style;
-            const float label_lh = font_vmetrics(st.font_path, st.label_fontsize).line_height;
+            const float xlabel_lh = tallest_label(prep.xticks, st.font_path, st.label_fontsize);
+            const float ylabel_lh = tallest_label(prep.yticks, st.font_path, st.label_fontsize);
 
             PlotInsets in;
 
             // The tick band goes on the side its labels fall; an interior axis
             // reserves nothing. Titles don't move with it.
             // A hidden axis (AxesStyle::show_xticks/show_yticks) reserves nothing.
-            const float x_band = st.show_xticks ? st.tick_length + kTickLabelGap + label_lh : 0.0f;
+            const float x_band = st.show_xticks ? st.tick_length + kTickLabelGap + xlabel_lh : 0.0f;
             const float y_band = st.show_yticks ? st.tick_length + kTickLabelGap + prep.max_ylabel_w
                                                 : 0.0f;
 
@@ -97,9 +112,9 @@ namespace sextant {
             if (!prep.yaxis.interior) (prep.yaxis.high ? in.right : in.left) = y_band;
 
             if (!snap.ytitle.empty())
-                in.left += kTitleGap + font_vmetrics(st.font_path, st.ytitle_fontsize).line_height;
+                in.left += kTitleGap + title_height(snap.ytitle, st.font_path, st.ytitle_fontsize);
             if (!snap.xtitle.empty())
-                in.bottom += kTitleGap + font_vmetrics(st.font_path, st.xtitle_fontsize).line_height;
+                in.bottom += kTitleGap + title_height(snap.xtitle, st.font_path, st.xtitle_fontsize);
 
             // End x labels are centred on the frame corners and hang half outside;
             // reserve for that (wherever the axis line is).
@@ -113,8 +128,8 @@ namespace sextant {
 
             // Likewise the outermost y labels at the top and bottom edges.
             if (st.show_yticks) {
-                in.top = std::max(in.top, label_lh * 0.5f);
-                in.bottom = std::max(in.bottom, label_lh * 0.5f);
+                in.top = std::max(in.top, ylabel_lh * 0.5f);
+                in.bottom = std::max(in.bottom, ylabel_lh * 0.5f);
             }
 
             return in;
@@ -127,7 +142,7 @@ namespace sextant {
         float title_band(const std::string& title, const AxesStyle& st) {
             return title.empty()
                        ? 0.0f
-                       : font_vmetrics(st.font_path, st.title_fontsize).line_height + kTitleGap;
+                       : title_height(title, st.font_path, st.title_fontsize) + kTitleGap;
         }
 
         std::vector<CellPrep> prepare_all(const FigureSnapshot& fsnap) {
@@ -154,7 +169,9 @@ namespace sextant {
                                                  text_width(cb.font_path, cb.fontsize, colorbar_number(r.vmin)));
                 // The name costs a line height beside a vertical bar too (drawn
                 // rotated along it), outboard of the numbers.
-                const float name = r.name.empty() ? 0.0f : kColorbarLabelGap + lh;
+                const float name = r.name.empty()
+                                       ? 0.0f
+                                       : kColorbarLabelGap + title_height(r.name, cb.font_path, cb.fontsize);
                 const float block = std::max(0.0f, cb.margin) + std::max(0.0f, cb.width)
                                     + kColorbarLabelGap + num + name;
                 d.colorbars.push_back({r.cmap, r.vmin, r.vmax, r.name, block});
@@ -169,7 +186,7 @@ namespace sextant {
             float text_w = 0.0f;
             d.legend_entry_w.reserve(d.legend_entries.size());
             for (const auto& e: d.legend_entries) {
-                const float w = text_width(lo.font_path, lo.fontsize, e.name);
+                const float w = label_width(lo.font_path, lo.fontsize, e.name);
                 text_w = std::max(text_w, w);
                 d.legend_entry_w.push_back(kLegendSwatchW + kLegendGap + w);
             }
@@ -487,6 +504,8 @@ namespace sextant {
     }
 
     FigureMeasure measure_figure(const FigureSnapshot& fsnap, const FigureMeasure* frozen) {
+        // FigureOptions::mathtext for every label measured below.
+        const MathTextScope math(fsnap.mathtext);
         return measure_with(fsnap, prepare_all(fsnap), frozen);
     }
 
@@ -605,6 +624,15 @@ namespace sextant {
         return font_vmetrics(font_path, fontsize).ascent;
     }
 
+    float middle_baseline_offset(const std::string& font_path, float fontsize, std::string_view text) {
+        const auto vm = label_vmetrics(font_path, fontsize, text);
+        return (vm.ascent + vm.descent) * 0.5f;
+    }
+
+    float top_baseline_offset(const std::string& font_path, float fontsize, std::string_view text) {
+        return label_vmetrics(font_path, fontsize, text).ascent;
+    }
+
     namespace {
         // The legend box and swatches in figure pixels for the requested anchor. `mg`
         // is the distance from the anchor corner; the offset moves the box only.
@@ -672,6 +700,8 @@ namespace sextant {
             float s = start;
             c.colorbars.reserve(dec.colorbars.size());
             for (const ColorbarSpec& spec: dec.colorbars) {
+                // The name's own height: math in it may reach past the font's.
+                const float name_lh = title_height(spec.name, cbo.font_path, cbo.fontsize);
                 ColorbarBox b;
                 b.cmap = spec.cmap;
                 b.vmin = spec.vmin;
@@ -686,7 +716,7 @@ namespace sextant {
                         b.vmin_y = f.y + f.h;
                         // Half a line inside the block's outer edge, centred down the
                         // frame: outboard of the numbers.
-                        b.name_x = s - spec.block + lh * 0.5f;
+                        b.name_x = s - spec.block + name_lh * 0.5f;
                         b.name_y = f.y + f.h * 0.5f;
                         s -= spec.block;
                         break;
@@ -698,7 +728,7 @@ namespace sextant {
                         b.vmax_x = f.x + f.w;
                         b.vmin_y = b.vmax_y = b.rect.y - kColorbarLabelGap - lh * 0.5f;
                         b.name_x = f.x + f.w * 0.5f;
-                        b.name_y = s - spec.block + lh * 0.5f;
+                        b.name_y = s - spec.block + name_lh * 0.5f;
                         s -= spec.block;
                         break;
                     case DecorSide::Bottom:
@@ -709,7 +739,7 @@ namespace sextant {
                         b.vmax_x = f.x + f.w;
                         b.vmin_y = b.vmax_y = b.rect.y + bw + kColorbarLabelGap + lh * 0.5f;
                         b.name_x = f.x + f.w * 0.5f;
-                        b.name_y = s + spec.block - lh * 0.5f;
+                        b.name_y = s + spec.block - name_lh * 0.5f;
                         s += spec.block;
                         break;
                     default: // Right
@@ -718,7 +748,7 @@ namespace sextant {
                         b.vmin_x = b.vmax_x = b.rect.x + bw + kColorbarLabelGap;
                         b.vmax_y = f.y;
                         b.vmin_y = f.y + f.h;
-                        b.name_x = s + spec.block - lh * 0.5f;
+                        b.name_x = s + spec.block - name_lh * 0.5f;
                         b.name_y = f.y + f.h * 0.5f;
                         s += spec.block;
                         break;
@@ -803,7 +833,9 @@ namespace sextant {
                 // The axes title: top of the cell, centred on the frame (as in 2D).
                 const float frame_cx = c.frame.x + c.frame.w * 0.5f;
                 c.title_x = frame_cx;
-                c.title_y = cy + font_vmetrics(st.font_path, st.title_fontsize).line_height * 0.5f;
+                const std::string& title = std::visit(
+                    [](const auto& sn) -> const std::string& { return sn.title; }, fa.snap);
+                c.title_y = cy + title_height(title, st.font_path, st.title_fontsize) * 0.5f;
 
                 // Legend first, then the bars outboard of it.
                 if (!me.dec.legend_entries.empty()) {
@@ -861,7 +893,7 @@ namespace sextant {
                     // x labels keep one top-aligned anchor; y labels flip alignment to
                     // face their axis.
                     const float xoff = st.tick_length + kTickLabelGap;
-                    const float label_lh = font_vmetrics(st.font_path, st.label_fontsize).line_height;
+                    const float label_lh = tallest_label(prep[i].xticks, st.font_path, st.label_fontsize);
                     c.xlabel_top = c.xtick_dir > 0.0f
                                        ? c.xaxis_y + xoff
                                        : c.xaxis_y - xoff - label_lh;
@@ -869,11 +901,12 @@ namespace sextant {
                     c.ylabel_align = c.ytick_dir > 0.0f ? HAlign::Left : HAlign::Right;
 
                     // At the outer edge of the grid-aligned furniture, so titles line up.
-                    const float xtitle_lh = font_vmetrics(st.font_path, st.xtitle_fontsize).line_height;
+                    const RenderSnapshot& s2 = *fa.snap2d();
+                    const float xtitle_lh = title_height(s2.xtitle, st.font_path, st.xtitle_fontsize);
                     c.xtitle_x = frame_cx;
                     c.xtitle_y = c.frame.y + c.frame.h + ax_b - xtitle_lh * 0.5f;
 
-                    const float ytitle_lh = font_vmetrics(st.font_path, st.ytitle_fontsize).line_height;
+                    const float ytitle_lh = title_height(s2.ytitle, st.font_path, st.ytitle_fontsize);
                     c.ytitle_x = c.frame.x - ax_l + ytitle_lh * 0.5f;
                     c.ytitle_y = c.frame.y + c.frame.h * 0.5f;
                 }
@@ -887,6 +920,8 @@ namespace sextant {
 
     FigureLayout compute_figure_layout(const FigureSnapshot& fsnap, int fig_w, int fig_h,
                                        FigureMeasure* out_measure) {
+        // FigureOptions::mathtext for every label measured below.
+        const MathTextScope math(fsnap.mathtext);
         // One prepare() per axes, shared by measure and cell pass (limits and
         // ticks once per frame).
         const std::vector<CellPrep> prep = prepare_all(fsnap);
@@ -898,6 +933,8 @@ namespace sextant {
 
     FigureLayout compute_figure_layout(const FigureSnapshot& fsnap, const FigureMeasure& measure,
                                        int fig_w, int fig_h) {
+        // FigureOptions::mathtext for every label measured below.
+        const MathTextScope math(fsnap.mathtext);
         if (!measure_fits(measure, fsnap)) return compute_figure_layout(fsnap, fig_w, fig_h);
         return layout_with(fsnap, prepare_all(fsnap), measure, fig_w, fig_h);
     }

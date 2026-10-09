@@ -580,6 +580,9 @@ namespace lt {
     // text.cpp (v1.1 step 31)
     void test_text();
 
+    // rich_text.cpp (v1.1 step 32a)
+    void test_rich_text();
+
     // describe.cpp
     void test_describe();
 

@@ -9,7 +9,9 @@
 namespace lt {
     class GlyphBoxes {
     public:
-        explicit GlyphBoxes(const std::string& font_file);   // face 0, as fontstash loads it
+        // Face 0, as fontstash loads it, and the fallback fonts after it: a glyph
+        // the face lacks is boxed in the font NanoVG draws it from.
+        explicit GlyphBoxes(const std::string& font_file);
         ~GlyphBoxes();
 
         bool ok() const;

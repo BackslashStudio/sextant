@@ -806,6 +806,9 @@ struct FigureSnapshot {
     // See FigureOptions::background.
     Color background = {0.93f, 0.93f, 0.93f, 1.0f};
 
+    // FigureOptions::mathtext; layout, render and export open a MathTextScope with it.
+    bool mathtext = true;
+
     // Grid weights; empty = equal. Read through grid_weights().
     std::vector<float> col_ratios, row_ratios;
 

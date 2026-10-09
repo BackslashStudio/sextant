@@ -163,18 +163,21 @@ static void test_axes_gallery() {
     fig->suptitle("What Axes draws");
 
     fig->add_subplot(3, 4, 1)
-            ->line(x, y_sin, {.color = sextant::Color::Blue, .linewidth = 4.0f, .name = "sin(x)"})
+            // Math in text (step 32a): the legend names, the annotation and the x title.
+            ->line(x, y_sin, {.color = sextant::Color::Blue, .linewidth = 4.0f, .name = "$\\sin(x)$"})
             .line(x, y_cos, {
                       .color = sextant::Color::Red, .linewidth = 2.0f,
-                      .linestyle = sextant::LineStyle::Dashed, .name = "cos(x)"
+                      .linestyle = sextant::LineStyle::Dashed, .name = "$\\cos(x)$"
                   })
             .line(pent_x, pent_y, {
                       .color = sextant::Color::Green, .linewidth = 3.0f,
                       .name = "loop", .loop = true
                   })
             // Text (step 31): an annotation whose text sits in the frame, not the data.
-            .annotate(M_PI / 2.0, 1.0, "sin peak", sextant::Pos::fraction(0.55), sextant::Pos::fraction(0.93),
+            .annotate(M_PI / 2.0, 1.0, "$\\sin(\\pi/2) = 1$", sextant::Pos::fraction(0.55),
+                      sextant::Pos::fraction(0.93),
                       {.va = sextant::VAlign::Top, .background = {1.0f, 1.0f, 0.85f, 1.0f}, .edge_linewidth = 1.0f})
+            .set_xtitle("$\\theta$ [rad]")
             .set_title("Line").legend().grid();
 
     fig->add_subplot(3, 4, 2)

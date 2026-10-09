@@ -3,6 +3,7 @@
 #include "../colormaps.h"
 #include "../font_discovery.h"
 #include "../line_dash.h"
+#include "../rich_text.h"
 #include "../contour.h"
 #include "marker_shape.h"
 #include "nanovg.h"
@@ -53,6 +54,42 @@ namespace sextant {
 
     NvgRenderer::NvgRenderer(NVGcontext* vg) : vg_(vg) {
         font_ = load_default_font(vg);
+        for (const FontEntry* e: fallback_fonts()) {
+            const int h = nvgCreateFont(vg_, ("fallback:" + e->path).c_str(), e->path.c_str());
+            if (h != -1) fallbacks_.emplace_back(e->path, h);
+        }
+        if (font_ != -1)
+            if (const FontEntry* def = pick_default_font()) add_fallbacks(font_, def->path);
+    }
+
+    void NvgRenderer::add_fallbacks(int font, const std::string& path) {
+        for (const auto& [fb_path, h]: fallbacks_)
+            if (fb_path != path) nvgAddFallbackFontId(vg_, font, h);
+    }
+
+    void NvgRenderer::label(float x, float y, int align, const std::string& text,
+                            const std::string& font_path, float size) {
+        if (!is_rich(text)) {
+            nvgTextAlign(vg_, align);
+            nvgText(vg_, x, y, text.c_str(), nullptr);
+            return;
+        }
+        // Aligned by the whole line's extent, as fontstash aligns plain text by
+        // the font's.
+        const RichLine l = layout_rich(font_path, size, text);
+        float x0 = x;
+        if (align & NVG_ALIGN_CENTER) x0 -= l.width * 0.5f;
+        else if (align & NVG_ALIGN_RIGHT) x0 -= l.width;
+        float base = y;
+        if (align & NVG_ALIGN_TOP) base += l.vm.ascent;
+        else if (align & NVG_ALIGN_MIDDLE) base += (l.vm.ascent + l.vm.descent) * 0.5f;
+        else if (align & NVG_ALIGN_BOTTOM) base += l.vm.descent;
+        nvgTextAlign(vg_, NVG_ALIGN_LEFT | NVG_ALIGN_BASELINE);
+        for (const RichRun& r: l.runs) {
+            nvgFontSize(vg_, r.size);
+            nvgText(vg_, x0 + r.x, base + r.dy, r.text.c_str(), nullptr);
+        }
+        nvgFontSize(vg_, size);
     }
 
     NvgRenderer::~NvgRenderer() {
@@ -68,6 +105,7 @@ namespace sextant {
 
         int h = nvgCreateFont(vg_, path.c_str(), path.c_str());
         if (h == -1) h = font_;
+        else add_fallbacks(h, path);
         font_cache_[path] = h;
         return h;
     }
@@ -158,14 +196,13 @@ namespace sextant {
         stroke_group(vg_, plan.tick_marks, st.tick_color, st.tick_linewidth, false);
 
         if (font_ == -1) return;
-        nvgTextAlign(vg_, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
         for (const auto* group: {&plan.tick_labels, &plan.axis_titles})
             for (const auto& l: *group) {
                 if (l.text.empty()) continue;
                 nvgFontFaceId(vg_, font_for_path(l.font_path));
                 nvgFontSize(vg_, l.fontsize);
                 nvgFillColor(vg_, nvgRGBAf(l.color.r, l.color.g, l.color.b, l.color.a));
-                nvgText(vg_, l.x, l.y, l.text.c_str(), nullptr);
+                label(l.x, l.y, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE, l.text, l.font_path, l.fontsize);
             }
     }
 
@@ -175,10 +212,10 @@ namespace sextant {
         const auto& style = snap.axes_style;
         const auto& c = style.title_color;
         nvgFontFaceId(vg_, font_for_path(style.font_path));
-        nvgTextAlign(vg_, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
         nvgFillColor(vg_, nvgRGBAf(c.r, c.g, c.b, c.a));
         nvgFontSize(vg_, style.title_fontsize);
-        nvgText(vg_, cell.title_x, cell.title_y, snap.title.c_str(), nullptr);
+        label(cell.title_x, cell.title_y, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE, snap.title,
+              style.font_path, style.title_fontsize);
     }
 
     // Heatmap contours with inline labels (in NanoVG because labels are text).
@@ -313,8 +350,8 @@ namespace sextant {
 
             // Label
             if (font_ != -1 && style.show_xticks) {
-                nvgTextAlign(vg_, NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
-                nvgText(vg_, px, cell.xlabel_top, t.label.c_str(), nullptr);
+                label(px, cell.xlabel_top, NVG_ALIGN_CENTER | NVG_ALIGN_TOP, t.label,
+                      style.font_path, font_size);
             }
         }
 
@@ -346,8 +383,7 @@ namespace sextant {
             // Label
             if (font_ != -1 && style.show_yticks) {
                 const int halign = cell.ylabel_align == HAlign::Left ? NVG_ALIGN_LEFT : NVG_ALIGN_RIGHT;
-                nvgTextAlign(vg_, halign | NVG_ALIGN_MIDDLE);
-                nvgText(vg_, cell.ylabel_x, py, t.label.c_str(), nullptr);
+                label(cell.ylabel_x, py, halign | NVG_ALIGN_MIDDLE, t.label, style.font_path, font_size);
             }
         }
 
@@ -374,22 +410,23 @@ namespace sextant {
         if (font_ == -1) return;
 
         nvgFontFaceId(vg_, font_for_path(snap.axes_style.font_path));
-        nvgTextAlign(vg_, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        constexpr int kCentred = NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE;
 
         const auto& style = snap.axes_style;
+        const std::string& fp = style.font_path;
 
         if (!snap.title.empty()) {
             const auto& c = style.title_color;
             nvgFillColor(vg_, nvgRGBAf(c.r, c.g, c.b, c.a));
             nvgFontSize(vg_, style.title_fontsize);
-            nvgText(vg_, cell.title_x, cell.title_y, snap.title.c_str(), nullptr);
+            label(cell.title_x, cell.title_y, kCentred, snap.title, fp, style.title_fontsize);
         }
 
         if (!snap.xtitle.empty()) {
             const auto& c = style.xtitle_color;
             nvgFillColor(vg_, nvgRGBAf(c.r, c.g, c.b, c.a));
             nvgFontSize(vg_, style.xtitle_fontsize);
-            nvgText(vg_, cell.xtitle_x, cell.xtitle_y, snap.xtitle.c_str(), nullptr);
+            label(cell.xtitle_x, cell.xtitle_y, kCentred, snap.xtitle, fp, style.xtitle_fontsize);
         }
 
         if (!snap.ytitle.empty()) {
@@ -399,7 +436,7 @@ namespace sextant {
             nvgSave(vg_);
             nvgTranslate(vg_, cell.ytitle_x, cell.ytitle_y);
             nvgRotate(vg_, -NVG_PI / 2.0f);
-            nvgText(vg_, 0, 0, snap.ytitle.c_str(), nullptr);
+            label(0, 0, kCentred, snap.ytitle, fp, style.ytitle_fontsize);
             nvgRestore(vg_);
         }
     }
@@ -463,9 +500,9 @@ namespace sextant {
                 nvgFillColor(vg_, rgba(t.color));
                 const int h = t.ha == HAlign::Left ? NVG_ALIGN_LEFT
                             : t.ha == HAlign::Right ? NVG_ALIGN_RIGHT : NVG_ALIGN_CENTER;
-                nvgTextAlign(vg_, h | NVG_ALIGN_BASELINE);
                 for (const TextDraw::Line& l: t.lines)
-                    if (!l.text.empty()) nvgText(vg_, l.x, l.y, l.text.c_str(), nullptr);
+                    if (!l.text.empty())
+                        label(l.x, l.y, h | NVG_ALIGN_BASELINE, l.text, t.font_path, t.fontsize);
             }
             nvgRestore(vg_);
         }
@@ -583,8 +620,7 @@ namespace sextant {
             nvgFillColor(vg_, nvgRGBAf(tc.r, tc.g, tc.b, tc.a));
             nvgFontFaceId(vg_, legend_font);
             nvgFontSize(vg_, fsz);
-            nvgTextAlign(vg_, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE);
-            nvgText(vg_, sx1 + kLegendGap, cy, e.name.c_str(), nullptr);
+            label(sx1 + kLegendGap, cy, NVG_ALIGN_LEFT | NVG_ALIGN_MIDDLE, e.name, opts.font_path, fsz);
         }
     }
 
@@ -652,14 +688,14 @@ namespace sextant {
             // The bar's name: rotated beside a vertical bar (as the axis titles),
             // level beyond a horizontal one.
             if (!box.name.empty()) {
-                nvgTextAlign(vg_, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+                constexpr int kCentred = NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE;
                 if (box.horizontal) {
-                    nvgText(vg_, box.name_x, box.name_y, box.name.c_str(), nullptr);
+                    label(box.name_x, box.name_y, kCentred, box.name, opts.font_path, opts.fontsize);
                 } else {
                     nvgSave(vg_);
                     nvgTranslate(vg_, box.name_x, box.name_y);
                     nvgRotate(vg_, -NVG_PI / 2.0f);
-                    nvgText(vg_, 0, 0, box.name.c_str(), nullptr);
+                    label(0, 0, kCentred, box.name, opts.font_path, opts.fontsize);
                     nvgRestore(vg_);
                 }
             }
@@ -677,11 +713,8 @@ namespace sextant {
         int halign = NVG_ALIGN_CENTER;
         if (opts.align == HAlign::Left) halign = NVG_ALIGN_LEFT;
         else if (opts.align == HAlign::Right) halign = NVG_ALIGN_RIGHT;
-        nvgTextAlign(vg_, halign | NVG_ALIGN_MIDDLE);
-
-        nvgText(vg_, suptitle_anchor_x(static_cast<float>(fig_w), opts),
-                suptitle_center_y(top_offset, opts),
-                text.c_str(), nullptr);
+        label(suptitle_anchor_x(static_cast<float>(fig_w), opts), suptitle_center_y(top_offset, opts),
+              halign | NVG_ALIGN_MIDDLE, text, opts.font_path, opts.fontsize);
     }
 
     namespace {

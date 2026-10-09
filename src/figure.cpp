@@ -19,6 +19,7 @@
 #include "widgets/figure_window_shell.h"
 #include "platform/platform.h"
 #include "messages.h"
+#include "rich_text.h"
 #include "output/file_write.h"
 #include "output/png_writer.h"
 #include <algorithm>
@@ -112,6 +113,7 @@ std::shared_ptr<A> Figure::Impl::add_impl(const char* who, const char* other,
         return *p;
     }
     auto ax = std::shared_ptr<A>(new A());
+    ax->d->mathtext = opts.mathtext;
     slots.push_back({rows, cols, first, last, ax});
     return ax;
 }
@@ -133,6 +135,7 @@ FigureSnapshot Figure::Impl::build_figure_snapshot() const {
     fs.col_gap = opts.subplot_col_gap;
     fs.row_gap = opts.subplot_row_gap;
     fs.margins       = opts.margins;
+    fs.mathtext      = opts.mathtext;
     fs.background    = opts.background;
     fs.col_ratios    = col_ratios;
     fs.row_ratios    = row_ratios;
@@ -737,6 +740,7 @@ void Figure::resize_to_frame(int frame_w, int frame_h, int slot_index) {
     if (s.width > 0 && s.height > 0) resize(s.width, s.height);
 }
 void Figure::suptitle(std::string_view text, float fontsize) {
+    warn_math(d->opts.mathtext, "Figure::suptitle", text);
     d->suptitle_text = text;
     d->suptitle_opts.fontsize = fontsize;
     d->stamps.suptitle = d->stamps.suptitle_style = next_snapshot_generation();

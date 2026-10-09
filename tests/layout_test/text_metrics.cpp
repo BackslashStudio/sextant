@@ -20,6 +20,9 @@ namespace lt {
             "\xC2\xB5m", // "µm"
             "\xE2\x88\x92" "1.0", // U+2212 MINUS SIGN, then "1.0"
             "\xF0\x9F\x93\x88", // U+1F4C8, a codepoint the font will lack
+            // Math symbols a text face may lack (fallback fonts, step 32a): nabla,
+            // element of, alpha, n-ary sum, beside letters of the face's own.
+            "x\xE2\x88\x87y\xE2\x88\x88z", "\xCE\xB1\xE2\x88\x91" "i",
         };
         return s;
     }
@@ -166,11 +169,26 @@ namespace lt {
         }
         std::printf("default font: %s (%s)\n\n", def->name.c_str(), def->path.c_str());
 
+        // The fallback fonts, registered on each face as NvgRenderer does, so a
+        // glyph a face lacks is drawn from the font text_width() measures it in.
+        std::vector<std::pair<std::string, int>> fallbacks;
+        for (const sextant::FontEntry* e: sextant::fallback_fonts()) {
+            const int h = nvgCreateFont(vg, ("fallback:" + e->path).c_str(), e->path.c_str());
+            if (h != -1) fallbacks.emplace_back(e->path, h);
+        }
+        auto add_fallbacks = [&](int font, const std::string& path) {
+            for (const auto& [p, h]: fallbacks)
+                if (p != path) nvgAddFallbackFontId(vg, font, h);
+        };
+
         // "" (the default font) must match the resolved path passed explicitly;
         // a different face is checked too.
         const int font_default = nvgCreateFont(vg, "default", def->path.c_str());
         check(font_default != -1, "default font loaded into NanoVG");
-        if (font_default != -1) compare_font(vg, font_default, "", "default font (\"\")");
+        if (font_default != -1) {
+            add_fallbacks(font_default, def->path);
+            compare_font(vg, font_default, "", "default font (\"\")");
+        }
 
         // A second, explicitly named face (the font_path branch).
         const auto& fonts = sextant::discover_system_fonts();
@@ -184,8 +202,10 @@ namespace lt {
         if (other) {
             const int font_other = nvgCreateFont(vg, other->path.c_str(), other->path.c_str());
             check(font_other != -1, "second font loaded into NanoVG");
-            if (font_other != -1)
+            if (font_other != -1) {
+                add_fallbacks(font_other, other->path);
                 compare_font(vg, font_other, other->path, other->name.c_str());
+            }
         } else {
             std::printf("(only one font on this system — explicit-path case skipped)\n");
         }
@@ -210,8 +230,10 @@ namespace lt {
         if (typo) {
             const int font_typo = nvgCreateFont(vg, typo->path.c_str(), typo->path.c_str());
             check(font_typo != -1, "USE_TYPO_METRICS font loaded into NanoVG");
-            if (font_typo != -1)
+            if (font_typo != -1) {
+                add_fallbacks(font_typo, typo->path);
                 compare_font(vg, font_typo, typo->path, (typo->name + " (USE_TYPO_METRICS)").c_str());
+            }
         } else {
             std::printf("(no USE_TYPO_METRICS font with diverging tables found — case skipped)\n");
         }

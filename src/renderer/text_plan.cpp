@@ -1,5 +1,5 @@
 #include "text_plan.h"
-#include "../text_metrics.h"
+#include "../rich_text.h"
 #include <algorithm>
 #include <cmath>
 
@@ -53,13 +53,17 @@ PlotRect lay_out_block(const TextPlot& p, float ax, float ay, TextDraw& d) {
 
     if (p.content.text.empty() || !(o.fontsize > 0.0f)) return {0.0f, 0.0f, 0.0f, 0.0f};
 
+    // Each line is parsed on its own, so a math span never crosses a newline. The
+    // block reaches from the first line's top to the last line's bottom (a
+    // line's own extent when it has math).
     const std::vector<std::string> lines = split_lines(p.content.text);
-    const FontVMetrics vm = font_vmetrics(o.font_path, o.fontsize);
+    const float ascent = label_vmetrics(o.font_path, o.fontsize, lines.front()).ascent;
+    const float descent = label_vmetrics(o.font_path, o.fontsize, lines.back()).descent;
     const float adv = std::max(0.0f, o.linespacing) * o.fontsize;
     const float n1 = static_cast<float>(lines.size() - 1);
     float w = 0.0f;
-    for (const auto& l : lines) w = std::max(w, text_width(o.font_path, o.fontsize, l));
-    const float h = vm.ascent - vm.descent + n1 * adv;
+    for (const auto& l : lines) w = std::max(w, label_width(o.font_path, o.fontsize, l));
+    const float h = ascent - descent + n1 * adv;
 
     float left = 0.0f;
     if (o.ha == HAlign::Center) left = -w * 0.5f;
@@ -69,11 +73,11 @@ PlotRect lay_out_block(const TextPlot& p, float ax, float ay, TextDraw& d) {
         case VAlign::Top:      top = 0.0f; break;
         case VAlign::Center:   top = -h * 0.5f; break;
         case VAlign::Bottom:   top = -h; break;
-        case VAlign::Baseline: top = -(vm.ascent + n1 * adv); break;
+        case VAlign::Baseline: top = -(ascent + n1 * adv); break;
     }
     const float lx = o.ha == HAlign::Left ? left : (o.ha == HAlign::Center ? left + w * 0.5f : left + w);
     for (std::size_t i = 0; i < lines.size(); ++i)
-        d.lines.push_back({lines[i], lx, top + vm.ascent + static_cast<float>(i) * adv});
+        d.lines.push_back({lines[i], lx, top + ascent + static_cast<float>(i) * adv});
 
     const float pad = std::max(0.0f, o.pad);
     const PlotRect block{left, top, w, h};

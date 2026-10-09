@@ -20,6 +20,10 @@ namespace sextant {
         std::vector<SurfaceTriPlot> surface_tri;
         std::vector<TextPlot> texts;
 
+        // The figure's FigureOptions::mathtext, set when the figure makes this
+        // axes; only warn_math() reads it (drawing reads the snapshot's).
+        bool mathtext = true;
+
         // shared_ptr: plane() returns the plane for the caller to draw on.
         std::vector<std::shared_ptr<Plane2D>> planes;
 

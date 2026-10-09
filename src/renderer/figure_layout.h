@@ -9,6 +9,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace sextant {
@@ -326,4 +327,9 @@ namespace sextant {
     float middle_baseline_offset(const std::string& font_path, float fontsize);
 
     float top_baseline_offset(const std::string& font_path, float fontsize);
+
+    // The same for one string: a string with math (rich_text.h) is aligned by
+    // its own extent, as NvgRenderer aligns it; plain text as above.
+    float middle_baseline_offset(const std::string& font_path, float fontsize, std::string_view text);
+    float top_baseline_offset(const std::string& font_path, float fontsize, std::string_view text);
 } // namespace sextant

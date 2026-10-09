@@ -11,6 +11,7 @@
 #include "output/png_writer.h"
 #include "output/svg_writer.h"
 #include "messages.h"
+#include "rich_text.h"
 #include <algorithm>
 #include <cmath>
 #include <exception>
@@ -119,6 +120,8 @@ std::string render_figure_svg(const FigureSnapshot& fsnap,
                               int width, int height,
                               const SvgExportOptions& opts, SvgSaveReport* report,
                               const FigureMeasure* on_screen) {
+    // FigureOptions::mathtext for every label measured and written below.
+    const MathTextScope math(fsnap.mathtext);
     // Same layout call as render_frame().
     const FigureLayout layout = layout_for_export(fsnap, on_screen, width, height);
 

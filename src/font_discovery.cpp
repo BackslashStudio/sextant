@@ -201,7 +201,9 @@ std::vector<FontEntry> scan_all() {
         size_t j = i;
         const RawFontInfo* best = &raw[i];
         while (j < raw.size() && raw[j].family == raw[i].family) {
-            if (contains_ci(raw[j].subfamily, "regular")) best = &raw[j];
+            // "Book" is DejaVu's name for its regular face.
+            if (contains_ci(raw[j].subfamily, "regular") || contains_ci(raw[j].subfamily, "book"))
+                best = &raw[j];
             ++j;
         }
         found.push_back({best->family, best->path});
@@ -225,6 +227,28 @@ const FontEntry* pick_default_font() {
             if (contains_ci(f.name, "times")) return &f;
         }
         return fonts.empty() ? nullptr : &fonts.front();
+    }();
+    return cached;
+}
+
+const std::vector<const FontEntry*>& fallback_fonts() {
+    static const std::vector<const FontEntry*> cached = [] {
+        // Symbol and math coverage first, then broad text faces with Greek.
+#if defined(_WIN32)
+        const char* wanted[] = {"Segoe UI Symbol", "DejaVu Sans", "Segoe UI"};
+#elif defined(__APPLE__)
+        const char* wanted[] = {"STIX Two Math", "Apple Symbols", "STIXGeneral", "DejaVu Sans"};
+#else
+        const char* wanted[] = {"DejaVu Sans", "Noto Sans Math", "Noto Sans Symbols", "FreeSerif"};
+#endif
+        std::vector<const FontEntry*> out;
+        for (const char* name : wanted)
+            for (const auto& f : discover_system_fonts())
+                if (f.name == name) {
+                    out.push_back(&f);
+                    break;
+                }
+        return out;
     }();
     return cached;
 }

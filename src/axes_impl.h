@@ -18,6 +18,11 @@ struct Axes::Impl {
     std::vector<HeatmapPlot>  heatmaps;
     std::vector<ScatterZPlot> scatter_z;
     std::vector<TextPlot>     texts;
+
+    // The figure's FigureOptions::mathtext, set when the figure makes this
+    // axes; only warn_math() reads it (drawing reads the snapshot's).
+    bool mathtext = true;
+
     // Font sizes for these live in axes_style, so the panel edits them via AxesEdit.
     std::string   title, xtitle, ytitle;
     TitleStamps   title_stamps;
