@@ -199,12 +199,19 @@ namespace lt {
                   && near(d[0].shaft[d[0].shaft.size() - 2], 125.0f) && d[0].heads[1].kind == ArrowHead::Bar,
                   "text plan: gap_point stops short; an open head keeps the shaft to its tip; a tail");
 
-            p.opts.arrow.arc = 0.3f;
-            d = plan_texts({p}, tr, kFrame);
+            // With no text the arrow runs anchor to point whatever the font: a
+            // 60 px chord whose control point is 18 px off it, so the curve
+            // peaks 9 px out.
+            TextPlot bare = p;
+            bare.content.text.clear();
+            bare.opts.arrow.arc = 0.3f;
+            d = plan_texts({bare}, tr, kFrame);
             float maxdev = 0.0f;
             for (std::size_t i = 1; i < d[0].shaft.size(); i += 2)
                 maxdev = std::max(maxdev, std::fabs(d[0].shaft[i] - 100.0f));
-            check(d[0].shaft.size() > 4 && maxdev > 5.0f, "text plan: arc bows the shaft off the straight line");
+            check(d[0].shaft.size() > 4 && maxdev > 8.0f && maxdev < 9.5f,
+                  "text plan: arc bows the shaft off the straight line");
+            p.opts.arrow.arc = 0.3f;
 
             p.content.px = 11.0;
             check(plan_texts({p}, tr, kFrame).empty(), "text plan: an annotation hides with its point");
