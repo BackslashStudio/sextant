@@ -571,6 +571,12 @@ namespace lt {
     // background.cpp (v1.1 step 33)
     void test_background();
 
+    // ticks_hidden.cpp (v1.1 step 34)
+    void test_ticks_hidden();
+
+    // edge_markers.cpp (v1.1 step 35)
+    void test_edge_markers();
+
     // describe.cpp
     void test_describe();
 

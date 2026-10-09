@@ -439,7 +439,8 @@ private:
     int          line3d_cmap_in_tex_ = -1;
 
     struct Scatter3DUniforms { int clip = -1, box_scale = -1, box_offset = -1,
-                                   resolution = -1, marker = -1, depth = -1, shade = -1; };
+                                   resolution = -1, marker = -1, depth = -1, shade = -1,
+                                   edge = -1, edge_w = -1, edge_face = -1; };
     Scatter3DUniforms scatter3d_u_{};
     Scatter3DUniforms peel_scatter3d_u_{};
     unsigned int scatter3d_program_ = 0;
@@ -562,7 +563,8 @@ private:
                                 dist_scale = -1; };
     SegUniforms    lineseg_u_{};
     struct MarkerUniforms { int resolution = -1, color = -1, marker = -1,
-                                scale = -1, offset = -1; };
+                                scale = -1, offset = -1,
+                                edge = -1, edge_w = -1, edge_face = -1; };
     struct HeatUniforms   { int resolution = -1, tex = -1; };
     LineUniforms   line_u_{};       // shared by draw_lines and draw_bars
     MarkerUniforms scatter_u_{};

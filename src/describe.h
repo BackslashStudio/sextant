@@ -49,10 +49,11 @@ namespace sextant {
                      F(color) F(linewidth) F(linestyle) F(name) F(show_legend) F(alpha) F(loop)
                      F(errorbar) F(hint_labels))
     SEXTANT_DESCRIBE(ScatterOptions,
-                     F(color) F(size) F(marker) F(name) F(show_legend) F(alpha) F(errorbar)
-                     F(hint_labels))
+                     F(color) F(size) F(marker) F(name) F(show_legend) F(alpha) F(edgecolor)
+                     F(edge_alpha) F(edge_linewidth) F(errorbar) F(hint_labels))
     SEXTANT_DESCRIBE(ScatterZOptions,
-                     F(cmap) F(size) F(marker) F(alpha) F(vmin) F(vmax) F(colorbar) F(name)
+                     F(cmap) F(size) F(marker) F(alpha) F(edgecolor) F(edge_alpha) F(edge_linewidth)
+                     F(vmin) F(vmax) F(colorbar) F(name)
                      F(show_legend) F(errorbar) F(hint_labels))
     SEXTANT_DESCRIBE(BarOptions,
                      F(color) F(width) F(alpha) F(name) F(show_legend) F(edgecolor) F(linewidth)
@@ -66,8 +67,9 @@ namespace sextant {
     SEXTANT_DESCRIBE(AxesStyle,
                      F(background) F(spine_color) F(spine_linewidth) F(spine_bottom) F(spine_left) F(spine_top)
                      F(spine_right) F(xaxis_y) F(xaxis_z) F(yaxis_x) F(yaxis_z) F(zaxis_x)
-                     F(zaxis_y) F(origin_x) F(origin_y) F(origin_z) F(frame_margin) F(tick_color)
-                     F(tick_length) F(tick_linewidth) F(label_color) F(label_fontsize)
+                     F(zaxis_y) F(origin_x) F(origin_y) F(origin_z) F(frame_margin)
+                     F(show_xticks) F(show_yticks) F(show_zticks)
+                     F(tick_color) F(tick_length) F(tick_linewidth) F(label_color) F(label_fontsize)
                      F(title_color) F(title_fontsize) F(xtitle_color) F(xtitle_fontsize)
                      F(ytitle_color) F(ytitle_fontsize) F(ztitle_color) F(ztitle_fontsize)
                      F(font_path))
@@ -110,7 +112,8 @@ namespace sextant {
                      F(color) F(linewidth) F(capsize) F(capstyle) F(boxwidth) F(box_alpha)
                      F(edge_alpha))
     SEXTANT_DESCRIBE(Scatter3DOptions,
-                     F(color) F(size) F(marker) F(alpha) F(depthshade) F(cmap) F(vmin) F(vmax)
+                     F(color) F(size) F(marker) F(alpha) F(edgecolor) F(edge_alpha) F(edge_linewidth)
+                     F(depthshade) F(cmap) F(vmin) F(vmax)
                      F(colorbar) F(name) F(show_legend) F(errorbar) F(hint_labels))
     SEXTANT_DESCRIBE(Line3DOptions,
                      F(color) F(linewidth) F(alpha) F(loop) F(depthshade) F(cmap) F(vmin) F(vmax)

@@ -136,6 +136,7 @@ namespace sextant {
             const std::string* title;
             float title_fontsize;
             Color title_color;
+            bool show_ticks; // AxesStyle::show_{x,y,z}ticks: marks and labels (the grid stays)
         };
 
         const auto& st = snap.axes_style;
@@ -161,17 +162,17 @@ namespace sextant {
             {
                 {-h.x, xax_y, xax_z}, {h.x, xax_y, xax_z},
                 {-h.x, -by, bz}, {h.x, -by, bz}, &xticks, &Transform3D::box_x, 0,
-                &snap.xtitle, st.xtitle_fontsize, st.xtitle_color
+                &snap.xtitle, st.xtitle_fontsize, st.xtitle_color, st.show_xticks
             },
             {
                 {yax_x, -h.y, yax_z}, {yax_x, h.y, yax_z},
                 {-bx, -h.y, bz}, {-bx, h.y, bz}, &yticks, &Transform3D::box_y, 1,
-                &snap.ytitle, st.ytitle_fontsize, st.ytitle_color
+                &snap.ytitle, st.ytitle_fontsize, st.ytitle_color, st.show_yticks
             },
             {
                 {zax_x, zax_y, -h.z}, {zax_x, zax_y, h.z},
                 {bx, -by, -h.z}, {bx, -by, h.z}, &zticks, &Transform3D::box_z, 2,
-                &snap.ztitle, st.ztitle_fontsize, st.ztitle_color
+                &snap.ztitle, st.ztitle_fontsize, st.ztitle_color, st.show_zticks
             },
         };
 
@@ -202,7 +203,8 @@ namespace sextant {
             float kept_pos = 0.0f, kept_half = 0.0f;
 
             float max_label_reach = 0.0f;
-            for (const Tick& t: *ax.ticks) {
+            const std::vector<Tick> no_ticks;
+            for (const Tick& t: ax.show_ticks ? *ax.ticks : no_ticks) {
                 const double v = (tf.*ax.to_box)(t.value);
                 Vec3 p = ax.a;
                 if (ax.axis == 0) p.x = v;
@@ -252,9 +254,9 @@ namespace sextant {
                 lbl.color = ax.title_color;
                 lbl.font_path = st.font_path;
                 // Clear of this axis's widest label.
-                const float reach = (max_label_reach > 0.0f
-                                         ? max_label_reach
-                                         : st.tick_length + kTickLabelGap)
+                const float reach = (max_label_reach > 0.0f ? max_label_reach
+                                     : ax.show_ticks        ? st.tick_length + kTickLabelGap
+                                                            : 0.0f)
                                     + kTitleGap + half_extent_along(lbl, dir);
                 lbl.x = mid.x + dir.x * reach;
                 lbl.y = mid.y + dir.y * reach;

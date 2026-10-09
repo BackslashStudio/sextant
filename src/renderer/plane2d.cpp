@@ -184,8 +184,9 @@ namespace sextant {
                 g.segs.push_back({at(u0, v0), at(u1, v1), c, w});
             }
 
-            void marker(double u, double v, Color c, float size_px, MarkerStyle m) {
-                g.markers.push_back({at(u, v), c, size_px, m});
+            void marker(double u, double v, Color c, float size_px, MarkerStyle m,
+                        Color edge = {}, float edge_px = 0.0f) {
+                g.markers.push_back({at(u, v), c, size_px, m, edge, edge_px});
             }
 
         private:
@@ -339,18 +340,25 @@ namespace sextant {
         for (const auto& sp: s.scatters) {
             const Color c = with_alpha(sp.opts.color, sp.opts.alpha);
             const std::size_t n = std::min(sp.x.size(), sp.y.size());
+            // Unset edgecolor = the fill's color; alpha is its own times edge_alpha.
+            Color ec = sp.opts.edgecolor ? *sp.opts.edgecolor : sp.opts.color;
+            ec.a = std::clamp(ec.a * sp.opts.edge_alpha, 0.0f, 1.0f);
+            const float ew = std::max(0.0f, sp.opts.edge_linewidth);
             for (std::size_t i = 0; i < n; ++i)
-                b.marker(sp.x[i], sp.y[i], c, sp.opts.size, sp.opts.marker);
+                b.marker(sp.x[i], sp.y[i], c, sp.opts.size, sp.opts.marker, ec, ew);
         }
         for (const auto& sp: s.scatter_z) {
             const std::uint8_t* lut = colormaps::get(sp.opts.cmap);
             const float vmin = sp.opts.vmin, vrange = sp.opts.vmax - sp.opts.vmin;
             const std::size_t n = std::min({sp.x.size(), sp.y.size(), sp.z.size()});
-            for (std::size_t i = 0; i < n; ++i)
-                b.marker(sp.x[i], sp.y[i],
-                         with_alpha(cell_color(lut, static_cast<float>(sp.z[i]), vmin, vrange),
-                                    sp.opts.alpha),
-                         sp.opts.size, sp.opts.marker);
+            const float ew = std::max(0.0f, sp.opts.edge_linewidth);
+            for (std::size_t i = 0; i < n; ++i) {
+                const Color face = cell_color(lut, static_cast<float>(sp.z[i]), vmin, vrange);
+                Color ec = sp.opts.edgecolor ? *sp.opts.edgecolor : face;
+                ec.a = std::clamp((sp.opts.edgecolor ? ec.a : 1.0f) * sp.opts.edge_alpha, 0.0f, 1.0f);
+                b.marker(sp.x[i], sp.y[i], with_alpha(face, sp.opts.alpha), sp.opts.size,
+                         sp.opts.marker, ec, ew);
+            }
         }
         b.close();
 
@@ -524,7 +532,10 @@ namespace sextant {
                             const double ru = std::hypot(qu.x - q.x, qu.y - q.y);
                             const double rv = std::hypot(qv.x - q.x, qv.y - q.y);
                             const float size_px = static_cast<float>(ru + rv);
-                            item.marks.push_back({q.x, q.y, size_px, m.color, m.marker});
+                            // The outline foreshortens with the marker.
+                            const float k = m.size_px > 0.0f ? size_px / m.size_px : 0.0f;
+                            item.marks.push_back({q.x, q.y, size_px, m.color, m.marker,
+                                                  m.edge, m.edge_px * k});
                         }
                         break;
                 }

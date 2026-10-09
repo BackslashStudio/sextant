@@ -292,11 +292,13 @@ namespace sextant {
             const float px = r.x + static_cast<float>((t.value - xmin) / (xmax - xmin)) * r.w;
             if (px < r.x || px > r.x + r.w) continue;
 
-            // Tick mark
-            nvgBeginPath(vg_);
-            nvgMoveTo(vg_, px, xa);
-            nvgLineTo(vg_, px, xa + cell.xtick_dir * tick_len);
-            nvgStroke(vg_);
+            // Tick mark (a hidden axis keeps its grid line below)
+            if (style.show_xticks) {
+                nvgBeginPath(vg_);
+                nvgMoveTo(vg_, px, xa);
+                nvgLineTo(vg_, px, xa + cell.xtick_dir * tick_len);
+                nvgStroke(vg_);
+            }
 
             // Grid line, dashed via begin_styled_segment().
             if (grid_enabled) {
@@ -310,7 +312,7 @@ namespace sextant {
             }
 
             // Label
-            if (font_ != -1) {
+            if (font_ != -1 && style.show_xticks) {
                 nvgTextAlign(vg_, NVG_ALIGN_CENTER | NVG_ALIGN_TOP);
                 nvgText(vg_, px, cell.xlabel_top, t.label.c_str(), nullptr);
             }
@@ -323,10 +325,12 @@ namespace sextant {
             if (py < r.y || py > r.y + r.h) continue;
 
             // Tick mark
-            nvgBeginPath(vg_);
-            nvgMoveTo(vg_, ya + cell.ytick_dir * tick_len, py);
-            nvgLineTo(vg_, ya, py);
-            nvgStroke(vg_);
+            if (style.show_yticks) {
+                nvgBeginPath(vg_);
+                nvgMoveTo(vg_, ya + cell.ytick_dir * tick_len, py);
+                nvgLineTo(vg_, ya, py);
+                nvgStroke(vg_);
+            }
 
             // Grid line
             if (grid_enabled) {
@@ -340,7 +344,7 @@ namespace sextant {
             }
 
             // Label
-            if (font_ != -1) {
+            if (font_ != -1 && style.show_yticks) {
                 const int halign = cell.ylabel_align == HAlign::Left ? NVG_ALIGN_LEFT : NVG_ALIGN_RIGHT;
                 nvgTextAlign(vg_, halign | NVG_ALIGN_MIDDLE);
                 nvgText(vg_, cell.ylabel_x, py, t.label.c_str(), nullptr);
@@ -495,20 +499,6 @@ namespace sextant {
                             nvgClosePath(vg_);
                             nvgFill(vg_);
                             outline();
-                            break;
-                        case MarkerShape::Form::Strokes:
-                            // No interior: an edged one is stroked in the edge color.
-                            if (edged)
-                                nvgStrokeColor(vg_, nvgRGBAf(e.edge.r, e.edge.g, e.edge.b, e.edge.a));
-                            else
-                                nvgStrokeColor(vg_, nvgRGBAf(e.color.r, e.color.g, e.color.b, e.color.a));
-                            nvgStrokeWidth(vg_, ms.width);
-                            for (int i = 0; i + 1 < ms.count; i += 2) {
-                                nvgBeginPath(vg_);
-                                nvgMoveTo(vg_, ms.pts[i][0], ms.pts[i][1]);
-                                nvgLineTo(vg_, ms.pts[i + 1][0], ms.pts[i + 1][1]);
-                                nvgStroke(vg_);
-                            }
                             break;
                         case MarkerShape::Form::None:
                         default: break;

@@ -804,6 +804,35 @@ namespace sextant {
             if (!p.err.empty()) errorbar_style(o.errorbar, o.color, has_cap(p.err), has_box(p.err), push);
         }
 
+        // A marker's outline: width, its own colour or the fill's, and its alpha
+        // (alpha 0 on the fill, above, makes the marker hollow). `fallback` is what an
+        // unset colour resolves to when the box is ticked.
+        template<class Push>
+        void marker_outline(std::optional<Color>& edgecolor, float& edge_alpha, float& edge_linewidth,
+                            Color fallback, Push&& push) {
+            ImGui::SeparatorText("Outline");
+            if (begin_field_table("outline")) {
+                field_row("Width");
+                if (drag_float("##moutw", &edge_linewidth, 0.0f, 20.0f, 0.05f, "%.2f px")) push();
+                end_field_table();
+            }
+            if (edge_linewidth <= 0.0f) return;
+            bool own = edgecolor.has_value();
+            if (ImGui::Checkbox("Own colour##moutown", &own)) {
+                edgecolor = own ? std::optional<Color>(fallback) : std::nullopt;
+                push();
+            }
+            if (begin_field_table("outline2")) {
+                if (edgecolor) {
+                    field_row("Color");
+                    if (color_swatch("##moutcol", *edgecolor)) push();
+                }
+                field_row("Alpha");
+                if (drag_float("##moutalpha", &edge_alpha, 0.0f, 1.0f, 0.005f, "%.2f")) push();
+                end_field_table();
+            }
+        }
+
         template<class Push>
         void scatter_style(DataPanelState& st, ScatterOptions& o, const ScatterPlot& p, Push&& push) {
             name_and_key(st, o, push);
@@ -818,6 +847,7 @@ namespace sextant {
                 if (drag_float("##salpha", &o.alpha, 0.0f, 1.0f, 0.005f, "%.2f")) push();
                 end_field_table();
             }
+            marker_outline(o.edgecolor, o.edge_alpha, o.edge_linewidth, o.color, push);
             if (!p.err.empty()) errorbar_style(o.errorbar, o.color, has_cap(p.err), has_box(p.err), push);
         }
 
@@ -840,6 +870,7 @@ namespace sextant {
                 if (drag_float("##zalpha", &o.alpha, 0.0f, 1.0f, 0.005f, "%.2f")) push();
                 end_field_table();
             }
+            marker_outline(o.edgecolor, o.edge_alpha, o.edge_linewidth, Color::Black, push);
             if (!p.err.empty()) errorbar_style(o.errorbar, Color::Black, has_cap(p.err), has_box(p.err), push);
         }
 
@@ -1176,6 +1207,7 @@ namespace sextant {
                 if (drag_float("##cshade", &o.depthshade, 0.0f, 1.0f, 0.005f, "%.2f")) push_cloud();
                 end_field_table();
             }
+            marker_outline(o.edgecolor, o.edge_alpha, o.edge_linewidth, o.color, push_cloud);
             // vmin/vmax only with `colors`, both or neither (empty = data range).
             if (begin_field_table("cloudv")) {
                 field_row("Colormap");

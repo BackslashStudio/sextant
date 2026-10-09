@@ -88,8 +88,10 @@ namespace sextant {
 
             // The tick band goes on the side its labels fall; an interior axis
             // reserves nothing. Titles don't move with it.
-            const float x_band = st.tick_length + kTickLabelGap + label_lh;
-            const float y_band = st.tick_length + kTickLabelGap + prep.max_ylabel_w;
+            // A hidden axis (AxesStyle::show_xticks/show_yticks) reserves nothing.
+            const float x_band = st.show_xticks ? st.tick_length + kTickLabelGap + label_lh : 0.0f;
+            const float y_band = st.show_yticks ? st.tick_length + kTickLabelGap + prep.max_ylabel_w
+                                                : 0.0f;
 
             if (!prep.xaxis.interior) (prep.xaxis.high ? in.top : in.bottom) = x_band;
             if (!prep.yaxis.interior) (prep.yaxis.high ? in.right : in.left) = y_band;
@@ -101,15 +103,19 @@ namespace sextant {
 
             // End x labels are centred on the frame corners and hang half outside;
             // reserve for that (wherever the axis line is).
-            in.left = std::max(in.left, half_label_width(prep.xticks, 0, st.font_path, st.label_fontsize));
-            in.right = std::max(in.right, prep.xticks.empty()
-                                              ? 0.0f
-                                              : half_label_width(prep.xticks, prep.xticks.size() - 1, st.font_path,
-                                                                 st.label_fontsize));
+            if (st.show_xticks) {
+                in.left = std::max(in.left, half_label_width(prep.xticks, 0, st.font_path, st.label_fontsize));
+                in.right = std::max(in.right, prep.xticks.empty()
+                                                  ? 0.0f
+                                                  : half_label_width(prep.xticks, prep.xticks.size() - 1,
+                                                                     st.font_path, st.label_fontsize));
+            }
 
             // Likewise the outermost y labels at the top and bottom edges.
-            in.top = std::max(in.top, label_lh * 0.5f);
-            in.bottom = std::max(in.bottom, label_lh * 0.5f);
+            if (st.show_yticks) {
+                in.top = std::max(in.top, label_lh * 0.5f);
+                in.bottom = std::max(in.bottom, label_lh * 0.5f);
+            }
 
             return in;
         }
@@ -363,6 +369,23 @@ namespace sextant {
         return out;
     }
 
+    // A scatter key keeps the series' color whatever its alpha (as always), except
+    // a hollow series (alpha 0), whose key is hollow too.
+    static Color marker_key_fill(Color color, float alpha) {
+        if (alpha <= 0.0f) color.a = 0.0f;
+        return color;
+    }
+
+    // A scatter key's outline (alpha 0 = none): the series' `edgecolor`, or its
+    // color, at `edge_alpha`; drawn 1 px wide whatever `edge_linewidth` is.
+    static Color marker_key_edge(const Color& color, const std::optional<Color>& edgecolor,
+                                 float edge_alpha, float edge_linewidth) {
+        if (!(edge_linewidth > 0.0f)) return {0.0f, 0.0f, 0.0f, 0.0f};
+        Color c = edgecolor ? *edgecolor : color;
+        c.a = std::clamp(c.a * edge_alpha, 0.0f, 1.0f);
+        return c;
+    }
+
     std::vector<LegendEntry> collect_legend_entries(const RenderSnapshot& snap) {
         std::vector<LegendEntry> entries;
         for (const auto& lp: snap.lines) {
@@ -375,8 +398,10 @@ namespace sextant {
         for (const auto& sp: snap.scatters)
             if (sp.opts.show_legend && !sp.opts.name.empty())
                 entries.push_back({
-                    sp.opts.color, sp.opts.name, LegendKind::Marker,
-                    LineStyle::Solid, sp.opts.marker
+                    marker_key_fill(sp.opts.color, sp.opts.alpha), sp.opts.name,
+                    LegendKind::Marker, LineStyle::Solid, sp.opts.marker,
+                    marker_key_edge(sp.opts.color, sp.opts.edgecolor, sp.opts.edge_alpha,
+                                    sp.opts.edge_linewidth)
                 });
         // scatter_z is keyed white with a black edge: the key names the shape, the
         // colorbar explains the colors.
@@ -409,12 +434,14 @@ namespace sextant {
             if (sc.opts.show_legend && !sc.opts.name.empty()
                 && sc.opts.marker != MarkerStyle::None)
                 entries.push_back({
-                    sc.colormapped() ? Color::White : sc.opts.color,
+                    sc.colormapped() ? Color::White
+                                     : marker_key_fill(sc.opts.color, sc.opts.alpha),
                     sc.opts.name, LegendKind::Marker, LineStyle::Solid,
                     sc.opts.marker,
                     sc.colormapped()
                         ? Color::Black
-                        : Color{0.0f, 0.0f, 0.0f, 0.0f}
+                        : marker_key_edge(sc.opts.color, sc.opts.edgecolor, sc.opts.edge_alpha,
+                                          sc.opts.edge_linewidth)
                 });
         // A path: its color when flat, the colormap swept along the stroke when
         // not (see LegendEntry::swept). No linestyle gate (paths have no LineStyle).

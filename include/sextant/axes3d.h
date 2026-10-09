@@ -269,6 +269,13 @@ namespace sextant {
         // unlike ScatterOptions::alpha's 0.8.
         float alpha = 1.0f;
 
+        // Marker outline; see ScatterOptions::edgecolor. Unset color = the
+        // marker's own fill color. `depthshade` darkens the outline with the fill;
+        // a marker with an outline below full alpha takes the translucent path.
+        std::optional<Color> edgecolor;
+        float edge_alpha = 1.0f;
+        float edge_linewidth = 0.0f;
+
         // Darken markers toward black with distance: `depthshade * t`, t from 0 at
         // the box's near face to 1 at its far face (the box's extent, not the
         // series'). 0 = off. The legend key and colorbar are never darkened.

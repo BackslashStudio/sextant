@@ -90,6 +90,14 @@ namespace sextant {
                 m.color = scatter3d_depth_shade(scatter3d_point_color(s, i, vmin, vmax),
                                                 s.opts.depthshade,
                                                 (q.depth - dmin) * dspan);
+                if (s.opts.edge_linewidth > 0.0f) {
+                    const Color fill = scatter3d_point_color(s, i, vmin, vmax);
+                    const Color ec = s.opts.edgecolor ? *s.opts.edgecolor : fill;
+                    m.edge = scatter3d_depth_shade(
+                        {ec.r, ec.g, ec.b, scatter3d_edge_alpha(s.opts, s.colormapped())},
+                        s.opts.depthshade, (q.depth - dmin) * dspan);
+                    m.edge_width = s.opts.edge_linewidth;
+                }
                 m.depth = q.depth;
                 m.box = b;
                 m.plot = pi;

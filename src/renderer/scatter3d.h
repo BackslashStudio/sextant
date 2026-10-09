@@ -11,9 +11,22 @@ namespace sextant {
 // Rules both outputs share for a 3D cloud: point color, depth shade and order.
 // Marker shapes are marker_shape()'s; the billboard is in the vertex shader.
 
+// The outline's alpha before any depth shade: its color's own (the fill color's
+// when `edgecolor` is unset; 1 for a colormapped cloud) times `edge_alpha`.
+inline float scatter3d_edge_alpha(const Scatter3DOptions& o, bool colormapped) {
+    const float base = o.edgecolor ? o.edgecolor->a : (colormapped ? 1.0f : o.color.a);
+    return std::clamp(base * o.edge_alpha, 0.0f, 1.0f);
+}
+
+// An outline below full alpha forces the composited path as well.
+inline bool scatter3d_edge_translucent(const Scatter3DOptions& o, bool colormapped) {
+    return o.edge_linewidth > 0.0f && scatter3d_edge_alpha(o, colormapped) < 1.0f;
+}
+
 // True when the cloud must be composited (alpha < 1); `colors` has no alpha.
 inline bool scatter3d_translucent(const Scatter3DPlot& s) {
-    return s.opts.alpha < 1.0f || (!s.colormapped() && s.opts.color.a < 1.0f);
+    return s.opts.alpha < 1.0f || (!s.colormapped() && s.opts.color.a < 1.0f)
+           || scatter3d_edge_translucent(s.opts, s.colormapped());
 }
 
 inline float scatter3d_alpha(const Scatter3DPlot& s) {
@@ -38,6 +51,10 @@ struct Scatter3DMarker {
     MarkerStyle marker = MarkerStyle::Circle;
     // Final color (colormap and depth shade applied).
     Color color{};
+    // The outline, drawn inside the boundary (`edge_width` 0 = none): final RGBA,
+    // the fill's depth shade applied.
+    Color edge{};
+    float edge_width = 0.0f;
     // Px3::depth (for the whole-object merge) and box position (for pairwise
     // tests).
     float depth = 0.0f;

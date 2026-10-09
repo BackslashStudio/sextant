@@ -269,6 +269,12 @@ int main() {
     // background.cpp
     test_background();
 
+    // ticks_hidden.cpp
+    test_ticks_hidden();
+
+    // edge_markers.cpp
+    test_edge_markers();
+
     // describe.cpp
     test_describe();
 

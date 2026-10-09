@@ -250,17 +250,25 @@ static void emit_error_bars(std::ostringstream& o, const SvgAxesData& d) {
 }
 
 // Markers from marker_shape() (shared with both legends), emitted as their
-// natural element (<circle>, <rect>, ...). Empty `stroke` = no outline; an
-// outlined Strokes form is drawn in the stroke color.
+// natural element (<circle>, <rect>, ...). Empty `stroke` = no outline. A data
+// marker's outline (`inside`) fills the band of `stroke_w` just within its
+// boundary, as on the GPU, so the shape is drawn inset by half the width; a
+// legend key's is a 1 px line centred on the boundary.
 static void emit_scatter_marker(std::ostringstream& o,
                                 float cx, float cy, float r,
                                 const std::string& fill, float alpha,
                                 MarkerStyle marker,
-                                const std::string& stroke = {})
+                                const std::string& stroke = {},
+                                float stroke_alpha = 1.0f, float stroke_w = 1.0f,
+                                bool inside = false)
 {
-    const MarkerShape s = marker_shape(marker, cx, cy, r);
-    const std::string edge = stroke.empty() ? std::string()
-        : " stroke=\"" + stroke + "\" stroke-width=\"1\"";
+    const MarkerShape s = marker_shape(marker, cx, cy, r,
+                                       !stroke.empty() && inside ? stroke_w * 0.5f : 0.0f);
+    std::ostringstream eo;
+    if (!stroke.empty())
+        eo << " stroke=\"" << stroke << "\" stroke-opacity=\"" << stroke_alpha
+           << "\" stroke-width=\"" << stroke_w << "\"";
+    const std::string edge = eo.str();
     switch (s.form) {
         case MarkerShape::Form::Disc:
             o << "    <circle cx=\"" << s.cx << "\" cy=\"" << s.cy << "\" r=\"" << s.radius
@@ -277,15 +285,6 @@ static void emit_scatter_marker(std::ostringstream& o,
                 o << (i ? " " : "") << s.pts[i][0] << "," << s.pts[i][1];
             o << "\" fill=\"" << fill << "\" fill-opacity=\"" << alpha << "\"" << edge << "/>\n";
             break;
-        case MarkerShape::Form::Strokes: {
-            const std::string& c = stroke.empty() ? fill : stroke;
-            for (int i = 0; i + 1 < s.count; i += 2)
-                o << "    <line x1=\"" << s.pts[i][0] << "\" y1=\"" << s.pts[i][1]
-                  <<        "\" x2=\"" << s.pts[i+1][0] << "\" y2=\"" << s.pts[i+1][1]
-                  << "\" stroke=\"" << c << "\" stroke-opacity=\"" << alpha
-                  << "\" stroke-width=\"" << s.width << "\"/>\n";
-            break;
-        }
         case MarkerShape::Form::None:
         default: break;
     }
@@ -296,9 +295,16 @@ static void emit_scatter(std::ostringstream& o, const SvgAxesData& d) {
         if (sp.x.empty()) continue;
         const std::string fill = rgb(sp.opts.color);
         const float r = sp.opts.size * 0.5f;
+        // Unset edgecolor = the fill's color; its alpha is the color's own times
+        // edge_alpha (not the fill's `alpha`), as on the GPU.
+        const bool edged = sp.opts.edge_linewidth > 0.0f;
+        const Color ec = sp.opts.edgecolor ? *sp.opts.edgecolor : sp.opts.color;
+        const std::string stroke = edged ? rgb(ec) : std::string();
+        const float stroke_alpha = std::clamp(ec.a * sp.opts.edge_alpha, 0.0f, 1.0f);
         for (std::size_t i = 0; i < sp.x.size(); ++i)
             emit_scatter_marker(o, d.layout.tr.to_px(sp.x[i]), d.layout.tr.to_py(sp.y[i]),
-                                r, fill, sp.opts.alpha, sp.opts.marker);
+                                r, fill, sp.opts.alpha, sp.opts.marker, stroke, stroke_alpha,
+                                sp.opts.edge_linewidth, true);
     }
 }
 
@@ -317,8 +323,14 @@ static void emit_scatter_z(std::ostringstream& o, const SvgAxesData& d) {
             const uint8_t* c = &lut[static_cast<int>(t * 255.0f) * 4];
             char buf[32];
             std::snprintf(buf, sizeof(buf), "rgb(%d,%d,%d)", c[0], c[1], c[2]);
+            std::string stroke;
+            if (sp.opts.edge_linewidth > 0.0f)
+                stroke = sp.opts.edgecolor ? rgb(*sp.opts.edgecolor) : std::string(buf);
+            const float stroke_alpha = std::clamp(
+                (sp.opts.edgecolor ? sp.opts.edgecolor->a : 1.0f) * sp.opts.edge_alpha, 0.0f, 1.0f);
             emit_scatter_marker(o, d.layout.tr.to_px(sp.x[i]), d.layout.tr.to_py(sp.y[i]),
-                                r, buf, sp.opts.alpha, sp.opts.marker);
+                                r, buf, sp.opts.alpha, sp.opts.marker, stroke, stroke_alpha,
+                                sp.opts.edge_linewidth, true);
         }
     }
 }
@@ -508,11 +520,13 @@ static void emit_ticks_and_labels(std::ostringstream& o, const SvgAxesData& d) {
     const float xa = d.layout.xaxis_y;
     const float ya = d.layout.yaxis_x;
     for (const auto& t : d.layout.xticks) {
+        if (!d.axes_style.show_xticks) break;
         float px = d.layout.tr.to_px(t.value);
         o << "    <line x1=\"" << px << "\" y1=\"" << xa
           <<        "\" x2=\"" << px << "\" y2=\"" << xa + d.layout.xtick_dir * tick_len << "\"/>\n";
     }
     for (const auto& t : d.layout.yticks) {
+        if (!d.axes_style.show_yticks) break;
         float py = d.layout.tr.to_py(t.value);
         o << "    <line x1=\"" << ya + d.layout.ytick_dir * tick_len << "\" y1=\"" << py
           <<        "\" x2=\"" << ya << "\" y2=\"" << py << "\"/>\n";
@@ -526,12 +540,14 @@ static void emit_ticks_and_labels(std::ostringstream& o, const SvgAxesData& d) {
     const float x_base = d.layout.xlabel_top + top_baseline_offset(d.axes_style.font_path, fsz);
     const float y_base = middle_baseline_offset(d.axes_style.font_path, fsz);
     for (const auto& t : d.layout.xticks) {
+        if (!d.axes_style.show_xticks) break;
         float px = d.layout.tr.to_px(t.value);
         o << "    <text x=\"" << px << "\" y=\"" << x_base
           << "\" text-anchor=\"middle\">" << xml_escape(t.label) << "</text>\n";
     }
     const char* y_anchor = d.layout.ylabel_align == HAlign::Left ? "start" : "end";
     for (const auto& t : d.layout.yticks) {
+        if (!d.axes_style.show_yticks) break;
         float py = d.layout.tr.to_py(t.value);
         o << "    <text x=\"" << d.layout.ylabel_x
           << "\" y=\"" << py + y_base
@@ -631,8 +647,8 @@ static void emit_legend(std::ostringstream& o, const SvgAxesData& d, std::size_t
         } else if (e.kind == LegendKind::Marker) {
             // Same emitter as the data markers. Alpha 0 edge = none (all but
             // scatter_z).
-            emit_scatter_marker(o, (sx0 + sx1) * 0.5f, cy, 4.5f, fill, 1.0f, e.marker,
-                                e.edge.a > 0.0f ? rgb(e.edge) : std::string());
+            emit_scatter_marker(o, (sx0 + sx1) * 0.5f, cy, 4.5f, fill, e.color.a, e.marker,
+                                e.edge.a > 0.0f ? rgb(e.edge) : std::string(), e.edge.a);
         } else {
             o << "    <rect x=\"" << sx0 << "\" y=\"" << cy - 5.f
               << "\" width=\"" << kLegendSwatchW << "\" height=\"10\" fill=\"" << fill << "\"/>\n";
@@ -835,7 +851,9 @@ static void emit_plane3d(std::ostringstream& o, const PlanePlanItem& p) {
     // Markers: same shapes and pixel size as on a 2D axes.
     for (const auto& m : p.marks)
         emit_scatter_marker(o, m.x, m.y, m.size * 0.5f, rgb(m.color), m.color.a,
-                            m.marker);
+                            m.marker,
+                            m.edge_width > 0.0f ? rgb(m.edge) : std::string(),
+                            m.edge.a, m.edge_width, true);
 
     o << "  </g>\n";
 }
@@ -994,7 +1012,9 @@ static void emit_box3d(std::ostringstream& o, const SvgAxesData& d, std::size_t 
                 const Scatter3DMarker& m = d.markers3d[s.index];
                  // Same emitter as 2D and the legends. `s.xy` is empty here.
                 emit_scatter_marker(o, m.cx, m.cy, m.radius, rgb(m.color),
-                                    m.color.a, m.marker);
+                                    m.color.a, m.marker,
+                                    m.edge_width > 0.0f ? rgb(m.edge) : std::string(),
+                                    m.edge.a, m.edge_width, true);
                 break;
             }
             case ScenePaint::Kind::Line: {

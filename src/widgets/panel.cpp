@@ -815,6 +815,16 @@ void draw_cosmetic_3d(CosmeticRefs& st, const RenderSnapshot3D& sn,
         ImGui::TextDisabled("Limits set the range the box spans.");
         ImGui::TextDisabled("Its size is under View: Box aspect and the camera.");
         ImGui::SeparatorText("Ticks & labels");
+        // Per axis: marks and labels together (the grid stays).
+        if (begin_field_table("tickshow3d", 3)) {
+            field_row("Show X");
+            if (ImGui::Checkbox("##showx3d", &sty.show_xticks)) push_style();
+            field_next("Y");
+            if (ImGui::Checkbox("##showy3d", &sty.show_yticks)) push_style();
+            field_next("Z");
+            if (ImGui::Checkbox("##showz3d", &sty.show_zticks)) push_style();
+            end_field_table();
+        }
         // Mark on one row, label on the next, in one table.
         if (begin_field_table("tick3d", 3)) {
             field_row("Mark");
@@ -1361,6 +1371,14 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
             end_field_table();
         }
         ImGui::SeparatorText("Ticks & labels");
+        // Per axis: marks and labels together (the grid stays).
+        if (begin_field_table("tickshow", 2)) {
+            field_row("Show X");
+            if (ImGui::Checkbox("##showx", &sty.show_xticks)) push_style();
+            field_next("Show Y");
+            if (ImGui::Checkbox("##showy", &sty.show_yticks)) push_style();
+            end_field_table();
+        }
         // Mark over Label in one table, so pairs line up.
         if (begin_field_table("tick", 3)) {
             field_row("Mark");

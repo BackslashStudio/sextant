@@ -147,6 +147,26 @@ void main() {
 }
 )";
 
+    // The marker shapes as one signed distance in quad units (negative inside; the
+    // quad is [-1,1]^2, so the outline band is `edge_px / half_size` wide), pasted
+    // into every scatter fragment shader by the MARKER_SDF token. `m` is the
+    // MarkerStyle enum: 0=None 1=Circle 2=Square 3=Triangle 4=Cross 5=Plus
+    // 6=Diamond. Cross and Plus are two crossing bars (half-width 0.3 along the
+    // axes, 0.3/sqrt(2) across the diagonals) clipped by the unit circle.
+    static constexpr char k_marker_sdf[] = R"(
+float marker_sd(int m, vec2 p) {
+    if (m == 0) return 1e9;
+    if (m == 1) return length(p) - 1.0;
+    if (m == 2) return max(abs(p.x), abs(p.y)) - 1.0;
+    if (m == 3) return max((2.0 * abs(p.x) - p.y - 1.0) * 0.4472136, p.y - 1.0);
+    if (m == 6) return (abs(p.x) + abs(p.y) - 1.0) * 0.70710678;
+    vec2 q = (m == 4) ? vec2(p.x + p.y, p.x - p.y) * 0.70710678 : p;
+    float t = (m == 4) ? 0.2121320 : 0.3;
+    float d = min(max(abs(q.y) - t, abs(q.x) - 1.0), max(abs(q.x) - t, abs(q.y) - 1.0));
+    return max(d, length(p) - 1.0);
+}
+)";
+
     // Scatter: instanced quads clipped by a marker-shape SDF. aCenter is in data
     // space minus an anchor with the transform in uScale/uOffset (survives
     // pan/zoom); the pixel half-extent is added after it, so markers don't scale.
@@ -157,6 +177,7 @@ layout(location = 0) in vec2 aQuadPos;   // unit quad [-1,1]x[-1,1]
 layout(location = 1) in vec2 aCenter;    // instance: data-space center (anchored)
 layout(location = 2) in float aSize;     // instance: pixel diameter
 out vec2 vUV;
+out float vHalf;                          // half the marker's pixel size
 uniform vec2 uResolution;
 uniform vec2 uScale;
 uniform vec2 uOffset;
@@ -167,33 +188,28 @@ void main() {
     ndc.y = -ndc.y;
     gl_Position = vec4(ndc, 0.0, 1.0);
     vUV = aQuadPos;
+    vHalf = aSize * 0.5;
 }
 )";
 
+    // uEdge is the outline's final RGBA (edge_alpha applied); uEdgeW its width in
+    // pixels, drawn inside the boundary. 0 = no outline.
     static constexpr char k_scatter_frag[] = R"(
 #version 410 core
 in vec2 vUV;
+in float vHalf;
 uniform vec4 uColor;
-uniform int  uMarker; // matches MarkerStyle enum: 0=None 1=Circle 2=Square 3=Triangle 4=Cross 5=Plus 6=Diamond
+uniform vec4 uEdge;
+uniform float uEdgeW;
+uniform int  uMarker;
 out vec4 FragColor;
+MARKER_SDF
 void main() {
-    bool inside = true;
-    if      (uMarker == 0) inside = false;  // None — no marker drawn
-    else if (uMarker == 1) inside = dot(vUV, vUV) <= 1.0;             // Circle
-    else if (uMarker == 2) inside = true;                             // Square
-    else if (uMarker == 3) inside = vUV.y >= abs(vUV.x) * 2.0 - 1.0;  // Triangle
-    else if (uMarker == 4) {                                          // Cross
-        float t = 0.3;
-        inside = (abs(vUV.x - vUV.y) < t || abs(vUV.x + vUV.y) < t)
-                 && dot(vUV, vUV) <= 1.0;
-    }
-    else if (uMarker == 5) {                                          // Plus
-        float t = 0.3;
-        inside = (abs(vUV.x) < t || abs(vUV.y) < t) && dot(vUV, vUV) <= 1.0;
-    }
-    else if (uMarker == 6) inside = abs(vUV.x) + abs(vUV.y) <= 1.0;   // Diamond
-    if (!inside) discard;
-    FragColor = uColor;
+    float d = marker_sd(uMarker, vUV);
+    if (d > 0.0) discard;
+    vec4 c = (uEdgeW > 0.0 && d > -uEdgeW / max(vHalf, 1e-3)) ? uEdge : uColor;
+    if (c.a <= 0.0) discard;
+    FragColor = c;
 }
 )";
 
@@ -207,6 +223,7 @@ layout(location = 2) in float aSize;     // instance: pixel diameter
 layout(location = 3) in vec4 aColor;     // instance: per-point RGBA
 out vec2 vUV;
 out vec4 vColor;
+out float vHalf;
 uniform vec2 uResolution;
 uniform vec2 uScale;
 uniform vec2 uOffset;
@@ -218,33 +235,30 @@ void main() {
     gl_Position = vec4(ndc, 0.0, 1.0);
     vUV = aQuadPos;
     vColor = aColor;
+    vHalf = aSize * 0.5;
 }
 )";
 
+    // The outline is uEdge, or with uEdgeFace each point's own RGB at uEdge.a.
     static constexpr char k_scatterz_frag[] = R"(
 #version 410 core
 in vec2 vUV;
 in vec4 vColor;
-uniform int  uMarker; // matches MarkerStyle enum: 0=None 1=Circle 2=Square 3=Triangle 4=Cross 5=Plus 6=Diamond
+in float vHalf;
+uniform vec4 uEdge;
+uniform float uEdgeW;
+uniform int  uEdgeFace;
+uniform int  uMarker;
 out vec4 FragColor;
+MARKER_SDF
 void main() {
-    bool inside = true;
-    if      (uMarker == 0) inside = false;  // None — no marker drawn
-    else if (uMarker == 1) inside = dot(vUV, vUV) <= 1.0;             // Circle
-    else if (uMarker == 2) inside = true;                             // Square
-    else if (uMarker == 3) inside = vUV.y >= abs(vUV.x) * 2.0 - 1.0;  // Triangle
-    else if (uMarker == 4) {                                          // Cross
-        float t = 0.3;
-        inside = (abs(vUV.x - vUV.y) < t || abs(vUV.x + vUV.y) < t)
-                 && dot(vUV, vUV) <= 1.0;
-    }
-    else if (uMarker == 5) {                                          // Plus
-        float t = 0.3;
-        inside = (abs(vUV.x) < t || abs(vUV.y) < t) && dot(vUV, vUV) <= 1.0;
-    }
-    else if (uMarker == 6) inside = abs(vUV.x) + abs(vUV.y) <= 1.0;   // Diamond
-    if (!inside) discard;
-    FragColor = vColor;
+    float d = marker_sd(uMarker, vUV);
+    if (d > 0.0) discard;
+    vec4 c = vColor;
+    if (uEdgeW > 0.0 && d > -uEdgeW / max(vHalf, 1e-3))
+        c = vec4(uEdgeFace != 0 ? vColor.rgb : uEdge.rgb, uEdge.a);
+    if (c.a <= 0.0) discard;
+    FragColor = c;
 }
 )";
 
@@ -260,6 +274,8 @@ layout(location = 2) in float aSize;     // instance: pixel diameter
 layout(location = 3) in vec4 aColor;     // instance: RGBA, already alpha'd
 out vec2 vUV;
 out vec4 vColor;
+out float vHalf;
+out float vShade;                         // depthshade factor, for the outline too
 uniform vec3 uBoxScale;
 uniform vec3 uBoxOffset;
 uniform mat4 uClip;
@@ -278,66 +294,64 @@ void main() {
     vUV = aQuadPos;
 
     float t = clamp((dot(box, uDepth.xyz) + uDepth.w - uShade.y) * uShade.z, 0.0, 1.0);
-    vColor = vec4(aColor.rgb * (1.0 - uShade.x * t), aColor.a);
+    vShade = 1.0 - uShade.x * t;
+    vColor = vec4(aColor.rgb * vShade, aColor.a);
+    vHalf = aSize * 0.5;
 }
 )";
 
-    // The marker SDF again (third copy; see marker_shape.h for the shared contract).
+    // The fragment's color: fill, or the outline band (uEdge; with uEdgeFace the
+    // fill's own shaded RGB at uEdge.a). Shared by the opaque and peeled shaders.
+    static constexpr char k_scatter3d_shade[] = R"(
+uniform vec4 uEdge;
+uniform float uEdgeW;
+uniform int  uEdgeFace;
+vec4 marker_color(float d) {
+    if (uEdgeW > 0.0 && d > -uEdgeW / max(vHalf, 1e-3))
+        return vec4(uEdgeFace != 0 ? vColor.rgb : uEdge.rgb * vShade, uEdge.a);
+    return vColor;
+}
+)";
+
     static constexpr char k_scatter3d_frag[] = R"(
 #version 410 core
 in vec2 vUV;
 in vec4 vColor;
-uniform int  uMarker; // matches MarkerStyle enum: 0=None 1=Circle 2=Square 3=Triangle 4=Cross 5=Plus 6=Diamond
+in float vHalf;
+in float vShade;
+uniform int  uMarker;
 out vec4 FragColor;
+MARKER_SDF
+MARKER_COLOR
 void main() {
-    bool inside = true;
-    if      (uMarker == 0) inside = false;  // None — no marker drawn
-    else if (uMarker == 1) inside = dot(vUV, vUV) <= 1.0;             // Circle
-    else if (uMarker == 2) inside = true;                             // Square
-    else if (uMarker == 3) inside = vUV.y >= abs(vUV.x) * 2.0 - 1.0;  // Triangle
-    else if (uMarker == 4) {                                          // Cross
-        float t = 0.3;
-        inside = (abs(vUV.x - vUV.y) < t || abs(vUV.x + vUV.y) < t)
-                 && dot(vUV, vUV) <= 1.0;
-    }
-    else if (uMarker == 5) {                                          // Plus
-        float t = 0.3;
-        inside = (abs(vUV.x) < t || abs(vUV.y) < t) && dot(vUV, vUV) <= 1.0;
-    }
-    else if (uMarker == 6) inside = abs(vUV.x) + abs(vUV.y) <= 1.0;   // Diamond
-    if (!inside) discard;
-    FragColor = vColor;
+    float d = marker_sd(uMarker, vUV);
+    if (d > 0.0) discard;
+    vec4 c = marker_color(d);
+    if (c.a <= 0.0) discard;
+    FragColor = c;
 }
 )";
 
     // Peeled marker: the shape test runs before peel_or_discard(), so a corner
-    // outside the marker never consumes a layer.
+    // outside the marker (or a fully transparent fill) never consumes a layer.
     static constexpr char k_peel_scatter3d_frag[] = R"(
 #version 410 core
 in vec2 vUV;
 in vec4 vColor;
+in float vHalf;
+in float vShade;
 uniform int  uMarker;
 layout(location = 0) out vec4 FragColor;
 PEEL
+MARKER_SDF
+MARKER_COLOR
 void main() {
-    bool inside = true;
-    if      (uMarker == 0) inside = false;
-    else if (uMarker == 1) inside = dot(vUV, vUV) <= 1.0;
-    else if (uMarker == 2) inside = true;
-    else if (uMarker == 3) inside = vUV.y >= abs(vUV.x) * 2.0 - 1.0;
-    else if (uMarker == 4) {
-        float t = 0.3;
-        inside = (abs(vUV.x - vUV.y) < t || abs(vUV.x + vUV.y) < t)
-                 && dot(vUV, vUV) <= 1.0;
-    }
-    else if (uMarker == 5) {
-        float t = 0.3;
-        inside = (abs(vUV.x) < t || abs(vUV.y) < t) && dot(vUV, vUV) <= 1.0;
-    }
-    else if (uMarker == 6) inside = abs(vUV.x) + abs(vUV.y) <= 1.0;
-    if (!inside) discard;
+    float d = marker_sd(uMarker, vUV);
+    if (d > 0.0) discard;
+    vec4 c = marker_color(d);
+    if (c.a <= 0.0) discard;
     peel_or_discard(gl_FragCoord.z);
-    FragColor = vec4(vColor.rgb * vColor.a, vColor.a);
+    FragColor = vec4(c.rgb * c.a, c.a);
 }
 )";
 
@@ -949,6 +963,40 @@ void main() {
         return s;
     }
 
+    // A marker outline as the scatter shaders take it: final RGBA, width in logical
+    // pixels (0 = none), and whether the RGB is the fill's own (no `edgecolor`).
+    struct MarkerEdge {
+        float rgba[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+        float width = 0.0f;
+        bool face = false;
+    };
+
+    static MarkerEdge marker_edge(const std::optional<Color>& edgecolor, float edge_alpha,
+                                  float edge_linewidth, const Color& fill) {
+        MarkerEdge e;
+        if (!(edge_linewidth > 0.0f)) return e;
+        const Color& c = edgecolor ? *edgecolor : fill;
+        e.rgba[0] = c.r;
+        e.rgba[1] = c.g;
+        e.rgba[2] = c.b;
+        e.rgba[3] = c.a * edge_alpha;
+        e.width = edge_linewidth;
+        e.face = !edgecolor;
+        return e;
+    }
+
+    static void set_marker_edge(int u_edge, int u_width, int u_face, const MarkerEdge& e) {
+        if (u_edge >= 0) glUniform4fv(u_edge, 1, e.rgba);
+        if (u_width >= 0) glUniform1f(u_width, e.width);
+        if (u_face >= 0) glUniform1i(u_face, e.face ? 1 : 0);
+    }
+
+    // A 3D scatter fragment shader with its marker SDF and outline blend pasted in.
+    static std::string scatter3d_marker_source(const char* src) {
+        return expand_shader(expand_shader(src, "MARKER_SDF", k_marker_sdf).c_str(),
+                             "MARKER_COLOR", k_scatter3d_shade);
+    }
+
     // Scissor to this axes' plot rect, converting logical to framebuffer pixels
     // and rounding outward.
     void DataRenderer::begin_pass(const PlotRect& pr, float win_h) const {
@@ -1210,7 +1258,8 @@ void main() {
         glBindVertexArray(0);
 
         // --- scatter ---
-        scatter_program_ = build_program(k_scatter_vert, k_scatter_frag);
+        scatter_program_ = build_program(
+            k_scatter_vert, expand_shader(k_scatter_frag, "MARKER_SDF", k_marker_sdf).c_str());
         glGenVertexArrays(1, &scatter_vao_);
         glGenBuffers(1, &scatter_quad_vbo_);
         glGenBuffers(1, &scatter_inst_vbo_);
@@ -1241,7 +1290,8 @@ void main() {
         glBindVertexArray(0);
 
         // --- scatter_z (continuous-color scatter) ---
-        scatterz_program_ = build_program(k_scatterz_vert, k_scatterz_frag);
+        scatterz_program_ = build_program(
+            k_scatterz_vert, expand_shader(k_scatterz_frag, "MARKER_SDF", k_marker_sdf).c_str());
         glGenVertexArrays(1, &scatterz_vao_);
         glGenBuffers(1, &scatterz_quad_vbo_);
         glGenBuffers(1, &scatterz_inst_vbo_);
@@ -1326,7 +1376,8 @@ void main() {
         glUseProgram(0);
 
         // --- 3D scatter markers ---
-        scatter3d_program_ = build_program(k_scatter3d_vert, k_scatter3d_frag);
+        scatter3d_program_ = build_program(
+            k_scatter3d_vert, scatter3d_marker_source(k_scatter3d_frag).c_str());
         glGenVertexArrays(1, &scatter3d_vao_);
         glGenBuffers(1, &scatter3d_corner_vbo_);
         glBindVertexArray(scatter3d_vao_);
@@ -1416,8 +1467,8 @@ void main() {
                     expand_shader(k_peel_plane3d_frag, "PEEL", k_peel_test);
             const std::string peel_flat =
                     expand_shader(k_peel_flat_frag, "PEEL", k_peel_test);
-            const std::string peel_scatter3d =
-                    expand_shader(k_peel_scatter3d_frag, "PEEL", k_peel_test);
+            const std::string peel_scatter3d = expand_shader(
+                    scatter3d_marker_source(k_peel_scatter3d_frag).c_str(), "PEEL", k_peel_test);
 
             peel_bar3d_program_ = build_program(k_bar3d_vert, peel_bar3d.c_str());
             peel_surface_program_ = build_program(k_surface_vert, peel_surface.c_str());
@@ -1484,12 +1535,15 @@ void main() {
         scatter_u_ = {
             loc(scatter_program_, "uResolution"), loc(scatter_program_, "uColor"),
             loc(scatter_program_, "uMarker"),
-            loc(scatter_program_, "uScale"), loc(scatter_program_, "uOffset")
+            loc(scatter_program_, "uScale"), loc(scatter_program_, "uOffset"),
+            loc(scatter_program_, "uEdge"), loc(scatter_program_, "uEdgeW"), -1
         };
         scatterz_u_ = {
             loc(scatterz_program_, "uResolution"), -1,
             loc(scatterz_program_, "uMarker"),
-            loc(scatterz_program_, "uScale"), loc(scatterz_program_, "uOffset")
+            loc(scatterz_program_, "uScale"), loc(scatterz_program_, "uOffset"),
+            loc(scatterz_program_, "uEdge"), loc(scatterz_program_, "uEdgeW"),
+            loc(scatterz_program_, "uEdgeFace")
         };
         heatmap_u_ = {loc(heatmap_program_, "uResolution"), loc(heatmap_program_, "uTex")};
         plane3d_u_ = {
@@ -1511,7 +1565,9 @@ void main() {
             loc(scatter3d_program_, "uClip"), loc(scatter3d_program_, "uBoxScale"),
             loc(scatter3d_program_, "uBoxOffset"), loc(scatter3d_program_, "uResolution"),
             loc(scatter3d_program_, "uMarker"), loc(scatter3d_program_, "uDepth"),
-            loc(scatter3d_program_, "uShade")
+            loc(scatter3d_program_, "uShade"),
+            loc(scatter3d_program_, "uEdge"), loc(scatter3d_program_, "uEdgeW"),
+            loc(scatter3d_program_, "uEdgeFace")
         };
         bar3d_u_ = {
             loc(bar3d_program_, "uClip"), loc(bar3d_program_, "uColor"),
@@ -1558,7 +1614,9 @@ void main() {
             loc(peel_scatter3d_program_, "uResolution"),
             loc(peel_scatter3d_program_, "uMarker"),
             loc(peel_scatter3d_program_, "uDepth"),
-            loc(peel_scatter3d_program_, "uShade")
+            loc(peel_scatter3d_program_, "uShade"),
+            loc(peel_scatter3d_program_, "uEdge"), loc(peel_scatter3d_program_, "uEdgeW"),
+            loc(peel_scatter3d_program_, "uEdgeFace")
         };
         peel_bar3d_u_ = {
             loc(peel_bar3d_program_, "uClip"),
@@ -2024,6 +2082,9 @@ void main() {
                         c.r, c.g, c.b, c.a * sp.opts.alpha);
             glUniform1i(scatter_u_.marker,
                         static_cast<int>(sp.opts.marker));
+            set_marker_edge(scatter_u_.edge, scatter_u_.edge_w, scatter_u_.edge_face,
+                            marker_edge(sp.opts.edgecolor, sp.opts.edge_alpha,
+                                        sp.opts.edge_linewidth, c));
 
             glDrawArraysInstanced(GL_TRIANGLES, 0, 6, e.instances);
         }
@@ -2149,6 +2210,9 @@ void main() {
 
             glUniform1i(scatterz_u_.marker,
                         static_cast<int>(sp.opts.marker));
+            set_marker_edge(scatterz_u_.edge, scatterz_u_.edge_w, scatterz_u_.edge_face,
+                            marker_edge(sp.opts.edgecolor, sp.opts.edge_alpha,
+                                        sp.opts.edge_linewidth, Color{0.0f, 0.0f, 0.0f, 1.0f}));
 
             glDrawArraysInstanced(GL_TRIANGLES, 0, 6, e.instances);
         }
@@ -4172,6 +4236,11 @@ void main() {
             glUniform4f(su.depth, static_cast<float>(ddir.x), static_cast<float>(ddir.y),
                         static_cast<float>(ddir.z), dbase);
             glUniform3f(su.shade, std::clamp(s.opts.depthshade, 0.0f, 1.0f), dmin, dspan);
+            set_marker_edge(su.edge, su.edge_w, su.edge_face,
+                            marker_edge(s.opts.edgecolor, s.opts.edge_alpha,
+                                        s.opts.edge_linewidth,
+                                        s.colormapped() ? Color{0.0f, 0.0f, 0.0f, 1.0f}
+                                                        : s.opts.color));
 
             glBindVertexArray(scatter3d_vao_);
 

@@ -91,6 +91,9 @@ namespace sextant {
             Color color;
             float size_px = 1.0f;
             MarkerStyle marker = MarkerStyle::Circle;
+            // Outline inside the boundary, in raster pixels (0 = none).
+            Color edge{};
+            float edge_px = 0.0f;
         };
 
         std::vector<Tri> tris;
@@ -167,6 +170,9 @@ namespace sextant {
             float x = 0, y = 0, size = 0;
             Color color;
             MarkerStyle marker = MarkerStyle::Circle;
+            // Outline inside the boundary (0 wide = none), final RGBA.
+            Color edge{};
+            float edge_width = 0.0f;
         };
 
         std::vector<Mark> marks;

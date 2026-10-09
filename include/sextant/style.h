@@ -126,7 +126,20 @@ namespace sextant {
         MarkerStyle marker = MarkerStyle::Circle;
         std::string name;
         bool show_legend = true; // see LineOptions::show_legend
+
+        // Opacity of the marker's fill (on top of `color`'s own alpha). 0 leaves a
+        // hollow marker: only its outline, if `edge_linewidth` > 0, is drawn.
         float alpha = 0.8f;
+
+        // Marker outline, drawn inside the marker's boundary, so `size` stays the
+        // outer diameter. Width in pixels; 0 (the default) draws none. Unset
+        // `edgecolor` outlines in the fill's color (each point's own, for
+        // scatter_z); its alpha is the color's own times `edge_alpha`, independent
+        // of `alpha`. Every marker is a filled shape (Cross and Plus too), so the
+        // outline follows its boundary.
+        std::optional<Color> edgecolor;
+        float edge_alpha = 1.0f;
+        float edge_linewidth = 0.0f;
 
         // Style of the error bars passed as an ErrorBar.
         ErrorBarOptions errorbar;
@@ -142,6 +155,13 @@ namespace sextant {
         float size = 20.0f;
         MarkerStyle marker = MarkerStyle::Circle;
         float alpha = 0.8f;
+
+        // Marker outline; see ScatterOptions::edgecolor. Unset color = each point's
+        // own fill color.
+        std::optional<Color> edgecolor;
+        float edge_alpha = 1.0f;
+        float edge_linewidth = 0.0f;
+
         float vmin = 0.0f;
         float vmax = 1.0f;
         bool colorbar = false;
@@ -264,6 +284,12 @@ namespace sextant {
         // Clear space in pixels around the extended frame (frame + ticks, labels,
         // titles) before an outside legend or colorbar. In 3D, around the frame.
         float frame_margin = 0.0f;
+
+        // Per axis: draw its tick marks and tick labels, or neither. A hidden axis
+        // reserves no room for them, and the grid lines stay (see grid()). This is
+        // not set_xticks({}), which means "back to automatic ticks". `show_zticks`
+        // is read by an Axes3D only.
+        bool show_xticks = true, show_yticks = true, show_zticks = true;
 
         Color tick_color = {0.3f, 0.3f, 0.3f, 1.0f};
         float tick_length = 5.0f;
