@@ -844,13 +844,25 @@ namespace lt {
         std::string sup = "program";
         SuptitleOptions so;
         FigureMargins m;
+        Color bg = Color::White;
         float cg = 1.0f, rg = 1.0f;
         f.col_gap = 7.0f;
-        apply_figure_edits(f, have, sup, so, m, cg, rg);
+        apply_figure_edits(f, have, sup, so, m, bg, cg, rg);
         check(sup == "program" && cg == 7.0f,
               "figure: a suptitle() made since wins; the gaps (no setter) always apply");
         have.suptitle = 5;
-        apply_figure_edits(f, have, sup, so, m, cg, rg);
+        apply_figure_edits(f, have, sup, so, m, bg, cg, rg);
         check(sup == "typed", "figure: otherwise the typed suptitle applies");
+
+        f.background = Color::Red;
+        f.fig_seen.background = 3;
+        have.background = 4;
+        apply_figure_edits(f, have, sup, so, m, bg, cg, rg);
+        check(bg.g == Color::White.g, "figure: a set_background() made since wins");
+        have.background = 3;
+        FigureEdits inv;
+        apply_figure_edits(f, have, sup, so, m, bg, cg, rg, &inv);
+        check(bg.g == Color::Red.g && inv.background && inv.background->g == Color::White.g,
+              "figure: otherwise the typed background applies, and its inverse holds the old one");
     }
 } // namespace lt

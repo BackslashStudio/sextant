@@ -37,6 +37,11 @@ namespace sextant {
         // Figure edge to subplot grid; see FigureMargins. Also set_margins().
         FigureMargins margins;
 
+        // Fill behind everything (margins, gaps, suptitle). Alpha 0 leaves a PNG
+        // or SVG transparent there; the window shows its panel color. Also
+        // set_background().
+        Color background = {0.93f, 0.93f, 0.93f, 1.0f};
+
         // Initial width of the docked Cosmetic panel (show() only, never exported).
         float panel_width = 240.0f;
 
@@ -290,6 +295,9 @@ namespace sextant {
 
         // Figure edge to subplot grid; see FigureMargins.
         void set_margins(FigureMargins margins);
+
+        // The fill behind the whole figure; see FigureOptions::background.
+        void set_background(Color color);
 
         // Relative column widths / row heights of the subplot grid, e.g. {2, 1};
         // a span gets the sum of its weights. Empty = equal (default). Throws

@@ -451,13 +451,14 @@ struct StyleStamps {
 };
 
 // Figure-level: suptitle() -> suptitle (its text), set_suptitle_style() and
-// suptitle()'s font size -> suptitle_style, set_margins() -> margins.
+// suptitle()'s font size -> suptitle_style, set_margins() -> margins,
+// set_background() -> background.
 struct FigureStamps {
-    unsigned long long suptitle = 0, suptitle_style = 0, margins = 0;
+    unsigned long long suptitle = 0, suptitle_style = 0, margins = 0, background = 0;
 
     static constexpr FigureStamps any() {
         constexpr auto m = ~0ull;
-        return { m, m, m };
+        return { m, m, m, m };
     }
 };
 
@@ -766,6 +767,9 @@ struct FigureSnapshot {
 
     // See FigureMargins.
     FigureMargins margins;
+
+    // See FigureOptions::background.
+    Color background = {0.93f, 0.93f, 0.93f, 1.0f};
 
     // Grid weights; empty = equal. Read through grid_weights().
     std::vector<float> col_ratios, row_ratios;

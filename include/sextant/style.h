@@ -239,6 +239,10 @@ namespace sextant {
     // Axes-frame cosmetics: spine, ticks, tick labels and titles. Font sizes are
     // in pixels as drawn.
     struct AxesStyle {
+        // Plot-area fill, under the data. 2D only: a 3D box colors its panes with
+        // Box3DStyle::pane_color. Alpha 0 shows the figure background.
+        Color background = {1.0f, 1.0f, 1.0f, 1.0f};
+
         Color spine_color = {0.3f, 0.3f, 0.3f, 1.0f};
         float spine_linewidth = 1.0f;
 

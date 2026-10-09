@@ -73,6 +73,7 @@ namespace sextant {
     struct SvgFigureData {
         int width = 800;
         int height = 600;
+        Color background = {0.93f, 0.93f, 0.93f, 1.0f};
         std::string suptitle;
         SuptitleOptions suptitle_opts;
         std::vector<SvgAxesData> axes;

@@ -72,10 +72,11 @@ namespace sextant {
         return h;
     }
 
-    void NvgRenderer::draw_axes_background(const PlotRect& r) {
+    void NvgRenderer::draw_axes_background(const PlotRect& r, const Color& c) {
+        if (c.a <= 0.0f) return;
         nvgBeginPath(vg_);
         nvgRect(vg_, r.x, r.y, r.w, r.h);
-        nvgFillColor(vg_, nvgRGBf(1.0f, 1.0f, 1.0f));
+        nvgFillColor(vg_, nvgRGBAf(c.r, c.g, c.b, c.a));
         nvgFill(vg_);
     }
 

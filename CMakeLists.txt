@@ -795,6 +795,7 @@ if(SEXTANT_BUILD_TESTS)
             tests/layout_test/object_id.cpp
             tests/layout_test/undo.cpp
             tests/layout_test/describe.cpp
+            tests/layout_test/background.cpp
             tests/layout_test/window_wait.cpp
             tests/layout_test/events.cpp)
         # cell_shading.h names ImU32/IM_COL32, so it needs the library's

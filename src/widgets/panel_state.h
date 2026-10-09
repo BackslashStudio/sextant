@@ -227,6 +227,7 @@ namespace sextant {
         // Layout controls: figure-level, seeded once (re-seeding every frame would
         // fight a drag).
         FigureMargins margins_local;
+        Color background_local = {0.93f, 0.93f, 0.93f, 1.0f};
         float col_gap_local = 0.0f;
         float row_gap_local = 0.0f;
         bool layout_synced = false;

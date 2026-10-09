@@ -27,7 +27,7 @@ public:
     NvgRenderer(const NvgRenderer&) = delete;
     NvgRenderer& operator=(const NvgRenderer&) = delete;
 
-    void draw_axes_background(const PlotRect& r);  // white fill — call before data
+    void draw_axes_background(const PlotRect& r, const Color& fill);  // call before data
     void draw_axes_border(const PlotRect& r, const AxesStyle& style);  // outline only — call after data
 
     // A 3D box from plan_box3d(): panes in pass 1 (they are back walls, so no

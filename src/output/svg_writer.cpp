@@ -65,6 +65,21 @@ static std::string svg_font_family(const AxesStyle& style) {
     return svg_font_family_for(style.font_path);
 }
 
+// ` fill="..."` for a background rect, plus its opacity when not opaque. Opaque
+// white stays `white` and other opaque colors `#rrggbb`, as the files always had.
+static std::string background_fill(const Color& c) {
+    auto q = [](float v) { return static_cast<int>(std::lround(std::clamp(v, 0.f, 1.f) * 255.f)); };
+    char buf[32];
+    if (q(c.r) == 255 && q(c.g) == 255 && q(c.b) == 255) std::snprintf(buf, sizeof(buf), "white");
+    else std::snprintf(buf, sizeof(buf), "#%02x%02x%02x", q(c.r), q(c.g), q(c.b));
+    std::string s = std::string(" fill=\"") + buf + "\"";
+    if (c.a < 1.0f) {
+        std::snprintf(buf, sizeof(buf), "%g", std::max(c.a, 0.0f));
+        s += std::string(" fill-opacity=\"") + buf + "\"";
+    }
+    return s;
+}
+
 static std::string rgb(const Color& c) {
     char buf[32];
     std::snprintf(buf, sizeof(buf), "rgb(%d,%d,%d)",
@@ -1107,9 +1122,10 @@ static void emit_one_axes(std::ostringstream& o, const SvgAxesData& d, std::size
         return;
     }
 
-    o << "  <rect x=\"" << d.layout.frame.x << "\" y=\"" << d.layout.frame.y
-      << "\" width=\"" << d.layout.frame.w << "\" height=\"" << d.layout.frame.h
-      << "\" fill=\"white\"/>\n";
+    if (d.axes_style.background.a > 0.0f)
+        o << "  <rect x=\"" << d.layout.frame.x << "\" y=\"" << d.layout.frame.y
+          << "\" width=\"" << d.layout.frame.w << "\" height=\"" << d.layout.frame.h
+          << "\"" << background_fill(d.axes_style.background) << "/>\n";
 
     o << "  <g clip-path=\"url(#plotArea" << idx << ")\">\n";
     emit_heatmap(o, d);
@@ -1147,9 +1163,10 @@ std::string svg_document(const SvgFigureData& fd) {
 
     emit_defs(o, fd.axes);
 
-    // Figure background
-    o << "  <rect width=\"" << fd.width << "\" height=\"" << fd.height
-      << "\" fill=\"#ededed\"/>\n";
+    // Figure background (nothing at alpha 0: the file stays transparent).
+    if (fd.background.a > 0.0f)
+        o << "  <rect width=\"" << fd.width << "\" height=\"" << fd.height
+          << "\"" << background_fill(fd.background) << "/>\n";
 
     if (!fd.suptitle.empty()) {
         const auto& so  = fd.suptitle_opts;

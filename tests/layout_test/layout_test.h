@@ -568,6 +568,9 @@ namespace lt {
     // undo.cpp
     void test_undo();
 
+    // background.cpp (v1.1 step 33)
+    void test_background();
+
     // describe.cpp
     void test_describe();
 

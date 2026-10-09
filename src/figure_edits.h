@@ -356,6 +356,7 @@ struct FigureEdits {
     // Figure-level layout.
     std::optional<FigureMargins> margins;
     std::optional<float>         col_gap, row_gap;
+    std::optional<Color>         background;
 
     // Grid weights from dragging or the Layout fields; journaled, so a drag
     // survives refresh().
@@ -368,14 +369,15 @@ struct FigureEdits {
     // arrives without a per-axes edit.
     bool empty() const {
         return per_axes.empty() && per_axes3d.empty() && !suptitle && !suptitle_opts
-               && !margins && !col_gap && !row_gap && !col_ratios && !row_ratios;
+               && !margins && !col_gap && !row_gap && !background
+               && !col_ratios && !row_ratios;
     }
 };
 
 // True if a drain holds only navigation (2D limits/ticks, 3D camera), which
 // leaves the stored layout alone. An allow-list: new fields count as changes.
 inline bool is_navigation_only(const FigureEdits& f) {
-    if (f.suptitle || f.suptitle_opts || f.margins || f.col_gap || f.row_gap
+    if (f.suptitle || f.suptitle_opts || f.margins || f.col_gap || f.row_gap || f.background
         || f.col_ratios || f.row_ratios)
         return false;
     for (const auto& [idx, e] : f.per_axes) {
@@ -1318,6 +1320,7 @@ inline void merge_figure_edits(FigureEdits& dst, const FigureEdits& src) {
     take_latest(dst.suptitle, src.suptitle, ds.suptitle, ss.suptitle);
     take_latest(dst.suptitle_opts, src.suptitle_opts, ds.suptitle_style, ss.suptitle_style);
     take_latest(dst.margins, src.margins, ds.margins, ss.margins);
+    take_latest(dst.background, src.background, ds.background, ss.background);
     // No setter writes the gaps after create(), so they need no stamp.
     if (src.col_gap) dst.col_gap = src.col_gap;
     if (src.row_gap) dst.row_gap = src.row_gap;
@@ -1327,10 +1330,11 @@ inline void merge_figure_edits(FigureEdits& dst, const FigureEdits& src) {
 // members, each unless its setter ran after the snapshot the panel drew.
 // `have` is the destination's FigureStamps. Grid ratios are applied by the
 // caller (they need the grid shape).
-template <class Suptitle, class Opts, class Margins, class Gap>
+template <class Suptitle, class Opts, class Margins, class Background, class Gap>
 void apply_figure_edits(const FigureEdits& e, const FigureStamps& have,
                         Suptitle& suptitle, Opts& suptitle_opts, Margins& margins,
-                        Gap& col_gap, Gap& row_gap, FigureEdits* inv = nullptr) {
+                        Background& background, Gap& col_gap, Gap& row_gap,
+                        FigureEdits* inv = nullptr) {
     const FigureStamps& seen = e.fig_seen;
     auto put = [](auto& d, const auto& v, auto* old) {
         if (old) *old = d;
@@ -1342,6 +1346,8 @@ void apply_figure_edits(const FigureEdits& e, const FigureStamps& have,
         put(suptitle_opts, e.suptitle_opts, inv ? &inv->suptitle_opts : nullptr);
     if (e.margins && have.margins <= seen.margins)
         put(margins, e.margins, inv ? &inv->margins : nullptr);
+    if (e.background && have.background <= seen.background)
+        put(background, e.background, inv ? &inv->background : nullptr);
     if (e.col_gap) put(col_gap, e.col_gap, inv ? &inv->col_gap : nullptr);
     if (e.row_gap) put(row_gap, e.row_gap, inv ? &inv->row_gap : nullptr);
 }
@@ -1457,6 +1463,7 @@ inline void compose_inverse(FigureEdits& older, const FigureEdits& newer) {
     keep_older(older.suptitle, newer.suptitle);
     keep_older(older.suptitle_opts, newer.suptitle_opts);
     keep_older(older.margins, newer.margins);
+    keep_older(older.background, newer.background);
     keep_older(older.col_gap, newer.col_gap);
     keep_older(older.row_gap, newer.row_gap);
     keep_older(older.col_ratios, newer.col_ratios);

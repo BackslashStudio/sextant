@@ -125,6 +125,7 @@ std::string render_figure_svg(const FigureSnapshot& fsnap,
     SvgFigureData fd;
     fd.width  = width;
     fd.height = height;
+    fd.background    = fsnap.background;
     fd.suptitle      = fsnap.suptitle;
     fd.suptitle_opts = fsnap.suptitle_opts;
     fd.axes.reserve(fsnap.axes.size());

@@ -158,7 +158,7 @@ static void test_axes_gallery() {
 
     auto fig = sextant::Figure::create({
         .width = 1800, .height = 1000,
-        .title = "Axes gallery", .supersample = 2
+        .title = "Axes gallery", .background = sextant::Color::White, .supersample = 2
     });
     fig->suptitle("What Axes draws");
 

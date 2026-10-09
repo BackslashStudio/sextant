@@ -38,7 +38,8 @@ void render_frame(RenderDevice& dev, DataRenderer& data,
     const float ratio = std::isfinite(pixel_ratio) && pixel_ratio > 0.0f ? pixel_ratio : 1.0f;
     glViewport(0, 0, static_cast<int>(std::lround(iw * ratio)),
                static_cast<int>(std::lround(ih * ratio)));
-    glClearColor(0.93f, 0.93f, 0.93f, 1.0f);
+    glClearColor(fsnap.background.r, fsnap.background.g, fsnap.background.b,
+                 fsnap.background.a);
     // Always clear depth too (the targets already have a depth attachment).
     glClear(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -64,8 +65,8 @@ void render_frame(RenderDevice& dev, DataRenderer& data,
         const auto& c = layout.cells[i];
         if (const RenderSnapshot3D* s3 = fsnap.axes[i].snap3d())
             nvg.draw_box3d_panes(box_plans[i], *s3, c.frame);
-        else
-            nvg.draw_axes_background(c.frame);
+        else if (const RenderSnapshot* s2 = fsnap.axes[i].snap2d())
+            nvg.draw_axes_background(c.frame, s2->axes_style.background);
     }
     dev.end_nvg_frame();
 

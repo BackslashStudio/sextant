@@ -266,6 +266,9 @@ int main() {
     // undo.cpp
     test_undo();
 
+    // background.cpp
+    test_background();
+
     // describe.cpp
     test_describe();
 

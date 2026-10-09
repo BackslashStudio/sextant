@@ -133,6 +133,7 @@ FigureSnapshot Figure::Impl::build_figure_snapshot() const {
     fs.col_gap = opts.subplot_col_gap;
     fs.row_gap = opts.subplot_row_gap;
     fs.margins       = opts.margins;
+    fs.background    = opts.background;
     fs.col_ratios    = col_ratios;
     fs.row_ratios    = row_ratios;
     fs.suptitle      = suptitle_text;
@@ -164,7 +165,7 @@ void Figure::Impl::fold_ratios(const std::optional<std::vector<float>>& cols,
 
 void Figure::Impl::apply_figure_level(const FigureEdits& e) {
     apply_figure_edits(e, stamps, suptitle_text, suptitle_opts, opts.margins,
-                       opts.subplot_col_gap, opts.subplot_row_gap);
+                       opts.background, opts.subplot_col_gap, opts.subplot_row_gap);
 }
 
 void Figure::Impl::apply_edits_and_publish() {
@@ -266,7 +267,7 @@ void Figure::Impl::patch_snapshot(const FigureEdits& edits, FigureEdits* inv) {
     // Figure-level edits, patched on the snapshot (also applied in
     // apply_edits_and_publish()) so they take effect without refresh().
     apply_figure_edits(edits, next->stamps, next->suptitle, next->suptitle_opts,
-                       next->margins, next->col_gap, next->row_gap, inv);
+                       next->margins, next->background, next->col_gap, next->row_gap, inv);
     if (edits.col_ratios) {
         if (inv) inv->col_ratios = next->col_ratios;
         next->col_ratios = *edits.col_ratios;
@@ -682,6 +683,11 @@ SvgSaveReport Figure::savefig_svg_live(std::string_view path, SvgExportOptions o
 void Figure::set_margins(FigureMargins m) {
     d->opts.margins = m;
     d->stamps.margins = next_snapshot_generation();
+}
+
+void Figure::set_background(Color c) {
+    d->opts.background = c;
+    d->stamps.background = next_snapshot_generation();
 }
 
 void Figure::set_col_ratios(std::vector<float> ratios) {

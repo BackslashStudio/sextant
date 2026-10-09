@@ -227,6 +227,7 @@ void sync_figure_from_snapshot(CosmeticState& c, const FigureSnapshot& fsnap) {
 void sync_layout_from_snapshot(CosmeticState& c, const FigureSnapshot& fsnap) {
     if (c.layout_synced) return;
     c.margins_local = fsnap.margins;
+    c.background_local = fsnap.background;
     c.col_gap_local = fsnap.col_gap;
     c.row_gap_local = fsnap.row_gap;
     c.layout_synced = true;
@@ -341,6 +342,12 @@ void draw_layout_fields(CosmeticRefs& st, const FigureSnapshot& fsnap,
         split_next();
         if (drag_float("##marb", &st.cosmetic.margins_local.bottom, 0.0f, 2000.0f, 0.5f, "B %.0f")) push_margins();
         split_end();
+        end_field_table();
+    }
+    if (begin_field_table("figbg")) {
+        field_row("Background");
+        if (color_swatch("##figbg", st.cosmetic.background_local))
+            edit_box.update_figure([&](FigureEdits& f){ f.background = st.cosmetic.background_local; });
         end_field_table();
     }
 
@@ -1209,6 +1216,11 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
             end_field_table();
         }
         ImGui::SeparatorText("Axis frame");
+        if (begin_field_table("plotbg")) {
+            field_row("Plot area");
+            if (color_swatch("##plotbg", sty.background)) push_style();
+            end_field_table();
+        }
         if (begin_field_table("spine", 2)) {
             field_row("Color");
             if (color_swatch("##spinecol", sty.spine_color)) push_style();

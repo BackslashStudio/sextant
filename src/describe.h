@@ -64,7 +64,7 @@ namespace sextant {
                      F(hint_labels))
     SEXTANT_DESCRIBE(GridOptions, F(color) F(linestyle) F(linewidth))
     SEXTANT_DESCRIBE(AxesStyle,
-                     F(spine_color) F(spine_linewidth) F(spine_bottom) F(spine_left) F(spine_top)
+                     F(background) F(spine_color) F(spine_linewidth) F(spine_bottom) F(spine_left) F(spine_top)
                      F(spine_right) F(xaxis_y) F(xaxis_z) F(yaxis_x) F(yaxis_z) F(zaxis_x)
                      F(zaxis_y) F(origin_x) F(origin_y) F(origin_z) F(frame_margin) F(tick_color)
                      F(tick_length) F(tick_linewidth) F(label_color) F(label_fontsize)
@@ -85,7 +85,7 @@ namespace sextant {
     // figure.h
     SEXTANT_DESCRIBE(FigureOptions,
                      F(width) F(height) F(title) F(resizable) F(dpi) F(subplot_col_gap)
-                     F(subplot_row_gap) F(margins) F(panel_width) F(supersample) F(vsync)
+                     F(subplot_row_gap) F(margins) F(background) F(panel_width) F(supersample) F(vsync)
                      F(theme))
     SEXTANT_DESCRIBE(SvgExportOptions, F(max_splits) F(max_tests))
     SEXTANT_DESCRIBE(PngExportOptions, F(peel_layers) F(dpi))
