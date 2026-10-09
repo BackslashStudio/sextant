@@ -449,6 +449,11 @@ namespace sextant {
         // Cut the text (and its arrow) at the plot frame. Off by default: a text
         // whose data position leaves the view is hidden whole instead.
         bool clip_to_frame = false;
+
+        // Draw $...$ spans as math (FigureOptions::mathtext, per text; only
+        // when the figure's is on too). false draws this text as written, as
+        // matplotlib's parse_math=False.
+        bool parse_math = true;
     };
 
     // The arrow annotate() draws from its text to the point.

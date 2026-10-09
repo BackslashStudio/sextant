@@ -86,7 +86,7 @@ namespace sextant {
     SEXTANT_DESCRIBE(TextOptions,
                      F(fontsize) F(color) F(alpha) F(font_path) F(ha) F(va) F(rotation) F(dx) F(dy)
                      F(linespacing) F(background) F(edgecolor) F(edge_linewidth) F(pad)
-                     F(clip_to_frame))
+                     F(clip_to_frame) F(parse_math))
     SEXTANT_DESCRIBE(ArrowOptions,
                      F(head) F(tail) F(head_length) F(head_width) F(linewidth) F(color) F(linestyle)
                      F(gap_text) F(gap_point) F(arc))

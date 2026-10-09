@@ -687,6 +687,8 @@ FontVMetrics label_vmetrics(const std::string& font_path, float size, std::strin
     return layout_rich(font_path, size, s).vm;
 }
 
+bool mathtext_on() { return t_math_on; }
+
 MathTextScope::MathTextScope(bool on) : prev_(t_math_on) { t_math_on = on; }
 MathTextScope::~MathTextScope() { t_math_on = prev_; }
 

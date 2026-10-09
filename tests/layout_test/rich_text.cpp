@@ -265,6 +265,41 @@ namespace lt {
                   "layout: a superscript in the title pushes the frame down");
         }
 
+        // --- TextOptions::parse_math: one text as written, its neighbour still math -----
+        {
+            auto fig = Figure::create();
+            auto ax = fig->add_subplot(1, 1, 1);
+            TextOptions raw;
+            raw.parse_math = false;
+            ax->text("$a^2$ raw", 0.2, 0.2, raw);
+            ax->text("$b^2$ rich", 0.6, 0.6);
+            const std::string svg = fig->render_svg().svg;
+            check(svg.find(">$a^2$ raw</text>") != std::string::npos, "parse_math=false: written as given");
+            check(svg.find("<tspan>b</tspan><tspan dy=") != std::string::npos, "...its neighbour is still math");
+            check(svg.find(">a</tspan>") == std::string::npos, "...and no tspan of its own");
+            const Ink off = ink_of(text_alone("$x^2$", false));
+            FigureOptions o;
+            o.width = 300;
+            o.height = 160;
+            o.background = Color::White;
+            auto f2 = Figure::create(o);
+            auto a2 = f2->add_subplot(1, 1, 1);
+            AxesStyle st;
+            st.show_xticks = st.show_yticks = false;
+            st.spine_bottom = st.spine_left = st.spine_top = st.spine_right = false;
+            a2->set_axes_style(st);
+            TextOptions to;
+            to.fontsize = 40.0f;
+            to.color = Color::Black;
+            to.ha = HAlign::Center;
+            to.va = VAlign::Center;
+            to.parse_math = false;
+            a2->text("$x^2$", Pos::fraction(0.5), Pos::fraction(0.5), to);
+            const Ink per_text = ink_of(f2->render_rgba());
+            check(per_text.cols == off.cols && per_text.rows == off.rows,
+                  "PNG: parse_math=false draws as the figure-wide switch does");
+        }
+
         // --- Every site: SVG carries a tspan per rich string ---------------------------
         {
             auto fig = Figure::create();
@@ -318,6 +353,10 @@ namespace lt {
             ax->text("ok $x$\n$\\bad$", 0.0, 0.0);
             check(cap.msgs.size() == 3 && cap.msgs[2].find("at line 2, column 2") != std::string::npos,
                   "warning: a multi-line text names the line");
+            TextOptions raw;
+            raw.parse_math = false;
+            ax->text("$\\bad$", 0.0, 0.0, raw);
+            check(cap.msgs.size() == 3, "no warning for a text with parse_math off");
             fig->suptitle("${$");
             check(cap.msgs.size() == 4 && cap.msgs[3].rfind("Figure::suptitle:", 0) == 0, "warning: the suptitle");
 

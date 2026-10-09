@@ -617,6 +617,7 @@ static void emit_titles(std::ostringstream& o, const SvgAxesData& d) {
 // render_frame()'s order: over the frame furniture, under the legend.
 static void emit_texts(std::ostringstream& o, const SvgAxesData& d, std::size_t idx) {
     for (const TextDraw& t : d.texts) {
+        const MathTextScope math(t.math);
         o << (t.clip ? "  <g clip-path=\"url(#plotArea" + std::to_string(idx) + ")\">\n" : "  <g>\n");
         if (t.shaft.size() >= 4 && t.linewidth > 0.0f) {
             o << "    <polyline fill=\"none\" stroke=\"" << rgb(t.arrow_color)

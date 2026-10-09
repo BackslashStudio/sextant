@@ -1562,6 +1562,7 @@ namespace sextant {
                 end_field_table();
             }
             if (ImGui::Checkbox("Clip to the frame##tclip", &o.clip_to_frame)) push_style();
+            if (ImGui::Checkbox("Math in $...$##tmath", &o.parse_math)) push_style();
 
             ImGui::SeparatorText("Box");
             if (begin_field_table("textbox")) {

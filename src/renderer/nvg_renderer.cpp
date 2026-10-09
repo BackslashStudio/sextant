@@ -495,6 +495,7 @@ namespace sextant {
                 }
             }
             if (font_ != -1 && !t.lines.empty()) {
+                const MathTextScope math(t.math);
                 nvgFontFaceId(vg_, font_for_path(t.font_path));
                 nvgFontSize(vg_, t.fontsize);
                 nvgFillColor(vg_, rgba(t.color));

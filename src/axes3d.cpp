@@ -387,7 +387,7 @@ namespace sextant {
 
     void Axes3D::Impl::ingest_text(TextContent c, TextStyle style, const char* who) {
         read_back::check_text(c, who);
-        warn_math(mathtext, who, c.text);
+        warn_math(mathtext && style.text.parse_math, who, c.text);
         texts.push_back({std::move(c), std::move(style), next_snapshot_generation(), next_object_id()});
     }
 
@@ -655,7 +655,7 @@ namespace sextant {
     void Axes3D::Impl::set_text_data(std::size_t i, TextContent c, const char* who) {
         TextPlot& p = read_back::at(texts, i, who);
         read_back::check_text(c, who);
-        warn_math(mathtext, who, c.text);
+        warn_math(mathtext && p.opts.text.parse_math, who, c.text);
         p.content = std::move(c);
         p.data_stamp = next_snapshot_generation();
     }

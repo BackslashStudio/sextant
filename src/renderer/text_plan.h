@@ -55,6 +55,10 @@ struct TextDraw {
 
     // Scissor to the frame (TextOptions::clip_to_frame).
     bool clip = false;
+
+    // $...$ spans draw as math: the figure's mathtext and TextOptions::parse_math.
+    // Drawing opens a MathTextScope with it, as planning did.
+    bool math = true;
 };
 
 // A 2D axes' texts, in plot order. Hidden ones are left out.

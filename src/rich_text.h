@@ -58,6 +58,9 @@ FontVMetrics label_vmetrics(const std::string& font_path, float size, std::strin
 // FigureOptions::mathtext for every measure and draw on this thread while it
 // lives. The figure-level entry points (layout, render, export) open one;
 // scopes nest, and with none open math is on.
+// Whether math is on for this thread (the innermost MathTextScope's).
+bool mathtext_on();
+
 class MathTextScope {
 public:
     explicit MathTextScope(bool on);
