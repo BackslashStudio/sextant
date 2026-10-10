@@ -1,5 +1,5 @@
 #pragma once
-// Field-by-field description of the public option structs (GUI-kit R11), for
+// Field-by-field description of the public option structs, for
 // code that handles their fields by name: a project file, graph templates,
 // keyword arguments, tests.
 //

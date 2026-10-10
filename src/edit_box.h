@@ -11,7 +11,7 @@
 namespace sextant {
 
 // The ids of the objects and planes a per-axes edit names by index, and the
-// style and placement stamps, from the snapshot it is made over (GUI-kit R9),
+// style and placement stamps, from the snapshot it is made over,
 // so each edit follows its object whatever moves before it is applied. An id
 // already set (by an earlier update(), or by a host) is kept.
 namespace stamp_detail {

@@ -77,7 +77,7 @@ namespace lt {
               "3D panel: and the z title");
         check(st.cosmetic.aspect_local.x == 2.0, "3D panel: and the box aspect");
 
-        // The per-object rows are the Data panel's own state (GUI-kit R3): drawing
+        // The per-object rows are the Data panel's own state: drawing
         // Cosmetic alone leaves them to that panel's pull.
         check(st.data.planes_local.empty() && st.data.bars3d_local.empty() &&
               st.data.synced_generation == kNeverSynced,
@@ -410,7 +410,7 @@ namespace lt {
             std::printf("    surface: %d of %d cursor positions reported a conflict, first id %u\n",
                         ss.conflicts, ss.probes, static_cast<unsigned>(ss.first));
 
-        // A text tab (step 31): an annotation with an outlined box and its own
+        // A text tab: an annotation with an outlined box and its own
         // arrow colour, so every row of the form is drawn; in 2D and in 3D.
         {
             TextPlot tp;
@@ -546,7 +546,7 @@ namespace lt {
         draw_two_cosmetics(fs, box, st, true);
     }
 
-    // GUI-kit R3: the components draw into the caller's window under the figure's
+    // the components draw into the caller's window under the figure's
     // id, take host-owned state, and re-seed by pulling the Selection generation.
     void test_figure_context() {
         std::printf("\n[FigureContext: host-owned state, per-state pulls, figure ids]\n");
@@ -1053,7 +1053,7 @@ namespace lt {
                     static_cast<double>(at_1x[8]), static_cast<double>(at_15x[8]),
                     static_cast<double>(at_1x[3]), static_cast<double>(at_15x[3]));
 
-        // ---- Which scale the chrome is styled at (v1.0 step 21.6).
+        // ---- Which scale the chrome is styled at.
         // Two platforms put the display's scale in different places, and the
         // panel must be scaled by it exactly once. As arithmetic, so the macOS
         // answer is checked here rather than assumed.

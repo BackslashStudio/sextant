@@ -1,4 +1,4 @@
-// Interactive events (Step 29): the per-figure channel that carries them from
+// Interactive events: the per-figure channel that carries them from
 // the window thread to whoever drains it, the GL-free translation of a frame of
 // pointer/key input into events, and delivery through a real figure.
 // Part of sextant_layout_test; see layout_test.h.

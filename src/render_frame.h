@@ -26,7 +26,7 @@ struct AxesLayout {
 };
 
 // The AxesLayout list for `layout`, one per cell in its order: what render_frame()
-// hands back through `out_layout`, with no GL (GUI-kit R6, M0 F6).
+// hands back through `out_layout`, with no GL.
 std::vector<AxesLayout> axes_layouts(const FigureLayout& layout);
 
 // Renders fsnap into the currently bound framebuffer, laid out at target_w x

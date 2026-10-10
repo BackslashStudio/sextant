@@ -52,7 +52,7 @@ namespace sextant {
     };
 
     // The chrome scale as arithmetic, apart from any window, so both platforms'
-    // answers can be checked from either (v1.0 step 21.6). `content` is the
+    // answers can be checked from either. `content` is the
     // monitor's content scale, `framebuffer` the framebuffer pixels per window
     // coordinate. Windows puts the whole scale in the first and leaves the
     // second at 1; macOS puts it in the second, so the panel is styled at its
@@ -122,7 +122,7 @@ namespace sextant {
         // Framebuffer pixels per window coordinate -- 2 on a Retina Mac, 1
         // where the two are the same unit. One rule, because the chrome scale
         // and ImGui's DisplayFramebufferScale have to agree or the panel is
-        // drawn at the square of the scale (v1.0 step 21.6).
+        // drawn at the square of the scale.
         float framebuffer_scale() const;
 
         // The part of the content scale the framebuffer is *not* already

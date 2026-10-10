@@ -61,7 +61,7 @@ namespace sextant {
         // The axes' own objects and its planes by identity, as Axes::Impl's (a
         // plane's objects: through its sheet). A removed plane's Plane2D handle
         // keeps working, detached: nothing it holds is drawn; restore_plane()
-        // attaches it again (GUI-kit R10).
+        // attaches it again.
         std::optional<ObjectRef> find_object(ObjectId id) const {
             return find_object_in(*this, kPlotKinds3D, id);
         }

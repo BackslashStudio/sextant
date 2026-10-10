@@ -799,7 +799,7 @@ void main() {
     // `prev` is the z the winner wrote to an R32F target, not read back from the
     // depth buffer: Apple GPUs emulate DEPTH24_STENCIL8, the value read back can
     // fall just below the fragment's own z, and the same layer then passes the
-    // test on every pass (v1.0 step 22.3). Same float out, same float in.
+    // test on every pass. Same float out, same float in.
     // texelFetch: the targets match the plot rect at framebuffer resolution.
     // gl_FragCoord.z includes polygon offset, so offset wireframes peel once.
     static constexpr char k_peel_test[] = R"(

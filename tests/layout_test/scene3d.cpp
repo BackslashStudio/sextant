@@ -178,7 +178,7 @@ namespace lt {
     // Oracle: surface_ray_hit() gives the first sheet per pixel, and the composite
     // is predicted exactly over a background measured with both alphas at zero.
     void test_depth_peel_order() {
-        std::printf("\n[3D: depth peeling orders per pixel (step 8)]\n");
+        std::printf("\n[3D: depth peeling orders per pixel]\n");
 
         using namespace sextant;
 
@@ -457,7 +457,7 @@ namespace lt {
                     c == d ? "identical" : "different");
 
         // Apple's software renderer (the macOS CI runner) does not repeat a
-        // translucent export exactly (v1.0 step 21.1: 292 px between two
+        // translucent export exactly (292 px between two
         // identical exports of the deep scene, against ~6800 for 4 vs 32 layers).
         // There, "identical" becomes "small next to what the layer count changes".
         const bool noisy = !renderer_repeats_exactly();
@@ -481,7 +481,7 @@ namespace lt {
         } else if (peeling) {
             // A renderer that repeats itself exactly may still round a layer
             // differently with the pass count: the Apple M2 differs by one level
-            // in a few dozen pixels between 12 and 32 layers (v1.0 step 22.3),
+            // in a few dozen pixels between 12 and 32 layers,
             // where a missing layer moves thousands by up to 14.
             auto same = [&](const std::string& x, const std::string& y,
                             const char* xs, const char* ys) {

@@ -1,5 +1,5 @@
 #pragma once
-// The plot view (GUI-kit R6): a figure's picture as a kit component. Renders the
+// The plot view: a figure's picture as a kit component. Renders the
 // figure into its own offscreen target at the size it is given, shows it with
 // ImGui::Image(), and turns the pointer over it into selection, grid drags,
 // navigation, hints and Figure::connect() events. Draws into the caller's

@@ -37,7 +37,7 @@ static std::string slurp(const std::string& path) {
 }
 
 // Save `stem`.png/.svg, then check the in-memory export is those files byte for
-// byte (v1.1 step 25). The PNG is rendered twice, so on a renderer that does
+// byte. The PNG is rendered twice, so on a renderer that does
 // not repeat an export exactly (Apple's software one) it may differ.
 static void savefig_and_check_memory(const std::shared_ptr<sextant::Figure>& fig,
                                      const std::string& stem) {
@@ -163,7 +163,7 @@ static void test_axes_gallery() {
     fig->suptitle("What Axes draws");
 
     fig->add_subplot(3, 4, 1)
-            // Math in text (step 32a): the legend names, the annotation and the x title.
+            // Math in text: the legend names, the annotation and the x title.
             ->line(x, y_sin, {.color = sextant::Color::Blue, .linewidth = 4.0f, .name = "$\\sin(x)$"})
             .line(x, y_cos, {
                       .color = sextant::Color::Red, .linewidth = 2.0f,
@@ -173,7 +173,7 @@ static void test_axes_gallery() {
                       .color = sextant::Color::Green, .linewidth = 3.0f,
                       .name = "loop", .loop = true
                   })
-            // Text (step 31): an annotation whose text sits in the frame, not the data.
+            // Text: an annotation whose text sits in the frame, not the data.
             .annotate(M_PI / 2.0, 1.0, "$\\sin(\\pi/2) = 1$", sextant::Pos::fraction(0.55),
                       sextant::Pos::fraction(0.93),
                       {.va = sextant::VAlign::Top, .background = {1.0f, 1.0f, 0.85f, 1.0f}, .edge_linewidth = 1.0f})
@@ -1877,7 +1877,7 @@ static void test_axis_position3d() {
 }
 
 // -------------------------------------------------------------------------
-// Step 29: interactive events. Click, scroll, press keys and resize the window;
+// Interactive events. Click, scroll, press keys and resize the window;
 // each event is printed on this thread (the one blocked in wait_closed()). The
 // left figure is 2D, the right one a 3D scene with a Plane2D; Edit > Navigate
 // shows `consumed`, and a click on a line point, bar, marker or heatmap cell adds a

@@ -7,10 +7,10 @@
 
 namespace sextant {
 
-// Rich text (v1.1 step 32a): a subset of matplotlib's mathtext. A string with
+// Rich text: a subset of matplotlib's mathtext. A string with
 // an even, nonzero count of `$` not preceded by a backslash holds math spans;
 // inside one, `^`/`_` scripts, `{}` groups, `\name` symbols and TeX spacing.
-// Letters in a span are italic, as TeX's (step 32b): Latin and lower-case
+// Letters in a span are italic, as TeX's: Latin and lower-case
 // Greek; digits, symbols, Greek capitals, function names, `\mathrm`/`\text`
 // upright; `\mathit` makes letters and digits italic.
 // Outside the spans, `\$` is a dollar. Any other string is plain and is
@@ -25,7 +25,7 @@ struct RichRun {
     float dy = 0.0f;       // baseline shift, y down (a superscript's is negative)
     float size = 0.0f;     // font size, px
     float width = 0.0f;    // advance of `text` at `size`
-    // A math letter (step 32b): the family's italic face, or the upright one
+    // A math letter: the family's italic face, or the upright one
     // slanted when it has none; measured by text_width_italic().
     bool italic = false;
 };

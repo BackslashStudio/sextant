@@ -1,4 +1,4 @@
-// The Save and Resize dialogs (GUI-kit R4): how their fields resolve into
+// The Save and Resize dialogs: how their fields resolve into
 // requests, perform_save() against the exporters it wraps, and the dialogs drawn
 // in a host's window. The first automated coverage of this path.
 // Part of sextant_layout_test; see layout_test.h.

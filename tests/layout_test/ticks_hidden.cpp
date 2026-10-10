@@ -1,4 +1,4 @@
-// Hiding an axis' tick marks and labels (v1.1 step 34): AxesStyle::show_xticks /
+// Hiding an axis' tick marks and labels: AxesStyle::show_xticks /
 // show_yticks / show_zticks. The layout stops reserving room, the grid stays,
 // and set_xticks({}) still means "automatic". Part of sextant_layout_test.
 #include "layout_test.h"
@@ -45,7 +45,7 @@ namespace lt {
     } // namespace
 
     void test_ticks_hidden() {
-        std::printf("\n[ticks hidden: marks and labels per axis (step 34)]\n");
+        std::printf("\n[ticks hidden: marks and labels per axis]\n");
 
         const AxesStyle shown;
         AxesStyle no_x, no_y, none;

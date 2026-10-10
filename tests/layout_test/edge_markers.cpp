@@ -1,4 +1,4 @@
-// Marker outlines (v1.1 step 35): edgecolor / edge_alpha / edge_linewidth on
+// Marker outlines: edgecolor / edge_alpha / edge_linewidth on
 // scatter, scatter_z and scatter3d; a hollow marker (alpha 0) with only its
 // outline; Cross and Plus as filled shapes. GPU pixels, SVG, legend keys, and
 // the shared marker_shape(). Part of sextant_layout_test; see layout_test.h.
@@ -53,7 +53,7 @@ namespace lt {
     } // namespace
 
     void test_edge_markers() {
-        std::printf("\n[markers: outlines, hollow markers, Cross and Plus (step 35)]\n");
+        std::printf("\n[markers: outlines, hollow markers, Cross and Plus]\n");
 
         // --- 2D GPU ---------------------------------------------------------
         // A filled disc of diameter 40: about pi * 20^2 pixels.

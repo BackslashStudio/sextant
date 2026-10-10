@@ -5,7 +5,7 @@
 
 // The kit's inspector and dialogs (contents only) and the plot view's pure
 // helpers. The library window composing them is FigureWindowShell
-// (figure_window_shell.h, GUI-kit R7); the plot view itself is plot_view.h.
+// (figure_window_shell.h); the plot view itself is plot_view.h.
 namespace sextant {
     struct FigureSnapshot;
     class FigureEditBox;
@@ -25,7 +25,7 @@ namespace sextant {
     // own state, owned by the host.
     void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic);
 
-    // --- The Save and Resize dialogs (GUI-kit R4) --------------------------------
+    // --- The Save and Resize dialogs --------------------------------
     // Contents only, like the inspectors: the host opens the window (with the
     // state's `open` as its close button) and pushes the figure id. A dialog
     // closes itself through `open` and returns a request on Save/Apply; the host

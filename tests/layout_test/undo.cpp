@@ -1,4 +1,4 @@
-// Undo-capable apply (GUI-kit R10): every apply records what it replaced, an
+// Undo-capable apply: every apply records what it replaced, an
 // inverse of the same type, and applying that inverse puts the figure back --
 // on the snapshot and, through the journal, on the live axes.
 #include "layout_test.h"
@@ -387,7 +387,7 @@ namespace lt {
     }
 
     void test_undo() {
-        std::printf("\n[undo: inverses of every edit (GUI-kit R10)]\n");
+        std::printf("\n[undo: inverses of every edit]\n");
         round_trip_2d();
         round_trip_3d();
         skipped_and_dropped();

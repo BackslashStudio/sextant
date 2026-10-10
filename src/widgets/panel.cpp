@@ -32,7 +32,7 @@ std::shared_ptr<const FigureMeasure> on_screen_measure(const PlotViewInfo* view,
 namespace {
 
 // The ids of a holder's objects of `kinds`, kind by kind: what a scratch list is
-// seeded from, and compared against to tell when to re-seed (GUI-kit R9).
+// seeded from, and compared against to tell when to re-seed.
 template <class S, std::size_t N>
 std::vector<ObjectId> object_ids(const S& s, const PlotKind (&kinds)[N]) {
     std::vector<ObjectId> ids;
@@ -100,7 +100,7 @@ bool sheet_objects_differ(const DataPanelState::SheetStyles& s, const RenderSnap
     return !same_objects(s.ids, sn, kPlotKinds2D);
 }
 
-// Seeding from the selected slot, one owner at a time (GUI-kit R3). Each state
+// Seeding from the selected slot, one owner at a time. Each state
 // pulls when its user next runs: seed_* when the Selection generation moved,
 // the per-frame follows otherwise.
 

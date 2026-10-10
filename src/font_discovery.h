@@ -8,7 +8,7 @@ namespace sextant {
         std::string path; // absolute path to the font file
         // The family's italic (or oblique) face, "" when it has none, and its
         // face index inside a .ttc (macOS's Times.ttc holds all four styles).
-        // For math letters (v1.1 step 32b).
+        // For math letters.
         std::string italic_path;
         int italic_index = 0;
     };
@@ -26,7 +26,7 @@ namespace sextant {
 
     // Fonts for the glyphs a string's own font lacks (math symbols, Greek), in
     // order: the first discovered of a per-platform list of symbol and math
-    // families (v1.1 step 32a). NanoVG registers them as fallbacks of every font
+    // families. NanoVG registers them as fallbacks of every font
     // it loads, and text_width() follows the same lookup. May be empty.
     const std::vector<const FontEntry*>& fallback_fonts();
 } // namespace sextant

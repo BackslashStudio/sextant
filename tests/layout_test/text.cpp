@@ -1,4 +1,4 @@
-// In-plot text and annotations (v1.1 step 31): Axes::text()/annotate() and the
+// In-plot text and annotations: Axes::text()/annotate() and the
 // Axes3D ones. Placement (data, frame fraction, blended), the block layout, the
 // hide rule, the arrow, pixels and SVG, read-back and set_text_data(), and the
 // Data-panel ops with their inverses. Part of sextant_layout_test; see
@@ -503,7 +503,7 @@ namespace lt {
     }
 
     void test_text() {
-        std::printf("\n[text and annotations (step 31)]\n");
+        std::printf("\n[text and annotations]\n");
         test_text_plan();
         test_text_api();
         test_text_pixels();

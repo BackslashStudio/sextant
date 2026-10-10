@@ -84,7 +84,7 @@ namespace lt {
     }
 
     // The frame a host runs instead of show(): host_frame() patches and draws,
-    // the host publishes when it chooses (GUI-kit R8).
+    // the host publishes when it chooses.
     void test_host_frame() {
         std::printf("\n[figure_impl.h: host_frame(), publishing on the host's call]\n");
 

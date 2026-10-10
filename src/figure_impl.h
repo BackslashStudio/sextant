@@ -183,7 +183,7 @@ struct Figure::Impl {
 
     // Applies `edits` to a copy of the published snapshot and publishes it;
     // with `inv`, records in it what undoes them, from the snapshot the user
-    // saw (GUI-kit R10): only what was actually written, every entry addressed
+    // saw: only what was actually written, every entry addressed
     // by id, data ops last-first. The journal is the caller's business.
     void patch_snapshot(const FigureEdits& edits, FigureEdits* inv);
 
@@ -216,7 +216,7 @@ struct Figure::Impl {
     // throws std::logic_error while `open`. A host owning the GLFW loop initialises GLFW with
     // ensure_glfw_init() (window_broker.h), not glfwInit().
     //
-    // Undo (GUI-kit R10): `inverse`, if given, receives what undoes the edits
+    // Undo: `inverse`, if given, receives what undoes the edits
     // this frame drained (empty when none), for the host's own undo stack; a
     // gesture spanning frames folds them with compose_inverse().
     std::shared_ptr<const FigureSnapshot> host_frame(FigureEdits* inverse = nullptr);

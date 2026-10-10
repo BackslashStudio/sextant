@@ -78,7 +78,7 @@ namespace lt {
     sextant::FigureSnapshot make_snapshot(int rows, int cols, int n_cells,
                                           double x_scale = 1.0, double y_scale = 1.0);
 
-    // GUI-kit R3: what the window's shell hands the components, over a test's
+    // what the window's shell hands the components, over a test's
     // FigureWindowState; and the inspectors in their windows, as the shell draws
     // them (window opened, figure id pushed).
     sextant::FigureContext panel_ctx(const sextant::FigureSnapshot& fs, sextant::FigureEditBox& box,
@@ -125,7 +125,7 @@ namespace lt {
     const std::string& gl_renderer();
 
     // False on Apple's software renderer (the macOS CI runner), which does not
-    // repeat an export exactly (v1.0 step 21.1): a simple scene had 2 pixels off
+    // repeat an export exactly: a simple scene had 2 pixels off
     // by one level between identical exports, a depth-peeled one hundreds.
     bool renderer_repeats_exactly();
 
@@ -482,28 +482,28 @@ namespace lt {
         const char* window_name,
         std::initializer_list<const char *> sections);
 
-    // dialogs.cpp (GUI-kit R4)
+    // dialogs.cpp
     void test_dialog_requests();
 
     void test_perform_save();
 
     void test_dialogs_drawn();
 
-    // render_device.cpp (GUI-kit R5)
+    // render_device.cpp
     void test_render_device_host_context();
 
     void test_render_device_two_figures();
 
     void test_render_device_caller_target();
 
-    // plot_view.cpp (GUI-kit R6)
+    // plot_view.cpp
     void test_axes_layouts();
 
     void test_plot_view_draw();
 
     void test_plot_view_two_figures();
 
-    // window_shell.cpp (GUI-kit R7)
+    // window_shell.cpp
     void test_panel_imgui_setup();
 
     void test_figure_window_shell();
@@ -568,19 +568,19 @@ namespace lt {
     // undo.cpp
     void test_undo();
 
-    // background.cpp (v1.1 step 33)
+    // background.cpp
     void test_background();
 
-    // ticks_hidden.cpp (v1.1 step 34)
+    // ticks_hidden.cpp
     void test_ticks_hidden();
 
-    // edge_markers.cpp (v1.1 step 35)
+    // edge_markers.cpp
     void test_edge_markers();
 
-    // text.cpp (v1.1 step 31)
+    // text.cpp
     void test_text();
 
-    // rich_text.cpp (v1.1 step 32a)
+    // rich_text.cpp
     void test_rich_text();
 
     // describe.cpp

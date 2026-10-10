@@ -1,4 +1,4 @@
-// The library window as a consumer of the kit (GUI-kit R7): the backend-free
+// The library window as a consumer of the kit: the backend-free
 // ImGui setup any host calls, and FigureWindowShell on a hidden window -- its
 // windows and dock layout, a View toggle, the dialogs' windows, and a resize
 // request carried out once the plot has a size.

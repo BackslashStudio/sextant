@@ -20,7 +20,7 @@ namespace lt {
             "\xC2\xB5m", // "µm"
             "\xE2\x88\x92" "1.0", // U+2212 MINUS SIGN, then "1.0"
             "\xF0\x9F\x93\x88", // U+1F4C8, a codepoint the font will lack
-            // Math symbols a text face may lack (fallback fonts, step 32a): nabla,
+            // Math symbols a text face may lack (fallback fonts): nabla,
             // element of, alpha, n-ary sum, beside letters of the face's own.
             "x\xE2\x88\x87y\xE2\x88\x88z", "\xCE\xB1\xE2\x88\x91" "i",
         };

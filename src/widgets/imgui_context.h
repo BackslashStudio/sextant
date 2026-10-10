@@ -12,7 +12,7 @@ namespace sextant {
     void apply_panel_style(PanelTheme theme, float scale);
 
     // What the kit's components need from an ImGui context, on the current one,
-    // with no platform or renderer backend (GUI-kit R7, M0 F4): the Roboto panel
+    // with no platform or renderer backend: the Roboto panel
     // font, click-to-type drags (drag_double() relies on it) and the panel style
     // at chrome scale `scale`. Call once, before the first frame. Any host: the
     // library window (ImGuiPanelContext) or an app on its own backend.
@@ -50,7 +50,7 @@ namespace sextant {
 
         // The chrome scale (1.0 = 100%): `WindowLink::chrome_scale()`, not the
         // raw content scale -- on a platform that scales the framebuffer
-        // instead of the window, the scaling is already done (v1.0 step 21.6).
+        // instead of the window, the scaling is already done.
         float dpi_scale() const { return dpi_scale_; }
 
     private:

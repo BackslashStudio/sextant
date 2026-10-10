@@ -373,7 +373,7 @@ namespace lt {
               near_px(lay.cells[0].frame.h, lay.cells[1].frame.h, 0.5f),
               "3D: the two cells' frames still line up along their row, so the grid is a grid");
         check(lay.cells[1].frame.w > lay.cells[0].frame.w,
-              "3D: and the 3D cell does not pay for the 2D cell's tick labels (step 15.1)");
+              "3D: and the 3D cell does not pay for the 2D cell's tick labels");
 
         // The projector uses the carved frame, so the box centres on what's left.
         const Px3 c = lay.cells[1].box3d->proj.project_box({0.0, 0.0, 0.0});

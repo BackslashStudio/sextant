@@ -1750,7 +1750,7 @@ namespace sextant {
                 if (tb.table < 0) {
                     // "###plane": apart from an object labelled "P0", and keyed by
                     // the plane's id where it has one, so the open tab stays on
-                    // its plane when one before it is removed (GUI-kit R9).
+                    // its plane when one before it is removed.
                     const ObjectId pid = static_cast<std::size_t>(tb.plane) < cur3d->planes.size()
                                              ? cur3d->planes[static_cast<std::size_t>(tb.plane)].id : 0;
                     const std::string tab = "P" + std::to_string(tb.plane) + "###plane"
@@ -1778,7 +1778,7 @@ namespace sextant {
                 // "##" each keystroke in the Name field re-IDs the tab and its
                 // widgets, dropping the field's focus). It is the object's id where
                 // it has one, so the open tab follows its object when objects
-                // before it go or move (GUI-kit R9); else the table index.
+                // before it go or move; else the table index.
                 const std::string tab = name + "###"
                                         + (t.id != 0 ? "i" + std::to_string(t.id) : std::to_string(i));
                 if (ImGui::BeginTabItem(tab.c_str())) {

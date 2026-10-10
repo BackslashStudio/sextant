@@ -3,7 +3,7 @@
 namespace sextant {
     // The caller's framebuffer bindings (draw and read) and viewport, saved
     // before an offscreen target is bound and put back afterwards, so a host
-    // that renders inside its own FBO keeps it (GUI-kit R5). Current context only.
+    // that renders inside its own FBO keeps it. Current context only.
     struct SavedTarget {
         int draw = 0;
         int read = 0;

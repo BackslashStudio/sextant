@@ -1,4 +1,4 @@
-// The plot view as a kit component (GUI-kit R6): axes_layouts() against what
+// The plot view as a kit component: axes_layouts() against what
 // render_frame() hands back, PlotView::draw() in a host's window with no sextant
 // backend (what it returns, the keys it is given), two figures' views in one
 // window, and the inspectors with no view on screen.

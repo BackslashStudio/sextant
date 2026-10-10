@@ -161,7 +161,7 @@ namespace lt {
 
     // -------------------------------------------------------------------------
     // frame_stats() from any thread, while show() and close() run on another
-    // (v1.1 step 28: the counters are the Figure's, not the WindowThread's)
+    // (the counters are the Figure's, not the WindowThread's)
     // -------------------------------------------------------------------------
     void test_frame_stats_any_thread() {
         std::printf("\n[window wait: frame_stats() from any thread]\n");

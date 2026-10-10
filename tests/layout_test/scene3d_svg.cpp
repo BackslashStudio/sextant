@@ -665,7 +665,7 @@ namespace lt {
     }
 
     void test_painter3d() {
-        std::printf("\n[3D: Newell's algorithm and the splits it needs (step 9)]\n");
+        std::printf("\n[3D: Newell's algorithm and the splits it needs]\n");
 
         using namespace sextant;
 

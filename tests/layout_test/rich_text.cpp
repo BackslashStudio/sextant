@@ -1,4 +1,4 @@
-// Rich text (v1.1 step 32a): the mathtext subset's parser and layout, the
+// Rich text: the mathtext subset's parser and layout, the
 // plain-text guarantee, every site drawing and measuring through the seam
 // (PNG pixels and SVG tspans), FigureOptions::mathtext, and the warning for
 // math that does not parse. Part of sextant_layout_test; see layout_test.h.
@@ -125,7 +125,7 @@ namespace lt {
     } // namespace
 
     void test_rich_text() {
-        std::printf("\n[rich text: mathtext subset (step 32a)]\n");
+        std::printf("\n[rich text: mathtext subset]\n");
 
         // --- Which strings have math (matplotlib's rule) ----------------------
         check(!has_math("Price ($)"), "one '$' is plain");
@@ -371,9 +371,9 @@ namespace lt {
                   && svg.find(">y</tspan><tspan dy=") != std::string::npos, "SVG: tick labels too");
         }
 
-        // --- Italic math letters (step 32b) ----------------------------------------------
+        // --- Italic math letters ----------------------------------------------
         {
-            std::printf("\n[rich text: italic math letters (step 32b)]\n");
+            std::printf("\n[rich text: italic math letters]\n");
             auto runs = [](std::string_view s) { return layout_rich("", kSize, s).runs; };
             auto all_italic = [&](std::string_view s, bool want) {
                 const auto r = runs(s);

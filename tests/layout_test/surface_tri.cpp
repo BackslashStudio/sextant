@@ -228,7 +228,7 @@ namespace lt {
                   "surface_tri: a figure holding only a mesh resolves its limits from that "
                   "mesh -- the axes are annotated over the mesh's own 2..6 rather than the "
                   "empty axes' 0..1. The has_data gate knows this kind, which is exactly "
-                  "the omission step 13 shipped for its own while every unit check passed");
+                  "an omission that once shipped while every unit check passed");
         }
     }
 

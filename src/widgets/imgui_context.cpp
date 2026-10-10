@@ -2,7 +2,7 @@
 #include "../renderer/gl_context.h"
 // The only includer, and keep it so: the generated header's arrays are
 // `static`, so each including file gets its own 115 KB copy. Others call
-// setup_panel_imgui() instead (GUI-kit R7).
+// setup_panel_imgui() instead.
 #include "panel_font.h"
 #include "sextant/figure.h"
 #include "imgui_impl_sextant.h"

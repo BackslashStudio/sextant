@@ -54,6 +54,8 @@ to inspect an array during a debugging session, without leaving the C++ ecosyste
 - **Hands your data straight in.** Every plot call takes `std::span<const double>`,
   so a `std::vector`, a `std::array`, a C array or an Armadillo `arma::vec`
   goes in as it is, with no conversion on your side.
+- **Talks back.** Clicks, keys and picks on the plot reach your callbacks, on your
+  own thread, with the data coordinates and the object under the cursor.
 
 ## Quick start
 
@@ -107,6 +109,45 @@ while (!fig->wait_closed(1.0 / 60)) {   // until the window is closed
 }
 ```
 
+## Text and math
+
+Labels over the plot, with or without an arrow, and matplotlib-style math in any
+string: titles, axis titles, legends, colorbars, tick labels and texts.
+
+![A damped oscillator whose title, axis titles and legend are math, with an annotated first peak, beside a 3D surface with its maximum labelled and its minimum annotated](doc/images/readme/text_math.png)
+
+```cpp
+using sextant::Pos;
+ax->set_title(R"(Damped oscillator: $x(t) = e^{-\gamma t}\sin(\omega t)$)")
+   .text("threshold", 2.5, Pos::fraction(0.95))     // data x, top of the frame
+   .annotate(t_peak, x_peak, "first peak",          // an arrow to the data point
+             Pos::fraction(0.6), Pos::fraction(0.8));
+```
+
+Each coordinate is a data value or a fraction of the frame, so a label can follow
+the data on one axis and stay put on the other. The math is a subset of
+matplotlib's mathtext: sub- and superscripts, Greek letters and about 150 symbols,
+`\sin`-style names, italic letters as in TeX. Texts work in 3D too (`text`,
+`text2d`, `annotate`), keep their pixel size under zoom, and render the same in
+the window, the PNG and the SVG.
+
+## React to the user
+
+Callbacks get the mouse, the keyboard and what was clicked. They run on your
+thread, inside `run()`, `wait_closed()`, `poll_events()` or `dispatch_events()`,
+so they can change the figure freely.
+
+```cpp
+fig->connect(sextant::EventKind::MouseDown, [](const sextant::Event& e) {
+    if (e.has_data) std::printf("clicked at (%g, %g)\n", e.xdata, e.ydata);
+});
+fig->connect(sextant::EventKind::Pick, [&](const sextant::Event& e) {
+    std::printf("picked line %d, point %d\n", e.pick_object, e.pick_index);
+});
+fig->show(false);
+sextant::Figure::run();   // deliver events until every window is closed
+```
+
 ## 2D plots
 
 ![Six subplots: styled lines with a legend, a series with error bars, a heatmap with labelled contours, a histogram, a bar chart, and a colour-mapped scatter](doc/images/readme/gallery_2d.png)
@@ -157,8 +198,12 @@ correctly per pixel in the PNG and per polygon in the SVG.
   labels, axes that cross at any point, per-element fonts and colours.
 - **Colormaps.** Viridis, Plasma, Inferno, Magma, Cividis, Turbo, Coolwarm and Gray,
   matching matplotlib's.
+- **Styling.** Figure and plot-area backgrounds (transparent if you like),
+  hidden ticks per axis, marker outlines and hollow markers.
 - **Read-back.** Every plot's data, the titles and the limits as drawn can be read
   back, including what the user edited in the window.
+- **Diagnostics.** `Figure::set_message_handler()` routes sextant's warnings to
+  your logger instead of stderr.
 
 ## Output
 
@@ -169,8 +214,39 @@ correctly per pixel in the PNG and per polygon in the SVG.
 - **SVG: `fig->savefig("out.svg")`.** Vector, resolution-independent, 3D
   included, and written with **no OpenGL context at all**, so it works on a
   headless server.
+- **In memory: `render_png()`, `render_svg()`, `render_rgba()`.** The same bytes
+  the files would hold, or the raw RGBA pixels, for a web server, a GUI or a test.
+- **No display needed on Linux.** PNG export runs in containers, CI and SSH
+  sessions through EGL (Mesa or the GPU driver at run time).
 
-## Building
+## Installing with vcpkg
+
+sextant is a port in the [BackslashStudio registry](https://github.com/BackslashStudio/vcpkg-registry).
+Add the registry to your `vcpkg-configuration.json`:
+
+```json
+{
+  "default-registry": {
+    "kind": "git",
+    "repository": "https://github.com/microsoft/vcpkg",
+    "baseline": "<a microsoft/vcpkg commit>"
+  },
+  "registries": [
+    {
+      "kind": "git",
+      "repository": "https://github.com/BackslashStudio/vcpkg-registry",
+      "baseline": "<a commit of the registry>",
+      "packages": ["sextant"]
+    }
+  ]
+}
+```
+
+depend on `sextant` in `vcpkg.json`, and link it as below. Windows, Linux and
+macOS, shared or static triplets. Optional features `freetype`, `png` and
+`window-icon` are on by default.
+
+## Building from source
 
 You need CMake 3.21 or newer and a C++20 compiler; the window needs OpenGL 4.1.
 Everything else is vendored or downloaded on the first configure. Each recipe
@@ -210,11 +286,11 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build --target install_dist
 ```
 
-Then use it from your project:
+Then use it from your project (with vcpkg, skip the first line):
 
 ```cmake
 list(APPEND CMAKE_PREFIX_PATH "/path/to/sextant/dist")
-find_package(sextant CONFIG REQUIRED)
+find_package(sextant 1.1 CONFIG REQUIRED)
 target_link_libraries(my_app PRIVATE sextant::sextant)
 ```
 

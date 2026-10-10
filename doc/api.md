@@ -20,11 +20,14 @@ own page, **[3d.md](3d.md)**; every option struct and enum is tabulated in
 - [Contours](#contours)
 - [Colormaps](#colormaps)
 - [Titles, legends, colorbars and ticks](#titles-legends-colorbars-and-ticks)
+- [Text and annotations](#text-and-annotations)
+- [Math in text](#math-in-text)
 - [Styling](#styling)
 - [Layout](#layout): [subplots and spans](#subplots-and-spans) · [a 3D cell](#a-3d-cell-in-the-same-grid) ·
   [sizing a figure](#sizing-a-figure)
-- [Saving to a file](#saving-to-a-file)
+- [Saving and exporting](#saving-and-exporting)
 - [The interactive window](#the-interactive-window)
+- [Events and picking](#events-and-picking)
 - [Live updates and threads](#live-updates-and-threads)
 - [Reading back](#reading-back)
 - [Errors](#errors)
@@ -123,6 +126,20 @@ ax->scatter(px, py, {.color = sextant::Color::Orange,
 
 `size` is a diameter in pixels and does not change when you zoom. Markers:
 `Circle`, `Square`, `Triangle`, `Diamond`, `Cross`, `Plus`, and `None`.
+
+**Outlines and hollow markers.** `edge_linewidth` (pixels, 0 by default) draws an
+outline inside the marker, so `size` stays its full diameter. `edgecolor` sets its
+colour (unset: the marker's own) and `edge_alpha` its opacity, independent of
+`alpha`. With `alpha = 0` only the outline is drawn: a hollow marker. Every shape
+takes one, `Cross` and `Plus` included. `scatter_z` and `scatter3d` have the same
+fields.
+
+```cpp
+ax->scatter(px, py, {.color = sextant::Color::Orange, .size = 16.0f,
+                     .alpha = 0.0f, .edge_linewidth = 2.0f});        // hollow
+```
+
+![filled, outlined, hollow and translucent markers](images/docs/markers.png)
 
 ### scatter_z
 
@@ -236,7 +253,8 @@ matplotlib's `imshow` does. Other data on the same axes is padded as usual, and
 where it reaches past the image only its own side gets the room.
 
 `origin` decides which end row 0 draws at: `"lower"` (default) puts it at the
-bottom, `"upper"` at the top. The buffer layout does not change either way.
+bottom, `"upper"` at the top; any other value throws. The buffer layout does not
+change either way.
 
 Hovering a cell reports its **row and column** and value, which under a real
 extent are deliberately not the numbers on the axes.
@@ -394,7 +412,7 @@ The positions have to be a named array or vector, not a braced list written in
 place: they arrive as `std::span<const double>`, and `std::span` gains a
 constructor from `std::initializer_list` only in C++26. The labels are a
 `std::vector<std::string>`, so those *can* be written inline. An empty span goes
-back to automatic ticks.
+back to automatic ticks; to hide an axis' ticks, see [Styling](#styling).
 
 `cla()` resets the axes completely: plot objects, limits, titles, styles, legend
 and ticks. To change the data of a live plot, use
@@ -402,6 +420,97 @@ and ticks. To change the data of a live plot, use
 
 > **Ordering gotcha.** `set_title(text, size)` stores its size in the axes style,
 > so a later `set_axes_style()` resets it. Call `set_axes_style()` first.
+
+---
+
+## Text and annotations
+
+```cpp
+Axes& text(std::string_view s, Pos x, Pos y, TextOptions opts = {});
+Axes& annotate(double px, double py, std::string_view s, Pos tx, Pos ty,
+               TextOptions opts = {}, ArrowOptions arrow = {});
+```
+
+`text()` writes a string over the plot; `annotate()` writes one with an arrow to
+the data point `(px, py)`. Each coordinate of the text's position is a **`Pos`**:
+a plain number is a data value, `Pos::fraction(f)` a fraction of the plot frame
+from its left (x) or bottom (y) edge. The two are independent, so a label can
+follow the data on one axis and stay put on the other:
+
+```cpp
+using sextant::Pos;
+ax->text("threshold", 2.5, Pos::fraction(0.95), {.va = sextant::VAlign::Top})
+   .text("n = 120", Pos::fraction(0.02), Pos::fraction(0.04))
+   .annotate(t_peak, x_peak, "first peak", Pos::fraction(0.6), Pos::fraction(0.8),
+             {.fontsize = 14.0f, .background = sextant::Color::White,
+              .edgecolor = sextant::Color::Gray, .edge_linewidth = 1.0f},
+             {.arc = 0.2f});
+```
+
+![text alignment, rotation, a box, a frame-anchored label and arrow ends](images/docs/text.png)
+
+`TextOptions` sets the look: `fontsize` (pixels), `color`, `alpha`, `font_path`;
+`ha`/`va`, how the block sits against its anchor (`va = Baseline` by default);
+`rotation` in degrees; `dx`/`dy`, a nudge in pixels (y up); multi-line text
+(`'\n'`) with `linespacing`; and a box, `background` filled and `edge_linewidth`
+outlined, `pad` pixels out. `ArrowOptions` sets the arrow: `head` and `tail`
+(`None`, `Open`, `Filled`, `Bar`), their size, `linewidth`, `color` (unset: the
+text's), `linestyle`, the gaps left at the text and the point, and `arc`, which
+bows the arrow (as matplotlib's `arc3`).
+
+Texts are drawn over the data at a fixed pixel size: they never widen the
+automatic limits and reserve no room. A text whose **data** coordinate leaves the
+view is hidden whole; `clip_to_frame = true` cuts it at the frame instead. An
+annotation is hidden while its point is out of view. A non-finite coordinate
+throws `std::invalid_argument`.
+
+Texts appear in the window, PNG and SVG, have a tab in the Data panel, and read
+back like plot objects: `text_count()`, `text_data(i)` (a `TextData`: the string,
+both coordinates and their `Coords`, the arrow and its point) and
+`set_text_data(i, …)`. 3D has `text()`, `text2d()` and `annotate()` of its own;
+see [3d.md](3d.md#text-and-annotations).
+
+---
+
+## Math in text
+
+Every string sextant draws can hold math: titles, axis titles, the suptitle,
+legend and colorbar names, custom tick labels and texts, in 2D and 3D. Write it
+between dollars, as in matplotlib:
+
+```cpp
+ax->set_xtitle(R"($\theta$ [rad])")
+   .set_title(R"(Damped oscillator: $x(t) = e^{-\gamma t}\sin(\omega t)$)");
+```
+
+![strings as written beside how they draw](images/docs/mathtext.png)
+
+It is a subset of matplotlib's mathtext:
+
+- superscripts and subscripts, `x^2`, `x_i`, `x_{i,j}^{2}`, nestable;
+- Greek letters and about 150 symbols by name: `\alpha`, `\Delta`, `\pm`,
+  `\times`, `\leq`, `\neq`, `\approx`, `\infty`, `\sum`, `\int`, `\nabla`,
+  `\rightarrow`, …;
+- function names set upright, `\sin`, `\cos`, `\log`, `\exp`, `\max`, …;
+- TeX spacing (`\,`, `\;`, `\quad`, …) and the spacing around operators;
+- fonts: `\mathrm{}` (upright), `\mathit{}` (italic), `\text{}` (upright, spaces
+  kept).
+
+Letters draw italic, as in TeX; digits, symbols, Greek capitals and function names
+stay upright. The italic is the font's own italic face, or its regular face
+slanted when it has none. Symbols the font lacks come from a system symbol font
+(Segoe UI Symbol on Windows, STIX Two Math on macOS, DejaVu Sans on Linux). The
+SVG writes math as `<tspan>`s, so it stays text.
+
+**When a string is math.** As in matplotlib: when it has an even, nonzero number
+of `$` not preceded by a backslash. `\$` is a literal dollar, and a string with
+one `$` or none draws as written. Math that does not parse (an unknown command, an
+unclosed brace) is drawn as written, and the call that set it sends a warning
+through [`set_message_handler()`](#errors).
+
+Turn it off for a whole figure with `FigureOptions::mathtext = false`, or for one
+text with `TextOptions::parse_math = false`. Not supported: fractions, roots,
+accents, sized delimiters, `\mathbf` and the calligraphic fonts, and `usetex`.
 
 ---
 
@@ -415,9 +524,14 @@ sextant::Color::Blue;                        // also Red Green Orange Purple
                                              // Cyan Black White Gray
 sextant::Color::from_hex(0x1f77b4);          // 0xRRGGBB
 sextant::Color::from_hex(0x1f77b480);        // 0xRRGGBBAA
-sextant::Color::from_name("orange");         // or "#1f77b4"; throws on an unknown name
+sextant::Color::from_name("orange");         // or "#1f77b4" / "#1f77b480"
 sextant::Color{0.2f, 0.4f, 0.9f, 0.5f};      // half-transparent blue
 ```
+
+`from_name()` takes a `#` followed by exactly 6 or 8 hex digits, or one of the
+names below; anything else throws. `from_hex()` reads a value above `0xFFFFFF` as
+`0xRRGGBBAA`, so an RGBA value whose red is 0 reads as RGB there; `from_name()`
+has no such ambiguity.
 
 The named colours are matplotlib's tab10 palette, so `Color::Blue` is
 `rgb(31,119,180)` rather than pure blue. `Black`, `White` and `Gray` are the
@@ -454,6 +568,25 @@ value, so `{.origin_x = 0.0, .origin_y = 0.0}` draws axes crossing at the origin
 matplotlib-style. On automatic limits, an origin outside the data widens the view
 to include it. The four `spine_*` flags turn frame edges on and off
 independently.
+
+**Backgrounds.** `FigureOptions::background` (or `Figure::set_background()`) fills
+behind the whole figure: margins, gaps and the suptitle, light gray by default.
+`AxesStyle::background` fills a 2D plot area, white by default (a 3D box colours
+its panes with `Box3DStyle::pane_color`). Alpha 0 leaves a PNG or SVG transparent
+there; the window shows its panel colour instead.
+
+**Hiding ticks.** `AxesStyle::show_xticks` and `show_yticks` (and `show_zticks` in
+3D) set to `false` drop that axis' tick marks and labels and give their room back
+to the plot; grid lines stay. `set_xticks({})` is different: it means automatic
+ticks.
+
+```cpp
+auto fig = sextant::Figure::create({.background = sextant::Color::from_hex(0xdde6ef)});
+fig->axes()->set_axes_style({.background = sextant::Color::from_hex(0x1e1f29),
+                             .show_xticks = false});
+```
+
+![figure and plot-area backgrounds; hidden x ticks with the grid kept](images/docs/backgrounds.png)
 
 ---
 
@@ -557,7 +690,7 @@ is exact apart from rounding to whole pixels.
 
 ---
 
-## Saving to a file
+## Saving and exporting
 
 ```cpp
 fig->savefig("plot.png");
@@ -566,7 +699,10 @@ fig->savefig("plot.svg");
 
 The format comes from the extension; anything else throws. **No window is
 required for either**: both work headless, and SVG needs no OpenGL context at
-all, so it runs on a server with no display.
+all, so it runs on a server with no display. On **Linux with no display at
+all** (a container, CI, an SSH session) PNG export renders through EGL, with Mesa
+(software rendering included) or the GPU driver; it needs `libegl1` and Mesa at
+run time and otherwise falls back to a hidden window, which needs a display.
 
 - **PNG** is supersampled and box-filtered, and matches the figure size exactly.
   `FigureOptions::supersample` sets the factor (default 2, max 4, 1 to disable);
@@ -585,12 +721,32 @@ sextant::SvgSaveReport r = fig->savefig_svg("scene.svg");
 A 3D scene whose translucent objects interpenetrate is ordered per pixel in the
 PNG and per polygon in the SVG, and both have a work bound. Hitting one is not an
 error: the file is written, with part of it in plain depth order, and
-`SvgSaveReport` (plus a line on `stderr`, and a comment in the file) says so and
-names the number to raise. See [3d.md](3d.md#translucency-and-depth-order).
+`SvgSaveReport` (plus a warning through the [message handler](#errors), and a
+comment in the file) says so and names the number to raise. See
+[3d.md](3d.md#translucency-and-depth-order).
+
+**Export to memory.** For a web server, a GUI or a test, the same output without a
+file:
+
+```cpp
+std::vector<std::uint8_t> png = fig->render_png();      // the bytes savefig_png() writes
+sextant::SvgRender svg = fig->render_svg();             // svg.svg, svg.report
+sextant::RgbaImage img = fig->render_rgba({.dpi = 192}); // width, height, pixels
+```
+
+They take the same options and sizes as `savefig_png()`/`savefig_svg()`, and
+return exactly the bytes those write. `RgbaImage::pixels` is 8-bit RGBA, top row
+first, no padding: the PNG's pixels before encoding.
+
+A failed write (a missing directory, a full disk) throws `std::system_error`. On
+Windows a file name containing `:` other than a drive letter is refused with
+`EINVAL`, since NTFS would otherwise hide the image in a data stream.
 
 Saving does not need `refresh()` for your own calls. Edits made in the window
 reach a caller's `savefig()` once `refresh()` has folded them in; the window's
-own **File → Save** always saves what is on screen.
+own **File → Save** always saves what is on screen. It takes `.png` and `.svg`
+names only, and a failed save shows its reason in the window instead of ending
+the program.
 
 ---
 
@@ -638,7 +794,8 @@ colormap and so on) and its data as an editable table, with x/y/z columns side b
 side and heatmap matrices as a grid. You can retype any value, insert and delete
 points, insert and delete matrix rows and columns, and choose the numeric
 notation and precision. Cells are tinted by where their value falls in their
-column's range; *Shade cells* turns that off.
+column's range; *Shade cells* turns that off. A text or annotation gets a tab too,
+with its string, position, box and arrow.
 
 The panels' look is set once at creation, and they follow the monitor's DPI:
 
@@ -646,6 +803,77 @@ The panels' look is set once at creation, and they follow the monitor's DPI:
 sextant::Figure::create({.theme = sextant::PanelTheme::Dark,   // or Light,
                          .panel_width = 300.0f});              // Classic
 ```
+
+---
+
+## Events and picking
+
+Your code can react to what the user does in the window, like matplotlib's
+`mpl_connect`:
+
+```cpp
+int id = fig->connect(sextant::EventKind::MouseDown, [](const sextant::Event& e) {
+    if (e.has_data) std::printf("clicked (%g, %g) in subplot %d\n", e.xdata, e.ydata, e.axes);
+});
+fig->connect(sextant::EventKind::Pick, [&](const sextant::Event& e) {
+    if (e.pick_kind == sextant::PickKind::Line)
+        std::printf("line %d, point %d\n", e.pick_object, e.pick_index);
+});
+fig->connect(sextant::EventKind::KeyDown, [&](const sextant::Event& e) {
+    if (e.key == "escape") fig->close();
+});
+fig->show(false);
+sextant::Figure::run();          // deliver events until every window is closed
+fig->disconnect(id);
+```
+
+| `EventKind` | When | Fields |
+|---|---|---|
+| `MouseDown`, `MouseUp` | A button over the plot (the release also off it, if the press began on it) | `button` (0 left, 1 right, 2 middle), `double_click`, position, data, `mods` |
+| `MouseMove` | The cursor moves over the plot, or during a press begun on it | position, data, `mods` |
+| `Scroll` | The wheel over the plot | `scroll_x`, `scroll_y` in notches, position, data |
+| `KeyDown`, `KeyUp` | A key, while no text field is being edited | `key`: `"a"`, `"A"`, `"ctrl+s"`, `"escape"`, `"f5"`, `"left"`, …; `mods` |
+| `Resize` | The plot area changed size | `width`, `height` |
+| `Close` | The window closed, by the user or `close()` | |
+| `Pick` | A plot object was under a press, sent right after its `MouseDown` | `pick_*`, below |
+
+The **position** `x`, `y` is in the figure's logical pixels from the top left of
+the plot area; `axes` is the subplot under it (the index `add_subplot()` takes, -1
+outside every frame). The **data** `xdata`, `ydata` is the point under the cursor
+in that subplot's coordinates, with `has_data` true. In a 3D subplot it is where
+the cursor meets the nearest visible `Plane2D` (`zdata` too); elsewhere in 3D
+`has_data` is false. `consumed` says what sextant itself did with the input
+(selected a subplot, navigated, dragged a grid boundary): every event is reported
+either way, and a callback cannot suppress sextant's own handling.
+
+**Picking.** A press within 12 pixels of a plot object also sends one `Pick`
+event, for the nearest object: `pick_kind` (`Line`, `Scatter`, `ScatterZ`, `Bar`,
+`Heatmap`; `Bar3D`, `Surface`, `SurfaceTri`, `Scatter3D`, `Line3D`),
+`pick_object` (the object's index in its kind, the `i` of `line_data(i)` and
+friends), `pick_index` (the point, bar or vertex; the flat cell index of a heatmap
+or `bar3d`), `pick_row`/`pick_col` for those grids, and `pick_plane`, the
+`Plane2D`'s index in `Axes3D::plane_at()` for an object on a plane (-1 otherwise).
+It finds what the hover hints find. The indices refer to the data the window drew.
+
+**Where callbacks run.** The window never calls them. It queues events, and they
+run **on your thread**, inside `wait_closed()`, `Figure::run()`,
+`Figure::poll_events()` or `dispatch_events()`, in order. So a callback may block,
+change the figure, or close it. A program that never calls one of those sees no
+events; a loop that keeps a window up should call one of them each pass:
+
+```cpp
+while (!fig->wait_closed(1.0 / 60)) {   // delivers events while it waits
+    step();
+    fig->refresh();
+}
+```
+
+`dispatch_events()` delivers one figure's queue and returns how many it ran, for
+a loop with its own way of pumping. Callbacks for one kind run in the order
+connected; an exception a callback throws goes to the message handler and does not
+stop delivery; events nobody connected for are never queued. `disconnect(id)`
+also drops that callback's queued events, and may be called from inside a
+callback.
 
 ---
 
@@ -684,13 +912,25 @@ count is unchanged and are dropped otherwise.
 | `show(false)` | Returns at once |
 | `wait_closed(timeout_s)` | Returns `true` once this figure's window has closed, `false` if the timeout ran out first; negative waits forever. Any thread, any number of waiters |
 | `Figure::run()` | Waits until every open figure in the process has closed |
-| `Figure::poll_events()` | Pumps window events once; see macOS below |
+| `Figure::poll_events()` | Pumps window events once and delivers every figure's queued events; see macOS below |
+| `dispatch_events()` | Delivers this figure's queued events |
+
+The waits deliver [events](#events-and-picking) on the waiting thread.
 
 **The rules:**
 
-- **Change a figure and its axes, and call `refresh()`, `savefig()`, `resize()`
-  and `close()`, from one thread**: the one that owns the `Figure`.
-  `is_open()` and `wait_closed()` are safe from anywhere.
+- **One call at a time per figure.** A `Figure` with its `Axes`, `Axes3D` and
+  `Plane2D`s is one object graph, which the window thread never touches (it draws a
+  published copy). Any thread may call into it, window open or not, but calls must
+  not overlap: serialize them yourself, as with a standard container. Separate
+  figures are independent.
+- **Safe from any thread at any time**, even during another call on the same
+  figure: `is_open()`, `wait_closed()`, `frame_stats()`, `connect()`,
+  `disconnect()`, `dispatch_events()`, `set_message_handler()`, and, where they are
+  allowed, `poll_events()` and `run()`.
+- **Calls that block:** `show()` until the window is up; `close()` and the
+  destructor until the window's thread has joined; `savefig*()`/`render_*()` for
+  the render, on the window's thread when one is open.
 - `refresh()` throws `std::logic_error` before `show()` or after the window has
   closed.
 - **Edits made in the window survive `refresh()`**: typed titles, a panned view,
@@ -699,8 +939,8 @@ count is unchanged and are dropped otherwise.
   pan, and a pan after your `set_xlim()` replaces that. `cla()` resets everything,
   window edits included.
 - **macOS**: window events belong to the main thread there. Call `poll_events()`
-  in any loop that holds a window up on the main thread (it does nothing on
-  Windows and Linux, so the loop stays portable), or use `wait_closed()`/`run()`,
+  in any loop that holds a window up on the main thread (on Windows and Linux it
+  only delivers events, so the loop stays portable), or use `wait_closed()`/`run()`,
   which pump while they wait. `poll_events()` throws `std::logic_error` off the
   main thread. `show(true)` on the main thread keeps the window live while it
   waits for ENTER.
@@ -738,8 +978,10 @@ struct named after the kind (`LineData`, `ScatterData`, `ScatterZData`,
 `BarData`, `HeatmapData`; in 3D `Bar3DData`, `SurfaceData`, `SurfaceTriData`,
 `Scatter3DData`, `Line3DData`), with fields named after the plotting call's
 arguments. `bar_data` covers `hist()` too (bin centres and heights), and
-`heatmap_data` covers `imshow()`. An index past the count throws
-`std::out_of_range`. Styles, error bars and `hint_labels` are not read back.
+`heatmap_data` covers `imshow()`. Texts and annotations read back the same way:
+`text_count()`, `text_data(i)` (`TextData`; in 3D `Text3DData`) and
+`set_text_data(i, …)`. An index past the count throws `std::out_of_range`.
+Styles, error bars and `hint_labels` are not read back.
 
 The structs are exactly what `set_<kind>_data()` takes, so read, edit, write back
 is three lines:
@@ -759,14 +1001,26 @@ draw a misleading plot is an exception rather than a best guess.
 
 | Thrown | When |
 |---|---|
-| `std::invalid_argument` | Mismatched lengths (`x`/`y`, `x`/`y`/`z`, `x`/`height`). An error-bar span that is not one entry per point. Heatmap `rows`/`cols` not positive, data too small, or a degenerate or non-finite range. A non-finite contour level. An invalid subplot index, a different grid shape, a cell already taken, a shape-less `add_subplot()` before any shape. Invalid grid weights. A non-positive size or dpi. An unknown `savefig` extension. A bad colour name or hex string. In 3D, see [3d.md](3d.md#errors) |
+| `std::invalid_argument` | Mismatched lengths (`x`/`y`, `x`/`y`/`z`, `x`/`height`). An error-bar span that is not one entry per point. Heatmap `rows`/`cols` not positive, data too small, or a degenerate or non-finite range; an `origin` other than `"lower"`/`"upper"`. A non-finite contour level. A non-finite text or annotation coordinate. An invalid subplot index, a different grid shape, a cell already taken, a shape-less `add_subplot()` before any shape. Invalid grid weights. A non-positive size or dpi. An unknown `savefig` extension. A bad colour name or hex string. An empty event callback. In 3D, see [3d.md](3d.md#errors) |
 | `std::out_of_range` | A read-back or `set_*_data()` index past the count |
 | `std::logic_error` | `refresh()` before `show()` or after the window closed; `poll_events()` off the main thread on macOS |
 | `std::runtime_error` | The window or OpenGL context could not be created |
-| `std::system_error` | Writing a file failed |
+| `std::system_error` | Writing a file failed, including a full disk; on Windows, a file name containing `:` (`EINVAL`) |
 
-Non-fatal warnings (a missing font, an export that hit its work bound) go to
-`stderr`.
+**Warnings** that do not fail the call (math that does not parse, an export that
+hit its work bound, a fallback to a hidden window, a missing font) go to the
+message handler, which prints them to `stderr` as `sextant: <message>` by default.
+Route them elsewhere, process-wide:
+
+```cpp
+auto previous = sextant::Figure::set_message_handler([](std::string_view msg) {
+    my_log.warn("sextant: {}", msg);
+});
+```
+
+The handler may be called on any thread, and on several at once; sextant holds
+none of its locks while calling it, so it may block or call back into sextant.
+An empty handler restores the default; an exception it throws is ignored.
 
 ---
 
@@ -774,9 +1028,14 @@ Non-fatal warnings (a missing font, an export that hit its work bound) go to
 
 ```cmake
 list(APPEND CMAKE_PREFIX_PATH "/path/to/sextant/dist")   # where you installed it
-find_package(sextant CONFIG REQUIRED)
+find_package(sextant 1.1 CONFIG REQUIRED)
 target_link_libraries(my_app PRIVATE sextant::sextant)
 ```
+
+Installed through **vcpkg** (the BackslashStudio registry; see
+[build.md](build.md#installing-with-vcpkg)), drop the first line: the toolchain
+finds the package, and links `sextant::sextant` as shared or static to match your
+triplet.
 
 `sextant::sextant` is the shared library. Building against it needs only the installed package: none of sextant's dependencies have to be on your machine. On Windows, copy `sextant.dll` next to your executable.
 

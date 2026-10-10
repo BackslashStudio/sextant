@@ -697,7 +697,7 @@ namespace {
     // The first two rows (nothing interleaving) are controls and must not move;
     // the rest have a plane cutting through the geometry.
     void bench_newell() {
-        std::printf("\n=== 4d. SVG export with an exact painter's order (step 9) ===\n");
+        std::printf("\n=== 4d. SVG export with an exact painter's order ===\n");
         if (const char* env = std::getenv("SEXTANT_NEWELL"))
             std::printf("SEXTANT_NEWELL=%s\n", env);
         else

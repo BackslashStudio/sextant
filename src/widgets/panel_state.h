@@ -17,23 +17,20 @@ namespace sextant {
     class EventChannel;
 
     // Render-thread-only UI state for the window's shell and the kit components,
-    // used only inside a frame (exceptions are marked below). Split by owner
-    // (GUI-kit R2): one struct per component or shell, none referring to
-    // another, so a host can own each one; the library window aggregates them
-    // in FigureWindowState.
+    // used only inside a frame (exceptions are marked below). Split by owner:
+    // one struct per component or shell, none referring to another, so a host
+    // can own each one; the library window aggregates them in FigureWindowState.
     //
     // Shared per figure (see FigureContext): Selection and SlotViewState. Each
     // state seeded from the selected slot remembers the Selection generation it
-    // last synced and re-seeds itself when that moves (GUI-kit R3), so no code
-    // has to know which components exist.
+    // last synced and re-seeds itself when that moves, so no code has to know
+    // which components exist.
     //
-    // No access crosses owners any more. Settled in R3: the plot view writing
-    // the camera/limit scratch (now the shared SlotViewState), Cosmetic reading
-    // PlotViewState (now through FigureContext::view), the shared re-seed (now
-    // per-state pulls). Settled in R4: the dialogs read Selection and the live
-    // size through FigureContext and return requests the shell performs; the
-    // menu, shell code, writes the plot view's own settings (navigate/hints)
-    // and asks it to refit, as a host does.
+    // No access crosses owners: the camera/limit scratch is the shared
+    // SlotViewState, Cosmetic reads the plot view through FigureContext::view,
+    // and the dialogs read Selection and the live size through FigureContext and
+    // return requests the shell performs. The menu, shell code, writes the plot
+    // view's own settings (navigate/hints) and asks it to refit, as a host does.
 
     // A synced generation no Selection has: the first pull always seeds.
     inline constexpr std::uint64_t kNeverSynced = ~std::uint64_t{0};
@@ -169,7 +166,7 @@ namespace sextant {
     };
 
     // What the plot view learned drawing a frame, returned by PlotView::draw()
-    // (GUI-kit R6) and read by the other components through FigureContext::view:
+    // and read by the other components through FigureContext::view:
     // only a drawn frame knows the live size and the resolved auto limits.
     struct PlotViewInfo {
         // The plot's laid-out size in logical pixels; 0 before the first frame.
@@ -345,7 +342,7 @@ namespace sextant {
         int frame_h = 0;
     };
 
-    // The library window's state (GUI-kit R7; was PanelState): its shell's own
+    // The library window's state: its shell's own
     // plus that of the components it hosts, for the one figure it shows. Lives in
     // Figure::Impl, not in FigureWindowShell: other threads read its atomics and
     // LayoutStore (Figure::resize(), savefig()), and it outlives a window (a

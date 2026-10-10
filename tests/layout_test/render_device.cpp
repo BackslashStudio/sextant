@@ -1,4 +1,4 @@
-// RenderDevice (GUI-kit R5): drawing on a GL context someone else made current,
+// RenderDevice: drawing on a GL context someone else made current,
 // without touching which context is current, GLAD's table or the caller's
 // framebuffer; and several figures through one device, each with its own
 // DataRenderer. Part of sextant_layout_test; see layout_test.h.

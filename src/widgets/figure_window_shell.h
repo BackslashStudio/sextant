@@ -1,5 +1,5 @@
 #pragma once
-// The library's own figure window (GUI-kit R7): one consumer of the kit, as an
+// The library's own figure window: one consumer of the kit, as an
 // app is another. It owns what is tied to the window's thread and GL context --
 // the ImGui context with sextant's backend, and the plot view -- and composes
 // the kit each frame: menu bar, dock layout with the windows "Plot", "Cosmetic"

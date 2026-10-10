@@ -1,4 +1,4 @@
-// Figure and plot-area background colors (v1.1 step 33): the pixels of a PNG
+// Figure and plot-area background colors: the pixels of a PNG
 // render, the SVG, set_background() after create(), and alpha 0 staying
 // transparent. Part of sextant_layout_test; see layout_test.h.
 #include "layout_test.h"
@@ -37,7 +37,7 @@ namespace lt {
     } // namespace
 
     void test_background() {
-        std::printf("\n[background: figure and plot-area colors (step 33)]\n");
+        std::printf("\n[background: figure and plot-area colors]\n");
 
         // Default: the long-standing gray outside the plot, white inside.
         {

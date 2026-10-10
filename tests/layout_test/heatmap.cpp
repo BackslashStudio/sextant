@@ -318,7 +318,7 @@ namespace lt {
         const std::vector<double> cells(4 * 6, 0.5);
         const double pad = sextant::kAutoScalePad;
 
-        // origin is validated at ingest (v1.1 step 28): every reader tests
+        // origin is validated at ingest: every reader tests
         // == "lower", so a typo used to mean "upper" silently.
         {
             auto fig = sextant::Figure::create();

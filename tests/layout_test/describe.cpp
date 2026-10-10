@@ -1,4 +1,4 @@
-// Option-struct description (GUI-kit R11): every field of every public option
+// Option-struct description: every field of every public option
 // struct is listed, in declaration order, reachable for reading and writing,
 // and survives a round trip through text; every enum name maps back.
 #include "layout_test.h"

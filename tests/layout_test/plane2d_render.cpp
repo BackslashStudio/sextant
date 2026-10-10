@@ -358,7 +358,7 @@ namespace lt {
             const int solid = red_of("plane_line_solid");
             const int dashed = red_of("plane_line_dashed");
             check(solid > 0 && dashed > 0 && dashed < solid * 3 / 4,
-                  "plane: a dashed line on a plane draws dashed, not solid (step 7a)");
+                  "plane: a dashed line on a plane draws dashed, not solid");
             std::printf("  line pixels on the plane: %d solid, %d dashed\n", solid, dashed);
         }
 

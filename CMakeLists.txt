@@ -813,7 +813,7 @@ if(SEXTANT_BUILD_TESTS)
         add_executable(sextant_split_probe tests/split_probe/main.cpp)
         target_link_libraries(sextant_split_probe PRIVATE sextant::internal)
 
-        # Headless export with no display (v1.1 step 27): renders gallery
+        # Headless export with no display: renders gallery
         # figures to files through the windowless context, or with --window
         # through the hidden-window path, so CI can compare the two byte for
         # byte. Internal only for the test switch (platform.h).

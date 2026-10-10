@@ -11,7 +11,8 @@ For how these are used, see the [API guide](api.md) and [3D plots](3d.md).
   [FigureMargins](#figuremargins) · [SuptitleOptions](#suptitleoptions) ·
   [SubplotSpan](#subplotspan) · [FigureSize](#figuresize) ·
   [PngExportOptions](#pngexportoptions) · [SvgExportOptions](#svgexportoptions) ·
-  [SvgSaveReport](#svgsavereport) · [FrameStats](#framestats)
+  [SvgSaveReport](#svgsavereport) · [SvgRender](#svgrender) · [RgbaImage](#rgbaimage) ·
+  [FrameStats](#framestats)
 - [2D plot options](#2d-plot-options): [LineOptions](#lineoptions) ·
   [ScatterOptions](#scatteroptions) · [ScatterZOptions](#scatterzoptions) ·
   [BarOptions](#baroptions) · [HistOptions](#histoptions) ·
@@ -20,6 +21,8 @@ For how these are used, see the [API guide](api.md) and [3D plots](3d.md).
 - [Decoration and style](#decoration-and-style): [Color](#color) ·
   [AxesStyle](#axesstyle) · [GridOptions](#gridoptions) ·
   [LegendOptions](#legendoptions) · [ColorbarOptions](#colorbaroptions)
+- [Text](#text): [Pos](#pos) · [TextOptions](#textoptions) · [ArrowOptions](#arrowoptions)
+- [Events](#events): [Event](#event)
 - [3D options](#3d-options): [Camera3D](#camera3d) · [Vec3](#vec3) ·
   [BoxAspect](#boxaspect) · [Box3DStyle](#box3dstyle) ·
   [Plane2DOptions](#plane2doptions) · [Bar3DOptions](#bar3doptions) ·
@@ -45,6 +48,8 @@ Passed to `Figure::create()`.
 | `dpi` | `float` | `96` | PNG resolution: `dpi / 96` output pixels per logical pixel. Finite and positive |
 | `subplot_col_gap`, `subplot_row_gap` | `float` | `0` | Space between subplot cells (a cell includes its decorations) |
 | `margins` | `FigureMargins` | 10 each | Figure edge to subplot grid; also `set_margins()` |
+| `background` | `Color` | `{0.93, 0.93, 0.93, 1}` | Fill behind everything (margins, gaps, suptitle); alpha 0 is transparent in PNG and SVG. Also `set_background()` |
+| `mathtext` | `bool` | `true` | Draw `$...$` spans in every string as math; `false` draws every string as written |
 | `panel_width` | `float` | `240` | Initial width of the window's side panels. Never exported |
 | `supersample` | `int` | `2` | Supersampling for window and PNG, 1..4; 1 disables. Cost is quadratic. No effect on SVG |
 | `vsync` | `bool` | `true` | Cap the render loop at the display refresh rate. Turn off only to measure |
@@ -113,6 +118,24 @@ Returned by `Figure::savefig_svg()`.
 | `splits`, `tests` | `std::size_t` | Work done |
 | `warning` | `std::string` | Which bound was hit and the number to beat; empty when exact |
 
+### SvgRender
+
+Returned by `Figure::render_svg()`.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `svg` | `std::string` | The document `savefig_svg()` would write |
+| `report` | `SvgSaveReport` | As `savefig_svg()` returns |
+
+### RgbaImage
+
+Returned by `Figure::render_rgba()`: the pixels a PNG export encodes.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `width`, `height` | `int` | Output pixels (follow `PngExportOptions::dpi`) |
+| `pixels` | `std::vector<std::uint8_t>` | 8-bit RGBA, top row first, no padding: `width * height * 4` bytes |
+
 ### FrameStats
 
 Returned by `Figure::frame_stats()`; cumulative since `show()`.
@@ -151,7 +174,10 @@ Returned by `Figure::frame_stats()`; cumulative since `show()`.
 | `marker` | `MarkerStyle` | `Circle` | |
 | `name` | `std::string` | empty | Legend key |
 | `show_legend` | `bool` | `true` | |
-| `alpha` | `float` | `0.8` | |
+| `alpha` | `float` | `0.8` | Fill opacity, on top of `color`'s own; 0 = a hollow marker |
+| `edgecolor` | `std::optional<Color>` | unset | Outline colour; unset = the fill colour |
+| `edge_alpha` | `float` | `1` | Outline opacity, independent of `alpha` |
+| `edge_linewidth` | `float` | `0` | Outline width, drawn inside the marker; 0 = none |
 | `errorbar` | `ErrorBarOptions` | | |
 | `hint_labels` | `std::vector<std::string>` | empty | |
 
@@ -163,6 +189,7 @@ Returned by `Figure::frame_stats()`; cumulative since `show()`.
 | `size` | `float` | `20` | |
 | `marker` | `MarkerStyle` | `Circle` | |
 | `alpha` | `float` | `0.8` | |
+| `edgecolor`, `edge_alpha`, `edge_linewidth` | | unset, `1`, `0` | As in `ScatterOptions`; unset colour = each point's own |
 | `vmin`, `vmax` | `float` | `0`, `1` | Data range the colormap spans |
 | `colorbar` | `bool` | `false` | Draw a colorbar for this series |
 | `name` | `std::string` | empty | Titles the colorbar; also the legend key (marker filled white, black edge) |
@@ -201,7 +228,7 @@ Also the bar style of `hist()`.
 | `vmin`, `vmax` | `float` | `0`, `1` | Data range the colormap spans |
 | `colorbar` | `bool` | `false` | |
 | `name` | `std::string` | empty | Titles the colorbar |
-| `origin` | `std::string` | `"lower"` | `"lower"` draws row 0 at the bottom, `"upper"` at the top |
+| `origin` | `std::string` | `"lower"` | `"lower"` draws row 0 at the bottom, `"upper"` at the top; anything else throws |
 | `contours` | `std::vector<double>` | empty | Contour levels in data units |
 | `contour_color` | `Color` | `Black` | |
 | `contour_linewidth` | `float` | `1` | |
@@ -254,8 +281,8 @@ Error-bar **style**, the `errorbar` field of a 2D series' options.
 | `r`, `g`, `b`, `a` | `float` in 0..1; `a` defaults to 1 |
 | `Blue`, `Red`, `Green`, `Orange`, `Purple`, `Cyan` | matplotlib's tab10 colours |
 | `Black`, `White`, `Gray` | |
-| `from_hex(uint32_t)` | `0xRRGGBB` or `0xRRGGBBAA` |
-| `from_name(std::string_view)` | A basic colour name, or `"#RRGGBB"`; throws on an unknown one |
+| `from_hex(uint32_t)` | `0xRRGGBB`, or `0xRRGGBBAA` when the value exceeds `0xFFFFFF` |
+| `from_name(std::string_view)` | `"#RRGGBB"`, `"#RRGGBBAA"`, or one of `red`, `blue`, `green`, `orange`, `purple`, `cyan`, `black`, `white`, `gray`/`grey`; anything else throws |
 
 ### AxesStyle
 
@@ -263,6 +290,7 @@ Passed to `set_axes_style()` on `Axes` and `Axes3D`.
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
+| `background` | `Color` | `White` | 2D plot-area fill, under the data; alpha 0 shows the figure background. A 3D box uses `Box3DStyle::pane_color` |
 | `spine_color` | `Color` | `{0.3, 0.3, 0.3, 1}` | Frame and axis lines |
 | `spine_linewidth` | `float` | `1` | |
 | `spine_bottom`, `spine_left`, `spine_top`, `spine_right` | `bool` | `true` | The four 2D frame edges; ignored in 3D |
@@ -271,6 +299,7 @@ Passed to `set_axes_style()` on `Axes` and `Axes3D`.
 | `zaxis_x`, `zaxis_y` | `AxisPosition` | `Auto` | Where the z axis sits (3D) |
 | `origin_x`, `origin_y`, `origin_z` | `std::optional<double>` | unset | Put the other axes through this data value; overrides the enums |
 | `frame_margin` | `float` | `0` | Space around the frame and its labels before an outside legend or colorbar |
+| `show_xticks`, `show_yticks`, `show_zticks` | `bool` | `true` | `false` hides that axis' tick marks and labels and frees their room; grid lines stay. `show_zticks` is 3D only |
 | `tick_color` | `Color` | `{0.3, 0.3, 0.3, 1}` | |
 | `tick_length` | `float` | `5` | |
 | `tick_linewidth` | `float` | `1` | |
@@ -324,6 +353,85 @@ Passed to `set_colorbar_style()`; styles every colorbar of the axes.
 | `border_color` | `Color` | `{0.3, 0.3, 0.3, 1}` | |
 | `border_linewidth` | `float` | `1` | |
 | `font_path` | `std::string` | empty | |
+
+---
+
+## Text
+
+### Pos
+
+One coordinate of a text's position, for `Axes::text()` and `annotate()`.
+
+| Member | Meaning |
+|---|---|
+| `Pos(double)` | A data value; implicit, so a plain number works |
+| `Pos::fraction(double f)` | A fraction of the plot frame from its left (x) or bottom (y) edge |
+| `v`, `space` | The value and its `Coords` (`Data`, `Fraction`) |
+
+### TextOptions
+
+Passed to `text()`, `annotate()` and the `Axes3D` ones.
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `fontsize` | `float` | `12` | Pixels as drawn; constant under zoom and at any 3D distance |
+| `color` | `Color` | `Black` | |
+| `alpha` | `float` | `1` | Of everything the text draws (text, box, arrow) |
+| `font_path` | `std::string` | empty | Empty = the default font |
+| `ha` | `HAlign` | `Left` | Where the block sits against its anchor, across |
+| `va` | `VAlign` | `Baseline` | ... and up/down; `Baseline` is the last line's |
+| `rotation` | `float` | `0` | Degrees counter-clockwise, about the anchor |
+| `dx`, `dy` | `float` | `0` | Nudge of the whole text, box included; y up |
+| `linespacing` | `float` | `1.2` | Lines (`'\n'`) are `linespacing` × `fontsize` apart |
+| `background` | `Color` | transparent | Box fill; alpha 0 = no fill |
+| `edgecolor` | `std::optional<Color>` | unset | Box outline; unset = the text colour |
+| `edge_linewidth` | `float` | `0` | 0 = no outline |
+| `pad` | `float` | `4` | Box margin around the text |
+| `clip_to_frame` | `bool` | `false` | Cut at the plot frame; by default a text whose data position leaves the view is hidden whole |
+| `parse_math` | `bool` | `true` | Draw `$...$` as math (only when the figure's `mathtext` is on too) |
+
+### ArrowOptions
+
+The arrow `annotate()` draws from its text to the point.
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `head` | `ArrowHead` | `Filled` | At the point |
+| `tail` | `ArrowHead` | `None` | At the text |
+| `head_length`, `head_width` | `float` | `10`, `7` | |
+| `linewidth` | `float` | `1.25` | |
+| `color` | `std::optional<Color>` | unset | Unset = the text colour |
+| `linestyle` | `LineStyle` | `Solid` | |
+| `gap_text`, `gap_point` | `float` | `2`, `0` | Pixels left clear at the text's box and before the point |
+| `arc` | `float` | `0` | 0 = straight; otherwise it bows to one side by `arc` × its length (negative: the other side), as matplotlib's `arc3` |
+
+---
+
+## Events
+
+### Event
+
+What a callback registered with `Figure::connect()` receives. One flat record; the
+`kind` says which fields mean anything. Valid only during the call.
+
+| Field | Type | Kinds | Meaning |
+|---|---|---|---|
+| `kind` | `EventKind` | all | |
+| `mods` | `int` | mouse, scroll, key | `EventMods` bits: `kModCtrl`, `kModShift`, `kModAlt`, `kModSuper` |
+| `button` | `int` | `MouseDown/Up` | 0 left, 1 right, 2 middle |
+| `double_click` | `bool` | `MouseDown` | |
+| `x`, `y` | `float` | mouse, scroll | Logical pixels from the top left of the plot area |
+| `axes` | `int` | mouse, scroll | The subplot under the cursor (as `add_subplot()` numbers it; a span by its first cell); -1 outside every frame |
+| `has_data`, `xdata`, `ydata`, `zdata` | `bool`, `double` | mouse, scroll | The data point under the cursor; in 3D where the cursor meets the nearest visible `Plane2D`, else `has_data` is false |
+| `scroll_x`, `scroll_y` | `double` | `Scroll` | Notches; positive y = away from the user |
+| `consumed` | `EventConsumed` | mouse | What sextant did with the input: `None`, `Select`, `Navigate`, `GridDrag`. Informational |
+| `key` | `std::string` | `KeyDown/Up` | `"a"`, `"A"` (shift), `"ctrl+a"`, `"escape"`, `"f5"`, `"left"`, …; modifiers as `ctrl+`, `alt+`, `super+`, and `shift+` for keys other than letters |
+| `width`, `height` | `int` | `Resize` | The new plot area |
+| `pick_kind` | `PickKind` | `Pick` | What was hit |
+| `pick_object` | `int` | `Pick` | Its index within its kind (on the axes, or on the plane) |
+| `pick_index` | `int` | `Pick` | Point, bar, marker or vertex; a surface sample; the flat cell index of a heatmap or `bar3d` |
+| `pick_row`, `pick_col` | `int` | `Pick` | For heatmap and `bar3d` grids, else -1 |
+| `pick_plane` | `int` | `Pick` | The plane's index in `Axes3D::plane_at()`, or -1 |
 
 ---
 
@@ -438,6 +546,7 @@ Passed to `Axes3D::plane()`.
 | `size` | `float` | `20` | Marker diameter, constant at any depth |
 | `marker` | `MarkerStyle` | `Circle` | |
 | `alpha` | `float` | `1` | |
+| `edgecolor`, `edge_alpha`, `edge_linewidth` | | unset, `1`, `0` | Marker outline, as in `ScatterOptions`; darkened with `depthshade` |
 | `depthshade` | `float` | `0` | Darken with distance; 0 = off |
 | `cmap` | `Colormap` | `Viridis` | For a `colors` vector |
 | `vmin`, `vmax` | `float` | `0`, `0` | Equal = the series' own range |
@@ -504,6 +613,12 @@ Pixel sizes here are measured at the box centre.
 | `LegendAnchor` | `InsideTL`, `InsideTR`, `InsideBL`, `InsideBR`, `OutsideTL`, `OutsideTR`, `OutsideBL`, `OutsideBR`, `OutsideLT`, `OutsideLB`, `OutsideRT`, `OutsideRB` |
 | `ColorbarAnchor` | `Left`, `Right`, `Top`, `Bottom` |
 | `HAlign` | `Left`, `Center`, `Right` |
+| `VAlign` | `Top`, `Center`, `Baseline`, `Bottom` |
+| `Coords` | `Data`, `Fraction` |
+| `ArrowHead` | `None`, `Open`, `Filled`, `Bar` |
+| `EventKind` | `Close`, `MouseDown`, `MouseUp`, `MouseMove`, `Scroll`, `KeyDown`, `KeyUp`, `Resize`, `Pick` |
+| `PickKind` | `None`, `Line`, `Scatter`, `ScatterZ`, `Bar`, `Heatmap`, `Bar3D`, `Surface`, `SurfaceTri`, `Scatter3D`, `Line3D` |
+| `EventConsumed` | `None`, `Select`, `Navigate`, `GridDrag` |
 | `PanelTheme` | `Dark`, `Light`, `Classic` |
 | `Projection` | `Orthographic`, `Perspective` |
 | `PlaneOrientation` | `XY`, `YZ`, `ZX` |
@@ -532,3 +647,5 @@ field is a `std::vector` unless noted.
 | `SurfaceTriData` | `x`, `y`, `z`, `tri` (`std::uint32_t`; the derived triangulation if one was), `colors` (empty = flat) |
 | `Scatter3DData` | `x`, `y`, `z`, `colors` (empty = flat) |
 | `Line3DData` | `x`, `y`, `z`, `colors` (empty = flat) |
+| `TextData` | `text` (`std::string`), `x`, `y` (`Pos`), `arrow` (`bool`), `px`, `py` (`double`, the arrow's point) |
+| `Text3DData` | `text`, `x`, `y`, `z` (`double`), `in_frame` (`bool`, a `text2d()`: x, y are frame fractions), `arrow` (`bool`, an `annotate()`), `dx`, `dy` (`double`, its pixel offset) |

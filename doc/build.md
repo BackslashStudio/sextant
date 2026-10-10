@@ -1,9 +1,11 @@
 # Building and installing sextant
 
-The [README](../README.md#building) has the two-command recipe for each
-platform. This page covers the rest: where the dependencies come from, the build
-options, where things are installed, how to link, and how to run the tests.
+The [README](../README.md#building-from-source) has the two-command recipe for each
+platform. This page covers the rest: installing through vcpkg, where the
+dependencies come from, the build options, where things are installed, how to
+link, and how to run the tests.
 
+- [Installing with vcpkg](#installing-with-vcpkg)
 - [Requirements](#requirements)
 - [Third-party code](#third-party-code)
 - [Windows](#windows) · [Linux](#linux) · [macOS](#macos)
@@ -13,6 +15,50 @@ options, where things are installed, how to link, and how to run the tests.
 - [Linking statically](#linking-statically)
 - [Running the tests](#running-the-tests)
 - [Troubleshooting](#troubleshooting)
+
+## Installing with vcpkg
+
+sextant is a port in the BackslashStudio registry,
+<https://github.com/BackslashStudio/vcpkg-registry>, for Windows, Linux and
+macOS. In manifest mode, add the registry beside your `vcpkg.json`, in
+`vcpkg-configuration.json`:
+
+```json
+{
+  "default-registry": {
+    "kind": "git",
+    "repository": "https://github.com/microsoft/vcpkg",
+    "baseline": "<a microsoft/vcpkg commit>"
+  },
+  "registries": [
+    {
+      "kind": "git",
+      "repository": "https://github.com/BackslashStudio/vcpkg-registry",
+      "baseline": "<a commit of the registry>",
+      "packages": ["sextant"]
+    }
+  ]
+}
+```
+
+depend on it in `vcpkg.json` (`{ "dependencies": ["sextant"] }`), and use it from
+CMake with the vcpkg toolchain:
+
+```cmake
+find_package(sextant 1.1 CONFIG REQUIRED)
+target_link_libraries(my_app PRIVATE sextant::sextant)
+```
+
+`sextant::sextant` is a shared library on dynamic triplets (`x64-windows`,
+`x64-linux-dynamic`, `arm64-osx-dynamic`) and a static one on static triplets;
+the toolchain copies the DLLs next to your executable on Windows. Features, all on
+by default: `freetype` (FreeType text), `png` (libpng output) and `window-icon`
+(see `SEXTANT_WINDOW_ICON` below); turn them off with `"default-features": false`.
+
+**Your own GLFW on a static triplet.** sextant carries its own GLFW. Linking the
+`glfw3` port into the same program on a static triplet leaves one GLFW for both,
+and on macOS sextant then loses its GPU-less fallback and its resize fix. Use a
+dynamic triplet if your program also uses GLFW.
 
 ## Requirements
 
@@ -36,7 +82,7 @@ CMake generator works.
 |---|---|
 | Dear ImGui, NanoVG, stb, GLAD | Vendored in `third_party/`, nothing to do. `scripts/setup_deps.sh` (or `setup_deps.bat`) fetches fresh copies of the first three if you want them |
 | GLFW 3.4 | Downloaded at configure time, patched (`cmake/glfw/`), and linked statically into sextant |
-| FreeType, libpng | Optional. Windows: from vcpkg. Linux: the system packages. macOS: built from source into the library by default |
+| FreeType, libpng | Optional. Windows: from vcpkg. Linux: the system packages. macOS: built from source into the library by default. `SEXTANT_BUNDLE_DEPS` builds them from source on any platform |
 
 Without FreeType, text is rasterized by stb_truetype; without libpng, PNGs are
 written by stb_image_write. Both fallbacks produce working output, and CMake
@@ -88,6 +134,12 @@ The X11 and Wayland packages are for GLFW, which is built with both. FreeType an
 libpng are linked from the system, so `libsextant.so` uses the distribution's
 `libfreetype` and `libpng` at runtime.
 
+**Exporting with no display.** `savefig()` and `render_png()` work with no X or
+Wayland server (containers, CI, SSH) through EGL. `libEGL` is loaded at run time,
+not linked, so building needs nothing more; at run time install `libegl1` and
+Mesa (`libegl-mesa0`, or the GPU driver's EGL). Without them exports fall back to
+a hidden window, which needs a display.
+
 Both libstdc++ and libc++ work. For Clang with libc++, configure with
 `-DCMAKE_CXX_COMPILER=clang++`, and `-stdlib=libc++` in `CMAKE_CXX_FLAGS`,
 `CMAKE_EXE_LINKER_FLAGS` and `CMAKE_SHARED_LINKER_FLAGS`.
@@ -101,7 +153,7 @@ cmake --build build --target install_dist
 ```
 
 FreeType 2.14.3 and libpng 1.6.58 are built from source and linked into
-`libsextant.dylib` (see `SEXTANT_MACOS_STATIC_DEPS` below), so the dylib needs
+`libsextant.dylib` (see `SEXTANT_BUNDLE_DEPS` below), so the dylib needs
 nothing beyond what every Mac has. zlib comes from the SDK.
 
 - **Deployment target.** `CMAKE_OSX_DEPLOYMENT_TARGET` defaults to 11.0, the
@@ -122,12 +174,15 @@ Pass any of these to the configure step as `-D<option>=<value>`.
 | `SEXTANT_USE_FREETYPE` | `ON` | Rasterize text with FreeType. `OFF`, or FreeType not found: stb_truetype |
 | `SEXTANT_USE_LIBPNG` | `ON` | Write PNGs with libpng. `OFF`, or libpng not found: stb_image_write |
 | `SEXTANT_FETCH_GLFW` | `ON` | Download and build GLFW. `OFF` uses an installed GLFW 3.3 or newer (without sextant's macOS patches) |
-| `SEXTANT_MACOS_STATIC_DEPS` | `ON` on macOS, else `OFF` | Build FreeType and libpng from source into `libsextant.dylib`. `OFF` links Homebrew's dylibs instead |
+| `SEXTANT_BUNDLE_DEPS` | `ON` on macOS, else `OFF` | Build FreeType and libpng (and zlib, except on macOS) from source into the library. On macOS, `OFF` links Homebrew's dylibs instead. Was `SEXTANT_MACOS_STATIC_DEPS`, which still sets the macOS default |
+| `SEXTANT_WINDOW_ICON` | `ON` | Give windows the sextant icon in the title bar and taskbar (Windows, Linux X11). `OFF` keeps the platform default |
+| `SEXTANT_BUILD_SHARED` | `ON` | Build the shared library. `OFF` builds `sextant_static` alone |
 | `SEXTANT_BUILD_STATIC` | `ON` | Also build and install `sextant_static` |
-| `SEXTANT_BUILD_TESTS` | `ON` | Build the test programs (not installed) |
+| `SEXTANT_BUILD_TESTS` | `ON` at top level | Build the test programs (not installed); off when sextant is a subproject |
 | `SEXTANT_LOCAL_INSTALL_PREFIX` | `<source>/dist` | Where `install_dist` installs |
 | `VCPKG_TARGET_TRIPLET` | `x64-windows-static-md` on Windows | vcpkg triplet for FreeType and libpng; only read with the vcpkg toolchain |
 | `CMAKE_OSX_DEPLOYMENT_TARGET` | `11.0` | Oldest macOS the build runs on |
+| `SEXTANT_PACKAGE_BUILD` | `OFF` | For package managers (the vcpkg port): one `sextant` target following `BUILD_SHARED_LIBS`, dependencies from `find_package` |
 
 `install_dist` builds only the libraries it installs, so the test programs are
 built only by a plain `cmake --build build`.
@@ -161,7 +216,7 @@ matching one for each configuration of your project.
 
 ```cmake
 list(APPEND CMAKE_PREFIX_PATH "/path/to/sextant/dist")   # or -DCMAKE_PREFIX_PATH=...
-find_package(sextant CONFIG REQUIRED)
+find_package(sextant 1.1 CONFIG REQUIRED)
 target_link_libraries(my_app PRIVATE sextant::sextant)
 ```
 

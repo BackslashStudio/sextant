@@ -1,5 +1,5 @@
 #pragma once
-// What a GUI-kit component gets to draw one figure (GUI-kit R3): the snapshot,
+// What a GUI-kit component gets to draw one figure: the snapshot,
 // the edit channel, and the state shared by every component bound to that
 // figure. A component's own state (CosmeticState, DataPanelState, ...) is
 // passed beside it, owned by whoever hosts the component.

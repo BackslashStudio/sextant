@@ -142,7 +142,7 @@ namespace lt {
         }
         check(ok_calls == total,
               "api: every span on every kind accepts one entry per point -- x included on line() "
-              "and bar(), which threw on an x field before step 16 (" +
+              "and bar(), which once threw on an x field (" +
               std::to_string(ok_calls) + "/" + std::to_string(total) + ")");
         check(bad_throws == total,
               "api: and every one of them throws on a count that is not one per point (" +

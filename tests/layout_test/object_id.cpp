@@ -1,4 +1,4 @@
-// Plot-object identity (GUI-kit R9): every plot object and plane has an
+// Plot-object identity: every plot object and plane has an
 // ObjectId; edits carry it beside their index, so an edit made over one order
 // of objects lands on its own object after the caller removed or reordered
 // others -- or drops with it.
@@ -296,7 +296,7 @@ namespace lt {
     }
 
     void test_object_ids() {
-        std::printf("\n[object ids: identity, removal, reorder (GUI-kit R9)]\n");
+        std::printf("\n[object ids: identity, removal, reorder]\n");
         ids_assigned();
         remove_and_move();
         edits_follow_objects();

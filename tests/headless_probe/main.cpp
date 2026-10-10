@@ -1,4 +1,4 @@
-// Headless export with no display (v1.1 step 27).
+// Headless export with no display.
 //
 //   sextant_headless_probe <out_dir> [--window]
 //

@@ -42,13 +42,13 @@ namespace sextant {
         // set_background().
         Color background = {0.93f, 0.93f, 0.93f, 1.0f};
 
-        // Math in text (v1.1 step 32): a string with an even, nonzero count of
-        // `$` not preceded by a backslash draws its $...$ spans as math, a
-        // subset of matplotlib's mathtext (x^2, x_i, \alpha, \pm, ...). Titles,
-        // tick labels, legend and colorbar names, suptitle and text()/annotate()
-        // all take it. Math that does not parse draws as written, with a warning
-        // through set_message_handler() from the call that set it. false draws
-        // every string as written.
+        // Math in text: a string with an even, nonzero count of `$` not preceded
+        // by a backslash draws its $...$ spans as math, a subset of matplotlib's
+        // mathtext (x^2, x_i, \alpha, \pm, ...). Titles, tick labels, legend and
+        // colorbar names, suptitle and text()/annotate() all take it. Math that
+        // does not parse draws as written, with a warning through
+        // set_message_handler() from the call that set it. false draws every
+        // string as written.
         bool mathtext = true;
 
         // Initial width of the docked Cosmetic panel (show() only, never exported).
@@ -280,7 +280,8 @@ namespace sextant {
         void refresh();
 
         // Headless file output; format from the extension, default options. Use
-        // savefig_svg() to get the SvgSaveReport (its warning also goes to stderr).
+        // savefig_svg() to get the SvgSaveReport (its warning also goes through
+        // set_message_handler(), stderr by default).
         void savefig(std::string_view path);
 
         // Per-format output with options. width/height <= 0 use the Figure's size.
@@ -294,7 +295,8 @@ namespace sextant {
         // render_svg() return exactly the bytes savefig_png()/savefig_svg() write
         // with the same arguments; the savefig_* functions are these plus a file
         // write. render_rgba() is the PNG's pixels before encoding. A
-        // render_svg() whose scene order is inexact also warns on stderr.
+        // render_svg() whose scene order is inexact also warns, through
+        // set_message_handler() (stderr by default).
         std::vector<std::uint8_t> render_png(PngExportOptions opts = {},
                                              int width = 0, int height = 0);
 

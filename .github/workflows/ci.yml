@@ -20,8 +20,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     # `experimental: true` lets a platform being brought up run for the log
-    # without failing the workflow. None is today: macOS stopped being one at
-    # v1.0 step 21.6, and every job here is a gate.
+    # without failing the workflow. None is today: every job here is a gate.
     continue-on-error: ${{ matrix.experimental }}
     strategy:
       fail-fast: false
@@ -299,7 +298,7 @@ jobs:
             exit 1
           fi
 
-      # Headless export with no display (v1.1 step 27). Linux: run once with no
+      # Headless export with no display. Linux: run once with no
       # X or Wayland at all -- the EGL context -- and once under xvfb forced onto
       # the hidden-window path, and require byte-identical files: both are
       # llvmpipe, so any difference is the export path's. Elsewhere once, as a
@@ -337,7 +336,7 @@ jobs:
           exit $status
 
       # sextant_static linked into a shared module and loaded at run time, as
-      # the Python binding's extension module will be (v1.1 step 24): its own
+      # the Python binding's extension module will be: its own
       # build, with no shared sextant and FreeType/libpng/zlib from source, so
       # nothing from the steps above -- vcpkg, Homebrew, apt -- is linked in.
       - name: Build module consumer
@@ -362,7 +361,7 @@ jobs:
           mkdir -p out/module && cd out/module
           module=$(cat ../../build-module/module_path.txt)
           # No display on Linux: the module exports through EGL, as a Python
-          # extension in a container would (v1.1 step 27).
+          # extension in a container would.
           status=0
           env -u DISPLAY -u WAYLAND_DISPLAY ../../build-module/sextant_module_loader "$module" . \
             2>&1 | tee module_probe.txt || status=$?

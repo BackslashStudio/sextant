@@ -90,7 +90,7 @@ namespace lt {
         }
 
         // The test switch sends a headless request to the hidden window, so
-        // the two paths can be compared (v1.1 step 27).
+        // the two paths can be compared.
         platform::set_offscreen_gl_enabled(false);
         {
             GLContext ctx({.width = 32, .height = 24, .title = "layout_test", .visible = false,
@@ -165,7 +165,7 @@ namespace lt {
     }
 
     // -------------------------------------------------------------------------
-    // dpi: output pixels scale, the layout does not (v1.0 step 22.4)
+    // dpi: output pixels scale, the layout does not
     // -------------------------------------------------------------------------
     void test_png_dpi() {
         std::printf("\n[PNG dpi]\n");

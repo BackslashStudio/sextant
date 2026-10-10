@@ -21,7 +21,7 @@ namespace lt {
         check(is(sextant::Color::from_hex(0x00FF00), 0x00, 0xFF, 0x00, 0xFF),
               "0xRRGGBB: pure green");
 
-        // from_name: the string's length says whether there is alpha (v1.1 step 28).
+        // from_name: the string's length says whether there is alpha.
         using sextant::Color;
         check(is(Color::from_name("#112233"), 0x11, 0x22, 0x33, 0xFF), "#rrggbb");
         check(is(Color::from_name("#11223344"), 0x11, 0x22, 0x33, 0x44), "#rrggbbaa");

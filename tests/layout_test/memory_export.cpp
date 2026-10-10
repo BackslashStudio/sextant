@@ -1,4 +1,4 @@
-// In-memory export (v1.1 step 25): render_png(), render_svg(), render_rgba().
+// In-memory export: render_png(), render_svg(), render_rgba().
 // The savefig_* functions are these plus a file write, so the gate is byte
 // identity between a file and the in-memory output for the same figure --
 // 2D and 3D gallery figures, at the default and a raised dpi, headless and

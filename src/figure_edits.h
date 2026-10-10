@@ -48,7 +48,7 @@ struct PlotRowEdit {
     unsigned long long seen = ~0ull;   // see PlotCellEdit
     ObjectId id = 0, plane_id = 0;    // see PlotCellEdit
 
-    // The removed point, on the Insert that undoes a Remove (GUI-kit R10):
+    // The removed point, on the Insert that undoes a Remove:
     // Insert writes these values instead of copying row-1, and puts a value
     // into an optional column only where the point had one.
     struct Restore {
@@ -165,7 +165,7 @@ void merge_title_edits(TitleEdits& dst, const E& e) {
 // Applies each title `e` carries unless dst's was set after the snapshot it was
 // typed over. For Axes::Impl, Axes3D::Impl and both snapshot kinds.
 //
-// Undo (GUI-kit R10): every apply_* below takes an optional `inv`, the same
+// Undo: every apply_* below takes an optional `inv`, the same
 // type as the edit, and records in it the value each field it writes replaced;
 // a field it skips (a newer setter, a gone object) leaves nothing there.
 template <typename T, typename E>
@@ -459,7 +459,7 @@ struct PlotDataJournal {
 // frame; the render thread cannot throw). Validate before mut() to avoid a
 // needless clone.
 //
-// Each applier returns the op that undoes it (GUI-kit R10), or nothing when it
+// Each applier returns the op that undoes it, or nothing when it
 // changed nothing. The inverse addresses the object where it is now (index,
 // id, and its current data_stamp as `seen`, so a later set_*_data() makes the
 // undo drop); a list's inverse runs in reverse order.
@@ -1422,7 +1422,7 @@ bool axes_edit_empty(const E& e) {
 }
 
 // ---------------------------------------------------------------------------
-// Composing inverses (GUI-kit R10). A host coalescing a gesture that spans
+// Composing inverses. A host coalescing a gesture that spans
 // frames folds each frame's inverse into the gesture's: `older` undoes the
 // earlier frames, `newer` the latest. The result undoes both: the older value
 // of every field wins, and the newer data ops run first. When a gesture ends

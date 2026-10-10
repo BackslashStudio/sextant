@@ -1,4 +1,4 @@
-// Diagnostics through Figure::set_message_handler() (v1.1 step 26): what
+// Diagnostics through Figure::set_message_handler(): what
 // reaches the handler, and the thread contract -- any thread, no sextant lock
 // held, a throwing handler ignored.
 // Part of sextant_layout_test; see layout_test.h.

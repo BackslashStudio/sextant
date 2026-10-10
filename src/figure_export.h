@@ -47,7 +47,7 @@ void export_figure_svg(const FigureSnapshot& fsnap, std::string_view path,
                        SvgSaveReport* report = nullptr,
                        const FigureMeasure* on_screen = nullptr);
 
-// A save asked for in the window (the Save dialog's result, GUI-kit R4), with
+// A save asked for in the window (the Save dialog's result), with
 // every size resolved: the figure size in logical pixels, never <= 0.
 struct SaveRequest {
     std::string path;
