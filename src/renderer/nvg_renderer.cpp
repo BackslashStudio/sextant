@@ -87,9 +87,38 @@ namespace sextant {
         nvgTextAlign(vg_, NVG_ALIGN_LEFT | NVG_ALIGN_BASELINE);
         for (const RichRun& r: l.runs) {
             nvgFontSize(vg_, r.size);
-            nvgText(vg_, x0 + r.x, base + r.dy, r.text.c_str(), nullptr);
+            if (!r.italic) {
+                nvgText(vg_, x0 + r.x, base + r.dy, r.text.c_str(), nullptr);
+                continue;
+            }
+            if (const int it = italic_for_path(font_path); it != -1) {
+                nvgFontFaceId(vg_, it);
+                nvgText(vg_, x0 + r.x, base + r.dy, r.text.c_str(), nullptr);
+                nvgFontFaceId(vg_, font_for_path(font_path));
+                continue;
+            }
+            // No italic face: the upright one, slanted about its baseline.
+            nvgSave(vg_);
+            nvgTranslate(vg_, x0 + r.x, base + r.dy);
+            nvgSkewX(vg_, -std::atan(kSyntheticSlant));
+            nvgText(vg_, 0.0f, 0.0f, r.text.c_str(), nullptr);
+            nvgRestore(vg_);
         }
         nvgFontSize(vg_, size);
+    }
+
+    int NvgRenderer::italic_for_path(const std::string& path) {
+        if (auto it = italic_cache_.find(path); it != italic_cache_.end()) return it->second;
+        int h = -1;
+        // Only a font text_metrics.cpp also reads italic, so widths agree.
+        if (has_italic_face(path))
+            if (const FontEntry* e = find_font_entry(path)) {
+                h = nvgCreateFontAtIndex(vg_, ("italic:" + e->italic_path + "#" + std::to_string(e->italic_index)).c_str(),
+                                         e->italic_path.c_str(), e->italic_index);
+                if (h != -1) add_fallbacks(h, e->italic_path);
+            }
+        italic_cache_[path] = h;
+        return h;
     }
 
     NvgRenderer::~NvgRenderer() {

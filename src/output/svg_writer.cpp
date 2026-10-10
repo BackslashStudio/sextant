@@ -69,8 +69,9 @@ static std::string svg_font_family(const AxesStyle& style) {
 // A user's string as <text> content: escaped, or for a string with math
 // (rich_text.h) one <tspan> per run. Each run moves by dx/dy from where the
 // previous one ended rather than to an absolute x, so text-anchor still places
-// the whole line; a run in a script carries its own font-size. `size` is the
-// size the enclosing element sets.
+// the whole line; a run in a script carries its own font-size, a math letter
+// font-style="italic" (a viewer slants the family when it has no italic face).
+// `size` is the size the enclosing element sets.
 static std::string text_body(const std::string& text, const std::string& font_path, float size) {
     if (!is_rich(text)) return xml_escape(text);
     const RichLine line = layout_rich(font_path, size, text);
@@ -81,6 +82,7 @@ static std::string text_body(const std::string& text, const std::string& font_pa
         if (std::fabs(r.x - pen) > 1e-3f) o << " dx=\"" << r.x - pen << "\"";
         if (r.dy != dy) o << " dy=\"" << r.dy - dy << "\"";
         if (r.size != size) o << " font-size=\"" << r.size << "\"";
+        if (r.italic) o << " font-style=\"italic\"";
         o << ">" << xml_escape(r.text) << "</tspan>";
         pen = r.x + r.width;
         dy = r.dy;

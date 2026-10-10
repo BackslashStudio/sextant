@@ -19,6 +19,15 @@ struct FontVMetrics {
 // renderers do. Falls back to a per-character estimate if the font can't be read.
 float text_width(const std::string& font_path, float px_size, std::string_view text);
 
+// The same in the italic face of `font_path`'s family (FontEntry::italic_path,
+// v1.1 step 32b), with the same fallback fonts. A font with no italic face
+// measures upright: the renderers slant it, which keeps its advances.
+float text_width_italic(const std::string& font_path, float px_size, std::string_view text);
+
+// Whether `font_path` ("" = the default) has an italic face text_width_italic()
+// reads. For tests.
+bool has_italic_face(const std::string& font_path);
+
 FontVMetrics font_vmetrics(const std::string& font_path, float px_size);
 
 // True when real glyph metrics are in use (not the fallback). For tests.

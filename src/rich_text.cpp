@@ -18,6 +18,7 @@ struct Atom {
     enum class Kind { Glyphs, Group, Space } kind = Kind::Glyphs;
     Cls cls = Cls::Ord;
     std::string text;              // Glyphs
+    bool italic = false;           // Glyphs
     float em = 0.0f;               // Space, in ems of the current size
     std::vector<Atom> group;       // Group
     std::vector<Atom> sub, sup;
@@ -68,6 +69,28 @@ std::size_t utf8_len(unsigned char b0) {
     if ((b0 & 0xF8) == 0xF0) return 4;
     return 1;
 }
+
+// The first code point of `s` (0 for an empty or broken one).
+char32_t first_cp(std::string_view s) {
+    if (s.empty()) return 0;
+    const auto b0 = static_cast<unsigned char>(s[0]);
+    const std::size_t n = utf8_len(b0);
+    if (n > s.size()) return 0;
+    char32_t cp = n == 1 ? b0 : n == 2 ? (b0 & 0x1Fu) : n == 3 ? (b0 & 0x0Fu) : (b0 & 0x07u);
+    for (std::size_t k = 1; k < n; ++k) cp = (cp << 6) | (static_cast<unsigned char>(s[k]) & 0x3Fu);
+    return cp;
+}
+
+// The letters math sets in italic, as matplotlib's mathtext does: Latin
+// (accented ones too) and lower-case Greek, not Greek capitals.
+bool math_letter(char32_t cp) {
+    if ((cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z')) return true;
+    if (cp >= 0x00C0 && cp <= 0x024F) return cp != 0x00D7 && cp != 0x00F7;   // not the times or divide sign
+    if (cp >= 0x03B1 && cp <= 0x03C9) return true;
+    return cp == 0x03D1 || cp == 0x03D5 || cp == 0x03D6 || cp == 0x03F1 || cp == 0x03F5;
+}
+
+bool greek_capital(char32_t cp) { return cp >= 0x0391 && cp <= 0x03A9; }
 
 // ---- The symbol table -------------------------------------------------------
 
@@ -215,9 +238,22 @@ public:
 
 private:
     enum class End { Dollar, Brace };
+    // The font a group sets: math's default (italic letters), \mathrm, \mathit.
+    enum class Font { Math, Roman, Italic };
 
     std::string_view s_;
     std::size_t i_ = 0;
+    Font font_ = Font::Math;
+
+    // Whether a glyph atom's text draws italic in the current font.
+    bool italic(std::string_view text) const {
+        const char32_t cp = first_cp(text);
+        switch (font_) {
+            case Font::Math: return math_letter(cp);
+            case Font::Italic: return math_letter(cp) || greek_capital(cp) || (cp >= '0' && cp <= '9');
+            default: return false;
+        }
+    }
 
     [[noreturn]] void fail(std::size_t pos, std::string reason) const {
         throw ParseFail{pos, std::move(reason)};
@@ -320,6 +356,7 @@ private:
                 default: break;
             }
         }
+        a.italic = italic(a.text);
         out.push_back(std::move(a));
     }
 
@@ -330,10 +367,11 @@ private:
         return a;
     }
 
-    static Atom glyph(char32_t cp, Cls cls) {
+    Atom glyph(char32_t cp, Cls cls) const {
         Atom a;
         a.text = utf8(cp);
         a.cls = cls;
+        a.italic = italic(a.text);
         return a;
     }
 
@@ -383,13 +421,16 @@ private:
             return;
         }
         if (name == "mathrm" || name == "mathit" || name == "mathdefault") {
-            // Upright and italic draw alike until italics (step 32b).
+            // \mathdefault is matplotlib's text font: upright.
             skip_spaces();
             if (i_ >= s_.size() || s_[i_] != '{') fail(at, "'\\" + std::string(name) + "' needs '{'");
             ++i_;
+            const Font outer = font_;
+            font_ = name == "mathit" ? Font::Italic : Font::Roman;
             Atom g;
             g.kind = Atom::Kind::Group;
             g.group = list(End::Brace);
+            font_ = outer;
             out.push_back(std::move(g));
             return;
         }
@@ -508,6 +549,10 @@ constexpr float kSupRaise = 0.40f;
 constexpr float kSubDrop = 0.18f;
 constexpr float kSubDropBoth = 0.25f;
 constexpr float kScriptSpace = 0.05f;
+// A superscript after an italic letter moves right by this much, clear of the
+// letter's slanted top (matplotlib's delta_slanted kern; TeX's italic
+// correction). Its subscript stays at the letter's edge.
+constexpr float kSupItalicKern = 0.06f;
 
 struct Box {
     std::vector<RichRun> runs;
@@ -519,14 +564,14 @@ class Layout {
 public:
     Layout(const std::string& font, float base) : font_(font), base_(base) {}
 
-    Box text(const std::string& t, float size) const {
+    Box text(const std::string& t, float size, bool italic = false) const {
         Box b;
         const FontVMetrics vm = font_vmetrics(font_, size);
         b.ascent = vm.ascent;
         b.descent = vm.descent;
         if (t.empty()) return b;
-        b.width = text_width(font_, size, t);
-        b.runs.push_back({t, 0.0f, 0.0f, size, b.width});
+        b.width = italic ? text_width_italic(font_, size, t) : text_width(font_, size, t);
+        b.runs.push_back({t, 0.0f, 0.0f, size, b.width, italic});
         return b;
     }
 
@@ -573,7 +618,7 @@ private:
             b.descent = std::min(b.descent, vm.descent);
             return b;
         }
-        return text(a.text, base_ * scale_at(level));
+        return text(a.text, base_ * scale_at(level), a.italic);
     }
 
     Box scripted(const Atom& a, int level) const {
@@ -586,30 +631,33 @@ private:
         const float extra_up = std::max(0.0f, n.ascent - vm.ascent);
         const float extra_down = std::max(0.0f, vm.descent - n.descent);
         const float x = n.width;
-        float scripts_w = 0.0f;
+        const bool slanted = a.kind == Atom::Kind::Glyphs && a.italic;
+        float scripts_end = x;
         if (a.has_sup) {
             const Box s = list(a.sup, level + 1);
-            append(n, s, x, -(kSupRaise * size + extra_up));
-            scripts_w = std::max(scripts_w, s.width);
+            const float sx = x + (slanted ? kSupItalicKern * size : 0.0f);
+            append(n, s, sx, -(kSupRaise * size + extra_up));
+            scripts_end = std::max(scripts_end, sx + s.width);
         }
         if (a.has_sub) {
             const Box s = list(a.sub, level + 1);
             append(n, s, x, (a.has_sup ? kSubDropBoth : kSubDrop) * size + extra_down);
-            scripts_w = std::max(scripts_w, s.width);
+            scripts_end = std::max(scripts_end, x + s.width);
         }
-        n.width = x + scripts_w + kScriptSpace * size;
+        n.width = scripts_end + kScriptSpace * size;
         return n;
     }
 };
 
-// Neighbouring runs at one size and baseline, with nothing between them,
-// become one: fewer draw calls, and plainer SVG.
+// Neighbouring runs at one size, baseline and slant, with nothing between
+// them, become one: fewer draw calls, and plainer SVG.
 void merge_runs(std::vector<RichRun>& runs) {
     std::vector<RichRun> out;
     for (RichRun& r: runs) {
         if (!out.empty()) {
             RichRun& p = out.back();
-            if (p.size == r.size && p.dy == r.dy && std::abs(p.x + p.width - r.x) < 1e-3f) {
+            if (p.size == r.size && p.dy == r.dy && p.italic == r.italic
+                && std::abs(p.x + p.width - r.x) < 1e-3f) {
                 p.text += r.text;
                 p.width += r.width;
                 continue;

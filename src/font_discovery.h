@@ -6,10 +6,19 @@ namespace sextant {
     struct FontEntry {
         std::string name; // display name, derived from filename stem
         std::string path; // absolute path to the font file
+        // The family's italic (or oblique) face, "" when it has none, and its
+        // face index inside a .ttc (macOS's Times.ttc holds all four styles).
+        // For math letters (v1.1 step 32b).
+        std::string italic_path;
+        int italic_index = 0;
     };
 
     // Scans OS font directories once (cached): sorted, de-duplicated .ttf/.ttc/.otf.
     const std::vector<FontEntry>& discover_system_fonts();
+
+    // The discovered family whose file is `font_path` ("" = pick_default_font()),
+    // compared as paths; nullptr for a file discovery did not list.
+    const FontEntry* find_font_entry(const std::string& font_path);
 
     // The default font when font_path is "": "Times New Roman" if found, else the
     // first discovered font, else nullptr. Shared by NvgRenderer and the SVG writer.

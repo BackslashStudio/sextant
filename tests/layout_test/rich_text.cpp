@@ -20,7 +20,11 @@ namespace lt {
             return n;
         }
 
+        // A superscript's kern after an italic letter (kSupItalicKern).
+        constexpr float kKern = 0.06f * kSize;
+
         float w(std::string_view s, float size = kSize) { return text_width("", size, s); }
+        float wi(std::string_view s, float size = kSize) { return text_width_italic("", size, s); }
 
         // The plot frame: the first axes-background rect in an SVG.
         bool frame_of(const std::string& svg, PlotRect& out) {
@@ -56,8 +60,29 @@ namespace lt {
             return k;
         }
 
+        // How far the ink's top quarter sits right of its bottom quarter, in px:
+        // about 0 for an upright 'I', several px for a slanted one.
+        float lean_of(const RgbaImage& img) {
+            const Ink k = ink_of(img);
+            if (k.rows == 0) return 0.0f;
+            const int band = std::max(1, (k.bottom - k.top + 1) / 4);
+            auto centre = [&](int y0, int y1) {
+                double sx = 0.0, n = 0.0;
+                for (int y = y0; y < y1; ++y)
+                    for (int x = 0; x < img.width; ++x) {
+                        const std::size_t i = (static_cast<std::size_t>(y) * img.width + x) * 4;
+                        if (img.pixels[i] < 100 && img.pixels[i + 1] < 100 && img.pixels[i + 2] < 100) {
+                            sx += x;
+                            n += 1.0;
+                        }
+                    }
+                return n > 0.0 ? static_cast<float>(sx / n) : 0.0f;
+            };
+            return centre(k.top, k.top + band) - centre(k.bottom + 1 - band, k.bottom + 1);
+        }
+
         // One text, alone on a bare white figure.
-        RgbaImage text_alone(const std::string& s, bool mathtext = true) {
+        RgbaImage text_alone(const std::string& s, bool mathtext = true, const std::string& font_path = "") {
             FigureOptions o;
             o.width = 300;
             o.height = 160;
@@ -74,6 +99,7 @@ namespace lt {
             to.color = Color::Black;
             to.ha = HAlign::Center;
             to.va = VAlign::Center;
+            to.font_path = font_path;
             ax->text(s, Pos::fraction(0.5), Pos::fraction(0.5), to);
             return fig->render_rgba();
         }
@@ -143,10 +169,10 @@ namespace lt {
             if (l.runs.size() == 2) {
                 const RichRun& b = l.runs[0];
                 const RichRun& s = l.runs[1];
-                check(b.text == "x" && b.size == kSize && b.dy == 0.0f, "x^2: the base on the baseline");
+                check(b.text == "x" && b.italic && b.size == kSize && b.dy == 0.0f, "x^2: the italic base on the baseline");
                 check(s.text == "2" && close(s.size, kSize * 0.7f), "x^2: the script at 0.7 of the size");
-                check(close(s.dy, -0.40f * kSize) && close(s.x, w("x")), "x^2: raised 0.4 em, right after the base");
-                check(close(l.width, w("x") + w("2", kSize * 0.7f) + 0.05f * kSize), "x^2: width, script space included");
+                check(close(s.dy, -0.40f * kSize) && close(s.x, wi("x") + kKern), "x^2: raised 0.4 em, clear of the slanted base");
+                check(!s.italic && close(l.width, wi("x") + kKern + w("2", kSize * 0.7f) + 0.05f * kSize), "x^2: width, script space included");
             }
             check(l.vm.ascent > font_vmetrics("", kSize).ascent, "x^2: reaches above the plain font");
             check(l.vm.descent == font_vmetrics("", kSize).descent, "x^2: no deeper than the plain font");
@@ -156,14 +182,18 @@ namespace lt {
             check(sub.vm.descent < font_vmetrics("", kSize).descent, "x_i: reaches below the plain font");
 
             const RichLine both = layout_rich("", kSize, "$x_i^2$");
-            check(both.runs.size() == 3 && close(both.runs[1].x, both.runs[2].x),
-                  "x_i^2: both scripts stacked at one x");
+            check(both.runs.size() == 3, "x_i^2: three runs");
             if (both.runs.size() == 3) {
-                const float sup_dy = both.runs[1].text == "2" ? both.runs[1].dy : both.runs[2].dy;
-                const float sub_dy = both.runs[1].text == "i" ? both.runs[1].dy : both.runs[2].dy;
-                check(close(sup_dy, -0.40f * kSize) && close(sub_dy, 0.25f * kSize),
+                const RichRun& sup = both.runs[1].text == "2" ? both.runs[1] : both.runs[2];
+                const RichRun& sub = both.runs[1].text == "i" ? both.runs[1] : both.runs[2];
+                check(close(sup.dy, -0.40f * kSize) && close(sub.dy, 0.25f * kSize),
                       "x_i^2: the subscript drops further under a superscript");
+                check(close(sub.x, wi("x")) && close(sup.x, sub.x + kKern),
+                      "x_i^2: stacked, the superscript kerned clear of the slant");
             }
+            const RichLine up = layout_rich("", kSize, "$2_i^2$");
+            check(up.runs.size() == 3 && close(up.runs[1].x, up.runs[2].x),
+                  "2_i^2: after an upright base both scripts stand at one x");
 
             const RichLine nest = layout_rich("", kSize, "$e^{x^2}$");
             check(nest.runs.size() == 3 && close(nest.runs[2].size, kSize * 0.5f), "a second level is half size");
@@ -187,31 +217,35 @@ namespace lt {
 
             // a + b: medium spaces on both sides of a binary operator...
             const RichLine bin = layout_rich("", kSize, "$a+b$");
-            check(close(bin.width, w("a") + w("+") + w("b") + 2.0f * (2.0f / 9.0f) * kSize, 0.01f),
+            check(close(bin.width, wi("a") + w("+") + wi("b") + 2.0f * (2.0f / 9.0f) * kSize, 0.01f),
                   "a+b: a medium space each side of '+'");
             // ...but not on a unary one.
-            check(close(layout_rich("", kSize, "$+b$").width, w("+") + w("b"), 0.01f), "+b: a unary '+' has none");
+            check(close(layout_rich("", kSize, "$+b$").width, w("+") + wi("b"), 0.01f), "+b: a unary '+' has none");
             const RichLine rel = layout_rich("", kSize, "$a=b$");
-            check(close(rel.width, w("a") + w("=") + w("b") + 2.0f * (5.0f / 18.0f) * kSize, 0.01f),
+            check(close(rel.width, wi("a") + w("=") + wi("b") + 2.0f * (5.0f / 18.0f) * kSize, 0.01f),
                   "a=b: a thick space each side of '='");
             const float s7 = kSize * 0.7f;
             const RichLine sc = layout_rich("", kSize, "$x^{a+b}$");
-            check(close(sc.width, w("x") + w("a", s7) + w("+", s7) + w("b", s7) + 0.05f * kSize, 0.01f),
+            check(close(sc.width, wi("x") + kKern + wi("a", s7) + w("+", s7) + wi("b", s7) + 0.05f * kSize, 0.01f),
                   "no medium space inside a script");
-            check(close(layout_rich("", kSize, "$a\\,b$").width, w("a") + w("b") + kSize / 6.0f, 0.01f),
+            check(close(layout_rich("", kSize, "$a\\,b$").width, wi("a") + wi("b") + kSize / 6.0f, 0.01f),
                   "\\, is a thin space");
-            check(close(layout_rich("", kSize, "$a\\quad b$").width, w("a") + w("b") + kSize, 0.01f),
+            check(close(layout_rich("", kSize, "$a\\quad b$").width, wi("a") + wi("b") + kSize, 0.01f),
                   "\\quad is an em");
-            check(close(layout_rich("", kSize, "$\\sin x$").width, w("sin") + w("x") + kSize / 6.0f, 0.01f),
+            check(close(layout_rich("", kSize, "$\\sin x$").width, w("sin") + wi("x") + kSize / 6.0f, 0.01f),
                   "\\sin: upright, a thin space before its argument");
 
             const RichLine mixed = layout_rich("", kSize, "cost \\$5 at $x$");
-            check(!mixed.runs.empty() && mixed.runs[0].text == "cost $5 at x",
-                  "outside a span, \\$ is a dollar; runs on one baseline merge");
+            check(mixed.runs.size() == 2 && mixed.runs[0].text == "cost $5 at " && mixed.runs[1].text == "x",
+                  "outside a span, \\$ is a dollar; the text run stays upright, the letter apart");
             const RichLine txt = layout_rich("", kSize, "$\\text{a b}_1$");
             check(!txt.runs.empty() && txt.runs[0].text == "a b", "\\text keeps its spaces");
-            check(layout_rich("", kSize, "$\\mathrm{d}x$").runs.size() == 1, "\\mathrm groups");
-            check(is_rich("$\\{x\\}$") && layout_rich("", kSize, "$\\{x\\}$").runs[0].text == "{x}",
+            const RichLine dx = layout_rich("", kSize, "$\\mathrm{d}x$");
+            check(dx.runs.size() == 2 && dx.runs[0].text == "d" && !dx.runs[0].italic && dx.runs[1].italic,
+                  "\\mathrm groups, upright");
+            const RichLine braces = layout_rich("", kSize, "$\\{x\\}$");
+            check(is_rich("$\\{x\\}$") && braces.runs.size() == 3 && braces.runs[0].text == "{"
+                  && braces.runs[1].text == "x" && braces.runs[2].text == "}",
                   "escaped braces are characters");
         }
 
@@ -247,8 +281,9 @@ namespace lt {
         // --- SVG: tspans, plain bytes, literal when off -----------------------------
         {
             const std::string rich = svg_titled("$x^2$ [m]");
-            check(rich.find("<tspan>x</tspan><tspan dy=\"-") != std::string::npos,
-                  "SVG: the script is a tspan shifted up");
+            check(rich.find("<tspan font-style=\"italic\">x</tspan><tspan dx=\"") != std::string::npos,
+                  "SVG: an italic x, then the script kerned");
+            check(rich.find("dy=\"-") != std::string::npos, "SVG: the script is a tspan shifted up");
             check(rich.find("font-size=\"12.6\">2</tspan>") != std::string::npos, "SVG: at its own font size");
             const std::string plain = svg_titled("x2 [m]");
             check(count(plain, "<tspan") == 0, "SVG: a plain title has no tspan");
@@ -275,7 +310,7 @@ namespace lt {
             ax->text("$b^2$ rich", 0.6, 0.6);
             const std::string svg = fig->render_svg().svg;
             check(svg.find(">$a^2$ raw</text>") != std::string::npos, "parse_math=false: written as given");
-            check(svg.find("<tspan>b</tspan><tspan dy=") != std::string::npos, "...its neighbour is still math");
+            check(svg.find("<tspan font-style=\"italic\">b</tspan><tspan dx=") != std::string::npos, "...its neighbour is still math");
             check(svg.find(">a</tspan>") == std::string::npos, "...and no tspan of its own");
             const Ink off = ink_of(text_alone("$x^2$", false));
             FigureOptions o;
@@ -334,6 +369,84 @@ namespace lt {
                       std::string("SVG: every site goes through the seam (") + g + ")");
             check(svg.find(">x</tspan><tspan dy=") != std::string::npos
                   && svg.find(">y</tspan><tspan dy=") != std::string::npos, "SVG: tick labels too");
+        }
+
+        // --- Italic math letters (step 32b) ----------------------------------------------
+        {
+            std::printf("\n[rich text: italic math letters (step 32b)]\n");
+            auto runs = [](std::string_view s) { return layout_rich("", kSize, s).runs; };
+            auto all_italic = [&](std::string_view s, bool want) {
+                const auto r = runs(s);
+                return !r.empty() && std::all_of(r.begin(), r.end(), [&](const RichRun& x) { return x.italic == want; });
+            };
+            check(all_italic("$x$", true) && all_italic("$xyz$", true) && all_italic("$\\alpha\\omega$", true),
+                  "italic: Latin letters and lower-case Greek");
+            check(all_italic("$2$", false) && all_italic("$\\Gamma\\Omega$", false) && all_italic("$+$", false)
+                  && all_italic("$\\infty$", false), "upright: digits, Greek capitals, symbols");
+            check(all_italic("$\\sin$", false) && all_italic("$\\mathrm{xy}$", false)
+                  && all_italic("$\\text{xy}$", false) && all_italic("$\\mathdefault{x}$", false),
+                  "upright: function names, \\mathrm, \\text, \\mathdefault");
+            check(all_italic("$\\mathit{x2\\Gamma}$", true) && runs("$\\mathit{x2\\Gamma}$").size() == 1,
+                  "\\mathit: letters, digits and Greek capitals, one run");
+            check(all_italic("$\\mathrm{a\\mathit{b}}$", false) == false && runs("$\\mathrm{a\\mathit{b}}$").size() == 2,
+                  "fonts nest and restore");
+            const auto r2 = runs("at $t$ s");
+            check(r2.size() == 3 && !r2[0].italic && r2[1].italic && !r2[2].italic, "text outside a span stays upright");
+            check(layout_rich("", kSize, "$x$").width == wi("x"), "an italic run measures in the italic face");
+
+            // Discovery: each family's italic face, when it has one.
+            const FontEntry* def = pick_default_font();
+            if (def) {
+                std::printf("  default font %s; italic: %s (face %d)\n", def->name.c_str(),
+                            def->italic_path.empty() ? "none" : def->italic_path.c_str(), def->italic_index);
+                check(find_font_entry("") == def && find_font_entry(def->path) == def,
+                      "find_font_entry: \"\" and the file both name the default");
+            }
+            bool files_exist = true;
+            int with_italic = 0;
+            for (const FontEntry& e: discover_system_fonts())
+                if (!e.italic_path.empty()) {
+                    ++with_italic;
+                    files_exist = files_exist && std::filesystem::exists(e.italic_path);
+                }
+            std::printf("  %d discovered families have an italic face\n", with_italic);
+            check(files_exist, "every italic face found is a file");
+            if (has_italic_face("")) {
+                const char* sample = "The quick brown fox jumps over the lazy dog";
+                check(wi(sample) != w(sample), "the default's italic face measures on its own");
+                check(lean_of(text_alone("$I$")) > 2.0f && std::fabs(lean_of(text_alone("I"))) < 1.0f,
+                      "PNG: the italic face leans, the upright one does not");
+            } else {
+                std::printf("  (the default font has no italic face: italic checks skipped)\n");
+            }
+
+            // No italic face (a copy discovery never listed): measured upright,
+            // drawn slanted, and the SVG asks the viewer for italic.
+            namespace fs = std::filesystem;
+            if (def) {
+                const fs::path copy = fs::temp_directory_path()
+                                      / ("sextant_no_italic" + fs::path(def->path).extension().string());
+                std::error_code ec;
+                fs::copy_file(def->path, copy, fs::copy_options::overwrite_existing, ec);
+                if (!ec) {
+                    const std::string cp = copy.string();
+                    check(!has_italic_face(cp) && text_width_italic(cp, kSize, "xy") == text_width(cp, kSize, "xy"),
+                          "no italic face: measured upright");
+                    check(lean_of(text_alone("$I$", true, cp)) > 2.0f
+                          && std::fabs(lean_of(text_alone("I", true, cp))) < 1.0f,
+                          "PNG: no italic face, the upright one slanted");
+                    auto fig = Figure::create();
+                    auto ax = fig->add_subplot(1, 1, 1);
+                    TextOptions to;
+                    to.font_path = cp;
+                    ax->text("$x$", 0.5, 0.5, to);
+                    check(fig->render_svg().svg.find("<tspan font-style=\"italic\">x</tspan>") != std::string::npos,
+                          "SVG: font-style=\"italic\" either way");
+                    fs::remove(copy, ec);
+                } else {
+                    std::printf("  (could not copy the default font: synthetic-slant checks skipped)\n");
+                }
+            }
         }
 
         // --- Warnings from the call that set the string ------------------------------

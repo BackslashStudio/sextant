@@ -34,7 +34,7 @@ uint32_t read_u32be(const char* p) {
          | (uint32_t(uint8_t(p[2])) << 8)  |  uint32_t(uint8_t(p[3]));
 }
 
-struct RawFontInfo { std::string family, subfamily, path; };
+struct RawFontInfo { std::string family, subfamily, path; int index = 0; };
 
 // Reads one byte range of an open font file (fonts are read in ranges, not
 // whole; only the header, directory and 'name' table are needed).
@@ -55,9 +55,9 @@ bool read_range(std::ifstream& f, size_t pos, size_t len, std::vector<char>& out
 }
 
 // Family (nameID 1) and subfamily (2) from an sfnt 'name' table, since
-// filenames often aren't family names ("times.ttf"). No FreeType needed.
-// nullopt if the file doesn't parse.
-std::optional<RawFontInfo> read_font_names(const fs::path& font_path) {
+// filenames often aren't family names ("times.ttf"), of face `index` (a .ttc
+// holds several). No FreeType needed. nullopt if the file doesn't parse.
+std::optional<RawFontInfo> read_font_names(const fs::path& font_path, int index = 0) {
     std::ifstream f(font_path, std::ios::binary);
     if (!f) return std::nullopt;
 
@@ -66,8 +66,14 @@ std::optional<RawFontInfo> read_font_names(const fs::path& font_path) {
 
     size_t sfnt_offset = 0;
     if (read_u32be(head.data()) == 0x74746366u /* 'ttcf' */) {
-        sfnt_offset = read_u32be(head.data() + 12); // first font in the collection
+        std::vector<char> off;
+        if (index < 0 || static_cast<uint32_t>(index) >= read_u32be(head.data() + 8)
+            || !read_range(f, 12 + size_t(index) * 4, 4, off))
+            return std::nullopt;
+        sfnt_offset = read_u32be(off.data());
         if (!read_range(f, sfnt_offset, 12, head)) return std::nullopt;
+    } else if (index != 0) {
+        return std::nullopt;
     }
 
     const uint16_t num_tables = read_u16be(head.data() + 4);
@@ -129,6 +135,7 @@ std::optional<RawFontInfo> read_font_names(const fs::path& font_path) {
 
     RawFontInfo info;
     info.path = font_path.string();
+    info.index = index;
     for (uint16_t pass = 0; pass < 3 && (info.family.empty() || info.subfamily.empty()); ++pass) {
         for (uint16_t i = 0; i < count; ++i) {
             const size_t rec = records + size_t(i) * 12;
@@ -148,7 +155,17 @@ std::optional<RawFontInfo> read_font_names(const fs::path& font_path) {
     return info;
 }
 
-void scan_dir(const fs::path& dir, bool recursive, std::vector<RawFontInfo>& out) {
+bool is_ttc(const fs::path& p) {
+    auto ext = p.extension().string();
+    std::transform(ext.begin(), ext.end(), ext.begin(),
+                    [](unsigned char c) { return std::tolower(c); });
+    return ext == ".ttc";
+}
+
+// Each file's first face into `out`; a collection's other faces into `more`,
+// which only supply italic faces (an entry's path loads face 0).
+void scan_dir(const fs::path& dir, bool recursive, std::vector<RawFontInfo>& out,
+              std::vector<RawFontInfo>& more) {
     std::error_code ec;
     if (!fs::exists(dir, ec) || ec) return;
 
@@ -159,6 +176,12 @@ void scan_dir(const fs::path& dir, bool recursive, std::vector<RawFontInfo>& out
             out.push_back(std::move(*info));
         else
             out.push_back({entry.path().stem().string(), "", entry.path().string()});
+        if (is_ttc(entry.path()))
+            for (int k = 1; k < 64; ++k) {
+                auto face = read_font_names(entry.path(), k);
+                if (!face) break;
+                more.push_back(std::move(*face));
+            }
     };
 
     if (recursive) {
@@ -176,20 +199,31 @@ void scan_dir(const fs::path& dir, bool recursive, std::vector<RawFontInfo>& out
     }
 }
 
+// A plain italic face: "Italic" or "Oblique", alone or after "Regular"/"Book";
+// a bold or light italic is not the regular face's.
+bool is_plain_italic(const std::string& subfamily) {
+    std::string s = subfamily;
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return std::tolower(c); });
+    for (const char* name : {"italic", "oblique", "regular italic", "regular oblique", "book italic",
+                             "book oblique"})
+        if (s == name) return true;
+    return false;
+}
+
 std::vector<FontEntry> scan_all() {
-    std::vector<RawFontInfo> raw;
+    std::vector<RawFontInfo> raw, more;
 #if defined(_WIN32)
-    scan_dir("C:/Windows/Fonts", false, raw);
+    scan_dir("C:/Windows/Fonts", false, raw, more);
 #elif defined(__APPLE__)
-    scan_dir("/System/Library/Fonts", true, raw);
-    scan_dir("/Library/Fonts", true, raw);
+    scan_dir("/System/Library/Fonts", true, raw, more);
+    scan_dir("/Library/Fonts", true, raw, more);
     if (const char* home = std::getenv("HOME"))
-        scan_dir(fs::path(home) / "Library/Fonts", true, raw);
+        scan_dir(fs::path(home) / "Library/Fonts", true, raw, more);
 #else
-    scan_dir("/usr/share/fonts", true, raw);
-    scan_dir("/usr/local/share/fonts", true, raw);
+    scan_dir("/usr/share/fonts", true, raw, more);
+    scan_dir("/usr/local/share/fonts", true, raw, more);
     if (const char* home = std::getenv("HOME"))
-        scan_dir(fs::path(home) / ".fonts", true, raw);
+        scan_dir(fs::path(home) / ".fonts", true, raw, more);
 #endif
 
     std::sort(raw.begin(), raw.end(),
@@ -209,6 +243,23 @@ std::vector<FontEntry> scan_all() {
         found.push_back({best->family, best->path});
         i = j;
     }
+
+    // Each family's italic face: the first plain one in path order, so the
+    // pick does not depend on the directory listing's order.
+    std::vector<const RawFontInfo*> italics;
+    for (const auto* list : {&raw, &more})
+        for (const RawFontInfo& r : *list)
+            if (is_plain_italic(r.subfamily)) italics.push_back(&r);
+    std::sort(italics.begin(), italics.end(), [](const RawFontInfo* a, const RawFontInfo* b) {
+        return a->path != b->path ? a->path < b->path : a->index < b->index;
+    });
+    for (FontEntry& e : found)
+        for (const RawFontInfo* r : italics)
+            if (r->family == e.name) {
+                e.italic_path = r->path;
+                e.italic_index = r->index;
+                break;
+            }
     return found;
 }
 
@@ -217,6 +268,14 @@ std::vector<FontEntry> scan_all() {
 const std::vector<FontEntry>& discover_system_fonts() {
     static std::vector<FontEntry> cached = scan_all();
     return cached;
+}
+
+const FontEntry* find_font_entry(const std::string& font_path) {
+    if (font_path.empty()) return pick_default_font();
+    const fs::path wanted(font_path);
+    for (const auto& f : discover_system_fonts())
+        if (fs::path(f.path) == wanted) return &f;
+    return nullptr;
 }
 
 const FontEntry* pick_default_font() {

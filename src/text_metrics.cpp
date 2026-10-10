@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <fstream>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -56,7 +57,20 @@ struct LoadedFont {
 };
 
 std::mutex                                   g_mutex;
-std::unordered_map<std::string, LoadedFont>  g_fonts;    // resolved path -> font
+std::unordered_map<std::string, LoadedFont>  g_fonts;    // font_key() -> font
+
+// A face's file and index inside it (0 unless a .ttc's later face).
+struct FaceRef {
+    std::string file;
+    int index = 0;
+};
+
+// resolved path -> its italic face, nullopt when it has none.
+std::unordered_map<std::string, std::optional<FaceRef>> g_italics;
+
+std::string font_key(const std::string& file, int index) {
+    return index == 0 ? file : file + "#" + std::to_string(index);
+}
 
 // "" = the default font, resolved once via pick_default_font() as the
 // renderers do.
@@ -96,12 +110,14 @@ bool uses_typo_metrics([[maybe_unused]] const stbtt_fontinfo& info) {
 #endif
 }
 
-// Caller must hold g_mutex. Unusable fonts are cached with ok=false.
-LoadedFont& get_font(const std::string& path) {
-    if (auto it = g_fonts.find(path); it != g_fonts.end()) return it->second;
+// Face `index` of `path`. Caller must hold g_mutex. Unusable fonts are cached
+// with ok=false.
+LoadedFont& get_font(const std::string& path, int index = 0) {
+    const std::string key = font_key(path, index);
+    if (auto it = g_fonts.find(key); it != g_fonts.end()) return it->second;
 
     // In place: stbtt_fontinfo points into `data`, which must not move.
-    LoadedFont& f = g_fonts[path];
+    LoadedFont& f = g_fonts[key];
     if (path.empty()) return f;
 
     std::ifstream in(path, std::ios::binary | std::ios::ate);
@@ -116,7 +132,7 @@ LoadedFont& get_font(const std::string& path) {
         return f;
     }
 
-    const int offset = stbtt_GetFontOffsetForIndex(f.data.data(), 0);
+    const int offset = stbtt_GetFontOffsetForIndex(f.data.data(), index);
     if (offset < 0 || !stbtt_InitFont(&f.info, f.data.data(), offset)) {
         f.data.clear();
         return f;
@@ -224,18 +240,20 @@ float measure(const LoadedFont& f, const std::vector<const LoadedFont*>& fallbac
     return x;
 }
 
-} // namespace
+// The italic face of the font at resolved `path`, memoized. Caller must hold
+// g_mutex.
+const std::optional<FaceRef>& italic_of(const std::string& path) {
+    if (auto it = g_italics.find(path); it != g_italics.end()) return it->second;
+    std::optional<FaceRef> face;
+    if (const FontEntry* e = find_font_entry(path); e && !e->italic_path.empty())
+        face = FaceRef{e->italic_path, e->italic_index};
+    return g_italics[path] = std::move(face);
+}
 
-float text_width(const std::string& font_path, float px_size, std::string_view text) {
-    if (text.empty()) return 0.0f;
-    const short isize = quantize_isize(px_size);
-    if (isize <= 0) return 0.0f;
+// Width of `text` in face `index` of `path`, cached. Caller must hold g_mutex.
+float width_locked(const std::string& path, int index, short isize, std::string_view text) {
     const float size = static_cast<float>(isize) / 10.0f;
-
-    const std::string& path = resolve_path(font_path);
-
-    std::lock_guard<std::mutex> lock(g_mutex);
-    LoadedFont& f = get_font(path);
+    LoadedFont& f = get_font(path, index);
     if (!f.ok) {
         // No usable font: estimate per codepoint (not per byte).
         std::size_t chars = 0;
@@ -263,6 +281,35 @@ float text_width(const std::string& font_path, float px_size, std::string_view t
     }
     ++f.width_entries;
     return w;
+}
+
+} // namespace
+
+float text_width(const std::string& font_path, float px_size, std::string_view text) {
+    if (text.empty()) return 0.0f;
+    const short isize = quantize_isize(px_size);
+    if (isize <= 0) return 0.0f;
+    const std::string& path = resolve_path(font_path);
+    std::lock_guard<std::mutex> lock(g_mutex);
+    return width_locked(path, 0, isize, text);
+}
+
+float text_width_italic(const std::string& font_path, float px_size, std::string_view text) {
+    if (text.empty()) return 0.0f;
+    const short isize = quantize_isize(px_size);
+    if (isize <= 0) return 0.0f;
+    const std::string& path = resolve_path(font_path);
+    std::lock_guard<std::mutex> lock(g_mutex);
+    const std::optional<FaceRef>& it = italic_of(path);
+    if (it && get_font(it->file, it->index).ok) return width_locked(it->file, it->index, isize, text);
+    return width_locked(path, 0, isize, text);
+}
+
+bool has_italic_face(const std::string& font_path) {
+    const std::string& path = resolve_path(font_path);
+    std::lock_guard<std::mutex> lock(g_mutex);
+    const std::optional<FaceRef>& it = italic_of(path);
+    return it && get_font(it->file, it->index).ok;
 }
 
 FontVMetrics font_vmetrics(const std::string& font_path, float px_size) {

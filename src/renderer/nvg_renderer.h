@@ -89,6 +89,10 @@ private:
     // loaded from `path`.
     void add_fallbacks(int font, const std::string& path);
 
+    // The italic face of font_path's family (FontEntry::italic_path), loaded on
+    // first use; -1 when it has none, and its math letters are slanted instead.
+    int italic_for_path(const std::string& path);
+
     // A user's string (title, tick label, legend name, text) at (x, y) under
     // NanoVG alignment `align`, in the current face and fill colour: plain text
     // through nvgText() as always, a string with math (rich_text.h) run by run.
@@ -99,6 +103,7 @@ private:
     NVGcontext* vg_;
     int         font_ = -1;
     std::unordered_map<std::string, int> font_cache_;
+    std::unordered_map<std::string, int> italic_cache_;   // font_path -> handle or -1
     std::vector<std::pair<std::string, int>> fallbacks_;   // path, handle
 
     // Colorbar gradient images, cached by colormap and orientation (true =
