@@ -106,10 +106,13 @@ private:
     }
 };
 
+// Every plot object below with a `color` option holds it set, so drawing and the
+// panels dereference it: a plotting call fills it from the color cycle, and an
+// object built here (tests, internal copies) starts with the old fixed default.
 struct LinePlot {
     CowVec<double> x, y;
     ErrorBarData   err;
-    LineOptions    opts;
+    LineOptions    opts{.color = Color::Blue};
     unsigned long long data_stamp = 0;
     ObjectId id = 0;
 
@@ -131,7 +134,7 @@ struct LinePlot {
 struct ScatterPlot {
     CowVec<double> x, y;
     ErrorBarData   err;
-    ScatterOptions opts;
+    ScatterOptions opts{.color = Color::Blue};
     unsigned long long data_stamp = 0;
     ObjectId id = 0;
 };
@@ -143,7 +146,7 @@ struct BarPlot {
     CowVec<double> heights;
     double         bar_width = 1.0;
     ErrorBarData   err;
-    BarOptions     opts;
+    BarOptions     opts{.color = Color::Blue};
     unsigned long long data_stamp = 0;
     ObjectId id = 0;
 };
@@ -209,7 +212,7 @@ struct Bar3DPlot {
     CowVec<double> bottoms;
     double         u_width = 1.0, v_width = 1.0;
     PlaneOrientation orient = PlaneOrientation::XY;
-    Bar3DOptions   opts;
+    Bar3DOptions   opts{.color = Color::Blue};
     unsigned long long data_stamp = 0;
     ObjectId id = 0;
 
@@ -233,7 +236,7 @@ struct SurfacePlot {
     CowVec<double> u, v;
     CowVec<double> heights;
     PlaneOrientation orient = PlaneOrientation::XY;
-    SurfaceOptions opts;
+    SurfaceOptions opts{.color = Color::Blue};
     unsigned long long data_stamp = 0;
     ObjectId id = 0;
 
@@ -273,7 +276,7 @@ struct SurfaceTriPlot {
     CowVec<double> x, y, z;
     CowVec<std::uint32_t> tri;
     CowVec<double> colors;
-    SurfaceTriOptions opts;
+    SurfaceTriOptions opts{.color = Color::Blue};
     unsigned long long data_stamp = 0;
     ObjectId id = 0;
 
@@ -327,7 +330,7 @@ struct Scatter3DPlot {
     CowVec<double> x, y, z;
     CowVec<double> colors;
     ErrorBar3DData err;
-    Scatter3DOptions opts;
+    Scatter3DOptions opts{.color = Color::Blue};
     unsigned long long data_stamp = 0;
     ObjectId id = 0;
 
@@ -360,7 +363,7 @@ struct Line3DPlot {
     CowVec<double> x, y, z;
     CowVec<double> colors;
     ErrorBar3DData err;
-    Line3DOptions opts;
+    Line3DOptions opts{.color = Color::Blue};
     unsigned long long data_stamp = 0;
     ObjectId id = 0;
 

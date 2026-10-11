@@ -1,7 +1,10 @@
 name: CI
 
 on:
+  # Pushes to dev only: main is fast-forwarded to commits dev already tested, and a
+  # release tag points at one of them, so neither needs a run of its own.
   push:
+    branches: [dev]
     paths-ignore: ['README.md', 'doc/**', 'LICENSE', 'THIRD_PARTY_NOTICES.md']
   pull_request:
     paths-ignore: ['README.md', 'doc/**', 'LICENSE', 'THIRD_PARTY_NOTICES.md']

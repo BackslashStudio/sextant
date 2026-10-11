@@ -43,10 +43,10 @@ void bar3d_faces(const Bar3DPlot& b, std::size_t k, const Transform3D& tf,
 
 // True when the plot must be drawn back to front (alpha < 1).
 inline bool bar3d_translucent(const Bar3DPlot& b) {
-    return b.opts.color.a * b.opts.alpha < 1.0f;
+    return b.opts.color->a * b.opts.alpha < 1.0f;
 }
 inline float bar3d_alpha(const Bar3DPlot& b) {
-    return std::clamp(b.opts.color.a * b.opts.alpha, 0.0f, 1.0f);
+    return std::clamp(b.opts.color->a * b.opts.alpha, 0.0f, 1.0f);
 }
 // Outline opacity, independent of the faces'.
 inline float bar3d_edge_alpha(const Bar3DPlot& b) {

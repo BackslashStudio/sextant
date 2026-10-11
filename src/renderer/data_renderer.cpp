@@ -571,8 +571,8 @@ uniform int  uColormapped;
 out vec4 FragColor;
 void main() {
     // vColor.a carries the resolved alpha; only rgb comes from the map.
-    vec3 rgb = uColormapped == 1
-             ? texture(uCmap, vec2(clamp(vValue, 0.0, 1.0), 0.5)).rgb
+    vec3 rgb = uColormapped != 0
+             ? texture(uCmap, vec2(uColormapped == 2 ? fract(vValue) : clamp(vValue, 0.0, 1.0), 0.5)).rgb
              : vColor.rgb;
     FragColor = vec4(rgb * vShade, vColor.a);
 }
@@ -709,7 +709,8 @@ void main() {
 in vec4  vColor;
 in float vValue;
 in float vShadeT;
-// The colormap as a 256x1 lookup, and whether this path has values to look up.
+// The colormap as a 256x1 lookup, and how this path looks values up: 0 = none
+// (flat), 1 = clamped to the ends, 2 = wrapped (a cyclic map).
 uniform sampler2D uCmap;
 uniform int  uColormapped;
 // x = depthshade; y and z are the vertex shader's, unused here.
@@ -718,8 +719,8 @@ out vec4 FragColor;
 void main() {
     vec4 c = vColor;
     // vColor.a carries the resolved alpha; only rgb comes from the map.
-    if (uColormapped == 1)
-        c = vec4(texture(uCmap, vec2(clamp(vValue, 0.0, 1.0), 0.5)).rgb, c.a);
+    if (uColormapped != 0)
+        c = vec4(texture(uCmap, vec2(uColormapped == 2 ? fract(vValue) : clamp(vValue, 0.0, 1.0), 0.5)).rgb, c.a);
     FragColor = vec4(c.rgb * (1.0 - uShade.x * vShadeT), c.a);
 }
 )";
@@ -738,8 +739,8 @@ PEEL
 void main() {
     peel_or_discard(gl_FragCoord.z);
     vec4 c = vColor;
-    if (uColormapped == 1)
-        c = vec4(texture(uCmap, vec2(clamp(vValue, 0.0, 1.0), 0.5)).rgb, c.a);
+    if (uColormapped != 0)
+        c = vec4(texture(uCmap, vec2(uColormapped == 2 ? fract(vValue) : clamp(vValue, 0.0, 1.0), 0.5)).rgb, c.a);
     vec3 rgb = c.rgb * (1.0 - uShade.x * vShadeT);
     FragColor = vec4(rgb * c.a, c.a);
 }
@@ -851,8 +852,8 @@ layout(location = 0) out vec4 FragColor;
 PEEL
 void main() {
     peel_or_discard(gl_FragCoord.z);
-    vec3 rgb = uColormapped == 1
-             ? texture(uCmap, vec2(clamp(vValue, 0.0, 1.0), 0.5)).rgb
+    vec3 rgb = uColormapped != 0
+             ? texture(uCmap, vec2(uColormapped == 2 ? fract(vValue) : clamp(vValue, 0.0, 1.0), 0.5)).rgb
              : vColor.rgb;
     rgb *= vShade;
     FragColor = vec4(rgb * vColor.a, vColor.a);
@@ -1973,7 +1974,7 @@ void main() {
                 glUniform1f(lineseg_u_.dist_scale, dist_scale);
             }
 
-            const auto& c = lp.opts.color;
+            const auto& c = *lp.opts.color;
             glUniform4f(lineseg_u_.color,
                         c.r, c.g, c.b, c.a * lp.opts.alpha);
             glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, e.segments);
@@ -2077,7 +2078,7 @@ void main() {
             glUniform2fv(scatter_u_.scale, 1, m.scale);
             glUniform2fv(scatter_u_.offset, 1, m.offset);
 
-            const auto& c = sp.opts.color;
+            const auto& c = *sp.opts.color;
             glUniform4f(scatter_u_.color,
                         c.r, c.g, c.b, c.a * sp.opts.alpha);
             glUniform1i(scatter_u_.marker,
@@ -2153,11 +2154,8 @@ void main() {
                 inst.clear();
                 inst.reserve(sp.x.size() * 7);
                 for (std::size_t i = 0; i < sp.x.size(); ++i) {
-                    float t = (vrange != 0.0f)
-                                  ? static_cast<float>((sp.z[i] - vmin) / vrange)
-                                  : 0.0f;
-                    t = std::clamp(t, 0.0f, 1.0f);
-                    const uint8_t* c = &lut[static_cast<int>(t * 255.0f) * 4];
+                    const double t = (vrange != 0.0f) ? (sp.z[i] - vmin) / vrange : 0.0;
+                    const uint8_t* c = &lut[colormaps::index(t, sp.opts.cmap.is_cyclic()) * 4];
 
                     if (e.data_space) {
                         inst.push_back(static_cast<float>(sp.x[i] - e.anchor_x));
@@ -2327,7 +2325,7 @@ void main() {
             glUniform2fv(line_u_.scale, 1, m.scale);
             glUniform2fv(line_u_.offset, 1, m.offset);
 
-            const auto& c = bp.opts.color;
+            const auto& c = *bp.opts.color;
             glUniform4f(line_u_.color,
                         c.r, c.g, c.b, c.a * bp.opts.alpha);
             glDrawArrays(GL_TRIANGLES, 0, e.fill_verts);
@@ -2476,7 +2474,7 @@ void main() {
         for (std::size_t i = 0; i < all.lines.size(); ++i) {
             const auto& p = all.lines[i];
             if (!p.err.empty())
-                emit(line_err_cache_, p, static_cast<int>(i), p.x, p.y, p.opts.color);
+                emit(line_err_cache_, p, static_cast<int>(i), p.x, p.y, *p.opts.color);
         }
         for (std::size_t i = 0; i < all.bars.size(); ++i) {
             const auto& p = all.bars[i];
@@ -2488,7 +2486,7 @@ void main() {
         for (std::size_t i = 0; i < all.scatters.size(); ++i) {
             const auto& p = all.scatters[i];
             if (!p.err.empty())
-                emit(scatter_err_cache_, p, static_cast<int>(i), p.x, p.y, p.opts.color);
+                emit(scatter_err_cache_, p, static_cast<int>(i), p.x, p.y, *p.opts.color);
         }
         for (std::size_t i = 0; i < all.scatter_z.size(); ++i) {
             const auto& p = all.scatter_z[i];
@@ -3485,7 +3483,7 @@ void main() {
             glUniform3fv(bu.box_scale, 1, box_scale);
             glUniform3fv(bu.box_offset, 1, box_offset);
             const float col[4] = {
-                b.opts.color.r, b.opts.color.g, b.opts.color.b,
+                b.opts.color->r, b.opts.color->g, b.opts.color->b,
                 bar3d_alpha(b)
             };
             glUniform4fv(bu.color, 1, col);
@@ -3639,10 +3637,10 @@ void main() {
                                c.data_generation != data_generation_ ||
                                c.shading != s.opts.shading ||
                                c.alpha != s.opts.alpha ||
-                               c.color.r != s.opts.color.r ||
-                               c.color.g != s.opts.color.g ||
-                               c.color.b != s.opts.color.b ||
-                               c.color.a != s.opts.color.a ||
+                               c.color.r != s.opts.color->r ||
+                               c.color.g != s.opts.color->g ||
+                               c.color.b != s.opts.color->b ||
+                               c.color.a != s.opts.color->a ||
                                c.colormap != s.opts.colormap ||
                                c.cmap != s.opts.cmap ||
                                c.vmin != vmin || c.vmax != vmax ||
@@ -3732,7 +3730,7 @@ void main() {
                 c.anchor = anchor;
                 c.shading = s.opts.shading;
                 c.alpha = s.opts.alpha;
-                c.color = s.opts.color;
+                c.color = *s.opts.color;
                 c.colormap = s.opts.colormap;
                 c.cmap = s.opts.cmap;
                 c.vmin = vmin;
@@ -3888,10 +3886,10 @@ void main() {
                                c.data_generation != data_generation_ ||
                                c.shading != s.opts.shading ||
                                c.alpha != s.opts.alpha ||
-                               c.color.r != s.opts.color.r ||
-                               c.color.g != s.opts.color.g ||
-                               c.color.b != s.opts.color.b ||
-                               c.color.a != s.opts.color.a ||
+                               c.color.r != s.opts.color->r ||
+                               c.color.g != s.opts.color->g ||
+                               c.color.b != s.opts.color->b ||
+                               c.color.a != s.opts.color->a ||
                                c.colormapped != s.colormapped() ||
                                c.cmap != s.opts.cmap ||
                                c.vmin != vmin || c.vmax != vmax ||
@@ -3979,7 +3977,7 @@ void main() {
                 c.anchor = anchor;
                 c.shading = s.opts.shading;
                 c.alpha = s.opts.alpha;
-                c.color = s.opts.color;
+                c.color = *s.opts.color;
                 c.colormapped = s.colormapped();
                 c.cmap = s.opts.cmap;
                 c.vmin = vmin;
@@ -3997,7 +3995,7 @@ void main() {
             glUniformMatrix4fv(su.clip, 1, GL_FALSE, clip.data());
             glUniform3fv(su.box_scale, 1, box_scale);
             glUniform3fv(su.box_offset, 1, box_offset);
-            glUniform1i(su.colormapped, s.colormapped() ? 1 : 0);
+            glUniform1i(su.colormapped, !s.colormapped() ? 0 : s.opts.cmap.is_cyclic() ? 2 : 1);
 
             if (s.colormapped()) {
                 // 256x1 colormap texture, re-uploaded only when the map changes.
@@ -4009,13 +4007,13 @@ void main() {
                     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
                     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
                     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-                    surface_tri_cmap_in_tex_ = -1;
+                    surface_tri_cmap_in_tex_.reset();
                 }
-                if (surface_tri_cmap_in_tex_ != static_cast<int>(s.opts.cmap)) {
+                if (surface_tri_cmap_in_tex_ != s.opts.cmap) {
                     glBindTexture(GL_TEXTURE_2D, surface_tri_cmap_tex_);
                     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 256, 1, 0, GL_RGBA,
                                  GL_UNSIGNED_BYTE, colormaps::get(s.opts.cmap));
-                    surface_tri_cmap_in_tex_ = static_cast<int>(s.opts.cmap);
+                    surface_tri_cmap_in_tex_ = s.opts.cmap;
                 }
                 glBindTexture(GL_TEXTURE_2D, surface_tri_cmap_tex_);
                 glUniform1i(su.cmap, 0);
@@ -4156,10 +4154,10 @@ void main() {
                                c.data_generation != data_generation_ ||
                                c.size != s.opts.size ||
                                c.alpha != s.opts.alpha ||
-                               c.color.r != s.opts.color.r ||
-                               c.color.g != s.opts.color.g ||
-                               c.color.b != s.opts.color.b ||
-                               c.color.a != s.opts.color.a ||
+                               c.color.r != s.opts.color->r ||
+                               c.color.g != s.opts.color->g ||
+                               c.color.b != s.opts.color->b ||
+                               c.color.a != s.opts.color->a ||
                                c.colormapped != s.colormapped() ||
                                c.cmap != s.opts.cmap ||
                                c.vmin != vmin || c.vmax != vmax;
@@ -4215,7 +4213,7 @@ void main() {
                 c.anchor = anchor;
                 c.size = s.opts.size;
                 c.alpha = s.opts.alpha;
-                c.color = s.opts.color;
+                c.color = *s.opts.color;
                 c.colormapped = s.colormapped();
                 c.cmap = s.opts.cmap;
                 c.vmin = vmin;
@@ -4240,7 +4238,7 @@ void main() {
                             marker_edge(s.opts.edgecolor, s.opts.edge_alpha,
                                         s.opts.edge_linewidth,
                                         s.colormapped() ? Color{0.0f, 0.0f, 0.0f, 1.0f}
-                                                        : s.opts.color));
+                                                        : *s.opts.color));
 
             glBindVertexArray(scatter3d_vao_);
 
@@ -4351,10 +4349,10 @@ void main() {
             const bool stale = c.vbo == 0 || data_generation_ == 0 ||
                                c.data_generation != data_generation_ ||
                                c.alpha != l.opts.alpha ||
-                               c.color.r != l.opts.color.r ||
-                               c.color.g != l.opts.color.g ||
-                               c.color.b != l.opts.color.b ||
-                               c.color.a != l.opts.color.a ||
+                               c.color.r != l.opts.color->r ||
+                               c.color.g != l.opts.color->g ||
+                               c.color.b != l.opts.color->b ||
+                               c.color.a != l.opts.color->a ||
                                c.colormapped != l.colormapped() ||
                                c.loop != l.opts.loop ||
                                c.cmap != l.opts.cmap ||
@@ -4417,12 +4415,15 @@ void main() {
                     verts.push_back(cb.g);
                     verts.push_back(cb.b);
                     verts.push_back(cb.a);
-                    // Normalized as line3d_point_color() does; zero for flat series.
+                    // Normalized as line3d_point_color() does; zero for flat series. A
+                    // cyclic map's value goes unwrapped, so a segment crossing vmax
+                    // runs on round the map; the shader wraps it per fragment.
                     const double span = vmax - vmin;
+                    const bool cyclic = l.opts.cmap.is_cyclic();
                     auto norm = [&](std::size_t i) {
                         if (!l.colormapped() || span == 0.0) return 0.0f;
-                        return static_cast<float>(
-                            std::clamp((l.color_at(i) - vmin) / span, 0.0, 1.0));
+                        const double t = (l.color_at(i) - vmin) / span;
+                        return static_cast<float>(cyclic ? t : std::clamp(t, 0.0, 1.0));
                     };
                     verts.push_back(norm(a));
                     verts.push_back(norm(b));
@@ -4439,7 +4440,7 @@ void main() {
                 c.data_generation = data_generation_;
                 c.anchor = anchor;
                 c.alpha = l.opts.alpha;
-                c.color = l.opts.color;
+                c.color = *l.opts.color;
                 c.colormapped = l.colormapped();
                 c.loop = l.opts.loop;
                 c.cmap = l.opts.cmap;
@@ -4466,7 +4467,7 @@ void main() {
             glUniform4f(lu.depth, static_cast<float>(ddir.x), static_cast<float>(ddir.y),
                         static_cast<float>(ddir.z), dbase);
             glUniform3f(lu.shade, std::clamp(l.opts.depthshade, 0.0f, 1.0f), dmin, dspan);
-            glUniform1i(lu.colormapped, l.colormapped() ? 1 : 0);
+            glUniform1i(lu.colormapped, !l.colormapped() ? 0 : l.opts.cmap.is_cyclic() ? 2 : 1);
             if (l.colormapped()) {
                 // Unit 3 (0 = plane raster, 1/2 = peel depth textures).
                 if (!line3d_cmap_tex_) {
@@ -4478,12 +4479,12 @@ void main() {
                     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
                     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
                 }
-                if (line3d_cmap_in_tex_ != static_cast<int>(l.opts.cmap)) {
+                if (line3d_cmap_in_tex_ != l.opts.cmap) {
                     glBindTexture(GL_TEXTURE_2D, line3d_cmap_tex_);
                     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
                     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 256, 1, 0,
                                  GL_RGBA, GL_UNSIGNED_BYTE, colormaps::get(l.opts.cmap));
-                    line3d_cmap_in_tex_ = static_cast<int>(l.opts.cmap);
+                    line3d_cmap_in_tex_ = l.opts.cmap;
                 }
                 glActiveTexture(GL_TEXTURE3);
                 glBindTexture(GL_TEXTURE_2D, line3d_cmap_tex_);

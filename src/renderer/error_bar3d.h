@@ -36,10 +36,10 @@ inline Color errorbar3d_color(const ErrorBar3DOptions& style, Color fallback) {
     return style.color.value_or(fallback);
 }
 inline Color errorbar3d_color(const Scatter3DPlot& s) {
-    return errorbar3d_color(s.opts.errorbar, s.colormapped() ? Color::Black : s.opts.color);
+    return errorbar3d_color(s.opts.errorbar, s.colormapped() ? Color::Black : *s.opts.color);
 }
 inline Color errorbar3d_color(const Line3DPlot& l) {
-    return errorbar3d_color(l.opts.errorbar, l.colormapped() ? Color::Black : l.opts.color);
+    return errorbar3d_color(l.opts.errorbar, l.colormapped() ? Color::Black : *l.opts.color);
 }
 
 // True when a series draws any error bar; `linewidth <= 0` draws none.

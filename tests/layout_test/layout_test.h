@@ -300,6 +300,9 @@ namespace lt {
 
     // color.cpp
     void test_color_from_hex();
+    void test_color_cycle();
+    void test_colormap_registry();
+    void test_colormap_cyclic();
 
     // axes3d.cpp
     void test_axes3d_projection();

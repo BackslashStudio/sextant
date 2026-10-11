@@ -41,7 +41,7 @@ namespace sextant {
 
     // True when the surface must be drawn back to front (alpha < 1).
     inline bool surface_translucent(const SurfacePlot& s) {
-        return s.opts.color.a * s.opts.alpha < 1.0f || s.opts.alpha < 1.0f;
+        return s.opts.color->a * s.opts.alpha < 1.0f || s.opts.alpha < 1.0f;
     }
 
     inline float surface_alpha(const SurfacePlot& s) {

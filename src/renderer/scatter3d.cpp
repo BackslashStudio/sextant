@@ -7,12 +7,12 @@
 namespace sextant {
     Color scatter3d_point_color(const Scatter3DPlot& s, std::size_t i,
                                 double vmin, double vmax) {
-        Color base = s.opts.color;
+        Color base = *s.opts.color;
         if (s.colormapped()) {
             // Same lookup and rounding as surface_cell_color().
             const double span = vmax - vmin;
             const double t = span != 0.0 ? (s.color_at(i) - vmin) / span : 0.0;
-            const int idx = static_cast<int>(std::clamp(t, 0.0, 1.0) * 255.0);
+            const int idx = colormaps::index(t, s.opts.cmap.is_cyclic());
             const uint8_t* lut = colormaps::get(s.opts.cmap) + idx * 4;
             base = {lut[0] / 255.0f, lut[1] / 255.0f, lut[2] / 255.0f, 1.0f};
         }

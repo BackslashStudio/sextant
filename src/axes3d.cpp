@@ -143,6 +143,7 @@ namespace sextant {
                           std::span<const double> bottoms, Bar3DOptions opts) {
         check_bar3d("Axes3D::bar3d", u, v, heights, bottoms);
         warn_math(d->mathtext, "Axes3D::bar3d", opts.name);
+        d->cycle->resolve(opts.color);
 
         Bar3DPlot b;
         b.orient = orient;
@@ -167,6 +168,7 @@ namespace sextant {
         if (!std::isfinite(opts.vmin) || !std::isfinite(opts.vmax))
             throw std::invalid_argument("Axes3D::surface: vmin and vmax must be finite");
         warn_math(d->mathtext, "Axes3D::surface", opts.name);
+        d->cycle->resolve(opts.color, !opts.colormap);
 
         SurfacePlot s;
         s.orient = orient;
@@ -255,6 +257,7 @@ namespace sextant {
         check_mesh_opts(opts);
         check_tri("Axes3D::surface_tri", tri, x.size());
         warn_math(d->mathtext, "Axes3D::surface_tri", opts.name);
+        d->cycle->resolve(opts.color, colors.empty());
 
         // Degenerate triangles are kept so face counts match the caller's; the
         // normal is guarded in surface_tri_face().
@@ -289,6 +292,7 @@ namespace sextant {
                 "different orientation, or pass the topology explicitly");
 
         warn_math(d->mathtext, "Axes3D::surface_tri", opts.name);
+        d->cycle->resolve(opts.color, colors.empty());
         // A concave domain gets its convex hull filled (no masking yet).
         d->surface_tri.push_back(make_mesh(x, y, z, std::move(tri), colors,
                                            std::move(opts)));
@@ -320,6 +324,7 @@ namespace sextant {
             throw std::invalid_argument("Axes3D::scatter3d: vmin and vmax must be finite");
         ErrorBar3DData eb = take_error_bars3d(err, x.size(), "Axes3D::scatter3d");
         warn_math(d->mathtext, "Axes3D::scatter3d", opts.name);
+        d->cycle->resolve(opts.color, colors.empty());
 
         Scatter3DPlot s;
         s.err = std::move(eb);
@@ -360,6 +365,7 @@ namespace sextant {
             throw std::invalid_argument("Axes3D::line3d: vmin and vmax must be finite");
         ErrorBar3DData eb = take_error_bars3d(err, x.size(), "Axes3D::line3d");
         warn_math(d->mathtext, "Axes3D::line3d", opts.name);
+        d->cycle->resolve(opts.color, colors.empty());
 
         Line3DPlot l;
         l.err = std::move(eb);
@@ -381,6 +387,7 @@ namespace sextant {
         opts.alpha = std::clamp(opts.alpha, 0.0f, 1.0f);
         auto p = std::shared_ptr<Plane2D>(new Plane2D(orient, offset, opts));
         p->d->sheet.mathtext = d->mathtext;
+        p->d->sheet.cycle = d->cycle;
         d->planes.push_back(p);
         return p;
     }
@@ -593,6 +600,11 @@ namespace sextant {
         cam.fov = degrees;
         d->camera = clamp_camera(cam);
         d->camera_stamp = next_snapshot_generation();
+        return *this;
+    }
+
+    Axes3D& Axes3D::set_color_cycle(std::vector<Color> colors) {
+        d->cycle->set(std::move(colors));
         return *this;
     }
 

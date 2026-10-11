@@ -114,7 +114,14 @@ namespace sextant {
         Axes& set_yticks(std::span<const double> positions,
                          std::vector<std::string> labels = {});
 
-        // Clear all plot objects and reset limits.
+        // The colors an unset `color` takes in turn, one per call that draws in a
+        // flat color: line(), scatter(), bar(), hist() (scatter_z() and heatmap()
+        // take none). Restarts from the first color; empty restores the default,
+        // matplotlib's tab10, which starts with Color::Blue. Objects already
+        // plotted keep theirs.
+        Axes& set_color_cycle(std::vector<Color> colors);
+
+        // Clear all plot objects and reset limits and the color cycle.
         Axes& cla();
 
         // ----------------------------------------------------------------

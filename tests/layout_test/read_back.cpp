@@ -703,7 +703,7 @@ namespace lt {
             const AxesEdit& s = j->styles[0].second;
             ok = s.axes_style && s.axes_style->tick_length == 9.0f && s.grid_enabled
                  && s.legend_enabled && s.plot_styles.size() == 2
-                 && std::get<LineOptions>(s.plot_styles[0].opts).color.b == Color::Blue.b;
+                 && std::get<LineOptions>(s.plot_styles[0].opts).color->b == Color::Blue.b;
         }
         check(ok, "journal: 2D styles merge to the latest value per field, plot styles per object");
         ok = j && !j->styles3d.empty();

@@ -2,8 +2,10 @@
 // Internal header — defines Axes::Impl.
 #include "sextant/axes.h"
 #include "sextant/style.h"
+#include "color_cycle.h"
 #include "plot_objects.h"
 #include "tick.h"
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -22,6 +24,10 @@ struct Axes::Impl {
     // The figure's FigureOptions::mathtext, set when the figure makes this
     // axes; only warn_math() reads it (drawing reads the snapshot's).
     bool mathtext = true;
+
+    // What an unset `color` takes, at ingest. A plane's sheet shares its
+    // Axes3D's (see Axes3D::plane()); cla() of the sheet keeps it.
+    std::shared_ptr<ColorCycle> cycle = std::make_shared<ColorCycle>();
 
     // Font sizes for these live in axes_style, so the panel edits them via AxesEdit.
     std::string   title, xtitle, ytitle;

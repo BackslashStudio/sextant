@@ -56,6 +56,7 @@ namespace lt {
         std::string encode(const X& x) {
             if constexpr (std::is_same_v<X, bool>) return x ? "true" : "false";
             else if constexpr (std::is_enum_v<X>) return std::string(enum_name(x));
+            else if constexpr (std::is_same_v<X, Colormap>) return x.name();
             else if constexpr (std::is_same_v<X, int> || std::is_same_v<X, std::size_t>)
                 return std::to_string(x);
             else if constexpr (std::is_same_v<X, float>) return num(x, 9);
@@ -81,6 +82,7 @@ namespace lt {
         void decode(X& x, const std::string& s) {
             if constexpr (std::is_same_v<X, bool>) x = s == "true";
             else if constexpr (std::is_enum_v<X>) x = enum_from_name<X>(s).value_or(X{});
+            else if constexpr (std::is_same_v<X, Colormap>) x = Colormap::from_name(s);
             else if constexpr (std::is_same_v<X, int>) x = std::stoi(s);
             else if constexpr (std::is_same_v<X, std::size_t>) x = static_cast<std::size_t>(std::stoull(s));
             else if constexpr (std::is_same_v<X, float>) x = std::strtof(s.c_str(), nullptr);
@@ -133,6 +135,7 @@ namespace lt {
             const float f = 0.03125f * static_cast<float>(k + 1);
             if constexpr (std::is_same_v<X, bool>) x = !x;
             else if constexpr (std::is_enum_v<X>) x = next_value(x);
+            else if constexpr (std::is_same_v<X, Colormap>) x = Colormap::Plasma.reversed();
             else if constexpr (std::is_same_v<X, int>) x += 7 + k;
             else if constexpr (std::is_same_v<X, std::size_t>) x += 7 + static_cast<std::size_t>(k);
             else if constexpr (std::is_same_v<X, float>) x += 0.5f + static_cast<float>(k);
@@ -235,7 +238,7 @@ namespace lt {
 #undef STRUCT
 
 #define ENUM(E) check_enum<E>(#E);
-        ENUM(LineStyle) ENUM(MarkerStyle) ENUM(Colormap) ENUM(CapStyle) ENUM(AxisPosition)
+        ENUM(LineStyle) ENUM(MarkerStyle) ENUM(CapStyle) ENUM(AxisPosition)
         ENUM(LegendAnchor) ENUM(ColorbarAnchor) ENUM(HAlign) ENUM(PanelTheme) ENUM(Projection)
         ENUM(PlaneOrientation) ENUM(VAlign) ENUM(Coords) ENUM(ArrowHead)
 #undef ENUM

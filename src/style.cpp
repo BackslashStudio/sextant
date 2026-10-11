@@ -1,4 +1,5 @@
 #include "sextant/style.h"
+#include "color_cycle.h"
 #include <stdexcept>
 #include <string>
 #include <algorithm>
@@ -15,6 +16,23 @@ const Color Color::Cyan   = {0.090f, 0.745f, 0.812f, 1.0f};
 const Color Color::Black  = {0.000f, 0.000f, 0.000f, 1.0f};
 const Color Color::White  = {1.000f, 1.000f, 1.000f, 1.0f};
 const Color Color::Gray   = {0.500f, 0.500f, 0.500f, 1.0f};
+
+// The named colors above at the same precision, so tab10's blue, orange, green,
+// red and purple are exactly Color::Blue, ::Orange, ::Green, ::Red, ::Purple.
+std::vector<Color> default_color_cycle() {
+    return {
+        {0.122f, 0.467f, 0.706f, 1.0f}, // #1f77b4 blue
+        {1.000f, 0.498f, 0.055f, 1.0f}, // #ff7f0e orange
+        {0.173f, 0.627f, 0.173f, 1.0f}, // #2ca02c green
+        {0.839f, 0.153f, 0.157f, 1.0f}, // #d62728 red
+        {0.580f, 0.404f, 0.741f, 1.0f}, // #9467bd purple
+        {0.549f, 0.337f, 0.294f, 1.0f}, // #8c564b brown
+        {0.890f, 0.467f, 0.761f, 1.0f}, // #e377c2 pink
+        {0.498f, 0.498f, 0.498f, 1.0f}, // #7f7f7f gray
+        {0.737f, 0.741f, 0.133f, 1.0f}, // #bcbd22 olive
+        {0.090f, 0.745f, 0.812f, 1.0f}, // #17becf cyan
+    };
+}
 
 Color Color::from_hex(uint32_t hex) {
     const bool has_alpha = hex > 0xFFFFFF;

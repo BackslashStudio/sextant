@@ -222,8 +222,8 @@ std::vector<Bar3DPolygon> plan_bars3d(const Projector3D& proj,
                 Bar3DPolygon poly;
                 poly.xy.reserve(ring.size() * 2);
                 for (const Px3& q : ring) { poly.xy.push_back(q.x); poly.xy.push_back(q.y); }
-                poly.fill = { b.opts.color.r * f.shade, b.opts.color.g * f.shade,
-                              b.opts.color.b * f.shade, alpha };
+                poly.fill = { b.opts.color->r * f.shade, b.opts.color->g * f.shade,
+                              b.opts.color->b * f.shade, alpha };
                 poly.stroke       = edge;
                 poly.stroke_width = translucent ? 0.0f : stroke_w;
                 poly.depth        = proj.project_box(centre).depth;

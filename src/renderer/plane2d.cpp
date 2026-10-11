@@ -8,10 +8,9 @@
 namespace sextant {
     namespace {
         // Colormap lookup shared by the texture and the per-cell polygons.
-        Color cell_color(const std::uint8_t* lut, float value, float vmin, float vrange) {
-            float t = (vrange != 0.0f) ? (value - vmin) / vrange : 0.0f;
-            t = std::clamp(t, 0.0f, 1.0f);
-            const std::uint8_t* c = &lut[static_cast<int>(t * 255.0f) * 4];
+        Color cell_color(const std::uint8_t* lut, bool cyclic, float value, float vmin, float vrange) {
+            const double t = (vrange != 0.0f) ? (value - vmin) / vrange : 0.0;
+            const std::uint8_t* c = &lut[colormaps::index(t, cyclic) * 4];
             return {c[0] / 255.0f, c[1] / 255.0f, c[2] / 255.0f, c[3] / 255.0f};
         }
 
@@ -100,6 +99,7 @@ namespace sextant {
         std::vector<std::uint8_t> out;
         if (hp.rows <= 0 || hp.cols <= 0) return out;
 
+        const bool cyclic = hp.opts.cmap.is_cyclic();
         const std::uint8_t* lut = colormaps::get(hp.opts.cmap);
         const float vmin = hp.opts.vmin, vrange = hp.opts.vmax - hp.opts.vmin;
         // Row 0 of the output is the yrange.hi edge; flip for origin "lower".
@@ -109,12 +109,11 @@ namespace sextant {
         for (int r = 0; r < hp.rows; ++r) {
             const int src = flip ? (hp.rows - 1 - r) : r;
             for (int c = 0; c < hp.cols; ++c) {
-                float t = (vrange != 0.0f)
-                              ? (hp.data[static_cast<std::size_t>(src) * hp.cols + c] - vmin) / vrange
-                              : 0.0f;
-                t = std::clamp(t, 0.0f, 1.0f);
+                const double t = (vrange != 0.0f)
+                                     ? (hp.data[static_cast<std::size_t>(src) * hp.cols + c] - vmin) / vrange
+                                     : 0.0;
                 std::memcpy(&out[(static_cast<std::size_t>(r) * hp.cols + c) * 4],
-                            &lut[static_cast<int>(t * 255.0f) * 4], 4);
+                            &lut[colormaps::index(t, cyclic) * 4], 4);
             }
         }
         return out;
@@ -270,7 +269,7 @@ namespace sextant {
         b.open(Kind::Tri);
         for (const auto& bp: s.bars) {
             const double half = bp.bar_width * 0.5;
-            const Color c = with_alpha(bp.opts.color, bp.opts.alpha);
+            const Color c = with_alpha(*bp.opts.color, bp.opts.alpha);
             for (std::size_t i = 0; i < bp.centers.size() && i < bp.heights.size(); ++i)
                 b.rect(bp.centers[i] - half, 0.0, bp.centers[i] + half, bp.heights[i], c);
         }
@@ -288,7 +287,7 @@ namespace sextant {
         // non-solid lines on a plane draw solid.
         for (const auto& lp: s.lines) {
             if (lp.opts.linestyle == LineStyle::None || lp.opts.linewidth <= 0.0f) continue;
-            const Color c = with_alpha(lp.opts.color, lp.opts.alpha);
+            const Color c = with_alpha(*lp.opts.color, lp.opts.alpha);
             // segment_count()/segment_ends() decide closure; the length guard drops
             // segments past a shorter y vector.
             const std::size_t n = std::min(lp.x.size(), lp.y.size());
@@ -313,12 +312,12 @@ namespace sextant {
                 error_bars(fills, strokes, xs, ys, err, style, fallback, ErrScale{px_u, px_v});
             };
             for (const auto& lp: s.lines)
-                run(lp.x, lp.y, lp.err, lp.opts.errorbar, lp.opts.color);
+                run(lp.x, lp.y, lp.err, lp.opts.errorbar, *lp.opts.color);
             // Error bars hang off the tip (heights), not the baseline.
             for (const auto& bp: s.bars)
                 run(bp.centers, bp.heights, bp.err, bp.opts.errorbar, bp.opts.edgecolor);
             for (const auto& sp: s.scatters)
-                run(sp.x, sp.y, sp.err, sp.opts.errorbar, sp.opts.color);
+                run(sp.x, sp.y, sp.err, sp.opts.errorbar, *sp.opts.color);
             // scatter_z has no single color, so black (as in 2D).
             for (const auto& sp: s.scatter_z)
                 run(sp.x, sp.y, sp.err, sp.opts.errorbar, Color::Black);
@@ -338,10 +337,10 @@ namespace sextant {
         // --- markers, last.
         b.open(Kind::Marker);
         for (const auto& sp: s.scatters) {
-            const Color c = with_alpha(sp.opts.color, sp.opts.alpha);
+            const Color c = with_alpha(*sp.opts.color, sp.opts.alpha);
             const std::size_t n = std::min(sp.x.size(), sp.y.size());
             // Unset edgecolor = the fill's color; alpha is its own times edge_alpha.
-            Color ec = sp.opts.edgecolor ? *sp.opts.edgecolor : sp.opts.color;
+            Color ec = sp.opts.edgecolor ? *sp.opts.edgecolor : *sp.opts.color;
             ec.a = std::clamp(ec.a * sp.opts.edge_alpha, 0.0f, 1.0f);
             const float ew = std::max(0.0f, sp.opts.edge_linewidth);
             for (std::size_t i = 0; i < n; ++i)
@@ -353,7 +352,8 @@ namespace sextant {
             const std::size_t n = std::min({sp.x.size(), sp.y.size(), sp.z.size()});
             const float ew = std::max(0.0f, sp.opts.edge_linewidth);
             for (std::size_t i = 0; i < n; ++i) {
-                const Color face = cell_color(lut, static_cast<float>(sp.z[i]), vmin, vrange);
+                const Color face =
+                    cell_color(lut, sp.opts.cmap.is_cyclic(), static_cast<float>(sp.z[i]), vmin, vrange);
                 Color ec = sp.opts.edgecolor ? *sp.opts.edgecolor : face;
                 ec.a = std::clamp((sp.opts.edgecolor ? ec.a : 1.0f) * sp.opts.edge_alpha, 0.0f, 1.0f);
                 b.marker(sp.x[i], sp.y[i], with_alpha(face, sp.opts.alpha), sp.opts.size,
@@ -431,8 +431,8 @@ namespace sextant {
                         poly.xy.push_back(px.x);
                         poly.xy.push_back(px.y);
                     }
-                    poly.fill = cell_color(lut, hp.data[static_cast<std::size_t>(r) * hp.cols + c],
-                                           vmin, vrange);
+                    poly.fill = cell_color(lut, hp.opts.cmap.is_cyclic(),
+                                           hp.data[static_cast<std::size_t>(r) * hp.cols + c], vmin, vrange);
                     item.polys.push_back(std::move(poly));
                 }
             }

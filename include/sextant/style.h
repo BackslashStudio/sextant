@@ -1,5 +1,6 @@
 #pragma once
 #include "export.h"
+#include <compare>
 #include <string>
 #include <string_view>
 #include <cstdint>
@@ -37,9 +38,104 @@ namespace sextant {
 
     enum class MarkerStyle { None, Circle, Square, Triangle, Cross, Plus, Diamond };
 
-    // Sequential: Viridis (default), Plasma, Inferno, Magma, Cividis (colorblind-safe),
-    // Turbo (rainbow-like, not perceptually uniform), Gray. Diverging: Coolwarm.
-    enum class Colormap { Viridis, Plasma, Inferno, Magma, Cividis, Turbo, Coolwarm, Gray };
+    class Colormap;
+
+    // Adds a colormap for the rest of the process: `colors` spread evenly from
+    // the low end (vmin) to the high end (vmax), interpolated linearly, alpha
+    // included. Channels are clamped to [0, 1]. Any thread; a registered map
+    // never changes and is never removed, so the handle stays valid. Throws
+    // std::invalid_argument for fewer than two colors, an empty name, a name
+    // ending in "_r", or one already taken (built in or registered, any case).
+    // `cyclic`: values outside [vmin, vmax] wrap instead of clamping (see
+    // Colormap::is_cyclic()); give its first and last colors the same value.
+    SEXTANT_API Colormap register_colormap(std::string_view name, const std::vector<Color>& colors,
+                                           bool cyclic = false);
+
+    // A colormap: one of the built-ins below, or a registered one, run either
+    // way. Copy it freely; it is a small value.
+    //
+    // The built-ins, by kind (data from matplotlib and cmocean; names as theirs):
+    //   Sequential, perceptually uniform: Viridis (default), Plasma, Inferno, Magma,
+    //     Cividis (colorblind-safe).
+    //   Sequential, one hue, light to dark (ColorBrewer): Blues, Greens, Reds,
+    //     Oranges, Purples, Greys.
+    //   Sequential, several hues: YlOrRd, YlGnBu, Hot, Gray (black to white), and
+    //     the rainbows Turbo and Jet (not perceptually uniform; Turbo is the better).
+    //   Diverging, around a centre: Coolwarm, RdBu, Spectral, BrBG, PiYG.
+    //   Cyclic, for angles and phases (see is_cyclic()): Twilight, TwilightShifted,
+    //     Hsv, Phase.
+    class Colormap {
+    public:
+        static const Colormap Viridis, Plasma, Inferno, Magma, Cividis, Turbo, Coolwarm, Gray;
+        static const Colormap Blues, Greens, Reds, Oranges, Purples, Greys, YlOrRd, YlGnBu, Hot, Jet;
+        static const Colormap RdBu, Spectral, BrBG, PiYG;
+        static const Colormap Twilight, TwilightShifted, Hsv, Phase;
+
+        constexpr Colormap() = default; // Viridis
+
+        // The same map from its high end to its low: matplotlib's
+        // cmap.reversed(), its "_r" maps. Reversing twice gives the map back.
+        constexpr Colormap reversed() const { return Colormap(id_, !reversed_, cyclic_); }
+        constexpr bool is_reversed() const { return reversed_; }
+
+        // The canonical name ("viridis", or as registered), with "_r" when reversed.
+        SEXTANT_API std::string name() const;
+
+        // A built-in or registered name, any case, optionally ending in "_r"
+        // (reversed). Anything else throws std::invalid_argument.
+        SEXTANT_API static Colormap from_name(std::string_view name);
+
+        // Every map's canonical name, without "_r": the built-ins in declaration
+        // order, then the registered ones in registration order.
+        SEXTANT_API static std::vector<std::string> names();
+
+        // A cyclic map's two ends meet, so a value outside [vmin, vmax] wraps
+        // round (vmax + d draws as vmin + d) rather than clamping to the end
+        // color: phase data runs on past +-pi and still reads right.
+        constexpr bool is_cyclic() const { return cyclic_; }
+
+        // Built-ins in declaration order, then registered maps in order.
+        constexpr std::uint16_t id() const { return id_; }
+
+        friend constexpr auto operator<=>(const Colormap&, const Colormap&) = default;
+
+    private:
+        constexpr Colormap(std::uint16_t id, bool reversed, bool cyclic = false)
+            : id_(id), reversed_(reversed), cyclic_(cyclic) {}
+
+        friend SEXTANT_API Colormap register_colormap(std::string_view, const std::vector<Color>&, bool);
+
+        std::uint16_t id_ = 0;
+        bool reversed_ = false;
+        bool cyclic_ = false; // fixed by the id; kept here so drawing reads it for free
+    };
+
+    inline constexpr Colormap Colormap::Viridis{0, false};
+    inline constexpr Colormap Colormap::Plasma{1, false};
+    inline constexpr Colormap Colormap::Inferno{2, false};
+    inline constexpr Colormap Colormap::Magma{3, false};
+    inline constexpr Colormap Colormap::Cividis{4, false};
+    inline constexpr Colormap Colormap::Turbo{5, false};
+    inline constexpr Colormap Colormap::Coolwarm{6, false};
+    inline constexpr Colormap Colormap::Gray{7, false};
+    inline constexpr Colormap Colormap::Blues{8, false};
+    inline constexpr Colormap Colormap::Greens{9, false};
+    inline constexpr Colormap Colormap::Reds{10, false};
+    inline constexpr Colormap Colormap::Oranges{11, false};
+    inline constexpr Colormap Colormap::Purples{12, false};
+    inline constexpr Colormap Colormap::Greys{13, false};
+    inline constexpr Colormap Colormap::YlOrRd{14, false};
+    inline constexpr Colormap Colormap::YlGnBu{15, false};
+    inline constexpr Colormap Colormap::Hot{16, false};
+    inline constexpr Colormap Colormap::Jet{17, false};
+    inline constexpr Colormap Colormap::RdBu{18, false};
+    inline constexpr Colormap Colormap::Spectral{19, false};
+    inline constexpr Colormap Colormap::BrBG{20, false};
+    inline constexpr Colormap Colormap::PiYG{21, false};
+    inline constexpr Colormap Colormap::Twilight{22, false, true};
+    inline constexpr Colormap Colormap::TwilightShifted{23, false, true};
+    inline constexpr Colormap Colormap::Hsv{24, false, true};
+    inline constexpr Colormap Colormap::Phase{25, false, true};
 
     // Error-bar whisker end: `Flat` crossbar ("to here") or `Arrow` head pointing
     // away from the point ("at least this far"). Shared by 2D and 3D.
@@ -99,7 +195,9 @@ namespace sextant {
     // No markers: add Axes::scatter() on the same data for a marked series.
     // A legend key is drawn iff `show_legend && !name.empty()`.
     struct LineOptions {
-        Color color = Color::Blue;
+        // Unset = the axes' next color-cycle color, taken at the call (see
+        // Axes::set_color_cycle()). The Data panel shows the color taken.
+        std::optional<Color> color;
         float linewidth = 1.5f;
         LineStyle linestyle = LineStyle::Solid;
         std::string name;
@@ -121,7 +219,7 @@ namespace sextant {
     };
 
     struct ScatterOptions {
-        Color color = Color::Blue;
+        std::optional<Color> color; // see LineOptions::color
         float size = 20.0f;
         MarkerStyle marker = MarkerStyle::Circle;
         std::string name;
@@ -180,7 +278,7 @@ namespace sextant {
     };
 
     struct BarOptions {
-        Color color = Color::Blue;
+        std::optional<Color> color; // see LineOptions::color
         float width = 0.8f;
         float alpha = 1.0f;
         std::string name;

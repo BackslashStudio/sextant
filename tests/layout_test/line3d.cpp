@@ -1017,7 +1017,7 @@ namespace lt {
             e.lines3d.push_back({0, o});
             apply_axes3d_edit(dst, e);
             check(dst.lines3d[0].opts.loop &&
-                  dst.lines3d[0].opts.color.g == Color::Green.g,
+                  dst.lines3d[0].opts.color->g == Color::Green.g,
                   "line3d lane: an appearance edit reaches the path it names");
             check(dst.lines3d[0].opts.hint_labels.size() == 3,
                   "line3d lane: and does not carry a stale copy of the hint labels back "

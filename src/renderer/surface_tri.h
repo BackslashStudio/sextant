@@ -14,11 +14,11 @@ namespace sextant {
 
     // True when the mesh must be composited (alpha < 1); `colors` has no alpha.
     inline bool surface_tri_translucent(const SurfaceTriPlot& s) {
-        return s.opts.alpha < 1.0f || (!s.colormapped() && s.opts.color.a < 1.0f);
+        return s.opts.alpha < 1.0f || (!s.colormapped() && s.opts.color->a < 1.0f);
     }
 
     inline float surface_tri_alpha(const SurfaceTriPlot& s) {
-        const float base = s.colormapped() ? 1.0f : s.opts.color.a;
+        const float base = s.colormapped() ? 1.0f : s.opts.color->a;
         return std::clamp(base * s.opts.alpha, 0.0f, 1.0f);
     }
 

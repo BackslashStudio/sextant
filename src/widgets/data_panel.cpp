@@ -792,7 +792,7 @@ namespace sextant {
             if (ImGui::Checkbox("Close the loop##lineloop", &o.loop)) push();
             if (begin_field_table("line")) {
                 field_row("Color");
-                if (color_swatch("##lcol", o.color)) push();
+                if (color_swatch("##lcol", *o.color)) push();
                 field_row("Alpha");
                 if (drag_float("##lalpha", &o.alpha, 0.0f, 1.0f, 0.005f, "%.2f")) push();
                 field_row("Width");
@@ -802,7 +802,7 @@ namespace sextant {
                 end_field_table();
             }
             if (on_plane) ImGui::TextDisabled("SVG export draws a plane's lines solid (the window dashes them).");
-            if (!p.err.empty()) errorbar_style(o.errorbar, o.color, has_cap(p.err), has_box(p.err), push);
+            if (!p.err.empty()) errorbar_style(o.errorbar, *o.color, has_cap(p.err), has_box(p.err), push);
         }
 
         // A marker's outline: width, its own colour or the fill's, and its alpha
@@ -843,13 +843,13 @@ namespace sextant {
                 field_row("Size");
                 if (drag_float("##ssize", &o.size, 1.0f, 100.0f, 0.2f, "%.1f px")) push();
                 field_row("Color");
-                if (color_swatch("##scol", o.color)) push();
+                if (color_swatch("##scol", *o.color)) push();
                 field_row("Alpha");
                 if (drag_float("##salpha", &o.alpha, 0.0f, 1.0f, 0.005f, "%.2f")) push();
                 end_field_table();
             }
-            marker_outline(o.edgecolor, o.edge_alpha, o.edge_linewidth, o.color, push);
-            if (!p.err.empty()) errorbar_style(o.errorbar, o.color, has_cap(p.err), has_box(p.err), push);
+            marker_outline(o.edgecolor, o.edge_alpha, o.edge_linewidth, *o.color, push);
+            if (!p.err.empty()) errorbar_style(o.errorbar, *o.color, has_cap(p.err), has_box(p.err), push);
         }
 
         template<class Push>
@@ -881,7 +881,7 @@ namespace sextant {
             name_and_key(st, o, push);
             if (begin_field_table("bar")) {
                 field_row("Color");
-                if (color_swatch("##bcol", o.color)) push();
+                if (color_swatch("##bcol", *o.color)) push();
                 field_row("Alpha");
                 if (drag_float("##balpha", &o.alpha, 0.0f, 1.0f, 0.005f, "%.2f")) push();
                 // BarOptions::width is a fraction resolved to data units at
@@ -1065,7 +1065,7 @@ namespace sextant {
             if (ImGui::Checkbox("Legend key##b3dlg", &o.show_legend)) push_bar();
             if (begin_field_table("bar3d")) {
                 field_row("Color");
-                if (color_swatch("##bcol", o.color)) push_bar();
+                if (color_swatch("##bcol", *o.color)) push_bar();
                 field_row("Alpha");
                 if (drag_float("##balpha", &o.alpha, 0.0f, 1.0f, 0.005f, "%.2f")) push_bar();
                 field_row("Shading");
@@ -1135,7 +1135,7 @@ namespace sextant {
             if (begin_field_table("surf")) {
                 if (!o.colormap) {
                     field_row("Color");
-                    if (color_swatch("##scol", o.color)) push_surf();
+                    if (color_swatch("##scol", *o.color)) push_surf();
                 } else {
                     field_row("Colormap");
                     if (colormap_combo("##scmap", o.cmap)) push_surf();
@@ -1201,14 +1201,14 @@ namespace sextant {
                 field_row("Size");
                 if (drag_float("##csize", &o.size, 1.0f, 100.0f, 0.2f, "%.1f px")) push_cloud();
                 field_row("Color");
-                if (color_swatch("##ccol", o.color)) push_cloud();
+                if (color_swatch("##ccol", *o.color)) push_cloud();
                 field_row("Alpha");
                 if (drag_float("##calpha", &o.alpha, 0.0f, 1.0f, 0.005f, "%.2f")) push_cloud();
                 field_row("Depth shade");
                 if (drag_float("##cshade", &o.depthshade, 0.0f, 1.0f, 0.005f, "%.2f")) push_cloud();
                 end_field_table();
             }
-            marker_outline(o.edgecolor, o.edge_alpha, o.edge_linewidth, o.color, push_cloud);
+            marker_outline(o.edgecolor, o.edge_alpha, o.edge_linewidth, *o.color, push_cloud);
             // vmin/vmax only with `colors`, both or neither (empty = data range).
             if (begin_field_table("cloudv")) {
                 field_row("Colormap");
@@ -1224,7 +1224,7 @@ namespace sextant {
             ImGui::TextDisabled("Color applies when the series has no 'c' column; the colormap "
                 "overrides it when it has.");
             if (p && !p->err.empty())
-                errorbar_style(o.errorbar, p->colormapped() ? Color::Black : o.color,
+                errorbar_style(o.errorbar, p->colormapped() ? Color::Black : *o.color,
                                has_cap(p->err), has_box(p->err), push_cloud);
             ImGui::Separator();
         }
@@ -1257,7 +1257,7 @@ namespace sextant {
             if (ImGui::Checkbox("Close the loop##pathloop", &o.loop)) push_path();
             if (begin_field_table("path")) {
                 field_row("Color");
-                if (color_swatch("##pcol", o.color)) push_path();
+                if (color_swatch("##pcol", *o.color)) push_path();
                 field_row("Width");
                 // Pixels at the box centre; thinner with distance.
                 if (drag_float("##pwidth", &o.linewidth, 0.1f, 20.0f, 0.05f, "%.2f px"))
@@ -1282,7 +1282,7 @@ namespace sextant {
             ImGui::TextDisabled("Color applies when the series has no 'c' column; the colormap "
                 "overrides it when it has.");
             if (p && !p->err.empty())
-                errorbar_style(o.errorbar, p->colormapped() ? Color::Black : o.color,
+                errorbar_style(o.errorbar, p->colormapped() ? Color::Black : *o.color,
                                has_cap(p->err), has_box(p->err), push_path);
             ImGui::Separator();
         }
@@ -1315,7 +1315,7 @@ namespace sextant {
             if (ImGui::Checkbox("Colorbar##meshcb", &o.colorbar)) push_mesh();
             if (begin_field_table("mesh")) {
                 field_row("Color");
-                if (color_swatch("##mcol", o.color)) push_mesh();
+                if (color_swatch("##mcol", *o.color)) push_mesh();
                 field_row("Alpha");
                 if (drag_float("##malpha", &o.alpha, 0.0f, 1.0f, 0.005f, "%.2f")) push_mesh();
                 field_row("Shading");

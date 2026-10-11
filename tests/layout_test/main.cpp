@@ -101,6 +101,9 @@ int main() {
 
     // color.cpp
     test_color_from_hex();
+    test_color_cycle();
+    test_colormap_registry();
+    test_colormap_cyclic();
 
     // axes3d.cpp / camera3d.cpp
     test_axes3d_projection();

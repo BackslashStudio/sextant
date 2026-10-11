@@ -4,6 +4,7 @@
 //   * No hardcoded pixel widths (they don't scale with DPI): use -FLT_MIN or
 //     GetFontSize()-relative widths.
 #include "sextant/style.h"
+#include "../colormaps.h"
 #include "../font_discovery.h"
 #include "../plot_objects.h"
 #include <imgui.h>
@@ -13,6 +14,7 @@
 #include <cmath>
 #include <cstdio>
 #include <string>
+#include <vector>
 
 namespace sextant {
     // "label | control" table with `pairs` pairs per row. The first label column
@@ -212,15 +214,44 @@ namespace sextant {
     }
 
     // One entry per Colormap value: a new colormap only needs its name added.
+    // Every map by name: the built-ins under Sequential, Diverging and Cyclic,
+    // then registered ones, with a "Reversed" toggle at the top of the list (the
+    // popup stays open for it).
     inline bool colormap_combo(const char* label, Colormap& c) {
-        static const char* kNames[] = {"Viridis", "Plasma", "Inferno", "Magma",
-                                       "Cividis", "Turbo",  "Coolwarm", "Gray"};
-        int cur = static_cast<int>(c);
-        if (ImGui::Combo(label, &cur, kNames, IM_ARRAYSIZE(kNames))) {
-            c = static_cast<Colormap>(cur);
-            return true;
+        bool changed = false;
+        const std::string preview = c.name();
+        if (ImGui::BeginCombo(label, preview.c_str())) {
+            bool rev = c.is_reversed();
+            if (ImGui::Checkbox("Reversed", &rev)) {
+                c = c.reversed();
+                changed = true;
+            }
+            const std::vector<std::string> names = Colormap::names();
+            auto item = [&](std::size_t i) {
+                const Colormap m = Colormap::from_name(names[i]);
+                const bool selected = m.id() == c.id();
+                if (ImGui::Selectable(names[i].c_str(), selected) && !selected) {
+                    c = c.is_reversed() ? m.reversed() : m;
+                    changed = true;
+                }
+                if (selected) ImGui::SetItemDefaultFocus();
+            };
+            using colormaps::Category;
+            const std::size_t builtins = colormaps::builtin_count();
+            for (const auto& [cat, title] : {std::pair{Category::Sequential, "Sequential"},
+                                             std::pair{Category::Diverging, "Diverging"},
+                                             std::pair{Category::Cyclic, "Cyclic"}}) {
+                ImGui::SeparatorText(title);
+                for (std::size_t i = 0; i < builtins; ++i)
+                    if (colormaps::category(Colormap::from_name(names[i])) == cat) item(i);
+            }
+            if (names.size() > builtins) {
+                ImGui::SeparatorText("Registered");
+                for (std::size_t i = builtins; i < names.size(); ++i) item(i);
+            }
+            ImGui::EndCombo();
         }
-        return false;
+        return changed;
     }
 
     inline bool capstyle_combo(const char* label, CapStyle& s) {

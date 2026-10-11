@@ -14,7 +14,7 @@ namespace sextant {
 // The outline's alpha before any depth shade: its color's own (the fill color's
 // when `edgecolor` is unset; 1 for a colormapped cloud) times `edge_alpha`.
 inline float scatter3d_edge_alpha(const Scatter3DOptions& o, bool colormapped) {
-    const float base = o.edgecolor ? o.edgecolor->a : (colormapped ? 1.0f : o.color.a);
+    const float base = o.edgecolor ? o.edgecolor->a : (colormapped ? 1.0f : o.color->a);
     return std::clamp(base * o.edge_alpha, 0.0f, 1.0f);
 }
 
@@ -25,12 +25,12 @@ inline bool scatter3d_edge_translucent(const Scatter3DOptions& o, bool colormapp
 
 // True when the cloud must be composited (alpha < 1); `colors` has no alpha.
 inline bool scatter3d_translucent(const Scatter3DPlot& s) {
-    return s.opts.alpha < 1.0f || (!s.colormapped() && s.opts.color.a < 1.0f)
+    return s.opts.alpha < 1.0f || (!s.colormapped() && s.opts.color->a < 1.0f)
            || scatter3d_edge_translucent(s.opts, s.colormapped());
 }
 
 inline float scatter3d_alpha(const Scatter3DPlot& s) {
-    const float base = s.colormapped() ? 1.0f : s.opts.color.a;
+    const float base = s.colormapped() ? 1.0f : s.opts.color->a;
     return std::clamp(base * s.opts.alpha, 0.0f, 1.0f);
 }
 

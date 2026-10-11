@@ -100,12 +100,14 @@ namespace sextant {
         return *this;
     }
 
-    // Clears the plane's data (its objects go, with their ids); placement and
-    // the figure's mathtext setting stay.
+    // Clears the plane's data (its objects go, with their ids); placement, the
+    // figure's mathtext setting and the parent's color cycle stay.
     Plane2D& Plane2D::cla() {
         const bool mathtext = d->sheet.mathtext;
+        std::shared_ptr<ColorCycle> cycle = std::move(d->sheet.cycle);
         d->sheet = Axes::Impl{};
         d->sheet.mathtext = mathtext;
+        d->sheet.cycle = std::move(cycle);
         return *this;
     }
 

@@ -35,6 +35,20 @@ If you ship a binary that embeds sextant, ship this file with it.
 | [zlib](https://zlib.net/) | zlib License | Pulled in by libpng. |
 | [GLM](https://github.com/g-truc/glm) | MIT (Happy Bunny / MIT dual) | Header-only math. |
 
+## Colormap data (compiled into `src/colormaps.cpp` and `src/colormap_tables.h`)
+
+The built-in colormaps are 256-entry tables sampled from these sources. Only
+the color values are used; no source code.
+
+| Maps | Source | License |
+|---|---|---|
+| viridis, plasma, inferno, magma | [matplotlib](https://matplotlib.org/); by Nathaniel J. Smith and Stéfan van der Walt (viridis with Eric Firing) | CC0 1.0 |
+| cividis, coolwarm, gray, jet, hot, hsv | [matplotlib](https://matplotlib.org/) (cividis by Jamie R. Nuñez et al., coolwarm by Kenneth Moreland) | matplotlib License (PSF-based, BSD-compatible) |
+| twilight, twilight_shifted | [matplotlib](https://matplotlib.org/); by Bastian Bechtold | matplotlib License |
+| turbo | Google LLC (Anton Mikhailov), via matplotlib | Apache License 2.0 |
+| Blues, Greens, Reds, Oranges, Purples, Greys, YlOrRd, YlGnBu, RdBu, Spectral, BrBG, PiYG | [ColorBrewer](https://colorbrewer2.org/), Cynthia Brewer, Mark Harrower and The Pennsylvania State University, via matplotlib | Apache License 2.0 |
+| phase | [cmocean](https://matplotlib.org/cmocean/), Copyright (c) 2015 Kristen M. Thyng | MIT |
+
 ---
 
 ## Required credit
@@ -45,6 +59,11 @@ If you ship a binary that embeds sextant, ship this file with it.
 This acknowledgement is required by the FreeType Project License whenever
 FreeType is used, which is sextant's default configuration
 (`SEXTANT_USE_FREETYPE=ON`).
+
+> This product includes color specifications and designs developed by Cynthia
+> Brewer (http://colorbrewer.org/).
+
+The attribution ColorBrewer asks for, for the ColorBrewer colormaps above.
 
 ## Notice retention
 

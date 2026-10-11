@@ -1,6 +1,17 @@
 #include "colormaps.h"
+#include <algorithm>
 #include <array>
+#include <cctype>
+#include <cmath>
+#include <deque>
+#include <iterator>
+#include <limits>
+#include <mutex>
+#include <optional>
 #include <stdexcept>
+#include <string>
+#include <string_view>
+#include <vector>
 
 namespace sextant::colormaps {
 
@@ -8,6 +19,11 @@ namespace sextant::colormaps {
 // tables (_cm_listed.py; coolwarm's segment data in _cm.py interpolated at
 // i/255), rounded to nearest. Alpha is always 255 and is added in to_rgba().
 // Gray needs no table.
+//
+// The maps v1.2 added are in colormap_tables.h, generated the same way from
+// matplotlib (ColorBrewer's maps, jet, hot, hsv, twilight) and cmocean (phase): a
+// source table of 256 entries copied as is, a longer one (twilight's 510)
+// interpolated linearly at i/255. THIRD_PARTY_NOTICES.md credits them all.
 
 // clang-format off
 static constexpr uint8_t k_viridis[256][3] = {
@@ -257,6 +273,8 @@ static constexpr uint8_t k_coolwarm[256][3] = {
 
 // clang-format on
 
+#include "colormap_tables.h"
+
 namespace {
 using Lut = std::array<std::array<uint8_t, 4>, 256>;
 
@@ -275,28 +293,206 @@ constexpr Lut build_gray() {
     return lut;
 }
 
-constexpr Lut k_viridis_lut  = to_rgba(k_viridis);
-constexpr Lut k_plasma_lut   = to_rgba(k_plasma);
-constexpr Lut k_inferno_lut  = to_rgba(k_inferno);
-constexpr Lut k_magma_lut    = to_rgba(k_magma);
-constexpr Lut k_cividis_lut  = to_rgba(k_cividis);
-constexpr Lut k_turbo_lut    = to_rgba(k_turbo);
-constexpr Lut k_coolwarm_lut = to_rgba(k_coolwarm);
-constexpr Lut k_gray_lut     = build_gray();
+constexpr Lut reverse(const Lut& lut) {
+    Lut r{};
+    for (int i = 0; i < 256; ++i) r[i] = lut[255 - i];
+    return r;
+}
+
+// A built-in: its canonical name (matplotlib's spelling), group, both directions.
+struct Builtin {
+    std::string_view name;
+    Category cat;
+    Lut fwd, rev;
+};
+
+constexpr Builtin builtin(std::string_view name, Category cat, const Lut& lut) {
+    return {name, cat, lut, reverse(lut)};
+}
+
+constexpr Category S = Category::Sequential, D = Category::Diverging, C = Category::Cyclic;
+
+// In Colormap's id order (style.h's constants).
+constexpr std::array k_builtins = {
+    builtin("viridis",          S, to_rgba(k_viridis)),
+    builtin("plasma",           S, to_rgba(k_plasma)),
+    builtin("inferno",          S, to_rgba(k_inferno)),
+    builtin("magma",            S, to_rgba(k_magma)),
+    builtin("cividis",          S, to_rgba(k_cividis)),
+    builtin("turbo",            S, to_rgba(k_turbo)),
+    builtin("coolwarm",         D, to_rgba(k_coolwarm)),
+    builtin("gray",             S, build_gray()),
+    // v1.2 step 33c
+    builtin("Blues",            S, to_rgba(k_blues)),
+    builtin("Greens",           S, to_rgba(k_greens)),
+    builtin("Reds",             S, to_rgba(k_reds)),
+    builtin("Oranges",          S, to_rgba(k_oranges)),
+    builtin("Purples",          S, to_rgba(k_purples)),
+    builtin("Greys",            S, to_rgba(k_greys)),
+    builtin("YlOrRd",           S, to_rgba(k_ylorrd)),
+    builtin("YlGnBu",           S, to_rgba(k_ylgnbu)),
+    builtin("hot",              S, to_rgba(k_hot)),
+    builtin("jet",              S, to_rgba(k_jet)),
+    builtin("RdBu",             D, to_rgba(k_rdbu)),
+    builtin("Spectral",         D, to_rgba(k_spectral)),
+    builtin("BrBG",             D, to_rgba(k_brbg)),
+    builtin("PiYG",             D, to_rgba(k_piyg)),
+    builtin("twilight",         C, to_rgba(k_twilight)),
+    builtin("twilight_shifted", C, to_rgba(k_twilight_shifted)),
+    builtin("hsv",              C, to_rgba(k_hsv)),
+    builtin("phase",            C, to_rgba(k_phase)),
+};
+// style.h's constants: one per entry, in order, cyclic exactly where the group is.
+constexpr bool constants_match() {
+    constexpr Colormap all[] = {
+        Colormap::Viridis, Colormap::Plasma, Colormap::Inferno, Colormap::Magma, Colormap::Cividis,
+        Colormap::Turbo, Colormap::Coolwarm, Colormap::Gray, Colormap::Blues, Colormap::Greens,
+        Colormap::Reds, Colormap::Oranges, Colormap::Purples, Colormap::Greys, Colormap::YlOrRd,
+        Colormap::YlGnBu, Colormap::Hot, Colormap::Jet, Colormap::RdBu, Colormap::Spectral,
+        Colormap::BrBG, Colormap::PiYG, Colormap::Twilight, Colormap::TwilightShifted,
+        Colormap::Hsv, Colormap::Phase,
+    };
+    if (std::size(all) != k_builtins.size()) return false;
+    for (std::size_t i = 0; i < k_builtins.size(); ++i)
+        if (all[i].id() != i || all[i].is_reversed()
+            || all[i].is_cyclic() != (k_builtins[i].cat == Category::Cyclic))
+            return false;
+    return true;
+}
+static_assert(constants_match(), "style.h's Colormap constants and k_builtins differ");
+
+// Registered maps. A deque, so an entry never moves: get() hands out pointers
+// into it, read on the render thread while another thread may register.
+struct Custom {
+    std::string name;
+    bool cyclic = false;
+    Lut fwd, rev;
+};
+
+std::mutex& registry_mutex() {
+    static std::mutex m;
+    return m;
+}
+std::deque<Custom>& registry() {
+    static std::deque<Custom> r;
+    return r;
+}
+
+bool same_name(std::string_view a, std::string_view b) {
+    return std::ranges::equal(a, b, [](char x, char y) {
+        return std::tolower(static_cast<unsigned char>(x)) == std::tolower(static_cast<unsigned char>(y));
+    });
+}
+
+bool reversed_suffix(std::string_view name) {
+    return name.size() > 2 && same_name(name.substr(name.size() - 2), "_r");
+}
+
+// The id of `name` (no "_r"), any case; caller holds the registry lock.
+std::optional<std::uint16_t> find_locked(std::string_view name) {
+    for (std::size_t i = 0; i < k_builtins.size(); ++i)
+        if (same_name(k_builtins[i].name, name)) return static_cast<std::uint16_t>(i);
+    const auto& reg = registry();
+    for (std::size_t i = 0; i < reg.size(); ++i)
+        if (same_name(reg[i].name, name)) return static_cast<std::uint16_t>(k_builtins.size() + i);
+    return std::nullopt;
+}
+
+std::uint8_t to_byte(float v) {
+    return static_cast<std::uint8_t>(std::lround(std::clamp(std::isfinite(v) ? v : 0.0f, 0.0f, 1.0f) * 255.0f));
+}
+
+// `colors` evenly spaced over the 256 entries, linear in between.
+Lut resample(const std::vector<Color>& colors) {
+    Lut lut{};
+    const float last = static_cast<float>(colors.size() - 1);
+    for (int i = 0; i < 256; ++i) {
+        const float t = static_cast<float>(i) / 255.0f * last;
+        const std::size_t k = std::min(static_cast<std::size_t>(t), colors.size() - 2);
+        const float f = t - static_cast<float>(k);
+        const Color& a = colors[k];
+        const Color& b = colors[k + 1];
+        lut[i] = {to_byte(a.r + (b.r - a.r) * f), to_byte(a.g + (b.g - a.g) * f),
+                  to_byte(a.b + (b.b - a.b) * f), to_byte(a.a + (b.a - a.a) * f)};
+    }
+    return lut;
+}
 } // namespace
 
+std::size_t builtin_count() { return k_builtins.size(); }
+
+Category category(Colormap cmap) {
+    if (cmap.id() < k_builtins.size()) return k_builtins[cmap.id()].cat;
+    return cmap.is_cyclic() ? Category::Cyclic : Category::Sequential;
+}
+
 const uint8_t* get(Colormap cmap) {
-    switch (cmap) {
-        case Colormap::Viridis:  return &k_viridis_lut[0][0];
-        case Colormap::Plasma:   return &k_plasma_lut[0][0];
-        case Colormap::Inferno:  return &k_inferno_lut[0][0];
-        case Colormap::Magma:    return &k_magma_lut[0][0];
-        case Colormap::Cividis:  return &k_cividis_lut[0][0];
-        case Colormap::Turbo:    return &k_turbo_lut[0][0];
-        case Colormap::Coolwarm: return &k_coolwarm_lut[0][0];
-        case Colormap::Gray:     return &k_gray_lut[0][0];
+    if (cmap.id() < k_builtins.size()) {
+        const Builtin& b = k_builtins[cmap.id()];
+        return &(cmap.is_reversed() ? b.rev : b.fwd)[0][0];
     }
-    throw std::invalid_argument("unknown colormap");
+    std::lock_guard lock(registry_mutex());
+    const auto& reg = registry();
+    const std::size_t i = cmap.id() - k_builtins.size();
+    // Unreachable: only register_colormap() makes such an id.
+    if (i >= reg.size()) return &k_builtins[0].fwd[0][0];
+    return &(cmap.is_reversed() ? reg[i].rev : reg[i].fwd)[0][0];
 }
 
 } // namespace sextant::colormaps
+
+namespace sextant {
+
+using namespace colormaps;
+
+Colormap register_colormap(std::string_view name, const std::vector<Color>& colors, bool cyclic) {
+    const std::string who = "register_colormap(\"" + std::string(name) + "\")";
+    if (colors.size() < 2) throw std::invalid_argument(who + ": needs at least two colors");
+    if (name.empty()) throw std::invalid_argument("register_colormap: the name is empty");
+    if (reversed_suffix(name))
+        throw std::invalid_argument(who + ": a name may not end in \"_r\", which names a reversed map");
+    Lut lut = resample(colors);
+    std::lock_guard lock(registry_mutex());
+    if (find_locked(name)) throw std::invalid_argument(who + ": that name is taken");
+    auto& reg = registry();
+    if (k_builtins.size() + reg.size() > std::numeric_limits<std::uint16_t>::max())
+        throw std::invalid_argument(who + ": too many colormaps registered");
+    const auto id = static_cast<std::uint16_t>(k_builtins.size() + reg.size());
+    reg.push_back({std::string(name), cyclic, lut, reverse(lut)});
+    return Colormap(id, false, cyclic);
+}
+
+std::string Colormap::name() const {
+    std::string n;
+    if (id_ < k_builtins.size()) {
+        n = k_builtins[id_].name;
+    } else {
+        std::lock_guard lock(registry_mutex());
+        const auto& reg = registry();
+        const std::size_t i = id_ - k_builtins.size();
+        n = i < reg.size() ? reg[i].name : std::string(k_builtins[0].name);
+    }
+    return reversed_ ? n + "_r" : n;
+}
+
+Colormap Colormap::from_name(std::string_view name) {
+    const bool rev = reversed_suffix(name);
+    const std::string_view base = rev ? name.substr(0, name.size() - 2) : name;
+    std::lock_guard lock(registry_mutex());
+    if (const auto id = find_locked(base)) {
+        const bool cyclic = *id < k_builtins.size() ? k_builtins[*id].cat == Category::Cyclic
+                                                    : registry()[*id - k_builtins.size()].cyclic;
+        return Colormap(*id, rev, cyclic);
+    }
+    throw std::invalid_argument("Colormap::from_name: no colormap named \"" + std::string(name) + "\"");
+}
+
+std::vector<std::string> Colormap::names() {
+    std::vector<std::string> out;
+    for (const Builtin& b : k_builtins) out.emplace_back(b.name);
+    std::lock_guard lock(registry_mutex());
+    for (const Custom& c : registry()) out.push_back(c.name);
+    return out;
+}
+
+} // namespace sextant

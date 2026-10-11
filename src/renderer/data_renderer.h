@@ -436,7 +436,7 @@ private:
     unsigned int line3d_corner_vbo_ = 0;   // static 4-vertex unit quad
     // 256x1 colormap texture for paths, re-uploaded only when the map changes.
     unsigned int line3d_cmap_tex_ = 0;
-    int          line3d_cmap_in_tex_ = -1;
+    std::optional<Colormap> line3d_cmap_in_tex_;
 
     struct Scatter3DUniforms { int clip = -1, box_scale = -1, box_offset = -1,
                                    resolution = -1, marker = -1, depth = -1, shade = -1,
@@ -462,7 +462,7 @@ private:
     unsigned int surface_tri_vao_     = 0;
     // Colormap texture for meshes, re-uploaded only when the map changes.
     unsigned int surface_tri_cmap_tex_ = 0;
-    int          surface_tri_cmap_in_tex_ = -1;
+    std::optional<Colormap> surface_tri_cmap_in_tex_;
 
     struct Plane3DUniforms { int clip = -1, tex = -1, alpha = -1,
                                  box_scale = -1, box_offset = -1; };

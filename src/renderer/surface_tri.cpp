@@ -35,11 +35,11 @@ namespace sextant {
 
     Color surface_tri_vertex_color(const SurfaceTriPlot& s, std::size_t i,
                                    double vmin, double vmax) {
-        Color base = s.opts.color;
+        Color base = *s.opts.color;
         if (s.colormapped()) {
             // Same lookup and rounding as the other kinds.
             const double t = surface_tri_vertex_t(s, i, vmin, vmax);
-            const int idx = static_cast<int>(std::clamp(t, 0.0, 1.0) * 255.0);
+            const int idx = colormaps::index(t, s.opts.cmap.is_cyclic());
             const uint8_t* lut = colormaps::get(s.opts.cmap) + idx * 4;
             base = {lut[0] / 255.0f, lut[1] / 255.0f, lut[2] / 255.0f, 1.0f};
         }
@@ -48,9 +48,9 @@ namespace sextant {
 
     Color surface_tri_shaded_color(const SurfaceTriPlot& s, const SurfaceTriFace& f,
                                    double t) {
-        Color base = s.opts.color;
+        Color base = *s.opts.color;
         if (s.colormapped()) {
-            const int idx = static_cast<int>(std::clamp(t, 0.0, 1.0) * 255.0);
+            const int idx = colormaps::index(t, s.opts.cmap.is_cyclic());
             const uint8_t* lut = colormaps::get(s.opts.cmap) + idx * 4;
             base = {lut[0] / 255.0f, lut[1] / 255.0f, lut[2] / 255.0f, 1.0f};
         }

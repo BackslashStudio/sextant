@@ -13,8 +13,9 @@
 //
 // Leaf types: bool, int, float, double, std::size_t, std::string, Color,
 // std::optional<Color>, std::optional<double>, std::vector<double>,
-// std::vector<std::string>, and the enums below, whose names enum_name()
-// and enum_from_name() give.
+// std::vector<std::string>, Colormap (named by its name() and from_name(),
+// since registered maps make it open-ended), and the enums below, whose names
+// enum_name() and enum_from_name() give.
 //
 // Every field of a struct must be listed: a field added to a public header
 // is an edit here. layout_test checks each list against the struct's layout,
@@ -197,11 +198,6 @@ namespace sextant {
                        {"square", MarkerStyle::Square}, {"triangle", MarkerStyle::Triangle},
                        {"cross", MarkerStyle::Cross}, {"plus", MarkerStyle::Plus},
                        {"diamond", MarkerStyle::Diamond})
-    SEXTANT_ENUM_NAMES(Colormap,
-                       {"viridis", Colormap::Viridis}, {"plasma", Colormap::Plasma},
-                       {"inferno", Colormap::Inferno}, {"magma", Colormap::Magma},
-                       {"cividis", Colormap::Cividis}, {"turbo", Colormap::Turbo},
-                       {"coolwarm", Colormap::Coolwarm}, {"gray", Colormap::Gray})
     SEXTANT_ENUM_NAMES(CapStyle, {"flat", CapStyle::Flat}, {"arrow", CapStyle::Arrow})
     SEXTANT_ENUM_NAMES(AxisPosition,
                        {"auto", AxisPosition::Auto}, {"low", AxisPosition::Low},

@@ -123,11 +123,11 @@ namespace sextant {
 
     Color surface_cell_color(const SurfacePlot& s, const SurfaceCell& c,
                              double vmin, double vmax) {
-        Color base = s.opts.color;
+        Color base = *s.opts.color;
         if (s.opts.colormap) {
             const double span = vmax - vmin;
             const double t = span != 0.0 ? (c.value - vmin) / span : 0.0;
-            const int idx = static_cast<int>(std::clamp(t, 0.0, 1.0) * 255.0);
+            const int idx = colormaps::index(t, s.opts.cmap.is_cyclic());
             const uint8_t* lut = colormaps::get(s.opts.cmap) + idx * 4;
             base = {lut[0] / 255.0f, lut[1] / 255.0f, lut[2] / 255.0f, 1.0f};
         }

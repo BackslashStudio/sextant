@@ -12,11 +12,11 @@ namespace sextant {
 
     // True when the path must be composited (alpha < 1); `colors` has no alpha.
     inline bool line3d_translucent(const Line3DPlot& l) {
-        return l.opts.alpha < 1.0f || (!l.colormapped() && l.opts.color.a < 1.0f);
+        return l.opts.alpha < 1.0f || (!l.colormapped() && l.opts.color->a < 1.0f);
     }
 
     inline float line3d_alpha(const Line3DPlot& l) {
-        const float base = l.colormapped() ? 1.0f : l.opts.color.a;
+        const float base = l.colormapped() ? 1.0f : l.opts.color->a;
         return std::clamp(base * l.opts.alpha, 0.0f, 1.0f);
     }
 

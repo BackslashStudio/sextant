@@ -6,12 +6,12 @@
 
 namespace sextant {
     Color line3d_point_color(const Line3DPlot& l, std::size_t i, double vmin, double vmax) {
-        Color base = l.opts.color;
+        Color base = *l.opts.color;
         if (l.colormapped()) {
             // Same lookup and rounding as the other kinds.
             const double span = vmax - vmin;
             const double t = span != 0.0 ? (l.color_at(i) - vmin) / span : 0.0;
-            const int idx = static_cast<int>(std::clamp(t, 0.0, 1.0) * 255.0);
+            const int idx = colormaps::index(t, l.opts.cmap.is_cyclic());
             const uint8_t* lut = colormaps::get(l.opts.cmap) + idx * 4;
             base = {lut[0] / 255.0f, lut[1] / 255.0f, lut[2] / 255.0f, 1.0f};
         }
@@ -145,10 +145,15 @@ namespace sextant {
                 g.colormapped = l.colormapped();
                 g.cmap = l.opts.cmap;
                 if (g.colormapped && span != 0.0) {
-                    g.v0 = static_cast<float>(
-                        std::clamp((l.color_at(ia) - vmin) / span, 0.0, 1.0));
-                    g.v1 = static_cast<float>(
-                        std::clamp((l.color_at(ib) - vmin) / span, 0.0, 1.0));
+                    // Unwrapped for a cyclic map, as the GL path sends it; the
+                    // gradient stops wrap at lookup.
+                    const bool cyclic = l.opts.cmap.is_cyclic();
+                    auto norm = [&](std::size_t i) {
+                        const double t = (l.color_at(i) - vmin) / span;
+                        return static_cast<float>(cyclic ? t : std::clamp(t, 0.0, 1.0));
+                    };
+                    g.v0 = norm(ia);
+                    g.v1 = norm(ib);
                 }
 
                 g.a = ba;

@@ -6,6 +6,7 @@ name: vcpkg port
 
 on:
   push:
+    branches: [dev]   # as ci.yml: main and release tags only take tested dev commits
     paths: ['CMakeLists.txt', 'cmake/**', 'include/**', 'src/**', 'third_party/**',
             'tests/vcpkg_consumer/**', 'tests/basic_smoke/**', '.github/workflows/vcpkg-port.yml']
   pull_request:

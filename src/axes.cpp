@@ -77,6 +77,7 @@ void Axes::Impl::ingest_line(std::span<const double> x, std::span<const double> 
         throw std::invalid_argument(std::string(who) + ": x and y must have the same length");
     ErrorBarData err = take_error_bars(eb, x.size(), who);
     warn_math(mathtext, who, opts.name);
+    cycle->resolve(opts.color);
     lines.push_back({
         std::vector<double>(x.begin(), x.end()),
         std::vector<double>(y.begin(), y.end()),
@@ -93,6 +94,7 @@ void Axes::Impl::ingest_scatter(std::span<const double> x, std::span<const doubl
         throw std::invalid_argument(std::string(who) + ": x and y must have the same length");
     ErrorBarData err = take_error_bars(eb, x.size(), who);
     warn_math(mathtext, who, opts.name);
+    cycle->resolve(opts.color);
     scatters.push_back({
         std::vector<double>(x.begin(), x.end()),
         std::vector<double>(y.begin(), y.end()),
@@ -127,6 +129,7 @@ void Axes::Impl::ingest_bar(std::span<const double> x, std::span<const double> h
         throw std::invalid_argument(std::string(who) + ": x and height must have the same length");
     ErrorBarData err = take_error_bars(eb, x.size(), who);
     warn_math(mathtext, who, opts.name);
+    cycle->resolve(opts.color);
     bars.push_back({
         std::vector<double>(x.begin(), x.end()),
         std::vector<double>(height.begin(), height.end()),
@@ -226,6 +229,7 @@ Axes& Axes::hist(std::span<const double> data, int bins,
     // bar_opts passes through; `width` is relative to the bin width. No error
     // bars for histograms.
     warn_math(d->mathtext, "hist", bar_opts.name);
+    d->cycle->resolve(bar_opts.color);
 
     d->bars.push_back({
         std::move(centers),
@@ -365,6 +369,10 @@ Axes& Axes::set_yticks(std::span<const double> pos, std::vector<std::string> lab
     if (pos.empty()) d->yticks_override.reset();
     else             d->yticks_override = make_tick_override(pos, labels);
     d->style_stamps.yticks = next_snapshot_generation();
+    return *this;
+}
+Axes& Axes::set_color_cycle(std::vector<Color> colors) {
+    d->cycle->set(std::move(colors));
     return *this;
 }
 Axes& Axes::cla() {

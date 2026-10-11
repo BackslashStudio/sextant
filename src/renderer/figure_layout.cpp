@@ -410,14 +410,14 @@ namespace sextant {
             if (!lp.opts.show_legend || lp.opts.name.empty()
                 || lp.opts.linestyle == LineStyle::None)
                 continue;
-            entries.push_back({lp.opts.color, lp.opts.name, LegendKind::Line, lp.opts.linestyle});
+            entries.push_back({*lp.opts.color, lp.opts.name, LegendKind::Line, lp.opts.linestyle});
         }
         for (const auto& sp: snap.scatters)
             if (sp.opts.show_legend && !sp.opts.name.empty())
                 entries.push_back({
-                    marker_key_fill(sp.opts.color, sp.opts.alpha), sp.opts.name,
+                    marker_key_fill(*sp.opts.color, sp.opts.alpha), sp.opts.name,
                     LegendKind::Marker, LineStyle::Solid, sp.opts.marker,
-                    marker_key_edge(sp.opts.color, sp.opts.edgecolor, sp.opts.edge_alpha,
+                    marker_key_edge(*sp.opts.color, sp.opts.edgecolor, sp.opts.edge_alpha,
                                     sp.opts.edge_linewidth)
                 });
         // scatter_z is keyed white with a black edge: the key names the shape, the
@@ -430,7 +430,7 @@ namespace sextant {
                 });
         for (const auto& bp: snap.bars)
             if (bp.opts.show_legend && !bp.opts.name.empty())
-                entries.push_back({bp.opts.color, bp.opts.name, LegendKind::Bar, LineStyle::Solid});
+                entries.push_back({*bp.opts.color, bp.opts.name, LegendKind::Bar, LineStyle::Solid});
         return entries;
     }
 
@@ -441,10 +441,10 @@ namespace sextant {
         std::vector<LegendEntry> entries;
         for (const auto& bp: snap.bars3d)
             if (bp.opts.show_legend && !bp.opts.name.empty())
-                entries.push_back({bp.opts.color, bp.opts.name, LegendKind::Bar, LineStyle::Solid});
+                entries.push_back({*bp.opts.color, bp.opts.name, LegendKind::Bar, LineStyle::Solid});
         for (const auto& sp: snap.surfaces)
             if (sp.opts.show_legend && !sp.opts.name.empty() && !sp.opts.colormap)
-                entries.push_back({sp.opts.color, sp.opts.name, LegendKind::Bar, LineStyle::Solid});
+                entries.push_back({*sp.opts.color, sp.opts.name, LegendKind::Bar, LineStyle::Solid});
         // A cloud: its color when flat, white with a black edge when colormapped.
         // Kept in the legend either way (it has no other shape to recognize).
         for (const auto& sc: snap.scatter3d)
@@ -452,12 +452,12 @@ namespace sextant {
                 && sc.opts.marker != MarkerStyle::None)
                 entries.push_back({
                     sc.colormapped() ? Color::White
-                                     : marker_key_fill(sc.opts.color, sc.opts.alpha),
+                                     : marker_key_fill(*sc.opts.color, sc.opts.alpha),
                     sc.opts.name, LegendKind::Marker, LineStyle::Solid,
                     sc.opts.marker,
                     sc.colormapped()
                         ? Color::Black
-                        : marker_key_edge(sc.opts.color, sc.opts.edgecolor, sc.opts.edge_alpha,
+                        : marker_key_edge(*sc.opts.color, sc.opts.edgecolor, sc.opts.edge_alpha,
                                           sc.opts.edge_linewidth)
                 });
         // A path: its color when flat, the colormap swept along the stroke when
@@ -465,7 +465,7 @@ namespace sextant {
         for (const auto& lp: snap.lines3d)
             if (lp.opts.show_legend && !lp.opts.name.empty() && lp.opts.linewidth > 0.0f)
                 entries.push_back({
-                    lp.opts.color, lp.opts.name, LegendKind::Line,
+                    *lp.opts.color, lp.opts.name, LegendKind::Line,
                     LineStyle::Solid, MarkerStyle::Circle,
                     Color{0.0f, 0.0f, 0.0f, 0.0f},
                     lp.colormapped(), lp.opts.cmap
@@ -474,7 +474,7 @@ namespace sextant {
         for (const auto& sm: snap.surface_tri)
             if (sm.opts.show_legend && !sm.opts.name.empty() && !sm.colormapped())
                 entries.push_back({
-                    sm.opts.color, sm.opts.name, LegendKind::Bar,
+                    *sm.opts.color, sm.opts.name, LegendKind::Bar,
                     LineStyle::Solid
                 });
         for (const auto& pl: snap.planes) {

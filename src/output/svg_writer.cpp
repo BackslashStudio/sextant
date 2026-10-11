@@ -185,7 +185,7 @@ static void emit_lines(std::ostringstream& o, const SvgAxesData& d) {
         // A closed path is a <polygon> (fill="none") so the seam gets a join;
         // SVG's default miterlimit 4 matches the stroke shader.
         const char* tag = lp.opts.loop && lp.x.size() >= 2 ? "polygon" : "polyline";
-        o << "  <" << tag << " fill=\"none\" stroke=\"" << rgb(lp.opts.color)
+        o << "  <" << tag << " fill=\"none\" stroke=\"" << rgb(*lp.opts.color)
           << "\" stroke-opacity=\"" << lp.opts.alpha
           << "\" stroke-width=\"" << lp.opts.linewidth << "\""
           << dash_attr(lp.opts.linestyle)
@@ -262,13 +262,13 @@ static void emit_error_bars_for(std::ostringstream& o, const SvgAxesData& d,
 
 static void emit_error_bars(std::ostringstream& o, const SvgAxesData& d) {
     for (const auto& lp : d.lines)
-        emit_error_bars_for(o, d, lp.x, lp.y, lp.err, lp.opts.errorbar, lp.opts.color);
+        emit_error_bars_for(o, d, lp.x, lp.y, lp.err, lp.opts.errorbar, *lp.opts.color);
     // Error bars hang off the tip (heights), not the baseline.
     for (const auto& bp : d.bars)
         emit_error_bars_for(o, d, bp.centers, bp.heights, bp.err,
                             bp.opts.errorbar, bp.opts.edgecolor);
     for (const auto& sp : d.scatters)
-        emit_error_bars_for(o, d, sp.x, sp.y, sp.err, sp.opts.errorbar, sp.opts.color);
+        emit_error_bars_for(o, d, sp.x, sp.y, sp.err, sp.opts.errorbar, *sp.opts.color);
     // scatter_z has no single color, so black (as in the raster path).
     for (const auto& sp : d.scatter_z)
         emit_error_bars_for(o, d, sp.x, sp.y, sp.err, sp.opts.errorbar, Color::Black);
@@ -318,12 +318,12 @@ static void emit_scatter_marker(std::ostringstream& o,
 static void emit_scatter(std::ostringstream& o, const SvgAxesData& d) {
     for (const auto& sp : d.scatters) {
         if (sp.x.empty()) continue;
-        const std::string fill = rgb(sp.opts.color);
+        const std::string fill = rgb(*sp.opts.color);
         const float r = sp.opts.size * 0.5f;
         // Unset edgecolor = the fill's color; its alpha is the color's own times
         // edge_alpha (not the fill's `alpha`), as on the GPU.
         const bool edged = sp.opts.edge_linewidth > 0.0f;
-        const Color ec = sp.opts.edgecolor ? *sp.opts.edgecolor : sp.opts.color;
+        const Color ec = sp.opts.edgecolor ? *sp.opts.edgecolor : *sp.opts.color;
         const std::string stroke = edged ? rgb(ec) : std::string();
         const float stroke_alpha = std::clamp(ec.a * sp.opts.edge_alpha, 0.0f, 1.0f);
         for (std::size_t i = 0; i < sp.x.size(); ++i)
@@ -342,10 +342,8 @@ static void emit_scatter_z(std::ostringstream& o, const SvgAxesData& d) {
         const float    vmin  = sp.opts.vmin, vrange = sp.opts.vmax - sp.opts.vmin;
         const float    r     = sp.opts.size * 0.5f;
         for (std::size_t i = 0; i < sp.x.size(); ++i) {
-            float t = (vrange != 0.0f)
-                    ? static_cast<float>((sp.z[i] - vmin) / vrange) : 0.0f;
-            t = std::clamp(t, 0.0f, 1.0f);
-            const uint8_t* c = &lut[static_cast<int>(t * 255.0f) * 4];
+            const double t = (vrange != 0.0f) ? (sp.z[i] - vmin) / vrange : 0.0;
+            const uint8_t* c = &lut[colormaps::index(t, sp.opts.cmap.is_cyclic()) * 4];
             char buf[32];
             std::snprintf(buf, sizeof(buf), "rgb(%d,%d,%d)", c[0], c[1], c[2]);
             std::string stroke;
@@ -371,9 +369,8 @@ static void emit_heatmap(std::ostringstream& o, const SvgAxesData& d) {
         std::vector<uint8_t> rgba(static_cast<std::size_t>(n) * 4);
         const float vmin = hp.opts.vmin, vrange = hp.opts.vmax - hp.opts.vmin;
         for (int i = 0; i < n; ++i) {
-            float t = (vrange != 0.0f) ? (hp.data[i] - vmin) / vrange : 0.0f;
-            t = std::clamp(t, 0.0f, 1.0f);
-            const int idx = static_cast<int>(t * 255.0f);
+            const double t = (vrange != 0.0f) ? (hp.data[i] - vmin) / vrange : 0.0;
+            const int idx = colormaps::index(t, hp.opts.cmap.is_cyclic());
             std::memcpy(&rgba[static_cast<std::size_t>(i) * 4], &lut[idx * 4], 4);
         }
 
@@ -423,7 +420,7 @@ static void emit_bars(std::ostringstream& o, const SvgAxesData& d) {
     const float py0 = d.layout.tr.to_py(0.0);
     for (const auto& bp : d.bars) {
         const float half = static_cast<float>(bp.bar_width * 0.5);
-        const std::string fill  = rgb(bp.opts.color);
+        const std::string fill  = rgb(*bp.opts.color);
         const std::string edge  = rgb(bp.opts.edgecolor);
         for (std::size_t i = 0; i < bp.centers.size(); ++i) {
             const float xl = d.layout.tr.to_px(bp.centers[i] - half);
@@ -1046,7 +1043,7 @@ static void emit_box3d(std::ostringstream& o, const SvgAxesData& d, std::size_t 
                     const float num = p.na + p.nx * sx + p.ny * sy;
                     const float den = p.wa + p.wx * sx + p.wy * sy;
                     const float t = den != 0.0f ? num / den : 0.0f;
-                    const int e = static_cast<int>(std::clamp(t, 0.0f, 1.0f) * 255.0f);
+                    const int e = colormaps::index(t, p.cmap.is_cyclic());
                      // Look up, then shade (the shader's order).
                     const Color c{ lut[e * 4]     / 255.0f * p.shade,
                                    lut[e * 4 + 1] / 255.0f * p.shade,
@@ -1135,8 +1132,7 @@ static void emit_box3d(std::ostringstream& o, const SvgAxesData& d, std::size_t 
                         const float f = static_cast<float>(k) / (kStops - 1);
                          // Position along the parent segment (f when unsplit).
                         const float t = lerp(t0, t1, f);
-                        const int e = static_cast<int>(
-                            std::clamp(lerp(g.v0, g.v1, t), 0.0f, 1.0f) * 255.0f);
+                        const int e = colormaps::index(lerp(g.v0, g.v1, t), g.cmap.is_cyclic());
                          // Look up, then darken (the shader's order).
                         const float sh = lerp(g.k0, g.k1, t);
                         const Color c{ lut[e * 4]     / 255.0f * sh,

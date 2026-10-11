@@ -1,6 +1,7 @@
 #pragma once
 // Internal header — defines Axes3D::Impl, the 3D sibling of Axes::Impl.
 #include "sextant/axes3d.h"
+#include "color_cycle.h"
 #include "plane2d_impl.h"
 #include "plot_objects.h"
 #include "tick.h"
@@ -23,6 +24,9 @@ namespace sextant {
         // The figure's FigureOptions::mathtext, set when the figure makes this
         // axes; only warn_math() reads it (drawing reads the snapshot's).
         bool mathtext = true;
+
+        // Shared with every plane, whose sheet draws from it too (see Axes::Impl::cycle).
+        std::shared_ptr<ColorCycle> cycle = std::make_shared<ColorCycle>();
 
         // shared_ptr: plane() returns the plane for the caller to draw on.
         std::vector<std::shared_ptr<Plane2D>> planes;

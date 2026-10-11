@@ -71,7 +71,9 @@ namespace sextant {
     };
 
     struct Bar3DOptions {
-        Color color = Color::Blue;
+        // Unset = the axes' next color-cycle color, taken at the call (see
+        // Axes3D::set_color_cycle()). The Data panel shows the color taken.
+        std::optional<Color> color;
 
         // Below 1 bars are translucent and every face is drawn back to front. This
         // needs per-camera ordering every frame; exactly 1 keeps the cheap
@@ -111,8 +113,10 @@ namespace sextant {
     // A surface over the same `u x v` grid as bar3d, with `heights` laid out the
     // same way (row-major, u major).
     struct SurfaceOptions {
-        // Flat color of every cell, unless `colormap` is on.
-        Color color = Color::Blue;
+        // Flat color of every cell, unless `colormap` is on. Unset: see
+        // Bar3DOptions::color; with `colormap` on it takes the next color without
+        // advancing the cycle.
+        std::optional<Color> color;
 
         // Color each cell by its height instead.
         bool colormap = false;
@@ -159,8 +163,9 @@ namespace sextant {
     struct SurfaceTriOptions {
         // Flat color of the whole mesh, unless a `colors` vector was given (which
         // is what makes a mesh colormapped; there is no `colormap` flag since a
-        // mesh has no height axis).
-        Color color = Color::Blue;
+        // mesh has no height axis). Unset: see SurfaceOptions::color, `colors`
+        // standing for `colormap`.
+        std::optional<Color> color;
 
         // Colormap for a `colors` vector; read only by the overloads that take one.
         Colormap cmap = Colormap::Viridis;
@@ -258,8 +263,9 @@ namespace sextant {
     // `colors` vector makes it colormapped. Note: in 3D `z` is a coordinate; the
     // color dimension is `colors` (unlike 2D scatter_z, where z is the color).
     struct Scatter3DOptions {
-        // Flat color of every marker, unless a `colors` vector was given.
-        Color color = Color::Blue;
+        // Flat color of every marker, unless a `colors` vector was given. Unset:
+        // see SurfaceTriOptions::color.
+        std::optional<Color> color;
 
         // Marker diameter in pixels, constant regardless of depth.
         float size = 20.0f;
@@ -306,8 +312,9 @@ namespace sextant {
 
     // A path through the points in the order given: the 3D line().
     struct Line3DOptions {
-        // Flat color of the path, unless a `colors` vector was given.
-        Color color = Color::Blue;
+        // Flat color of the path, unless a `colors` vector was given. Unset: see
+        // SurfaceTriOptions::color.
+        std::optional<Color> color;
 
         // Width in pixels at the box centre, converted once to a length in the box,
         // so under perspective a distant stretch is thinner.
@@ -418,7 +425,8 @@ namespace sextant {
         // axes: XY -> (x, y), YZ -> (y, z), ZX -> (z, x). Options mean what they
         // mean in 2D, except that line widths, bar edges and error-bar strokes are
         // pixels at the box centre (they scale with depth under perspective), while
-        // markers and contours keep a fixed screen size.
+        // markers and contours keep a fixed screen size. An unset `color` comes
+        // from the parent axes' color cycle (see Axes3D::set_color_cycle()).
         Plane2D& line(std::span<const double> x, std::span<const double> y,
                       LineOptions opts = {});
 
@@ -464,6 +472,7 @@ namespace sextant {
         // Whole-plane opacity; multiplies the objects' own alpha.
         Plane2D& set_alpha(float alpha);
 
+        // Clears the plane's objects; the parent's color cycle carries on.
         Plane2D& cla();
 
         PlaneOrientation orientation() const;
@@ -710,6 +719,12 @@ namespace sextant {
         // plot objects on planes). A colorbar is requested by the plot object.
         Axes3D& set_colorbar_style(ColorbarOptions opts = {});
 
+        // As Axes::set_color_cycle(), for bar3d(), surface(), surface_tri(),
+        // scatter3d() and line3d() and the 2D calls on this axes' planes, which
+        // share the cycle. A colormapped object takes the next color without
+        // advancing the cycle.
+        Axes3D& set_color_cycle(std::vector<Color> colors);
+
         // ----------------------------------------------------------------
         // Camera
         // ----------------------------------------------------------------
@@ -731,6 +746,7 @@ namespace sextant {
         // The camera a double-click resets to. Unaffected by set_camera() and drags.
         Axes3D& set_default_camera(Camera3D cam);
 
+        // Clears the objects and planes and resets the rest, the color cycle included.
         Axes3D& cla();
 
         // ----------------------------------------------------------------

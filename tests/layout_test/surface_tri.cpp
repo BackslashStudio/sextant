@@ -1007,7 +1007,7 @@ namespace lt {
             e.surface_tri.push_back({0, o});
             apply_axes3d_edit(dst, e);
             check(dst.surface_tri[0].opts.edges &&
-                  dst.surface_tri[0].opts.color.g == Color::Green.g,
+                  dst.surface_tri[0].opts.color->g == Color::Green.g,
                   "surface_tri lane: an appearance edit reaches the mesh it names");
             check(dst.surface_tri[0].opts.hint_labels.size() == 4,
                   "surface_tri lane: and does not carry a stale copy of the hint labels back "

@@ -98,7 +98,7 @@ namespace lt {
         // Bar and surface rows, seeded the same way.
         check(st.data.bars3d_local.size() == 1 && st.data.surfaces_local.size() == 1,
               "3D panel: one Bars row per bar3d grid, one Surfaces row per surface");
-        check(st.data.bars3d_local[0].color.r == 1.0f && st.data.bars3d_local[0].shading == 0.9f,
+        check(st.data.bars3d_local[0].color->r == 1.0f && st.data.bars3d_local[0].shading == 0.9f,
               "3D panel: the Bars row is seeded from its own grid's options");
         check(st.data.surfaces_local[0].colormap && st.data.surfaces_local[0].alpha == 0.4f &&
               st.data.surfaces_local[0].edges,
@@ -960,7 +960,7 @@ namespace lt {
             FigureSnapshot fs = wrap(std::move(r));
             FigureWindowState st;
             pull_data_panel(st.data, st.selection, *normalize_selection(st.selection, fs));
-            check(st.data.bars3d_local.size() == 1 && st.data.bars3d_local[0].color.r == 1.0f,
+            check(st.data.bars3d_local.size() == 1 && st.data.bars3d_local[0].color->r == 1.0f,
                   "object tabs: the copies are seeded from the snapshot");
 
             Bar3DPlot blue = bar3d_grid();
@@ -970,8 +970,8 @@ namespace lt {
             PlaneSnapshot pl;
             s3->planes.push_back(pl);
             pull_data_panel(st.data, st.selection, *normalize_selection(st.selection, fs));
-            check(st.data.bars3d_local.size() == 2 && st.data.bars3d_local[0].color.b == 1.0f &&
-                  st.data.bars3d_local[1].color.r == 1.0f,
+            check(st.data.bars3d_local.size() == 2 && st.data.bars3d_local[0].color->b == 1.0f &&
+                  st.data.bars3d_local[1].color->r == 1.0f,
                   "object tabs: a grid inserted ahead re-seeds them, so index 0 is the new grid");
             check(st.data.planes_local.size() == 1,
                   "object tabs: and a plane added is picked up the same way");

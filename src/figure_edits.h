@@ -1078,7 +1078,8 @@ struct ReplacedOpts {
 };
 
 // Assign an object's options, keeping its current `hint_labels` (data owned by
-// the Data panel, which the options copy may have stale). Edits name objects
+// the Data panel, which the options copy may have stale) and, when the new
+// options leave it unset, its `color`. Edits name objects
 // as data ops do (find_object()). Nothing when the object is gone.
 template <class Vec, class Opts>
 std::optional<ReplacedOpts<Opts>> assign_plot_opts(Vec& v, int idx, ObjectId id, const Opts& o) {
@@ -1095,6 +1096,10 @@ std::optional<ReplacedOpts<Opts>> assign_plot_opts(Vec& v, int idx, ObjectId id,
         r.old.hint_labels.clear();
         p->opts = o;
         p->opts.hint_labels = std::move(labels);
+        // An unset `color` keeps the object's, which drawing reads as always set
+        // (see plot_objects.h).
+        if constexpr (requires { p->opts.color.has_value(); })
+            if (!p->opts.color) p->opts.color = r.old.color;
         return r;
     }
 }
