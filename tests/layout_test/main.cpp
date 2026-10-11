@@ -78,6 +78,11 @@ int main() {
     test_errorbar_rendered();
     test_errorbar_hint_and_rows();
 
+    // draw_order.cpp
+    test_draw_order_2d();
+    test_draw_order_plane();
+    test_draw_order_keys_and_hint();
+
     // line2d.cpp
     test_line_loop_segments();
     test_line_loop_rendered();

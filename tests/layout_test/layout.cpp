@@ -853,6 +853,11 @@ namespace lt {
             bp.heights = CowVec<double>{std::vector<double>{1.0, 2.0}};
             bp.opts.name = "bars";
             s->bars.push_back(bp);
+            // Made in this order (ids are call order).
+            s->lines[0].id = 1;
+            s->scatters[0].id = 2;
+            s->scatter_z[0].id = 3;
+            s->bars[0].id = 4;
             return fs;
         };
 
@@ -861,7 +866,7 @@ namespace lt {
         check(base.size() == 4, "show_legend: every labelled 2D kind is keyed by default");
         check(base[0].name == "line" && base[1].name == "dots"
               && base[2].name == "flux" && base[3].name == "bars",
-              "show_legend: in kind order, with scatter_z between the scatters and the bars");
+              "show_legend: in call order");
 
         // Each kind's switch removes exactly its own key.
         struct Off {

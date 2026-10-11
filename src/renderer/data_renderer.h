@@ -7,6 +7,7 @@
 #include "../contour.h"
 #include <array>
 #include <cstdint>
+#include <span>
 #include <unordered_map>
 #include <vector>
 
@@ -31,27 +32,11 @@ public:
         axes_index_ = axes_index;
     }
 
-    void draw_lines(const std::vector<LinePlot>& lines,
-                    const CoordTransform& tr, const PlotRect& pr);
-
-    void draw_scatter(const std::vector<ScatterPlot>& scatters,
-                      const CoordTransform& tr, const PlotRect& pr);
-
-    // Continuous-color scatter: per-point colors from the colormap, computed on
-    // the CPU and uploaded per instance (separate shader from draw_scatter).
-    void draw_scatter_z(const std::vector<ScatterZPlot>& points,
-                        const CoordTransform& tr, const PlotRect& pr);
-
-    void draw_bars(const std::vector<BarPlot>& bars,
-                   const CoordTransform& tr, const PlotRect& pr);
-
-    void draw_heatmap(const std::vector<HeatmapPlot>& heatmaps,
-                      const CoordTransform& tr, const PlotRect& pr);
-
-    // Error bars for all four 2D kinds in one call. Draw after fills, before
-    // draw_scatter.
-    void draw_error_bars(const AllPlotData& all,
-                         const CoordTransform& tr, const PlotRect& pr);
+    // A 2D sheet's plot objects (an axes', or a plane's into its raster), each
+    // with its error bars, in call_order(): a later call draws over an earlier
+    // one whatever their kinds. A bar or line object's error bars go over it, a
+    // scatter's under its markers.
+    void draw_plots(const RenderSnapshot& snap, const CoordTransform& tr, const PlotRect& pr);
 
     // The whole 3D scene in two phases: all opaque objects (depth-tested, any
     // order), then all translucent objects in one back-to-front order across
@@ -167,6 +152,24 @@ private:
     // accumulated transmittance to coverage.
     void draw_peel_quad(unsigned int tex, bool flip_alpha,
                         float x0, float y0, float x1, float y1) const;
+
+    // The per-kind 2D draws, sequenced only by draw_plots(): the objects of
+    // `which` (indices into the vector), in that order.
+    void draw_lines(const std::vector<LinePlot>& lines, std::span<const std::size_t> which,
+                    const CoordTransform& tr, const PlotRect& pr);
+    void draw_scatter(const std::vector<ScatterPlot>& scatters, std::span<const std::size_t> which,
+                      const CoordTransform& tr, const PlotRect& pr);
+    // Continuous-color scatter: per-point colors from the colormap, computed on
+    // the CPU and uploaded per instance (separate shader from draw_scatter).
+    void draw_scatter_z(const std::vector<ScatterZPlot>& points, std::span<const std::size_t> which,
+                        const CoordTransform& tr, const PlotRect& pr);
+    void draw_bars(const std::vector<BarPlot>& bars, std::span<const std::size_t> which,
+                   const CoordTransform& tr, const PlotRect& pr);
+    void draw_heatmap(const std::vector<HeatmapPlot>& heatmaps, std::span<const std::size_t> which,
+                      const CoordTransform& tr, const PlotRect& pr);
+    // One object's error bars, any of the four kinds that have them.
+    void draw_error_bars(const RenderSnapshot& snap, ObjectRef ref,
+                         const CoordTransform& tr, const PlotRect& pr);
 
     float pixel_ratio_ = 1.0f;
 

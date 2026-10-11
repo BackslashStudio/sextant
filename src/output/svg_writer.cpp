@@ -178,8 +178,10 @@ static void emit_grid(std::ostringstream& o, const SvgAxesData& d) {
     o << "  </g>\n";
 }
 
-static void emit_lines(std::ostringstream& o, const SvgAxesData& d) {
-    for (const auto& lp : d.lines) {
+static void emit_lines(std::ostringstream& o, const SvgAxesData& d,
+                       std::span<const std::size_t> which) {
+    for (const std::size_t k : which) {
+        const auto& lp = d.lines[k];
         if (lp.x.empty() || lp.opts.linestyle == LineStyle::None) continue;
 
         // A closed path is a <polygon> (fill="none") so the seam gets a join;
@@ -260,18 +262,34 @@ static void emit_error_bars_for(std::ostringstream& o, const SvgAxesData& d,
     }
 }
 
-static void emit_error_bars(std::ostringstream& o, const SvgAxesData& d) {
-    for (const auto& lp : d.lines)
-        emit_error_bars_for(o, d, lp.x, lp.y, lp.err, lp.opts.errorbar, *lp.opts.color);
-    // Error bars hang off the tip (heights), not the baseline.
-    for (const auto& bp : d.bars)
-        emit_error_bars_for(o, d, bp.centers, bp.heights, bp.err,
-                            bp.opts.errorbar, bp.opts.edgecolor);
-    for (const auto& sp : d.scatters)
-        emit_error_bars_for(o, d, sp.x, sp.y, sp.err, sp.opts.errorbar, *sp.opts.color);
-    // scatter_z has no single color, so black (as in the raster path).
-    for (const auto& sp : d.scatter_z)
-        emit_error_bars_for(o, d, sp.x, sp.y, sp.err, sp.opts.errorbar, Color::Black);
+// One object's error bars.
+static void emit_error_bars(std::ostringstream& o, const SvgAxesData& d, ObjectRef r) {
+    switch (r.kind) {
+        case PlotKind::Line: {
+            const auto& lp = d.lines[r.index];
+            emit_error_bars_for(o, d, lp.x, lp.y, lp.err, lp.opts.errorbar, *lp.opts.color);
+            break;
+        }
+        case PlotKind::Bar: {
+            // Error bars hang off the tip (heights), not the baseline.
+            const auto& bp = d.bars[r.index];
+            emit_error_bars_for(o, d, bp.centers, bp.heights, bp.err,
+                                bp.opts.errorbar, bp.opts.edgecolor);
+            break;
+        }
+        case PlotKind::Scatter: {
+            const auto& sp = d.scatters[r.index];
+            emit_error_bars_for(o, d, sp.x, sp.y, sp.err, sp.opts.errorbar, *sp.opts.color);
+            break;
+        }
+        case PlotKind::ScatterZ: {
+            // scatter_z has no single color, so black (as in the raster path).
+            const auto& sp = d.scatter_z[r.index];
+            emit_error_bars_for(o, d, sp.x, sp.y, sp.err, sp.opts.errorbar, Color::Black);
+            break;
+        }
+        default: break;
+    }
 }
 
 // Markers from marker_shape() (shared with both legends), emitted as their
@@ -315,8 +333,10 @@ static void emit_scatter_marker(std::ostringstream& o,
     }
 }
 
-static void emit_scatter(std::ostringstream& o, const SvgAxesData& d) {
-    for (const auto& sp : d.scatters) {
+static void emit_scatter(std::ostringstream& o, const SvgAxesData& d,
+                         std::span<const std::size_t> which) {
+    for (const std::size_t k : which) {
+        const auto& sp = d.scatters[k];
         if (sp.x.empty()) continue;
         const std::string fill = rgb(*sp.opts.color);
         const float r = sp.opts.size * 0.5f;
@@ -335,8 +355,10 @@ static void emit_scatter(std::ostringstream& o, const SvgAxesData& d) {
 
 // Continuous-color scatter: per-point fill via the same colormap LUT as the
 // raster path.
-static void emit_scatter_z(std::ostringstream& o, const SvgAxesData& d) {
-    for (const auto& sp : d.scatter_z) {
+static void emit_scatter_z(std::ostringstream& o, const SvgAxesData& d,
+                           std::span<const std::size_t> which) {
+    for (const std::size_t k : which) {
+        const auto& sp = d.scatter_z[k];
         if (sp.x.empty()) continue;
         const uint8_t* lut   = colormaps::get(sp.opts.cmap);
         const float    vmin  = sp.opts.vmin, vrange = sp.opts.vmax - sp.opts.vmin;
@@ -360,8 +382,10 @@ static void emit_scatter_z(std::ostringstream& o, const SvgAxesData& d) {
 
 // Heatmap as a base64 PNG <image>, via the same colormap LUT and origin flip
 // as DataRenderer::draw_heatmap, plus mirroring for reversed ranges.
-static void emit_heatmap(std::ostringstream& o, const SvgAxesData& d) {
-    for (const auto& hp : d.heatmaps) {
+static void emit_heatmap(std::ostringstream& o, const SvgAxesData& d,
+                         std::span<const std::size_t> which) {
+    for (const std::size_t k : which) {
+        const auto& hp = d.heatmaps[k];
         if (hp.rows <= 0 || hp.cols <= 0) continue;
 
         const uint8_t* lut = colormaps::get(hp.opts.cmap);
@@ -416,9 +440,11 @@ static void emit_heatmap(std::ostringstream& o, const SvgAxesData& d) {
     }
 }
 
-static void emit_bars(std::ostringstream& o, const SvgAxesData& d) {
+static void emit_bars(std::ostringstream& o, const SvgAxesData& d,
+                      std::span<const std::size_t> which) {
     const float py0 = d.layout.tr.to_py(0.0);
-    for (const auto& bp : d.bars) {
+    for (const std::size_t k : which) {
+        const auto& bp = d.bars[k];
         const float half = static_cast<float>(bp.bar_width * 0.5);
         const std::string fill  = rgb(*bp.opts.color);
         const std::string edge  = rgb(bp.opts.edgecolor);
@@ -436,6 +462,36 @@ static void emit_bars(std::ostringstream& o, const SvgAxesData& d) {
             if (bp.opts.linewidth > 0.f)
                 o << " stroke=\"" << edge << "\" stroke-width=\"" << bp.opts.linewidth << "\"";
             o << "/>\n";
+        }
+    }
+}
+
+// The plot objects in call order, each with its error bars, as
+// DataRenderer::draw_plots().
+static void emit_plots(std::ostringstream& o, const SvgAxesData& d) {
+    for (const ObjectRef& r : call_order(d)) {
+        const std::size_t one[1] = {r.index};
+        switch (r.kind) {
+            case PlotKind::Heatmap:
+                emit_heatmap(o, d, one);
+                break;
+            case PlotKind::Bar:
+                emit_bars(o, d, one);
+                emit_error_bars(o, d, r);
+                break;
+            case PlotKind::Line:
+                emit_lines(o, d, one);
+                emit_error_bars(o, d, r);
+                break;
+            case PlotKind::Scatter:
+                emit_error_bars(o, d, r);
+                emit_scatter(o, d, one);
+                break;
+            case PlotKind::ScatterZ:
+                emit_error_bars(o, d, r);
+                emit_scatter_z(o, d, one);
+                break;
+            default: break;
         }
     }
 }
@@ -1221,12 +1277,7 @@ static void emit_one_axes(std::ostringstream& o, const SvgAxesData& d, std::size
           << "\"" << background_fill(d.axes_style.background) << "/>\n";
 
     o << "  <g clip-path=\"url(#plotArea" << idx << ")\">\n";
-    emit_heatmap(o, d);
-    emit_bars(o, d);
-    emit_lines(o, d);
-    emit_error_bars(o, d);
-    emit_scatter(o, d);
-    emit_scatter_z(o, d);
+    emit_plots(o, d);
     o << "  </g>\n";
 
     // Contours in their own clipped group: above plots, below border/grid.

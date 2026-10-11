@@ -76,7 +76,7 @@ void render_frame(RenderDevice& dev, DataRenderer& data,
 
     if (out_layout) *out_layout = axes_layouts(layout);
 
-    // Pass 2 — GLSL data. 2D: fixed back-to-front order; 3D: depth-tested scene.
+    // Pass 2 — GLSL data. 2D: in call order; 3D: depth-tested scene.
     for (std::size_t i = 0; i < layout.cells.size(); ++i) {
         const auto& c = layout.cells[i];
         if (const RenderSnapshot3D* s3 = fsnap.axes[i].snap3d()) {
@@ -88,16 +88,10 @@ void render_frame(RenderDevice& dev, DataRenderer& data,
         }
         const RenderSnapshot* s2 = fsnap.axes[i].snap2d();
         if (!s2) continue;
-        const AllPlotData all = s2->all();
         // Cache key: the data generation, so pan/zoom keeps the buffers.
         data.set_frame_key(fsnap.data_generation, c.slot.index);
-        data.draw_heatmap  (all.heatmaps,  c.tr, c.frame);
-        data.draw_bars     (all.bars,      c.tr, c.frame);
-        data.draw_lines    (all.lines,     c.tr, c.frame);
-        // After fills, before scatter (same order as the SVG writer).
-        data.draw_error_bars(all, c.tr, c.frame);
-        data.draw_scatter  (all.scatters,  c.tr, c.frame);
-        data.draw_scatter_z(all.scatter_z, c.tr, c.frame);
+        // In call order, as the SVG writer.
+        data.draw_plots(*s2, c.tr, c.frame);
     }
 
     // Pass 3 — NanoVG: borders, ticks, labels, texts, legend, colorbar, suptitle.

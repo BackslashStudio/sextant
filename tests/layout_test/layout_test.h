@@ -244,6 +244,13 @@ namespace lt {
 
     void test_grid_boundary_drag();
 
+    // draw_order.cpp
+    void test_draw_order_2d();
+
+    void test_draw_order_plane();
+
+    void test_draw_order_keys_and_hint();
+
     // errorbar2d.cpp
     void test_errorbar_api();
 

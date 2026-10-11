@@ -989,6 +989,12 @@ namespace lt {
         RenderSnapshot3D* s = fs.axes[0].snap3d();
         s->planes.push_back(make_kinds_plane(PlaneOrientation::XY, 0.0));
         s->planes.push_back(make_kinds_plane(PlaneOrientation::YZ, 1.0));
+        // Each plane's series made line, dots, bars (ids are call order).
+        for (PlaneSnapshot& pl: s->planes) {
+            pl.sheet.lines[0].id = 1;
+            pl.sheet.scatters[0].id = 2;
+            pl.sheet.bars[0].id = 3;
+        }
 
         check(compute_cell_decorations(*s).legend_entries.empty(),
               "legend: nothing is keyed until the axes asks for a legend");
@@ -999,7 +1005,7 @@ namespace lt {
               "legend: every labelled series on every plane gets a key");
         check(dec.legend_entries[0].name == "line" && dec.legend_entries[1].name == "dots"
               && dec.legend_entries[2].name == "bars",
-              "legend: in the 2D kind order within a plane");
+              "legend: in call order within a plane");
         check(dec.legend_entries[3].name == "line",
               "legend: and in plane order across them");
         check(dec.legend_entries[0].kind == LegendKind::Line

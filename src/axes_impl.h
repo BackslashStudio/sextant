@@ -55,7 +55,8 @@ struct Axes::Impl {
     // API neither removes nor reorders objects. Each is a caller-thread change
     // like a plotting call, reaching a window at the next publish; panel edits
     // made over the old order follow their objects (or drop with them).
-    // Reorder is within a kind, which is what draw and legend order follow.
+    // Reorder is within a kind; draw and legend order follow the ids
+    // (call_order()), so a move changes neither.
     // Each returns what undoes it: the removed object for
     // restore_object(), the old index for a move back.
     std::optional<ObjectRef> find_object(ObjectId id) const {

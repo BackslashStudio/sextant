@@ -27,7 +27,7 @@ namespace sextant {
     // ---------------------------------------------------------------------------
     // The plane's raster
     // ---------------------------------------------------------------------------
-    // A plane's contents are rendered in 2D painter order into their own
+    // A plane's contents are rendered in 2D call order into their own
     // framebuffer and enter the scene as one textured quad. The raster spans the
     // parent's limits (the box face), so content outside them is clipped. No GL
     // here, so it is testable without a context.
@@ -72,6 +72,8 @@ namespace sextant {
     //   Tri     a filled area in the plane      -- bar bodies, error-bar boxes
     //   Seg     a stroke in the scene           -- lines, bar edges, whiskers
     //   Marker  a symbol                        -- scatter and scatter_z points
+    //   Heatmap one of the sheet's heatmaps, by index (the batch's `begin`); its
+    //           pixels are plane_heatmap_rgba()'s
     //
     // A Seg's width is pixels at the box centre, converted to a box length.
     struct PlaneGeometry {
@@ -100,10 +102,11 @@ namespace sextant {
         std::vector<Seg> segs;
         std::vector<Marker> markers;
 
-        // The 2D painter order as consecutive ranges into the three lists (fills
-        // and strokes alternate, and coplanar primitives can't be depth-sorted).
+        // The 2D call order as consecutive ranges into the three lists, or a
+        // heatmap (fills and strokes alternate, and coplanar primitives can't be
+        // depth-sorted).
         struct Batch {
-            enum class Kind { Tri, Seg, Marker } kind = Kind::Tri;
+            enum class Kind { Tri, Seg, Marker, Heatmap } kind = Kind::Tri;
 
             std::size_t begin = 0, end = 0;
         };
@@ -113,7 +116,7 @@ namespace sextant {
         bool empty() const { return batches.empty(); }
     };
 
-    // Everything on `p` except its heatmaps, in 2D painter order. Used by the SVG
+    // Everything on `p`, in 2D call order (call_order()). Used by the SVG
     // writer only; the raster path draws into the plane's framebuffer instead.
     // Markers are drawn into the plane, so they foreshorten with it; `size` is in
     // raster pixels.

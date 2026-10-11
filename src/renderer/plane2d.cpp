@@ -188,12 +188,19 @@ namespace sextant {
                 g.markers.push_back({at(u, v), c, size_px, m, edge, edge_px});
             }
 
+            // A heatmap, by its index in the sheet: a batch of its own, never
+            // extended.
+            void heatmap(std::size_t index) {
+                g.batches.push_back({PlaneGeometry::Batch::Kind::Heatmap, index, index + 1});
+            }
+
         private:
             std::size_t size_of(PlaneGeometry::Batch::Kind k) const {
                 switch (k) {
                     case PlaneGeometry::Batch::Kind::Tri: return g.tris.size();
                     case PlaneGeometry::Batch::Kind::Seg: return g.segs.size();
                     case PlaneGeometry::Batch::Kind::Marker: return g.markers.size();
+                    case PlaneGeometry::Batch::Kind::Heatmap: return 0; // never opened
                 }
                 return 0;
             }
@@ -265,102 +272,115 @@ namespace sextant {
         const double px_u = std::max(1e-300, ext.xmax - ext.xmin) / kPixelsAcross;
         const double px_v = std::max(1e-300, ext.ymax - ext.ymin) / kPixelsAcross;
 
-        // --- bar bodies, then bar outlines and lines (the 2D order).
-        b.open(Kind::Tri);
-        for (const auto& bp: s.bars) {
-            const double half = bp.bar_width * 0.5;
-            const Color c = with_alpha(*bp.opts.color, bp.opts.alpha);
-            for (std::size_t i = 0; i < bp.centers.size() && i < bp.heights.size(); ++i)
-                b.rect(bp.centers[i] - half, 0.0, bp.centers[i] + half, bp.heights[i], c);
-        }
-        b.close();
-
-        b.open(Kind::Seg);
-        for (const auto& bp: s.bars) {
-            if (bp.opts.linewidth <= 0.0f) continue;
-            const double half = bp.bar_width * 0.5;
-            for (std::size_t i = 0; i < bp.centers.size() && i < bp.heights.size(); ++i)
-                b.rect_outline(bp.centers[i] - half, 0.0, bp.centers[i] + half,
-                               bp.heights[i], bp.opts.edgecolor, bp.opts.linewidth);
-        }
-        // No dashing in the scene (a world-space ribbon has no pixel arc length);
-        // non-solid lines on a plane draw solid.
-        for (const auto& lp: s.lines) {
-            if (lp.opts.linestyle == LineStyle::None || lp.opts.linewidth <= 0.0f) continue;
-            const Color c = with_alpha(*lp.opts.color, lp.opts.alpha);
-            // segment_count()/segment_ends() decide closure; the length guard drops
-            // segments past a shorter y vector.
-            const std::size_t n = std::min(lp.x.size(), lp.y.size());
-            for (std::size_t s = 0; s < lp.segment_count(); ++s) {
-                std::size_t i, j;
-                lp.segment_ends(s, i, j);
-                if (i >= n || j >= n) continue;
-                b.seg_uv(lp.x[i], lp.y[i], lp.x[j], lp.y[j], c, lp.opts.linewidth);
-            }
-        }
-        b.close();
-
-        // --- error bars, in the 2D order: after fills, before markers.
-        {
+        // One object's error bars: boxes, then whiskers (error_bars()).
+        auto errs = [&](const CowVec<double>& xs, const CowVec<double>& ys,
+                        const ErrorBarData& err, const ErrorBarOptions& style,
+                        const Color& fallback) {
+            if (err.empty()) return;
             GeometryBuilder fills, strokes;
             fills.orient = strokes.orient = p.orient;
             fills.offset = strokes.offset = p.offset;
+            error_bars(fills, strokes, xs, ys, err, style, fallback, ErrScale{px_u, px_v});
+            b.open(Kind::Tri);
+            b.g.tris.insert(b.g.tris.end(), fills.g.tris.begin(), fills.g.tris.end());
+            b.close();
+            b.open(Kind::Seg);
+            b.g.segs.insert(b.g.segs.end(), strokes.g.segs.begin(), strokes.g.segs.end());
+            b.close();
+        };
 
-            auto run = [&](const CowVec<double>& xs, const CowVec<double>& ys,
-                           const ErrorBarData& err, const ErrorBarOptions& style,
-                           const Color& fallback) {
-                error_bars(fills, strokes, xs, ys, err, style, fallback, ErrScale{px_u, px_v});
-            };
-            for (const auto& lp: s.lines)
-                run(lp.x, lp.y, lp.err, lp.opts.errorbar, *lp.opts.color);
-            // Error bars hang off the tip (heights), not the baseline.
-            for (const auto& bp: s.bars)
-                run(bp.centers, bp.heights, bp.err, bp.opts.errorbar, bp.opts.edgecolor);
-            for (const auto& sp: s.scatters)
-                run(sp.x, sp.y, sp.err, sp.opts.errorbar, *sp.opts.color);
-            // scatter_z has no single color, so black (as in 2D).
-            for (const auto& sp: s.scatter_z)
-                run(sp.x, sp.y, sp.err, sp.opts.errorbar, Color::Black);
+        // In call order, as the raster (DataRenderer::draw_plots()): a bar or line
+        // object's error bars over it, a scatter's under its markers.
+        for (const ObjectRef& r: call_order(s)) {
+            switch (r.kind) {
+                case PlotKind::Heatmap:
+                    b.heatmap(r.index);
+                    break;
 
-            if (!fills.g.tris.empty()) {
-                b.open(Kind::Tri);
-                b.g.tris.insert(b.g.tris.end(), fills.g.tris.begin(), fills.g.tris.end());
-                b.close();
-            }
-            if (!strokes.g.segs.empty()) {
-                b.open(Kind::Seg);
-                b.g.segs.insert(b.g.segs.end(), strokes.g.segs.begin(), strokes.g.segs.end());
-                b.close();
+                case PlotKind::Bar: {
+                    const auto& bp = s.bars[r.index];
+                    const double half = bp.bar_width * 0.5;
+                    const std::size_t n = std::min(bp.centers.size(), bp.heights.size());
+                    const Color c = with_alpha(*bp.opts.color, bp.opts.alpha);
+                    b.open(Kind::Tri);
+                    for (std::size_t i = 0; i < n; ++i)
+                        b.rect(bp.centers[i] - half, 0.0, bp.centers[i] + half, bp.heights[i], c);
+                    b.close();
+                    if (bp.opts.linewidth > 0.0f) {
+                        b.open(Kind::Seg);
+                        for (std::size_t i = 0; i < n; ++i)
+                            b.rect_outline(bp.centers[i] - half, 0.0, bp.centers[i] + half,
+                                           bp.heights[i], bp.opts.edgecolor, bp.opts.linewidth);
+                        b.close();
+                    }
+                    // Error bars hang off the tip (heights), not the baseline.
+                    errs(bp.centers, bp.heights, bp.err, bp.opts.errorbar, bp.opts.edgecolor);
+                    break;
+                }
+
+                case PlotKind::Line: {
+                    // No dashing in the scene (a world-space ribbon has no pixel arc
+                    // length); non-solid lines on a plane draw solid.
+                    const auto& lp = s.lines[r.index];
+                    if (lp.opts.linestyle != LineStyle::None && lp.opts.linewidth > 0.0f) {
+                        const Color c = with_alpha(*lp.opts.color, lp.opts.alpha);
+                        // segment_count()/segment_ends() decide closure; the length
+                        // guard drops segments past a shorter y vector.
+                        const std::size_t n = std::min(lp.x.size(), lp.y.size());
+                        b.open(Kind::Seg);
+                        for (std::size_t k = 0; k < lp.segment_count(); ++k) {
+                            std::size_t i, j;
+                            lp.segment_ends(k, i, j);
+                            if (i >= n || j >= n) continue;
+                            b.seg_uv(lp.x[i], lp.y[i], lp.x[j], lp.y[j], c, lp.opts.linewidth);
+                        }
+                        b.close();
+                    }
+                    errs(lp.x, lp.y, lp.err, lp.opts.errorbar, *lp.opts.color);
+                    break;
+                }
+
+                case PlotKind::Scatter: {
+                    const auto& sp = s.scatters[r.index];
+                    errs(sp.x, sp.y, sp.err, sp.opts.errorbar, *sp.opts.color);
+                    const Color c = with_alpha(*sp.opts.color, sp.opts.alpha);
+                    const std::size_t n = std::min(sp.x.size(), sp.y.size());
+                    // Unset edgecolor = the fill's color; alpha is its own times edge_alpha.
+                    Color ec = sp.opts.edgecolor ? *sp.opts.edgecolor : *sp.opts.color;
+                    ec.a = std::clamp(ec.a * sp.opts.edge_alpha, 0.0f, 1.0f);
+                    const float ew = std::max(0.0f, sp.opts.edge_linewidth);
+                    b.open(Kind::Marker);
+                    for (std::size_t i = 0; i < n; ++i)
+                        b.marker(sp.x[i], sp.y[i], c, sp.opts.size, sp.opts.marker, ec, ew);
+                    b.close();
+                    break;
+                }
+
+                case PlotKind::ScatterZ: {
+                    const auto& sp = s.scatter_z[r.index];
+                    // scatter_z has no single color, so black (as in 2D).
+                    errs(sp.x, sp.y, sp.err, sp.opts.errorbar, Color::Black);
+                    const std::uint8_t* lut = colormaps::get(sp.opts.cmap);
+                    const float vmin = sp.opts.vmin, vrange = sp.opts.vmax - sp.opts.vmin;
+                    const std::size_t n = std::min({sp.x.size(), sp.y.size(), sp.z.size()});
+                    const float ew = std::max(0.0f, sp.opts.edge_linewidth);
+                    b.open(Kind::Marker);
+                    for (std::size_t i = 0; i < n; ++i) {
+                        const Color face = cell_color(lut, sp.opts.cmap.is_cyclic(),
+                                                      static_cast<float>(sp.z[i]), vmin, vrange);
+                        Color ec = sp.opts.edgecolor ? *sp.opts.edgecolor : face;
+                        ec.a = std::clamp((sp.opts.edgecolor ? ec.a : 1.0f) * sp.opts.edge_alpha,
+                                          0.0f, 1.0f);
+                        b.marker(sp.x[i], sp.y[i], with_alpha(face, sp.opts.alpha), sp.opts.size,
+                                 sp.opts.marker, ec, ew);
+                    }
+                    b.close();
+                    break;
+                }
+
+                default: break;
             }
         }
-
-        // --- markers, last.
-        b.open(Kind::Marker);
-        for (const auto& sp: s.scatters) {
-            const Color c = with_alpha(*sp.opts.color, sp.opts.alpha);
-            const std::size_t n = std::min(sp.x.size(), sp.y.size());
-            // Unset edgecolor = the fill's color; alpha is its own times edge_alpha.
-            Color ec = sp.opts.edgecolor ? *sp.opts.edgecolor : *sp.opts.color;
-            ec.a = std::clamp(ec.a * sp.opts.edge_alpha, 0.0f, 1.0f);
-            const float ew = std::max(0.0f, sp.opts.edge_linewidth);
-            for (std::size_t i = 0; i < n; ++i)
-                b.marker(sp.x[i], sp.y[i], c, sp.opts.size, sp.opts.marker, ec, ew);
-        }
-        for (const auto& sp: s.scatter_z) {
-            const std::uint8_t* lut = colormaps::get(sp.opts.cmap);
-            const float vmin = sp.opts.vmin, vrange = sp.opts.vmax - sp.opts.vmin;
-            const std::size_t n = std::min({sp.x.size(), sp.y.size(), sp.z.size()});
-            const float ew = std::max(0.0f, sp.opts.edge_linewidth);
-            for (std::size_t i = 0; i < n; ++i) {
-                const Color face =
-                    cell_color(lut, sp.opts.cmap.is_cyclic(), static_cast<float>(sp.z[i]), vmin, vrange);
-                Color ec = sp.opts.edgecolor ? *sp.opts.edgecolor : face;
-                ec.a = std::clamp((sp.opts.edgecolor ? ec.a : 1.0f) * sp.opts.edge_alpha, 0.0f, 1.0f);
-                b.marker(sp.x[i], sp.y[i], with_alpha(face, sp.opts.alpha), sp.opts.size,
-                         sp.opts.marker, ec, ew);
-            }
-        }
-        b.close();
 
         return std::move(b.g);
     }
@@ -438,7 +458,39 @@ namespace sextant {
             }
         }
 
-        // The plane's non-heatmap primitives, projected, one item per batch.
+        // One heatmap as an item: an affine <image> under orthographic, cell
+        // polygons under perspective (up to kPlane3DCellCap).
+        void append_heatmap_item(std::vector<PlanePlanItem>& out, const PlaneSnapshot& pl,
+                                 std::size_t pi, std::size_t hi, float depth,
+                                 const Projector3D& proj) {
+            const HeatmapPlot& hp = pl.sheet.heatmaps[hi];
+            if (hp.rows <= 0 || hp.cols <= 0) return;
+
+            PlanePlanItem item;
+            item.alpha = pl.opts.alpha;
+            item.depth = depth;
+            item.plane = pi;
+            item.plot = hi;
+
+            const std::size_t cells = static_cast<std::size_t>(hp.rows) * hp.cols;
+            const PlaneQuad q = plane_heatmap_quad(hp, pl.orient, pl.offset);
+
+            if (!proj.is_perspective()) {
+                fill_image_form(item, hp, q, proj);
+            } else if (cells <= kPlane3DCellCap) {
+                fill_cell_form(item, hp, pl.orient, pl.offset, proj);
+            } else {
+                fill_image_form(item, hp, q, proj);
+                item.warning = "plane " + std::to_string(pi) + ": " +
+                               std::to_string(cells) + " cells exceeds the " +
+                               std::to_string(kPlane3DCellCap) +
+                               "-cell cap for an exact perspective plane; "
+                               "placed as an affine <image>, which a projective warp is not";
+            }
+            out.push_back(std::move(item));
+        }
+
+        // The plane's contents, projected, one item per batch.
         void append_geometry_items(std::vector<PlanePlanItem>& out, const PlaneSnapshot& pl,
                                    std::size_t pi, float depth, const Projector3D& proj) {
             const PlaneGeometry g = plane_geometry(pl);
@@ -474,6 +526,10 @@ namespace sextant {
             std::vector<Px3> clipped;
 
             for (const auto& batch: g.batches) {
+                if (batch.kind == PlaneGeometry::Batch::Kind::Heatmap) {
+                    append_heatmap_item(out, pl, pi, batch.begin, depth, proj);
+                    continue;
+                }
                 PlanePlanItem item;
                 item.alpha = pl.opts.alpha;
                 item.depth = depth;
@@ -513,6 +569,7 @@ namespace sextant {
                         }
                         break;
 
+                    case PlaneGeometry::Batch::Kind::Heatmap: break; // handled above
                     case PlaneGeometry::Batch::Kind::Marker:
                         item.form = PlanePlanItem::Form::Markers;
                         for (std::size_t i = batch.begin; i < batch.end && i < g.markers.size(); ++i) {
@@ -554,35 +611,6 @@ namespace sextant {
             const PlaneSnapshot& pl = planes[pi];
             if (!plane_drawn(pl)) continue;
             const float depth = static_cast<float>(plane_distance(pl, proj));
-
-            // Heatmaps first (the backdrop), then everything else.
-            for (std::size_t hi = 0; hi < pl.sheet.heatmaps.size(); ++hi) {
-                const HeatmapPlot& hp = pl.sheet.heatmaps[hi];
-                if (hp.rows <= 0 || hp.cols <= 0) continue;
-
-                PlanePlanItem item;
-                item.alpha = pl.opts.alpha;
-                item.depth = depth;
-                item.plane = pi;
-                item.plot = hi;
-
-                const std::size_t cells = static_cast<std::size_t>(hp.rows) * hp.cols;
-                const PlaneQuad q = plane_heatmap_quad(hp, pl.orient, pl.offset);
-
-                if (!proj.is_perspective()) {
-                    fill_image_form(item, hp, q, proj);
-                } else if (cells <= kPlane3DCellCap) {
-                    fill_cell_form(item, hp, pl.orient, pl.offset, proj);
-                } else {
-                    fill_image_form(item, hp, q, proj);
-                    item.warning = "plane " + std::to_string(pi) + ": " +
-                                   std::to_string(cells) + " cells exceeds the " +
-                                   std::to_string(kPlane3DCellCap) +
-                                   "-cell cap for an exact perspective plane; "
-                                   "placed as an affine <image>, which a projective warp is not";
-                }
-                out.push_back(std::move(item));
-            }
 
             append_geometry_items(out, pl, pi, depth, proj);
         }

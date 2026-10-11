@@ -100,8 +100,9 @@ struct PickHit {
 };
 
 // The hit find_hint() words: nearest point across line/scatter/scatter_z/bar
-// within kHintHitRadiusPx, else the heatmap cell under the cursor. `index` as for
-// find_hint().
+// within kHintHitRadiusPx (of equal distances, the later call's), else the
+// heatmap cell under the cursor; a heatmap drawn over that point wins too (it
+// hides it). `index` as for find_hint().
 std::optional<PickHit> find_pick(const RenderSnapshot& snap, const HintProjector& proj,
                                  float cursor_x, float cursor_y,
                                  HintIndexCache* index = nullptr);
@@ -116,8 +117,9 @@ std::optional<PickHit> find_pick3d(const RenderSnapshot3D& snap, const Projector
 std::string format_pick(const RenderSnapshot& snap, const PickHit& hit);
 std::string format_pick3d(const RenderSnapshot3D& snap, const PickHit& hit);
 
-// Nearest point across line/scatter/scatter_z/bar within kHintHitRadiusPx,
-// else the heatmap cell under the cursor. nullopt = nothing. `index`
+// The text for find_pick()'s hit: nearest point across line/scatter/scatter_z/bar
+// within kHintHitRadiusPx, else the heatmap cell under the cursor (or the cell,
+// when that heatmap is drawn over the point). nullopt = nothing. `index`
 // (optional, set_frame_key() already called) only speeds up the search.
 std::optional<HintResult> find_hint(const RenderSnapshot& snap,
                                     const HintProjector& proj,

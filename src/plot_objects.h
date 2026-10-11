@@ -748,6 +748,62 @@ std::optional<std::size_t> move_object_in(S& s, const PlotKind (&kinds)[N], Obje
     return at->index;
 }
 
+// The order the plotting calls made a holder's plot objects in, texts left out:
+// by ObjectId, which next_object_id() hands out at the call, so a later call
+// draws over an earlier one whatever their kinds. What drawing, export, the
+// legend, the colorbars and the hover hint all follow. Equal ids (objects built
+// by hand with id 0, in tests) keep the listed kind order, then the index.
+namespace objects_detail {
+struct OrderKey {
+    ObjectId  id;
+    ObjectRef ref;
+};
+
+template <class V>
+void add_order_keys(std::vector<OrderKey>& keys, PlotKind kind, const V& v) {
+    for (std::size_t i = 0; i < v.size(); ++i) keys.push_back({ v[i].id, { kind, i } });
+}
+
+inline std::vector<ObjectRef> sorted_refs(std::vector<OrderKey>& keys) {
+    std::stable_sort(keys.begin(), keys.end(),
+                     [](const OrderKey& a, const OrderKey& b) { return a.id < b.id; });
+    std::vector<ObjectRef> out;
+    out.reserve(keys.size());
+    for (const OrderKey& k : keys) out.push_back(k.ref);
+    return out;
+}
+} // namespace objects_detail
+
+// 2D: a RenderSnapshot, Axes::Impl, a plane's sheet or the SVG writer's data.
+template <class S>
+    requires requires(const S& s) { s.lines; s.scatters; s.bars; s.heatmaps; s.scatter_z; }
+std::vector<ObjectRef> call_order(const S& s) {
+    std::vector<objects_detail::OrderKey> keys;
+    keys.reserve(s.heatmaps.size() + s.bars.size() + s.lines.size() + s.scatters.size()
+                 + s.scatter_z.size());
+    // The fixed per-kind order that preceded call order, for the ties.
+    objects_detail::add_order_keys(keys, PlotKind::Heatmap, s.heatmaps);
+    objects_detail::add_order_keys(keys, PlotKind::Bar, s.bars);
+    objects_detail::add_order_keys(keys, PlotKind::Line, s.lines);
+    objects_detail::add_order_keys(keys, PlotKind::Scatter, s.scatters);
+    objects_detail::add_order_keys(keys, PlotKind::ScatterZ, s.scatter_z);
+    return objects_detail::sorted_refs(keys);
+}
+
+// 3D: the axes' own kinds (not its planes, which are objects of their own). Only
+// the legend and colorbars follow it: the scene is depth-tested.
+inline std::vector<ObjectRef> call_order(const RenderSnapshot3D& s) {
+    std::vector<objects_detail::OrderKey> keys;
+    keys.reserve(s.bars3d.size() + s.surfaces.size() + s.scatter3d.size() + s.lines3d.size()
+                 + s.surface_tri.size());
+    objects_detail::add_order_keys(keys, PlotKind::Bar3D, s.bars3d);
+    objects_detail::add_order_keys(keys, PlotKind::Surface, s.surfaces);
+    objects_detail::add_order_keys(keys, PlotKind::Scatter3D, s.scatter3d);
+    objects_detail::add_order_keys(keys, PlotKind::Line3D, s.lines3d);
+    objects_detail::add_order_keys(keys, PlotKind::SurfaceTri, s.surface_tri);
+    return objects_detail::sorted_refs(keys);
+}
+
 // Grid position of one axes (1-based, row-major, like matplotlib). Covers cells
 // `index` (top-left) to `last` (bottom-right; 0 = just `index`). `index` is the
 // slot's identity; Figure guarantees no two slots share a cell.
@@ -828,54 +884,65 @@ struct ColorbarRequest {
     std::string name;
 };
 
-// Every colorbar an axes draws: one per requesting object, in kind order then
-// index (outward from the frame). Shared by raster and SVG paths.
+// Every colorbar an axes draws: one per requesting object, in call order
+// (outward from the frame). Shared by raster and SVG paths.
 inline std::vector<ColorbarRequest> find_colorbar_requests(const RenderSnapshot& snap) {
     std::vector<ColorbarRequest> reqs;
-    for (const auto& hp : snap.heatmaps)
-        if (hp.opts.colorbar) reqs.push_back({ hp.opts.cmap, hp.opts.vmin, hp.opts.vmax,
-                                               hp.opts.name });
-    for (const auto& sp : snap.scatter_z)
-        if (sp.opts.colorbar) reqs.push_back({ sp.opts.cmap, sp.opts.vmin, sp.opts.vmax,
-                                               sp.opts.name });
+    auto add = [&reqs](const auto& opts) {
+        if (opts.colorbar) reqs.push_back({ opts.cmap, opts.vmin, opts.vmax, opts.name });
+    };
+    for (const ObjectRef& r : call_order(snap)) {
+        if (r.kind == PlotKind::Heatmap)       add(snap.heatmaps[r.index].opts);
+        else if (r.kind == PlotKind::ScatterZ) add(snap.scatter_z[r.index].opts);
+    }
     return reqs;
 }
 
 // 3D: colorbars are drawn beside the cell, not in the scene. The axes' own
-// kinds come first, then each plane's. bar3d has no colormap.
+// kinds come first, in call order, then each plane's. bar3d has no colormap.
+// Each range is the resolved one.
 inline std::vector<ColorbarRequest> find_colorbar_requests(const RenderSnapshot3D& snap) {
     std::vector<ColorbarRequest> reqs;
-    for (const auto& sp : snap.surfaces) {
-        // Only with `colormap` on; the range is the resolved one.
-        if (!sp.opts.colorbar || !sp.opts.colormap) continue;
+    auto add = [&reqs](const auto& opts, double lo, double hi) {
+        reqs.push_back({ opts.cmap, static_cast<float>(lo), static_cast<float>(hi), opts.name });
+    };
+    for (const ObjectRef& r : call_order(snap)) {
         double lo = 0.0, hi = 1.0;
-        surface_value_range(sp, lo, hi);
-        reqs.push_back({ sp.opts.cmap, static_cast<float>(lo), static_cast<float>(hi),
-                         sp.opts.name });
-    }
-        // Only with a `colors` vector; the range is the resolved one.
-    for (const auto& sc : snap.scatter3d) {
-        if (!sc.opts.colorbar || !sc.colormapped()) continue;
-        double lo = 0.0, hi = 1.0;
-        scatter3d_value_range(sc, lo, hi);
-        reqs.push_back({ sc.opts.cmap, static_cast<float>(lo), static_cast<float>(hi),
-                         sc.opts.name });
-    }
-        // As scatter3d.
-    for (const auto& lp : snap.lines3d) {
-        if (!lp.opts.colorbar || !lp.colormapped()) continue;
-        double lo = 0.0, hi = 1.0;
-        line3d_value_range(lp, lo, hi);
-        reqs.push_back({ lp.opts.cmap, static_cast<float>(lo), static_cast<float>(hi),
-                         lp.opts.name });
-    }
-        // As scatter3d.
-    for (const auto& sm : snap.surface_tri) {
-        if (!sm.opts.colorbar || !sm.colormapped()) continue;
-        double lo = 0.0, hi = 1.0;
-        surface_tri_value_range(sm, lo, hi);
-        reqs.push_back({ sm.opts.cmap, static_cast<float>(lo), static_cast<float>(hi),
-                         sm.opts.name });
+        switch (r.kind) {
+            case PlotKind::Surface: {
+                // Only with `colormap` on.
+                const auto& sp = snap.surfaces[r.index];
+                if (!sp.opts.colorbar || !sp.opts.colormap) break;
+                surface_value_range(sp, lo, hi);
+                add(sp.opts, lo, hi);
+                break;
+            }
+            case PlotKind::Scatter3D: {
+                // Only with a `colors` vector.
+                const auto& sc = snap.scatter3d[r.index];
+                if (!sc.opts.colorbar || !sc.colormapped()) break;
+                scatter3d_value_range(sc, lo, hi);
+                add(sc.opts, lo, hi);
+                break;
+            }
+            case PlotKind::Line3D: {
+                // As scatter3d.
+                const auto& lp = snap.lines3d[r.index];
+                if (!lp.opts.colorbar || !lp.colormapped()) break;
+                line3d_value_range(lp, lo, hi);
+                add(lp.opts, lo, hi);
+                break;
+            }
+            case PlotKind::SurfaceTri: {
+                // As scatter3d.
+                const auto& sm = snap.surface_tri[r.index];
+                if (!sm.opts.colorbar || !sm.colormapped()) break;
+                surface_tri_value_range(sm, lo, hi);
+                add(sm.opts, lo, hi);
+                break;
+            }
+            default: break;
+        }
     }
     for (const auto& pl : snap.planes) {
         auto one = find_colorbar_requests(pl.sheet);

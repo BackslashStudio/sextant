@@ -403,80 +403,120 @@ namespace sextant {
         return c;
     }
 
+    // In call order (call_order()), as the objects draw.
     std::vector<LegendEntry> collect_legend_entries(const RenderSnapshot& snap) {
         std::vector<LegendEntry> entries;
-        for (const auto& lp: snap.lines) {
-            // A LineStyle::None line isn't drawn, so it gets no key.
-            if (!lp.opts.show_legend || lp.opts.name.empty()
-                || lp.opts.linestyle == LineStyle::None)
-                continue;
-            entries.push_back({*lp.opts.color, lp.opts.name, LegendKind::Line, lp.opts.linestyle});
+        auto keyed = [](const auto& opts) { return opts.show_legend && !opts.name.empty(); };
+        for (const ObjectRef& r: call_order(snap)) {
+            switch (r.kind) {
+                case PlotKind::Line: {
+                    // A LineStyle::None line isn't drawn, so it gets no key.
+                    const auto& lp = snap.lines[r.index];
+                    if (keyed(lp.opts) && lp.opts.linestyle != LineStyle::None)
+                        entries.push_back({*lp.opts.color, lp.opts.name, LegendKind::Line,
+                                           lp.opts.linestyle});
+                    break;
+                }
+                case PlotKind::Scatter: {
+                    const auto& sp = snap.scatters[r.index];
+                    if (keyed(sp.opts))
+                        entries.push_back({
+                            marker_key_fill(*sp.opts.color, sp.opts.alpha), sp.opts.name,
+                            LegendKind::Marker, LineStyle::Solid, sp.opts.marker,
+                            marker_key_edge(*sp.opts.color, sp.opts.edgecolor, sp.opts.edge_alpha,
+                                            sp.opts.edge_linewidth)
+                        });
+                    break;
+                }
+                case PlotKind::ScatterZ: {
+                    // Keyed white with a black edge: the key names the shape, the
+                    // colorbar explains the colors.
+                    const auto& zp = snap.scatter_z[r.index];
+                    if (keyed(zp.opts))
+                        entries.push_back({
+                            Color::White, zp.opts.name, LegendKind::Marker,
+                            LineStyle::Solid, zp.opts.marker, Color::Black
+                        });
+                    break;
+                }
+                case PlotKind::Bar: {
+                    const auto& bp = snap.bars[r.index];
+                    if (keyed(bp.opts))
+                        entries.push_back({*bp.opts.color, bp.opts.name, LegendKind::Bar,
+                                           LineStyle::Solid});
+                    break;
+                }
+                default: break; // heatmaps: explained by their colorbar
+            }
         }
-        for (const auto& sp: snap.scatters)
-            if (sp.opts.show_legend && !sp.opts.name.empty())
-                entries.push_back({
-                    marker_key_fill(*sp.opts.color, sp.opts.alpha), sp.opts.name,
-                    LegendKind::Marker, LineStyle::Solid, sp.opts.marker,
-                    marker_key_edge(*sp.opts.color, sp.opts.edgecolor, sp.opts.edge_alpha,
-                                    sp.opts.edge_linewidth)
-                });
-        // scatter_z is keyed white with a black edge: the key names the shape, the
-        // colorbar explains the colors.
-        for (const auto& zp: snap.scatter_z)
-            if (zp.opts.show_legend && !zp.opts.name.empty())
-                entries.push_back({
-                    Color::White, zp.opts.name, LegendKind::Marker,
-                    LineStyle::Solid, zp.opts.marker, Color::Black
-                });
-        for (const auto& bp: snap.bars)
-            if (bp.opts.show_legend && !bp.opts.name.empty())
-                entries.push_back({*bp.opts.color, bp.opts.name, LegendKind::Bar, LineStyle::Solid});
         return entries;
     }
 
-    // 3D: the axes' own kinds first, then each plane's (same function per sheet).
-    // A surface is keyed only when flat; a colormapped one is explained by its
-    // colorbar.
+    // 3D: the axes' own kinds first, in call order, then each plane's (same
+    // function per sheet). A surface is keyed only when flat; a colormapped one
+    // is explained by its colorbar.
     std::vector<LegendEntry> collect_legend_entries(const RenderSnapshot3D& snap) {
         std::vector<LegendEntry> entries;
-        for (const auto& bp: snap.bars3d)
-            if (bp.opts.show_legend && !bp.opts.name.empty())
-                entries.push_back({*bp.opts.color, bp.opts.name, LegendKind::Bar, LineStyle::Solid});
-        for (const auto& sp: snap.surfaces)
-            if (sp.opts.show_legend && !sp.opts.name.empty() && !sp.opts.colormap)
-                entries.push_back({*sp.opts.color, sp.opts.name, LegendKind::Bar, LineStyle::Solid});
-        // A cloud: its color when flat, white with a black edge when colormapped.
-        // Kept in the legend either way (it has no other shape to recognize).
-        for (const auto& sc: snap.scatter3d)
-            if (sc.opts.show_legend && !sc.opts.name.empty()
-                && sc.opts.marker != MarkerStyle::None)
-                entries.push_back({
-                    sc.colormapped() ? Color::White
-                                     : marker_key_fill(*sc.opts.color, sc.opts.alpha),
-                    sc.opts.name, LegendKind::Marker, LineStyle::Solid,
-                    sc.opts.marker,
-                    sc.colormapped()
-                        ? Color::Black
-                        : marker_key_edge(*sc.opts.color, sc.opts.edgecolor, sc.opts.edge_alpha,
-                                          sc.opts.edge_linewidth)
-                });
-        // A path: its color when flat, the colormap swept along the stroke when
-        // not (see LegendEntry::swept). No linestyle gate (paths have no LineStyle).
-        for (const auto& lp: snap.lines3d)
-            if (lp.opts.show_legend && !lp.opts.name.empty() && lp.opts.linewidth > 0.0f)
-                entries.push_back({
-                    *lp.opts.color, lp.opts.name, LegendKind::Line,
-                    LineStyle::Solid, MarkerStyle::Circle,
-                    Color{0.0f, 0.0f, 0.0f, 0.0f},
-                    lp.colormapped(), lp.opts.cmap
-                });
-        // A mesh follows the surface rule: keyed only when flat.
-        for (const auto& sm: snap.surface_tri)
-            if (sm.opts.show_legend && !sm.opts.name.empty() && !sm.colormapped())
-                entries.push_back({
-                    *sm.opts.color, sm.opts.name, LegendKind::Bar,
-                    LineStyle::Solid
-                });
+        auto keyed = [](const auto& opts) { return opts.show_legend && !opts.name.empty(); };
+        for (const ObjectRef& r: call_order(snap)) {
+            switch (r.kind) {
+                case PlotKind::Bar3D: {
+                    const auto& bp = snap.bars3d[r.index];
+                    if (keyed(bp.opts))
+                        entries.push_back({*bp.opts.color, bp.opts.name, LegendKind::Bar,
+                                           LineStyle::Solid});
+                    break;
+                }
+                case PlotKind::Surface: {
+                    const auto& sp = snap.surfaces[r.index];
+                    if (keyed(sp.opts) && !sp.opts.colormap)
+                        entries.push_back({*sp.opts.color, sp.opts.name, LegendKind::Bar,
+                                           LineStyle::Solid});
+                    break;
+                }
+                case PlotKind::Scatter3D: {
+                    // A cloud: its color when flat, white with a black edge when
+                    // colormapped. Kept in the legend either way (it has no other
+                    // shape to recognize).
+                    const auto& sc = snap.scatter3d[r.index];
+                    if (keyed(sc.opts) && sc.opts.marker != MarkerStyle::None)
+                        entries.push_back({
+                            sc.colormapped() ? Color::White
+                                             : marker_key_fill(*sc.opts.color, sc.opts.alpha),
+                            sc.opts.name, LegendKind::Marker, LineStyle::Solid,
+                            sc.opts.marker,
+                            sc.colormapped()
+                                ? Color::Black
+                                : marker_key_edge(*sc.opts.color, sc.opts.edgecolor,
+                                                  sc.opts.edge_alpha, sc.opts.edge_linewidth)
+                        });
+                    break;
+                }
+                case PlotKind::Line3D: {
+                    // A path: its color when flat, the colormap swept along the stroke
+                    // when not (see LegendEntry::swept). No linestyle gate (paths have
+                    // no LineStyle).
+                    const auto& lp = snap.lines3d[r.index];
+                    if (keyed(lp.opts) && lp.opts.linewidth > 0.0f)
+                        entries.push_back({
+                            *lp.opts.color, lp.opts.name, LegendKind::Line,
+                            LineStyle::Solid, MarkerStyle::Circle,
+                            Color{0.0f, 0.0f, 0.0f, 0.0f},
+                            lp.colormapped(), lp.opts.cmap
+                        });
+                    break;
+                }
+                case PlotKind::SurfaceTri: {
+                    // A mesh follows the surface rule: keyed only when flat.
+                    const auto& sm = snap.surface_tri[r.index];
+                    if (keyed(sm.opts) && !sm.colormapped())
+                        entries.push_back({*sm.opts.color, sm.opts.name, LegendKind::Bar,
+                                           LineStyle::Solid});
+                    break;
+                }
+                default: break;
+            }
+        }
         for (const auto& pl: snap.planes) {
             auto one = collect_legend_entries(pl.sheet);
             entries.insert(entries.end(), one.begin(), one.end());

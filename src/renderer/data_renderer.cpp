@@ -1797,9 +1797,10 @@ void main() {
     // draw_lines
     // -------------------------------------------------------------------------
     void DataRenderer::draw_lines(const std::vector<LinePlot>& lines,
+                                  std::span<const std::size_t> which,
                                   const CoordTransform& tr,
                                   const PlotRect& pr) {
-        if (lines.empty()) return;
+        if (which.empty()) return;
 
         begin_pass(pr, tr.win_h);
         glUseProgram(lineseg_program_);
@@ -1808,7 +1809,7 @@ void main() {
         glBindVertexArray(lineseg_vao_);
 
         std::vector<float> pts, dists;
-        for (std::size_t li = 0; li < lines.size(); ++li) {
+        for (const std::size_t li : which) {
             const auto& lp = lines[li];
             if (lp.x.size() < 2) continue;
             // LineStyle::None: no stroke.
@@ -1989,9 +1990,10 @@ void main() {
     // draw_scatter
     // -------------------------------------------------------------------------
     void DataRenderer::draw_scatter(const std::vector<ScatterPlot>& scatters,
+                                    std::span<const std::size_t> which,
                                     const CoordTransform& tr,
                                     const PlotRect& pr) {
-        if (scatters.empty()) return;
+        if (which.empty()) return;
 
         begin_pass(pr, tr.win_h);
         glUseProgram(scatter_program_);
@@ -2000,7 +2002,7 @@ void main() {
         glBindVertexArray(scatter_vao_);
 
         std::vector<float> inst;
-        for (std::size_t si = 0; si < scatters.size(); ++si) {
+        for (const std::size_t si : which) {
             const auto& sp = scatters[si];
             if (sp.x.empty()) continue;
 
@@ -2099,9 +2101,10 @@ void main() {
     // draw_scatter_z
     // -------------------------------------------------------------------------
     void DataRenderer::draw_scatter_z(const std::vector<ScatterZPlot>& points,
+                                      std::span<const std::size_t> which,
                                       const CoordTransform& tr,
                                       const PlotRect& pr) {
-        if (points.empty()) return;
+        if (which.empty()) return;
 
         begin_pass(pr, tr.win_h);
         glUseProgram(scatterz_program_);
@@ -2110,7 +2113,7 @@ void main() {
         glBindVertexArray(scatterz_vao_);
 
         std::vector<float> inst;
-        for (std::size_t si = 0; si < points.size(); ++si) {
+        for (const std::size_t si : which) {
             const auto& sp = points[si];
             if (sp.x.empty()) continue;
 
@@ -2224,9 +2227,10 @@ void main() {
     // draw_bars
     // -------------------------------------------------------------------------
     void DataRenderer::draw_bars(const std::vector<BarPlot>& bars,
+                                 std::span<const std::size_t> which,
                                  const CoordTransform& tr,
                                  const PlotRect& pr) {
-        if (bars.empty()) return;
+        if (which.empty()) return;
 
         begin_pass(pr, tr.win_h);
         glUseProgram(line_program_);
@@ -2245,7 +2249,7 @@ void main() {
         };
 
         std::vector<float> scratch;
-        for (std::size_t bi = 0; bi < bars.size(); ++bi) {
+        for (const std::size_t bi : which) {
             const auto& bp = bars[bi];
             if (bp.centers.empty()) continue;
 
@@ -2382,20 +2386,51 @@ void main() {
     }
 
     // -------------------------------------------------------------------------
+    // draw_plots
+    // -------------------------------------------------------------------------
+    void DataRenderer::draw_plots(const RenderSnapshot& snap, const CoordTransform& tr,
+                                  const PlotRect& pr) {
+        // One object per draw: consecutive objects of one kind can't share a
+        // call, since each one's error bars go between them.
+        for (const ObjectRef& r : call_order(snap)) {
+            const std::size_t one[1] = {r.index};
+            switch (r.kind) {
+                case PlotKind::Heatmap:
+                    draw_heatmap(snap.heatmaps, one, tr, pr);
+                    break;
+                case PlotKind::Bar:
+                    draw_bars(snap.bars, one, tr, pr);
+                    draw_error_bars(snap, r, tr, pr);
+                    break;
+                case PlotKind::Line:
+                    draw_lines(snap.lines, one, tr, pr);
+                    draw_error_bars(snap, r, tr, pr);
+                    break;
+                case PlotKind::Scatter:
+                    draw_error_bars(snap, r, tr, pr);
+                    draw_scatter(snap.scatters, one, tr, pr);
+                    break;
+                case PlotKind::ScatterZ:
+                    draw_error_bars(snap, r, tr, pr);
+                    draw_scatter_z(snap.scatter_z, one, tr, pr);
+                    break;
+                default: break;
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // draw_error_bars
     // -------------------------------------------------------------------------
-    void DataRenderer::draw_error_bars(const AllPlotData& all,
+    void DataRenderer::draw_error_bars(const RenderSnapshot& snap, ObjectRef ref,
                                        const CoordTransform& tr,
                                        const PlotRect& pr) {
-        // No error bars (the common case) must cost nothing; scans are over plot
-        // objects, not points.
-        auto none = [](const auto& v) {
-            return std::none_of(v.begin(), v.end(),
-                                [](const auto& p) { return !p.err.empty(); });
-        };
-        if (none(all.lines) && none(all.bars) &&
-            none(all.scatters) && none(all.scatter_z))
-            return;
+        // No error bars (the common case) must cost nothing.
+        const bool has = with_kind(snap, ref.kind, [&ref](const auto& v) {
+            if constexpr (requires { v[0].err; }) return !v[ref.index].err.empty();
+            else return false;
+        }, false);
+        if (!has) return;
 
         begin_pass(pr, tr.win_h);
         glUseProgram(line_program_);
@@ -2471,28 +2506,31 @@ void main() {
             draw(e.stroke_vbo, e.stroke_verts, c.a);
         };
 
-        for (std::size_t i = 0; i < all.lines.size(); ++i) {
-            const auto& p = all.lines[i];
-            if (!p.err.empty())
-                emit(line_err_cache_, p, static_cast<int>(i), p.x, p.y, *p.opts.color);
-        }
-        for (std::size_t i = 0; i < all.bars.size(); ++i) {
-            const auto& p = all.bars[i];
-            // Error bars hang off the tip (heights), not the baseline.
-            if (!p.err.empty())
-                emit(bar_err_cache_, p, static_cast<int>(i),
-                     p.centers, p.heights, p.opts.edgecolor);
-        }
-        for (std::size_t i = 0; i < all.scatters.size(); ++i) {
-            const auto& p = all.scatters[i];
-            if (!p.err.empty())
-                emit(scatter_err_cache_, p, static_cast<int>(i), p.x, p.y, *p.opts.color);
-        }
-        for (std::size_t i = 0; i < all.scatter_z.size(); ++i) {
-            const auto& p = all.scatter_z[i];
-            // scatter_z has no single color, so black.
-            if (!p.err.empty())
-                emit(scatterz_err_cache_, p, static_cast<int>(i), p.x, p.y, Color::Black);
+        const int i = static_cast<int>(ref.index);
+        switch (ref.kind) {
+            case PlotKind::Line: {
+                const auto& p = snap.lines[ref.index];
+                emit(line_err_cache_, p, i, p.x, p.y, *p.opts.color);
+                break;
+            }
+            case PlotKind::Bar: {
+                // Error bars hang off the tip (heights), not the baseline.
+                const auto& p = snap.bars[ref.index];
+                emit(bar_err_cache_, p, i, p.centers, p.heights, p.opts.edgecolor);
+                break;
+            }
+            case PlotKind::Scatter: {
+                const auto& p = snap.scatters[ref.index];
+                emit(scatter_err_cache_, p, i, p.x, p.y, *p.opts.color);
+                break;
+            }
+            case PlotKind::ScatterZ: {
+                // scatter_z has no single color, so black.
+                const auto& p = snap.scatter_z[ref.index];
+                emit(scatterz_err_cache_, p, i, p.x, p.y, Color::Black);
+                break;
+            }
+            default: break;
         }
 
         glBindVertexArray(0);
@@ -2541,9 +2579,10 @@ void main() {
     }
 
     void DataRenderer::draw_heatmap(const std::vector<HeatmapPlot>& heatmaps,
+                                    std::span<const std::size_t> which,
                                     const CoordTransform& tr,
                                     const PlotRect& pr) {
-        if (heatmaps.empty()) return;
+        if (which.empty()) return;
 
         begin_pass(pr, tr.win_h);
         glUseProgram(heatmap_program_);
@@ -2552,7 +2591,7 @@ void main() {
         glUniform1i(heatmap_u_.tex, 0);
         glBindVertexArray(heatmap_vao_);
 
-        for (std::size_t hi = 0; hi < heatmaps.size(); ++hi) {
+        for (const std::size_t hi : which) {
             const auto& hp = heatmaps[hi];
             if (hp.rows <= 0 || hp.cols <= 0) continue;
 
@@ -3307,14 +3346,8 @@ void main() {
 
         // Premultiplied accumulation from straight-alpha sources: alpha must
         // accumulate coverage (see begin_pass()).
-        const AllPlotData all = pl.sheet.all();
         plane_index_ = plane_index;
-        draw_heatmap(all.heatmaps, raster.tr, {0.0f, 0.0f, raster.tr.pw, raster.tr.ph});
-        draw_bars(all.bars, raster.tr, {0.0f, 0.0f, raster.tr.pw, raster.tr.ph});
-        draw_lines(all.lines, raster.tr, {0.0f, 0.0f, raster.tr.pw, raster.tr.ph});
-        draw_error_bars(all, raster.tr, {0.0f, 0.0f, raster.tr.pw, raster.tr.ph});
-        draw_scatter(all.scatters, raster.tr, {0.0f, 0.0f, raster.tr.pw, raster.tr.ph});
-        draw_scatter_z(all.scatter_z, raster.tr, {0.0f, 0.0f, raster.tr.pw, raster.tr.ph});
+        draw_plots(pl.sheet, raster.tr, {0.0f, 0.0f, raster.tr.pw, raster.tr.ph});
         plane_index_ = -1;
 
         glBindFramebuffer(GL_FRAMEBUFFER, static_cast<unsigned>(prev_fbo));
