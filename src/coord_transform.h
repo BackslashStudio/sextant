@@ -32,21 +32,27 @@ namespace sextant {
         double sxspan() const { return sxmax() - sxmin(); }
         double syspan() const { return symax() - symin(); }
 
+        // Linear first, as before scales: the same arithmetic, and no scale calls
+        // per point in an unoptimised build (layout_test's debug budget).
         float to_px(double x) const {
+            if (xs.linear()) return px + static_cast<float>((x - xmin) / (xmax - xmin)) * pw;
             return px + static_cast<float>((sx(x) - sxmin()) / sxspan()) * pw;
         }
 
         // Pixel y=0 is at the top; data y increases upward
         float to_py(double y) const {
+            if (ys.linear()) return py + ph - static_cast<float>((y - ymin) / (ymax - ymin)) * ph;
             return py + ph - static_cast<float>((sy(y) - symin()) / syspan()) * ph;
         }
 
         // Inverse of to_px/to_py — screen pixel back to data space (pan/zoom).
         double to_data_x(float screen_x) const {
+            if (xs.linear()) return xmin + static_cast<double>((screen_x - px) / pw) * (xmax - xmin);
             return xs.inv(sxmin() + static_cast<double>((screen_x - px) / pw) * sxspan());
         }
 
         double to_data_y(float screen_y) const {
+            if (ys.linear()) return ymin + static_cast<double>((py + ph - screen_y) / ph) * (ymax - ymin);
             return ys.inv(symin() + static_cast<double>((py + ph - screen_y) / ph) * syspan());
         }
     };
@@ -149,9 +155,10 @@ namespace sextant {
         AutoAxis x, y;
     };
 
-    namespace detail {
+    namespace bounds_detail {
         // auto_bounds() with each value passed through fx/fy first (scale
-        // space); a NaN they return widens nothing.
+        // space); a NaN they return widens nothing. Scaled axes only; the
+        // all-linear case keeps its own loop (auto_bounds(all)).
         template <class FX, class FY>
         AutoBounds auto_bounds_in(const AllPlotData& all, FX fx, FY fy) {
             double xlo = std::numeric_limits<double>::max();
@@ -225,19 +232,99 @@ namespace sextant {
             }
             return b;
         }
-    } // namespace detail
+    } // namespace bounds_detail
 
-    // Unpadded bounds of every plot object, split as AutoAxis describes.
+    // Unpadded bounds of every plot object, split as AutoAxis describes. Written out
+    // rather than auto_bounds_in() with identities: it runs per frame, and in an
+    // unoptimised build the lambdas cost a call per value (layout_test's debug budget).
     inline AutoBounds auto_bounds(const AllPlotData& all) {
-        const auto id = [](double v) { return v; };
-        return detail::auto_bounds_in(all, id, id);
+        double xlo = std::numeric_limits<double>::max();
+        double xhi = -std::numeric_limits<double>::max();
+        double ylo = std::numeric_limits<double>::max();
+        double yhi = -std::numeric_limits<double>::max();
+
+        // Error bars widen the auto limits so the outermost bars aren't clipped.
+        // For bars, `ys` is the heights (the tip).
+        auto grow_err = [&](const CowVec<double>& xs, const CowVec<double>& ys,
+                            const ErrorBarData& err) {
+            const std::size_t n = std::min(xs.size(), ys.size());
+            auto grow = [&](const CowVec<double>& ps, ErrOffsets (ErrorBarData::*at)(std::size_t) const,
+                            double& lo, double& hi) {
+                for (std::size_t i = 0; i < n; ++i) {
+                    const ErrOffsets e = (err.*at)(i);
+                    lo = std::min(lo, ps[i] - e.lo);
+                    hi = std::max(hi, ps[i] + e.hi);
+                }
+            };
+            if (err.has_x_cap()) grow(xs, &ErrorBarData::x_cap, xlo, xhi);
+            if (err.has_x_box()) grow(xs, &ErrorBarData::x_box, xlo, xhi);
+            if (err.has_y_cap()) grow(ys, &ErrorBarData::y_cap, ylo, yhi);
+            if (err.has_y_box()) grow(ys, &ErrorBarData::y_box, ylo, yhi);
+        };
+
+        for (const auto& lp: all.lines) {
+            for (double v: lp.x) {
+                xlo = std::min(xlo, v);
+                xhi = std::max(xhi, v);
+            }
+            for (double v: lp.y) {
+                ylo = std::min(ylo, v);
+                yhi = std::max(yhi, v);
+            }
+            grow_err(lp.x, lp.y, lp.err);
+        }
+        for (const auto& sp: all.scatters) {
+            for (double v: sp.x) {
+                xlo = std::min(xlo, v);
+                xhi = std::max(xhi, v);
+            }
+            for (double v: sp.y) {
+                ylo = std::min(ylo, v);
+                yhi = std::max(yhi, v);
+            }
+            grow_err(sp.x, sp.y, sp.err);
+        }
+        for (const auto& sp: all.scatter_z) {
+            for (double v: sp.x) {
+                xlo = std::min(xlo, v);
+                xhi = std::max(xhi, v);
+            }
+            for (double v: sp.y) {
+                ylo = std::min(ylo, v);
+                yhi = std::max(yhi, v);
+            }
+            grow_err(sp.x, sp.y, sp.err);
+        }
+        for (const auto& bp: all.bars) {
+            for (std::size_t i = 0; i < bp.centers.size(); ++i) {
+                const double half = bp.bar_width * 0.5;
+                xlo = std::min(xlo, bp.centers[i] - half);
+                xhi = std::max(xhi, bp.centers[i] + half);
+                // Y spans 0 to height (negative heights go below 0)
+                ylo = std::min(ylo, std::min(0.0, bp.heights[i]));
+                yhi = std::max(yhi, std::max(0.0, bp.heights[i]));
+            }
+            // Error bars hang off the tip (heights), not the baseline.
+            grow_err(bp.centers, bp.heights, bp.err);
+        }
+        AutoBounds b;
+        b.x.loose = {xlo, xhi};
+        b.y.loose = {ylo, yhi};
+        for (const auto& hp: all.heatmaps) {
+            // The heatmap's extent, unpadded; either range may be reversed.
+            b.x.tight.add(hp.xrange.lo);
+            b.x.tight.add(hp.xrange.hi);
+            b.y.tight.add(hp.yrange.lo);
+            b.y.tight.add(hp.yrange.hi);
+        }
+        return b;
     }
 
     // The same in each axis' scale space: a value the scale has no place for
     // (<= 0 on log) is skipped.
     inline AutoBounds auto_bounds(const AllPlotData& all, const AxisScale& xs, const AxisScale& ys) {
         if (xs.linear() && ys.linear()) return auto_bounds(all);
-        return detail::auto_bounds_in(all, [&xs](double v) { return xs.fwd_strict(v); },
+        return bounds_detail::auto_bounds_in(all, [&xs](double v) { return xs.fwd_strict(v); },
                                       [&ys](double v) { return ys.fwd_strict(v); });
     }
 
