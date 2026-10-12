@@ -17,10 +17,12 @@ namespace sextant {
 std::vector<AxesLayout> axes_layouts(const FigureLayout& layout) {
     std::vector<AxesLayout> out;
     out.reserve(layout.cells.size());
-    for (const auto& c : layout.cells)
+    for (const auto& c : layout.cells) {
         out.push_back({ c.slot, c.tr,
                         c.box3d ? std::optional<Projector3D>(c.box3d->proj) : std::nullopt,
-                        c.cell });
+                        c.cell, {} });
+        for (const CellLayout& t : c.twins) out.back().twins.push_back({ t.layer, t.tr });
+    }
     return out;
 }
 
@@ -88,6 +90,20 @@ void render_frame(RenderDevice& dev, DataRenderer& data,
         }
         const RenderSnapshot* s2 = fsnap.axes[i].snap2d();
         if (!s2) continue;
+        const auto& twins = fsnap.axes[i].twins;
+        if (!twins.empty()) {
+            // A twinned cell: one call order across its layers.
+            std::vector<const RenderSnapshot*> snaps{s2};
+            std::vector<const CoordTransform*> trs{&c.tr};
+            std::vector<int> keys{c.slot.index};
+            for (std::size_t k = 0; k < twins.size(); ++k) {
+                snaps.push_back(&twins[k].snap);
+                trs.push_back(&c.twins[k].tr);
+                keys.push_back(axes_key(c.slot.index, twins[k].layer));
+            }
+            data.draw_layers(snaps, trs, keys, fsnap.data_generation, c.frame);
+            continue;
+        }
         // Cache key: the data generation, so pan/zoom keeps the buffers.
         data.set_frame_key(fsnap.data_generation, c.slot.index);
         // In call order, as the SVG writer.
@@ -114,14 +130,27 @@ void render_frame(RenderDevice& dev, DataRenderer& data,
             continue;
         }
         const RenderSnapshot& snap = *fsnap.axes[i].snap2d();
+        const auto& twins = fsnap.axes[i].twins;
         // Contours first: over the data, under border/grid/ticks. Cached on
         // the data generation.
         nvg.draw_contours(c, snap, data.contour_cache(), fsnap.data_generation, c.slot.index);
+        for (std::size_t k = 0; k < twins.size(); ++k)
+            nvg.draw_contours(c.twins[k], twins[k].snap, data.contour_cache(), fsnap.data_generation,
+                              axes_key(c.slot.index, twins[k].layer));
+        // A twin's frame is its host's: drawn once.
         nvg.draw_axes_border(c.frame, snap.axes_style);
         nvg.draw_ticks(c, snap.axes_style, snap.grid_enabled, snap.grid_opts);
+        for (std::size_t k = 0; k < twins.size(); ++k) {
+            const RenderSnapshot& t = twins[k].snap;
+            nvg.draw_ticks(c.twins[k], t.axes_style, t.grid_enabled, t.grid_opts);
+        }
         nvg.draw_titles(c, snap);
+        for (std::size_t k = 0; k < twins.size(); ++k) nvg.draw_titles(c.twins[k], twins[k].snap);
         // Texts over the frame furniture, under the legend and colorbar.
         if (!snap.texts.empty()) nvg.draw_texts(plan_texts(snap.texts, c.tr, c.frame), c.frame);
+        for (std::size_t k = 0; k < twins.size(); ++k)
+            if (!twins[k].snap.texts.empty())
+                nvg.draw_texts(plan_texts(twins[k].snap.texts, c.twins[k].tr, c.frame), c.frame);
         if (c.has_legend())   nvg.draw_legend(c, snap.legend_opts);
         for (const auto& cb : c.colorbars) nvg.draw_colorbar(cb, snap.colorbar_opts);
     }

@@ -162,18 +162,22 @@ static void emit_grid(std::ostringstream& o, const SvgAxesData& d) {
     const auto& g = d.grid_opts;
     // LineStyle::None draws no grid line, as for data lines.
     if (g.linestyle == LineStyle::None) return;
+    // A twin draws its own axis' lines only (CellLayout::xgrid).
+    const bool gx = d.layout.xgrid, gy = d.layout.ygrid;
     // Minor lines first, under the major ones (as NanoVG); only those in the frame.
-    if (g.minor && (!d.layout.xminor.empty() || !d.layout.yminor.empty())) {
+    if (g.minor && ((gx && !d.layout.xminor.empty()) || (gy && !d.layout.yminor.empty()))) {
         const PlotRect& f = d.layout.frame;
         o << "  <g stroke=\"" << rgb(g.minor_color) << "\" stroke-opacity=\"" << g.minor_color.a
           << "\" stroke-width=\"" << g.linewidth << "\"" << dash_attr(g.linestyle) << ">\n";
         for (const double v : d.layout.xminor) {
+            if (!gx) break;
             const float px = d.layout.tr.to_px(v);
             if (px < f.x || px > f.x + f.w) continue;
             o << "    <line x1=\"" << px << "\" y1=\"" << f.y
               <<         "\" x2=\"" << px << "\" y2=\"" << f.y + f.h << "\"/>\n";
         }
         for (const double v : d.layout.yminor) {
+            if (!gy) break;
             const float py = d.layout.tr.to_py(v);
             if (py < f.y || py > f.y + f.h) continue;
             o << "    <line x1=\"" << f.x << "\" y1=\"" << py
@@ -185,11 +189,13 @@ static void emit_grid(std::ostringstream& o, const SvgAxesData& d) {
       << "\" stroke-width=\"" << g.linewidth << "\"";
     o << dash_attr(g.linestyle) << ">\n";
     for (const auto& t : d.layout.xticks) {
+        if (!gx) break;
         float px = d.layout.tr.to_px(t.value);
         o << "    <line x1=\"" << px << "\" y1=\"" << d.layout.frame.y
           <<         "\" x2=\"" << px << "\" y2=\"" << d.layout.frame.y + d.layout.frame.h << "\"/>\n";
     }
     for (const auto& t : d.layout.yticks) {
+        if (!gy) break;
         float py = d.layout.tr.to_py(t.value);
         o << "    <line x1=\"" << d.layout.frame.x      << "\" y1=\"" << py
           <<         "\" x2=\"" << d.layout.frame.x + d.layout.frame.w << "\" y2=\"" << py << "\"/>\n";
@@ -487,32 +493,43 @@ static void emit_bars(std::ostringstream& o, const SvgAxesData& d,
 
 // The plot objects in call order, each with its error bars, as
 // DataRenderer::draw_plots().
-static void emit_plots(std::ostringstream& o, const SvgAxesData& d) {
-    for (const ObjectRef& r : call_order(d)) {
-        const std::size_t one[1] = {r.index};
-        switch (r.kind) {
-            case PlotKind::Heatmap:
-                emit_heatmap(o, d, one);
-                break;
-            case PlotKind::Bar:
-                emit_bars(o, d, one);
-                emit_error_bars(o, d, r);
-                break;
-            case PlotKind::Line:
-                emit_lines(o, d, one);
-                emit_error_bars(o, d, r);
-                break;
-            case PlotKind::Scatter:
-                emit_error_bars(o, d, r);
-                emit_scatter(o, d, one);
-                break;
-            case PlotKind::ScatterZ:
-                emit_error_bars(o, d, r);
-                emit_scatter_z(o, d, one);
-                break;
-            default: break;
-        }
+static void emit_object(std::ostringstream& o, const SvgAxesData& d, const ObjectRef& r) {
+    const std::size_t one[1] = {r.index};
+    switch (r.kind) {
+        case PlotKind::Heatmap:
+            emit_heatmap(o, d, one);
+            break;
+        case PlotKind::Bar:
+            emit_bars(o, d, one);
+            emit_error_bars(o, d, r);
+            break;
+        case PlotKind::Line:
+            emit_lines(o, d, one);
+            emit_error_bars(o, d, r);
+            break;
+        case PlotKind::Scatter:
+            emit_error_bars(o, d, r);
+            emit_scatter(o, d, one);
+            break;
+        case PlotKind::ScatterZ:
+            emit_error_bars(o, d, r);
+            emit_scatter_z(o, d, one);
+            break;
+        default: break;
     }
+}
+
+// A twinned cell: every layer's objects in one call order, as
+// DataRenderer::draw_layers().
+static void emit_plots(std::ostringstream& o, const SvgAxesData& d) {
+    if (d.twins.empty()) {
+        for (const ObjectRef& r : call_order(d)) emit_object(o, d, r);
+        return;
+    }
+    std::vector<const SvgAxesData*> layers{&d};
+    for (const SvgAxesData& t : d.twins) layers.push_back(&t);
+    for (const LayerRef& r : layered_call_order<SvgAxesData>(layers))
+        emit_object(o, *layers[r.layer], r.ref);
 }
 
 // Contours via the shared trace_contours()/plan_contours() (no cache: one
@@ -1295,6 +1312,13 @@ static void emit_box3d(std::ostringstream& o, const SvgAxesData& d, std::size_t 
     emit_box3d_labels(o, plan.axis_titles);
 }
 
+// A 2D cell's layers: its own axes, then its twins.
+static std::vector<const SvgAxesData*> layers_of(const SvgAxesData& d) {
+    std::vector<const SvgAxesData*> out{&d};
+    for (const SvgAxesData& t : d.twins) out.push_back(&t);
+    return out;
+}
+
 static void emit_one_axes(std::ostringstream& o, const SvgAxesData& d, std::size_t idx) {
     if (d.box3d) {
         emit_box3d(o, d, idx);
@@ -1317,19 +1341,24 @@ static void emit_one_axes(std::ostringstream& o, const SvgAxesData& d, std::size
     o << "  </g>\n";
 
     // Contours in their own clipped group: above plots, below border/grid.
-    if (has_contours(d)) {
-        o << "  <g clip-path=\"url(#plotArea" << idx << ")\">\n";
-        emit_contours(o, d);
-        o << "  </g>\n";
-    }
+    // A twin's over its frame (the cell's), so the same clip.
+    for (const SvgAxesData* l : layers_of(d))
+        if (has_contours(*l)) {
+            o << "  <g clip-path=\"url(#plotArea" << idx << ")\">\n";
+            emit_contours(o, *l);
+            o << "  </g>\n";
+        }
 
+    // A twin's frame is its host's: drawn once.
     emit_spines(o, d);
-    emit_grid(o, d);
-    emit_ticks_and_labels(o, d);
-    // After the grid, as in NanoVG: an interior axis line goes over the grid.
-    emit_interior_axes(o, d);
-    emit_titles(o, d);
-    emit_texts(o, d, idx);
+    for (const SvgAxesData* l : layers_of(d)) {
+        emit_grid(o, *l);
+        emit_ticks_and_labels(o, *l);
+        // After the grid, as in NanoVG: an interior axis line goes over the grid.
+        emit_interior_axes(o, *l);
+    }
+    for (const SvgAxesData* l : layers_of(d)) emit_titles(o, *l);
+    for (const SvgAxesData* l : layers_of(d)) emit_texts(o, *l, idx);
     emit_legend(o, d, idx);
     emit_colorbar(o, d, idx);
 }

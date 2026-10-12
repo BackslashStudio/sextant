@@ -38,15 +38,27 @@ namespace sextant {
     // Which subplot the panels address; shared by every component.
     struct Selection {
         int slot = 1;
-        // Bumped by every real change of `slot` (select(), or normalization to an
-        // existing slot); the states seeded from the slot compare against it.
+        // The layer of a twinned 2D cell the inspectors edit (Axes::twinx()):
+        // 0 its own axes, kLayerTwinX/Y a twin. A new slot starts on 0.
+        int layer = 0;
+        // Bumped by every real change of `slot` or `layer` (select(),
+        // select_layer(), or normalization to an existing one); the states
+        // seeded from the selection compare against it.
         std::uint64_t generation = 0;
 
         void select(int s) {
             if (s == slot) return;
             slot = s;
+            layer = 0;
             ++generation;
         }
+        void select_layer(int l) {
+            if (l == layer) return;
+            layer = l;
+            ++generation;
+        }
+        // What edits to the selected axes are addressed by (axes_key()).
+        int key() const { return axes_key(slot, layer); }
     };
 
     // The selected slot's view, written by both the plot view (pan/zoom/orbit)

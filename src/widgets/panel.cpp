@@ -107,19 +107,23 @@ bool sheet_objects_differ(const DataPanelState::SheetStyles& s, const RenderSnap
 
 // The Cosmetic inspector's per-slot fields. Takes the 2D snapshot; never call
 // with a 3D cell.
-// The other subplots sharing cur's x (y) axis, as add_subplot() indices
-// ("2, 3"); empty when it isn't shared.
-std::string shared_with(const FigureSnapshot& fsnap, const FigureAxesSnapshot& cur, bool x) {
-    const RenderSnapshot* s = cur.snap2d();
-    const unsigned long long id = s ? (x ? s->xshare : s->yshare) : 0;
+// The other axes sharing `s`'s x (y) axis (`s` is in cell `slot`), as
+// add_subplot() indices, a twin named after its cell ("2, 3, twin x, 4 twin
+// y"); empty when it isn't shared.
+std::string shared_with(const FigureSnapshot& fsnap, const RenderSnapshot& s, int slot, bool x) {
+    const unsigned long long id = x ? s.xshare : s.yshare;
     std::string out;
     if (!id) return out;
-    for (const auto& fa : fsnap.axes) {
-        const RenderSnapshot* o = fa.snap2d();
-        if (&fa == &cur || !o || (x ? o->xshare : o->yshare) != id) continue;
+    fsnap.for_each2d([&](int key, const RenderSnapshot& o) {
+        if (&o == &s || (x ? o.xshare : o.yshare) != id) return;
+        const int layer = key_layer(key);
+        const char* twin = layer == kLayerTwinX ? "twin x" : layer == kLayerTwinY ? "twin y" : "";
+        std::string name;
+        if (key_slot(key) == slot) name = layer ? twin : "host";
+        else name = std::to_string(key_slot(key)) + (layer ? std::string(" ") + twin : std::string());
         if (!out.empty()) out += ", ";
-        out += std::to_string(fa.slot.index);
-    }
+        out += name;
+    });
     return out;
 }
 
@@ -262,7 +266,8 @@ void sync_layout_from_snapshot(CosmeticState& c, const FigureSnapshot& fsnap) {
 // The Cosmetic inspector's own pull.
 void pull_cosmetic(CosmeticState& c, const Selection& sel, const FigureAxesSnapshot& fa) {
     if (c.synced_generation == sel.generation) return;
-    std::visit([&](const auto& sn) { seed_cosmetic(c, sn); }, fa.snap);
+    if (fa.snap2d()) seed_cosmetic(c, *selected_layer(sel, fa));
+    else std::visit([&](const auto& sn) { seed_cosmetic(c, sn); }, fa.snap);
     c.synced_generation = sel.generation;
 }
 
@@ -938,19 +943,30 @@ const FigureAxesSnapshot* normalize_selection(Selection& sel, const FigureSnapsh
     if (!fa) fa = &fsnap.axes.front();
     // Normalized: File > Resize and the Save dialog read selection.slot.
     sel.select(fa->slot.index);
+    // A twin that is gone (or a 3D cell) leaves the cell's own axes.
+    if (sel.layer != 0 && !fa->layer2d(sel.layer)) sel.select_layer(0);
     return fa;
+}
+
+const RenderSnapshot* selected_layer(const Selection& sel, const FigureAxesSnapshot& fa) {
+    const RenderSnapshot* s = fa.layer2d(sel.layer);
+    return s ? s : fa.snap2d();
 }
 
 SlotViewState& slot_view(FigureContext& ctx) {
     SlotViewState& v = ctx.slot_view_state;
     const FigureAxesSnapshot* fa = normalize_selection(ctx.selection, ctx.snap);
     if (!fa) return v;
+    // A twinned cell's: the selected layer's limits.
+    const RenderSnapshot* layer = fa->snap2d() ? selected_layer(ctx.selection, *fa) : nullptr;
     if (v.synced_generation != ctx.selection.generation) {
-        std::visit([&](const auto& sn) { seed_slot_view(v, sn); }, fa->snap);
+        if (layer) seed_slot_view(v, *layer);
+        else std::visit([&](const auto& sn) { seed_slot_view(v, sn); }, fa->snap);
         v.synced_generation = ctx.selection.generation;
         return v;
     }
-    std::visit([&](const auto& sn) { follow_program_limits(v, sn); }, fa->snap);
+    if (layer) follow_program_limits(v, *layer);
+    else std::visit([&](const auto& sn) { follow_program_limits(v, sn); }, fa->snap);
     if (const RenderSnapshot3D* sn = fa->snap3d()) {
         // The program set the camera since it was seeded: follow it, or the next
         // drag would start from a view no longer on screen.
@@ -968,7 +984,7 @@ void pull_data_panel(DataPanelState& d, const Selection& sel, const FigureAxesSn
             sync_planes(d, *sn);
             sync_plane_sheets(d, *sn);
             sync_scene_objects(d, *sn);
-        } else if (const RenderSnapshot* sn = fa.snap2d()) {
+        } else if (const RenderSnapshot* sn = selected_layer(sel, fa)) {
             sync_sheet(d.sheet_local, *sn);
         }
         d.synced_generation = sel.generation;
@@ -982,7 +998,7 @@ void pull_data_panel(DataPanelState& d, const Selection& sel, const FigureAxesSn
             sync_plane_sheets(d, *sn);
         if (!same_objects(d.scene_ids, *sn, kPlotKinds3D))
             sync_scene_objects(d, *sn);
-    } else if (const RenderSnapshot* sn = fa.snap2d()) {
+    } else if (const RenderSnapshot* sn = selected_layer(sel, fa)) {
         if (sheet_objects_differ(d.sheet_local, *sn)) sync_sheet(d.sheet_local, *sn);
     }
 }
@@ -1179,7 +1195,7 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
     sync_figure_from_snapshot(st.cosmetic, fsnap);
     sync_layout_from_snapshot(st.cosmetic, fsnap);
 
-    const int idx = cur->slot.index;
+    int idx = cur->slot.index;
 
     if (const RenderSnapshot3D* cur3d = cur->snap3d()) {
         track_resolved_limits(st.slot_view, st.view, idx, cur3d->xlim_auto, cur3d->ylim_auto,
@@ -1188,7 +1204,20 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
         return;
     }
 
-    const RenderSnapshot* cur2d = cur->snap2d();
+    // A twinned cell edits one layer at a time (the menu bar's layer_selector());
+    // the cell's title, frame, legend and colorbars are its own axes' (the
+    // host's), edited there.
+    const RenderSnapshot* cur2d = selected_layer(ctx.selection, *cur);
+    const int layer = ctx.selection.layer;
+    const bool host = layer == 0;
+    // Under a twin, this layer's twinned axis sits on a fixed frame edge.
+    bool fixed_x = false, fixed_y = false;
+    for (const TwinSnapshot& t : cur->twins) {
+        fixed_y = fixed_y || (t.layer == kLayerTwinX && (host || layer == kLayerTwinX));
+        fixed_x = fixed_x || (t.layer == kLayerTwinY && (host || layer == kLayerTwinY));
+    }
+    // Every edit below addresses the selected layer.
+    idx = ctx.selection.key();
     track_resolved_limits(st.slot_view, st.view, idx, cur2d->xlim_auto, cur2d->ylim_auto, false);
 
     // Each group republishes its whole options struct on change.
@@ -1205,7 +1234,7 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
     //   Legend & colorbar
 
     // ==== Figure ==========================================================
-    draw_figure_group(st, fsnap, edit_box, idx);
+    draw_figure_group(st, fsnap, edit_box, cur->slot.index);
 
     // ==== Axis ============================================================
     if (section("Axis", true)) {
@@ -1226,7 +1255,9 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
             { "Y title", "ytitle", st.cosmetic.ytitle_buf, sizeof(st.cosmetic.ytitle_buf), &AxesEdit::ytitle, &TitleStamps::ytitle,
               &sty.ytitle_color, &sty.ytitle_fontsize },
         };
+        if (!host) ImGui::TextDisabled("Title, frame, legend and colorbars: see Host.");
         for (const TitleUi& t : titles) {
+            if (!host && t.text == &AxesEdit::title) continue;
             ImGui::PushID(t.id);
             if (begin_field_table("text")) {
                 field_row(t.label);
@@ -1251,26 +1282,27 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
             if (font_combo("##axesfont", sty.font_path)) push_style();
             end_field_table();
         }
-        ImGui::SeparatorText("Axis frame");
-        if (begin_field_table("plotbg")) {
+        // A twin draws no frame of its own.
+        if (host) ImGui::SeparatorText("Axis frame");
+        if (host && begin_field_table("plotbg")) {
             field_row("Plot area");
             if (color_swatch("##plotbg", sty.background)) push_style();
             end_field_table();
         }
-        if (begin_field_table("spine", 2)) {
+        if (host && begin_field_table("spine", 2)) {
             field_row("Color");
             if (color_swatch("##spinecol", sty.spine_color)) push_style();
             field_next("Width");
             if (drag_float("##spinew", &sty.spine_linewidth, 0.5f, 6.0f, 0.02f, "%.2f px")) push_style();
             end_field_table();
         }
-        if (begin_field_table("framemargin")) {
+        if (host && begin_field_table("framemargin")) {
             field_row("Margin");
             if (drag_float("##framemargin", &sty.frame_margin, 0.0f, 400.0f, 0.5f, "%.0f px")) push_style();
             end_field_table();
         }
         // Frame edges, independent of ticks.
-        if (begin_field_table("spines", 2)) {
+        if (host && begin_field_table("spines", 2)) {
             field_row("Bottom");
             if (ImGui::Checkbox("##spinebottom", &sty.spine_bottom)) push_style();
             field_next("Top");
@@ -1294,17 +1326,23 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
                 double* scratch;
                 const double* lo;      // the limits of the coordinate the
                 const double* hi;      // component is measured along
+                bool fixed;            // on a fixed edge while twinned
+                const char* why;
             };
             const AxisPos pos_axes[2] = {
                 { "X axis", "at y", &sty.xaxis_y, &sty.origin_y, &st.cosmetic.origin_y_scratch,
-                  &st.slot_view.ymin_local, &st.slot_view.ymax_local },
+                  &st.slot_view.ymin_local, &st.slot_view.ymax_local, fixed_x,
+                  "Ignored while twinned: the host's x axis is at the bottom, the twin's at the top." },
                 { "Y axis", "at x", &sty.yaxis_x, &sty.origin_x, &st.cosmetic.origin_x_scratch,
-                  &st.slot_view.xmin_local, &st.slot_view.xmax_local },
+                  &st.slot_view.xmin_local, &st.slot_view.xmax_local, fixed_y,
+                  "Ignored while twinned: the host's y axis is on the left, the twin's on the right." },
             };
             if (begin_field_table("axpos", 2)) {
                 for (const AxisPos& a : pos_axes) {
                     ImGui::PushID(a.label);
                     field_row(a.label);
+                    // Kept, and used again only if the twin goes.
+                    ImGui::BeginDisabled(a.fixed);
                     // Greyed while pinned.
                     ImGui::BeginDisabled(a.pin->has_value());
                     if (axis_position_combo("##pos", *a.pos)) push_style();
@@ -1326,6 +1364,9 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
                         push_style();
                     }
                     ImGui::EndDisabled();
+                    ImGui::EndDisabled();
+                    if (a.fixed && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                        ImGui::SetTooltip("%s", a.why);
                     ImGui::PopID();
                 }
                 end_field_table();
@@ -1405,7 +1446,7 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
         }
         // A shared axis' limits and scale are its group's (Axes::sharex()).
         for (const bool x : {true, false}) {
-            const std::string with = shared_with(fsnap, *cur, x);
+            const std::string with = shared_with(fsnap, *cur2d, cur->slot.index, x);
             if (!with.empty())
                 ImGui::TextDisabled("%s shared with %s", x ? "X" : "Y", with.c_str());
         }
@@ -1451,10 +1492,11 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
             const auto group_heatmap = [&](bool x) {
                 const unsigned long long id = x ? cur2d->xshare : cur2d->yshare;
                 if (!id) return !cur2d->heatmaps.empty();
-                for (const auto& fa : fsnap.axes)
-                    if (const RenderSnapshot* o = fa.snap2d())
-                        if ((x ? o->xshare : o->yshare) == id && !o->heatmaps.empty()) return true;
-                return false;
+                bool has = false;
+                fsnap.for_each2d([&](int, const RenderSnapshot& o) {
+                    has = has || ((x ? o.xshare : o.yshare) == id && !o.heatmaps.empty());
+                });
+                return has;
             };
             struct ScaleAxis {
                 const char* id;
@@ -1532,10 +1574,11 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
     }
 
     // ==== Legend & colorbar ===============================================
-    // Shared with the 3D panel.
-    draw_legend_colorbar_group<AxesEdit>(
-        st, !find_colorbar_requests(*cur2d).empty(),
-        [&](auto&& fn){ edit_box.update(idx, fn); });
+    // Shared with the 3D panel; the cell's, so the host's (every layer's bars).
+    if (host)
+        draw_legend_colorbar_group<AxesEdit>(
+            st, !cell_colorbar_requests(*cur).empty(),
+            [&](auto&& fn){ edit_box.update(idx, fn); });
 
 }
 

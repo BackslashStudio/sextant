@@ -10,7 +10,9 @@
 #include <cmath>
 #include <limits>
 #include <optional>
+#include <span>
 #include <type_traits>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -814,6 +816,38 @@ std::vector<ObjectRef> call_order(const S& s) {
     return objects_detail::sorted_refs(keys);
 }
 
+// One object of a twinned cell (Axes::twinx()): which layer's holder (its
+// index in the list given) and where in it.
+struct LayerRef {
+    std::size_t layer = 0;
+    ObjectRef   ref;
+};
+
+// call_order() across a cell's layers (host first, then its twins): one order by
+// ObjectId, so objects draw in call order whichever axes took them. Equal ids
+// keep the layer order, then call_order()'s.
+template <class S>
+std::vector<LayerRef> layered_call_order(std::span<const S* const> layers) {
+    struct Key { ObjectId id; LayerRef ref; };
+    std::vector<Key> keys;
+    for (std::size_t k = 0; k < layers.size(); ++k) {
+        const S& s = *layers[k];
+        const auto add = [&](PlotKind kind, const auto& v) {
+            for (std::size_t i = 0; i < v.size(); ++i) keys.push_back({ v[i].id, { k, { kind, i } } });
+        };
+        add(PlotKind::Heatmap, s.heatmaps);
+        add(PlotKind::Bar, s.bars);
+        add(PlotKind::Line, s.lines);
+        add(PlotKind::Scatter, s.scatters);
+        add(PlotKind::ScatterZ, s.scatter_z);
+    }
+    std::stable_sort(keys.begin(), keys.end(), [](const Key& a, const Key& b) { return a.id < b.id; });
+    std::vector<LayerRef> out;
+    out.reserve(keys.size());
+    for (const Key& k : keys) out.push_back(k.ref);
+    return out;
+}
+
 // 3D: the axes' own kinds (not its planes, which are objects of their own). Only
 // the legend and colorbars follow it: the scene is depth-tested.
 inline std::vector<ObjectRef> call_order(const RenderSnapshot3D& s) {
@@ -843,12 +877,43 @@ struct AxesSlot {
     int col1() const { return (last_index() - 1) % cols; }
 };
 
+// A 2D axes' twins (Axes::twinx()/twiny()) are layers of its cell: layer 0 is
+// the cell's own axes, kLayerTwinX its twinx, kLayerTwinY its twiny. An edit
+// addresses a layer by axes_key(): the slot index alone for layer 0, so code
+// that knows no twins addresses as before. add_subplot() keeps slot indices
+// below 1 << kAxesKeyShift.
+inline constexpr int kLayerTwinX = 1;
+inline constexpr int kLayerTwinY = 2;
+inline constexpr int kAxesKeyShift = 20;
+constexpr int axes_key(int slot, int layer) { return slot + (layer << kAxesKeyShift); }
+constexpr int key_slot(int key) { return key & ((1 << kAxesKeyShift) - 1); }
+constexpr int key_layer(int key) { return key >> kAxesKeyShift; }
+
+struct TwinSnapshot {
+    int layer = kLayerTwinX;
+    RenderSnapshot snap;
+};
+
 // One grid cell, holding a 2D or 3D axes snapshot. A variant (not a base class)
 // so the compiler enumerates every consumer. The accessors are for code that
 // already knows the kind; otherwise use std::visit.
 struct FigureAxesSnapshot {
     AxesSlot slot;
     std::variant<RenderSnapshot, RenderSnapshot3D> snap;
+    // 2D only: the axes' twins, twinx before twiny. Their own title, legend
+    // and colorbar options are unused (the cell's are the host's).
+    std::vector<TwinSnapshot> twins;
+
+    // Layer `layer`'s snapshot (0 = the cell's own 2D axes); null if absent.
+    const RenderSnapshot* layer2d(int layer) const {
+        if (layer == 0) return snap2d();
+        for (const TwinSnapshot& t : twins)
+            if (t.layer == layer) return &t.snap;
+        return nullptr;
+    }
+    RenderSnapshot* layer2d(int layer) {
+        return const_cast<RenderSnapshot*>(std::as_const(*this).layer2d(layer));
+    }
 
     bool is_3d() const { return std::holds_alternative<RenderSnapshot3D>(snap); }
     const RenderSnapshot*   snap2d() const { return std::get_if<RenderSnapshot>(&snap); }
@@ -867,6 +932,40 @@ inline unsigned long long next_snapshot_generation() {
 // What SnapshotBox holds: every axes with its grid slot, captured together.
 struct FigureSnapshot {
     std::vector<FigureAxesSnapshot> axes;
+
+    // The 2D axes an edit key names (axes_key()), twins included; null if none.
+    const RenderSnapshot* find2d(int key) const {
+        for (const FigureAxesSnapshot& fa : axes)
+            if (fa.slot.index == key_slot(key)) return fa.layer2d(key_layer(key));
+        return nullptr;
+    }
+    RenderSnapshot* find2d(int key) {
+        return const_cast<RenderSnapshot*>(std::as_const(*this).find2d(key));
+    }
+    // The 3D axes at slot `key` (3D axes have no layers).
+    const RenderSnapshot3D* find3d(int key) const {
+        for (const FigureAxesSnapshot& fa : axes)
+            if (fa.slot.index == key) return fa.snap3d();
+        return nullptr;
+    }
+    RenderSnapshot3D* find3d(int key) {
+        return const_cast<RenderSnapshot3D*>(std::as_const(*this).find3d(key));
+    }
+    // `f(key, snapshot)` for every 2D axes, each cell's own before its twins.
+    template <class F> void for_each2d(F&& f) const {
+        for (const FigureAxesSnapshot& fa : axes)
+            if (const RenderSnapshot* s = fa.snap2d()) {
+                f(fa.slot.index, *s);
+                for (const TwinSnapshot& t : fa.twins) f(axes_key(fa.slot.index, t.layer), t.snap);
+            }
+    }
+    template <class F> void for_each2d(F&& f) {
+        for (FigureAxesSnapshot& fa : axes)
+            if (RenderSnapshot* s = fa.snap2d()) {
+                f(fa.slot.index, *s);
+                for (TwinSnapshot& t : fa.twins) f(axes_key(fa.slot.index, t.layer), t.snap);
+            }
+    }
 
     // 0 = never stamped (never matches a cache, so it rebuilds). `generation`
     // changes on any change; `data_generation` only when plot data changes, so

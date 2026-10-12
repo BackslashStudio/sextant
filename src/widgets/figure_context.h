@@ -31,6 +31,11 @@ namespace sextant {
     // Null when the figure has no axes.
     const FigureAxesSnapshot* normalize_selection(Selection& sel, const FigureSnapshot& fsnap);
 
+    // The selected layer's 2D axes in `fa` (its own, or a twin; see
+    // Selection::layer), null for a 3D cell. normalize_selection() has made
+    // the layer one `fa` has.
+    const RenderSnapshot* selected_layer(const Selection& sel, const FigureAxesSnapshot& fa);
+
     // The shared slot view, re-seeded from the selected slot if the selection has
     // moved since, and otherwise following the limits and camera the program set
     // since. Every reader and writer goes through here, so a slot change re-seeds

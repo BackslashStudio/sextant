@@ -41,6 +41,10 @@ namespace sextant {
         // Texts in pixels (plan_texts() or plan_texts3d()), 2D and 3D cells alike.
         std::vector<TextDraw> texts;
 
+        // 2D, a twinned cell (Axes::twinx()): one per twin, its `layout` the
+        // cell's twins entry; its legend, colorbar and background are unused.
+        std::vector<SvgAxesData> twins;
+
         // 3D cells only (plot vectors above are then empty): the box, already in
         // pixels via plan_box3d(). The writer never sees a camera.
         std::optional<Box3DPlan> box3d;

@@ -802,6 +802,7 @@ if(SEXTANT_BUILD_TESTS)
             tests/layout_test/ticks_hidden.cpp
             tests/layout_test/scale.cpp
             tests/layout_test/share.cpp
+            tests/layout_test/twin.cpp
             tests/layout_test/edge_markers.cpp
             tests/layout_test/rich_text.cpp
             tests/layout_test/text.cpp

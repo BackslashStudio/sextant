@@ -1691,14 +1691,16 @@ namespace sextant {
             return;
         }
 
+        // A twinned cell lists one layer's objects at a time (Axes::twinx()),
+        // the one the menu bar's layer_selector() chose.
         // This panel's tabs edit its own scratch copies: re-seeded when the
         // selection moved or the object counts changed.
         pull_data_panel(st, ctx.selection, *cur);
-        const int idx = cur->slot.index;
+        const int idx = cur->snap2d() ? ctx.selection.key() : cur->slot.index;
 
         // A 3D slot contributes its planes' objects and its own 3D objects
         // (plane index -1).
-        const RenderSnapshot* cur2d = cur->snap2d();
+        const RenderSnapshot* cur2d = cur->snap2d() ? selected_layer(ctx.selection, *cur) : nullptr;
         const RenderSnapshot3D* cur3d = cur->snap3d();
         if (cur3d && cur3d->planes.empty() && cur3d->bars3d.empty() && cur3d->surfaces.empty()
             && cur3d->scatter3d.empty() && cur3d->lines3d.empty()

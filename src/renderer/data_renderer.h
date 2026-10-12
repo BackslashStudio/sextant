@@ -38,6 +38,13 @@ public:
     // scatter's under its markers.
     void draw_plots(const RenderSnapshot& snap, const CoordTransform& tr, const PlotRect& pr);
 
+    // A twinned cell (Axes::twinx()): every layer's objects in one call order
+    // (layered_call_order()), each drawn with its own layer's transform and
+    // cache key (`keys[k]`, axes_key() of layer k).
+    void draw_layers(std::span<const RenderSnapshot* const> snaps,
+                     std::span<const CoordTransform* const> trs, std::span<const int> keys,
+                     unsigned long long data_generation, const PlotRect& pr);
+
     // The whole 3D scene in two phases: all opaque objects (depth-tested, any
     // order), then all translucent objects in one back-to-front order across
     // every kind (by eye_coord() distance; exact unless objects interpenetrate).
@@ -152,6 +159,10 @@ private:
     // accumulated transmittance to coverage.
     void draw_peel_quad(unsigned int tex, bool flip_alpha,
                         float x0, float y0, float x1, float y1) const;
+
+    // One object and its error bars, as draw_plots() sequences them.
+    void draw_object(const RenderSnapshot& snap, const ObjectRef& r, const CoordTransform& tr,
+                     const PlotRect& pr);
 
     // The per-kind 2D draws, sequenced only by draw_plots(): the objects of
     // `which` (indices into the vector), in that order.

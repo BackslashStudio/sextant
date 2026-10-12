@@ -286,6 +286,9 @@ int main() {
     // share.cpp
     test_share();
 
+    // twin.cpp
+    test_twin();
+
     // edge_markers.cpp
     test_edge_markers();
 

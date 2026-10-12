@@ -88,6 +88,20 @@ struct Axes::Impl {
     // A panel edit replayed on the caller thread: applied (minus a scale the
     // group can't take), then the group follows. Defined in figure.cpp.
     void apply_shared_edit(const AxesEdit& e);
+
+    // twinx()/twiny() (v1.2 step 36b-2). The host owns its twins; a twin points
+    // back at it (null once the host is gone, see ~Axes()) and is its layer
+    // (kLayerTwinX/Y) of the cell. A twin shares the host's color cycle, and
+    // its title, legend and colorbar setters write the host's (cell()).
+    Impl* host = nullptr;
+    int layer = 0;
+    std::shared_ptr<Axes> twin_x, twin_y;
+    Impl& cell() { return host ? *host : *this; }
+    const Impl& cell() const { return host ? *host : *this; }
+    // twinx() (x = true) / twiny().
+    std::shared_ptr<Axes> make_twin(bool x, const char* who);
+    // What a twin starts with: its shared axis hidden.
+    void twin_defaults();
     // set_xtick_format()/set_ytick_format(); empty = the scale's default.
     std::string xtick_format, ytick_format;
 

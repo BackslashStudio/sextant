@@ -46,20 +46,21 @@ void warn_if_inexact(std::string_view path, const SvgSaveReport& r) {
 
 // Share groups (Axes::sharex()) on the snapshot: whether a group holds a
 // heatmap, and copying one member's shared fields to the rest.
+// Twins are members like any other (Axes::twinx()).
 bool snapshot_group_has_heatmap(const FigureSnapshot& fs, unsigned long long id, bool x) {
-    for (const auto& fa : fs.axes)
-        if (const RenderSnapshot* s = fa.snap2d())
-            if ((x ? s->xshare : s->yshare) == id && !s->heatmaps.empty()) return true;
-    return false;
+    bool has = false;
+    fs.for_each2d([&](int, const RenderSnapshot& s) {
+        has = has || ((x ? s.xshare : s.yshare) == id && !s.heatmaps.empty());
+    });
+    return has;
 }
 
 void sync_snapshot_groups(FigureSnapshot& fs, const RenderSnapshot& src) {
-    for (auto& fa : fs.axes) {
-        RenderSnapshot* s = fa.snap2d();
-        if (!s || s == &src) continue;
-        if (src.xshare && s->xshare == src.xshare) copy_shared_x(*s, src);
-        if (src.yshare && s->yshare == src.yshare) copy_shared_y(*s, src);
-    }
+    fs.for_each2d([&](int, RenderSnapshot& s) {
+        if (&s == &src) return;
+        if (src.xshare && s.xshare == src.xshare) copy_shared_x(s, src);
+        if (src.yshare && s.yshare == src.yshare) copy_shared_y(s, src);
+    });
 }
 
 // `e` without a Log/Symlog scale the axis' group can't take (a heatmap on any
@@ -106,6 +107,10 @@ Figure::Impl::Slot* Figure::Impl::find_or_reserve_slot(const char* who, int rows
     const std::string w(who);
     if (rows <= 0 || cols <= 0)
         throw std::invalid_argument(w + ": rows/cols must be positive");
+    // Edits name a twin by slot + layer << kAxesKeyShift (axes_key()).
+    if (static_cast<long long>(rows) * cols >= (1LL << kAxesKeyShift))
+        throw std::invalid_argument(w + ": a grid has fewer than "
+                                    + std::to_string(1 << kAxesKeyShift) + " cells");
     if (first < 1 || first > rows * cols || last < 1 || last > rows * cols)
         throw std::invalid_argument(w + ": index out of range");
 
@@ -184,10 +189,15 @@ FigureSnapshot Figure::Impl::build_figure_snapshot() const {
     fs.axes.reserve(slots.size());
     for (const auto& s : slots) {
         const AxesSlot slot{ s.rows, s.cols, s.index, s.last };
-        if (const Axes3D* a3 = s.as3d())
+        if (const Axes3D* a3 = s.as3d()) {
             fs.axes.push_back({ slot, a3->d->build_snapshot() });
-        else
-            fs.axes.push_back({ slot, s.as2d()->d->build_snapshot() });
+            continue;
+        }
+        const Axes::Impl& d2 = *s.as2d()->d;
+        FigureAxesSnapshot fa{ slot, d2.build_snapshot() };
+        if (d2.twin_x) fa.twins.push_back({ kLayerTwinX, d2.twin_x->d->build_snapshot() });
+        if (d2.twin_y) fa.twins.push_back({ kLayerTwinY, d2.twin_y->d->build_snapshot() });
+        fs.axes.push_back(std::move(fa));
     }
     return fs;
 }
@@ -286,32 +296,25 @@ void Figure::Impl::patch_snapshot(const FigureEdits& edits, FigureEdits* inv) {
     if (!is_navigation_only(edits)) next->layout_generation = next_snapshot_generation();
 
     for (const auto& [idx, e] : edits.per_axes) {
-        for (auto& fa : next->axes) {
-            if (fa.slot.index != idx) continue;
-            RenderSnapshot* sp = fa.snap2d();
-            if (!sp) break;   // a 3D slot is addressed on the other lane
-            AxesEdit undo, scratch;
-            const AxesEdit& ok = without_refused_scale(
-                e, sp->xshare && snapshot_group_has_heatmap(*next, sp->xshare, true),
-                sp->yshare && snapshot_group_has_heatmap(*next, sp->yshare, false), scratch);
-            apply_axes_edit(*sp, ok, inv ? &undo : nullptr);
-            // The group follows; the inverse, applied to this axes, brings it back the same way.
-            sync_snapshot_groups(*next, *sp);
-            if (inv && !axes_edit_empty(undo)) inv->per_axes.push_back({idx, std::move(undo)});
-            break;
-        }
+        // A 3D slot is addressed on the other lane.
+        RenderSnapshot* sp = next->find2d(idx);
+        if (!sp) continue;
+        AxesEdit undo, scratch;
+        const AxesEdit& ok = without_refused_scale(
+            e, sp->xshare && snapshot_group_has_heatmap(*next, sp->xshare, true),
+            sp->yshare && snapshot_group_has_heatmap(*next, sp->yshare, false), scratch);
+        apply_axes_edit(*sp, ok, inv ? &undo : nullptr);
+        // The group follows; the inverse, applied to this axes, brings it back the same way.
+        sync_snapshot_groups(*next, *sp);
+        if (inv && !axes_edit_empty(undo)) inv->per_axes.push_back({idx, std::move(undo)});
     }
 
     for (const auto& [idx, e] : edits.per_axes3d) {
-        for (auto& fa : next->axes) {
-            if (fa.slot.index != idx) continue;
-            if (RenderSnapshot3D* s3 = fa.snap3d()) {
-                AxesEdit3D undo;
-                apply_axes3d_edit(*s3, e, inv ? &undo : nullptr);
-                if (inv && !axes_edit_empty(undo))
-                    inv->per_axes3d.push_back({idx, std::move(undo)});
-            }
-            break;
+        if (RenderSnapshot3D* s3 = next->find3d(idx)) {
+            AxesEdit3D undo;
+            apply_axes3d_edit(*s3, e, inv ? &undo : nullptr);
+            if (inv && !axes_edit_empty(undo))
+                inv->per_axes3d.push_back({idx, std::move(undo)});
         }
     }
     // Figure-level edits, patched on the snapshot (also applied in

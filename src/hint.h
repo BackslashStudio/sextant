@@ -107,6 +107,24 @@ std::optional<PickHit> find_pick(const RenderSnapshot& snap, const HintProjector
                                  float cursor_x, float cursor_y,
                                  HintIndexCache* index = nullptr);
 
+// A 2D cell's layers (Axes::twinx()) as drawn: its own axes, then its twins,
+// each with its transform, edit key (axes_key()) and layer number.
+struct CellLayers {
+    std::vector<const RenderSnapshot*> snaps;
+    std::vector<const CoordTransform*> trs;
+    std::vector<int> keys, layers;
+};
+CellLayers cell_layers(const FigureAxesSnapshot& fa, const AxesLayout& cell);
+
+// find_pick() over every layer of a 2D cell, each through its own transform:
+// the nearest point in pixels, the later object on a tie; a heatmap cell
+// against a point goes to whichever drew later, as within one axes. `layer`
+// receives the winner's index in `l`. `index`, if given, is keyed per layer
+// on `data_generation`.
+std::optional<PickHit> find_pick_layers(const CellLayers& l, float cursor_x, float cursor_y,
+                                        std::size_t& layer, HintIndexCache* index = nullptr,
+                                        unsigned long long data_generation = 0);
+
 // 3D: the nearest thing the cursor ray meets, as find_hint3d() searches it.
 std::optional<PickHit> find_pick3d(const RenderSnapshot3D& snap, const Projector3D& proj,
                                    float cursor_x, float cursor_y,

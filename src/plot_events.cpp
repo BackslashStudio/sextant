@@ -20,6 +20,8 @@ namespace {
         e.ydata = p.y;
         // A 2D axes has no third coordinate; locate_point() leaves it NaN there.
         e.zdata = p.z;
+        e.x2data = p.x2;
+        e.y2data = p.y2;
     }
 } // namespace
 
@@ -38,6 +40,10 @@ PointLocation locate_point(const FigureSnapshot& fsnap,
         loc.x = cell->tr.to_data_x(x);
         loc.y = cell->tr.to_data_y(y);
         loc.z = std::numeric_limits<double>::quiet_NaN();
+        for (const AxesLayout::Twin& t : cell->twins) {
+            if (t.layer == kLayerTwinX) loc.y2 = t.tr.to_data_y(y);
+            if (t.layer == kLayerTwinY) loc.x2 = t.tr.to_data_x(x);
+        }
         return loc;
     }
 
@@ -67,7 +73,14 @@ static bool fill_pick(Event& e, const FigureSnapshot& fsnap, const std::vector<A
     if (!fa) return false;
 
     std::optional<PickHit> hit;
-    if (fa->snap2d()) {
+    int twin = 0;
+    if (fa->snap2d() && !cell->twins.empty()) {
+        // Every layer of a twinned cell.
+        const CellLayers l = cell_layers(*fa, *cell);
+        std::size_t k = 0;
+        hit = find_pick_layers(l, e.x, e.y, k, index, fsnap.data_generation);
+        if (hit) twin = l.layers[k];
+    } else if (fa->snap2d()) {
         if (index) index->set_frame_key(fsnap.data_generation, cell->slot.index);
         hit = find_pick(*fa->snap2d(), HintProjector(cell->tr), e.x, e.y, index);
     } else if (fa->snap3d() && cell->proj3d) {
@@ -83,6 +96,7 @@ static bool fill_pick(Event& e, const FigureSnapshot& fsnap, const std::vector<A
     e.pick_row = hit->row;
     e.pick_col = hit->col;
     e.pick_plane = hit->plane;
+    e.pick_twin = twin;
     return true;
 }
 

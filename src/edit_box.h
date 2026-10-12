@@ -96,18 +96,13 @@ void stamp_view(E& e, const Snap& s) {
 // Every stamp and id of a whole edit, from snapshot `snap`: what
 // Figure::Impl::apply_edits() does to an edit (an undo) before applying it.
 inline void stamp_figure_edits(FigureEdits& f, const FigureSnapshot& snap) {
-    auto slot = [&snap]<class Snap>(int idx, const Snap*) -> const Snap* {
-        for (const auto& fa : snap.axes)
-            if (fa.slot.index == idx) return std::get_if<Snap>(&fa.snap);
-        return nullptr;
-    };
     for (auto& [idx, e] : f.per_axes)
-        if (const auto* s = slot(idx, static_cast<const RenderSnapshot*>(nullptr))) {
+        if (const RenderSnapshot* s = snap.find2d(idx)) {
             stamp_edit(e, *s);
             stamp_view(e, *s);
         }
     for (auto& [idx, e] : f.per_axes3d)
-        if (const auto* s = slot(idx, static_cast<const RenderSnapshot3D*>(nullptr))) {
+        if (const RenderSnapshot3D* s = snap.find3d(idx)) {
             stamp_edit(e, *s);
             stamp_view(e, *s);
         }
@@ -260,12 +255,12 @@ private:
         if (f.row_ratios) journal_.row_ratios = f.row_ratios;
     }
 
+    // A 2D key may name a twin (axes_key()); 3D axes have none.
     template <class Snap>
     const Snap* drawn_axes(int idx) const {
         if (!drawn_) return nullptr;
-        for (const auto& fa : drawn_->axes)
-            if (fa.slot.index == idx) return std::get_if<Snap>(&fa.snap);
-        return nullptr;
+        if constexpr (std::is_same_v<Snap, RenderSnapshot>) return drawn_->find2d(idx);
+        else return drawn_->find3d(idx);
     }
 
     // Everything without a lane of its own, latest value only.
@@ -308,12 +303,13 @@ private:
     void journal_shared(int idx, const AxesEdit& e) {
         const RenderSnapshot* s = drawn_axes<RenderSnapshot>(idx);
         if (!s || (!s->xshare && !s->yshare)) return;
-        for (const auto& fa : drawn_->axes) {
-            const RenderSnapshot* m = fa.snap2d();
-            if (!m || fa.slot.index == idx) continue;
+        // Twins are members like any other.
+        drawn_->for_each2d([&](int key, const RenderSnapshot& ms) {
+            const RenderSnapshot* m = &ms;
+            if (key == idx) return;
             const bool x = s->xshare && m->xshare == s->xshare;
             const bool y = s->yshare && m->yshare == s->yshare;
-            if (!x && !y) continue;
+            if (!x && !y) return;
             AxesEdit part;
             if (x) {
                 part.xlim_auto = e.xlim_auto; part.xmin = e.xmin; part.xmax = e.xmax;
@@ -327,9 +323,9 @@ private:
             }
             // The member's own ticks-lane stamps, as if pushed over it.
             part.style_seen = m->style_stamps;
-            journal_limits(fa.slot.index, part);
-            journal_style(journal_.styles, fa.slot.index, part);
-        }
+            journal_limits(key, part);
+            journal_style(journal_.styles, key, part);
+        });
     }
 
     // The camera, latest value only.

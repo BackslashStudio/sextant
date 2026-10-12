@@ -152,10 +152,19 @@ struct Figure::Impl {
 
     FigureSnapshot build_figure_snapshot() const;
 
-    // 2D slots only; nullptr for a 3D slot (see find_slot_impl3d()).
-    AxesImpl* find_slot_impl(int idx) {
-        for (auto& s : slots)
-            if (s.index == idx) return s.as2d() ? s.as2d()->d.get() : nullptr;
+    // The 2D axes an edit key names (axes_key(): a slot, or a twin of the
+    // axes there); nullptr for a 3D slot (see find_slot_impl3d()).
+    AxesImpl* find_slot_impl(int key) {
+        for (auto& s : slots) {
+            if (s.index != key_slot(key)) continue;
+            AxesImpl* d = s.as2d() ? s.as2d()->d.get() : nullptr;
+            switch (key_layer(key)) {
+                case 0:           return d;
+                case kLayerTwinX: return d && d->twin_x ? d->twin_x->d.get() : nullptr;
+                case kLayerTwinY: return d && d->twin_y ? d->twin_y->d.get() : nullptr;
+                default:          return nullptr;
+            }
+        }
         return nullptr;
     }
 

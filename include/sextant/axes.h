@@ -121,6 +121,27 @@ namespace sextant {
 
         Axes& sharey(Axes& other);
 
+        // A second axes over this one's frame, as matplotlib's twinx(): it shares
+        // this axes' x axis (sharex()) and has its own y axis on the right of
+        // the frame, this one's y axis then staying on the left whatever
+        // AxesStyle::yaxis_x or origin_x either holds. Plot into it as into any
+        // axes; objects of the two draw in call order, whichever took them. The
+        // cell's title, legend and colorbars stay one: set_title(), legend() and
+        // set_colorbar_style() on the twin set this axes', title() reads it, and
+        // the legend lists both axes' series. The twin takes this axes' color
+        // cycle, so its series continue the colors. Its x axis is hidden
+        // (AxesStyle::show_xticks, which a set_axes_style() on it replaces too);
+        // its frame and background are never drawn, its grid draws its y lines
+        // only, and its y title sits on the right. Pan and zoom move both axes.
+        // A second call returns the same twin; cla() on this axes keeps it. The
+        // twin lives as long as this axes. Throws std::invalid_argument on a twin.
+        std::shared_ptr<Axes> twinx();
+
+        // The same with the axes swapped: shares the y axis, its own x axis at
+        // the top of the frame (this one's then at the bottom, whatever
+        // xaxis_y or origin_y hold), its x title above it.
+        std::shared_ptr<Axes> twiny();
+
         Axes& grid(bool enable = true, GridOptions opts = {});
 
         Axes& set_axes_style(AxesStyle opts = {});

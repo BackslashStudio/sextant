@@ -2405,30 +2405,42 @@ void main() {
                                   const PlotRect& pr) {
         // One object per draw: consecutive objects of one kind can't share a
         // call, since each one's error bars go between them.
-        for (const ObjectRef& r : call_order(snap)) {
-            const std::size_t one[1] = {r.index};
-            switch (r.kind) {
-                case PlotKind::Heatmap:
-                    draw_heatmap(snap.heatmaps, one, tr, pr);
-                    break;
-                case PlotKind::Bar:
-                    draw_bars(snap.bars, one, tr, pr);
-                    draw_error_bars(snap, r, tr, pr);
-                    break;
-                case PlotKind::Line:
-                    draw_lines(snap.lines, one, tr, pr);
-                    draw_error_bars(snap, r, tr, pr);
-                    break;
-                case PlotKind::Scatter:
-                    draw_error_bars(snap, r, tr, pr);
-                    draw_scatter(snap.scatters, one, tr, pr);
-                    break;
-                case PlotKind::ScatterZ:
-                    draw_error_bars(snap, r, tr, pr);
-                    draw_scatter_z(snap.scatter_z, one, tr, pr);
-                    break;
-                default: break;
-            }
+        for (const ObjectRef& r : call_order(snap)) draw_object(snap, r, tr, pr);
+    }
+
+    void DataRenderer::draw_layers(std::span<const RenderSnapshot* const> snaps,
+                                   std::span<const CoordTransform* const> trs, std::span<const int> keys,
+                                   unsigned long long data_generation, const PlotRect& pr) {
+        for (const LayerRef& r : layered_call_order<RenderSnapshot>(snaps)) {
+            set_frame_key(data_generation, keys[r.layer]);
+            draw_object(*snaps[r.layer], r.ref, *trs[r.layer], pr);
+        }
+    }
+
+    void DataRenderer::draw_object(const RenderSnapshot& snap, const ObjectRef& r,
+                                   const CoordTransform& tr, const PlotRect& pr) {
+        const std::size_t one[1] = {r.index};
+        switch (r.kind) {
+            case PlotKind::Heatmap:
+                draw_heatmap(snap.heatmaps, one, tr, pr);
+                break;
+            case PlotKind::Bar:
+                draw_bars(snap.bars, one, tr, pr);
+                draw_error_bars(snap, r, tr, pr);
+                break;
+            case PlotKind::Line:
+                draw_lines(snap.lines, one, tr, pr);
+                draw_error_bars(snap, r, tr, pr);
+                break;
+            case PlotKind::Scatter:
+                draw_error_bars(snap, r, tr, pr);
+                draw_scatter(snap.scatters, one, tr, pr);
+                break;
+            case PlotKind::ScatterZ:
+                draw_error_bars(snap, r, tr, pr);
+                draw_scatter_z(snap.scatter_z, one, tr, pr);
+                break;
+            default: break;
         }
     }
 

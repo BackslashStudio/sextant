@@ -48,6 +48,9 @@ struct PointLocation {
     int axes = -1;
     bool has_data = false;
     double x = 0.0, y = 0.0, z = 0.0;
+    // A twinned 2D cell: the twiny's x and the twinx's y (Event::x2data).
+    double x2 = std::numeric_limits<double>::quiet_NaN();
+    double y2 = std::numeric_limits<double>::quiet_NaN();
 };
 
 PointLocation locate_point(const FigureSnapshot& fsnap,

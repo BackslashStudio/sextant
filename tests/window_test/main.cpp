@@ -2082,13 +2082,82 @@ static void test_shared_axes() {
     fig->show(true);
 }
 
+// v1.2 step 36b-2: twinx()/twiny(). Check: each twin's axis on its own edge
+// (cell 1's host asks for its y axis on the right and is ignored); the
+// legend lists both layers in call order; drag, wheel and double-click move
+// every layer; the menu bar's Host / Twin selector beside the subplot one; cell 3's
+// twin labels hide toward cell 4's twin, which shares its (log) y.
+static void test_twins() {
+    constexpr int N = 12, M = 200;
+    std::vector<double> month(N), rain(N), temp(N);
+    for (int i = 0; i < N; ++i) {
+        month[i] = i + 1;
+        rain[i] = 40.0 + 35.0 * std::sin(0.5 * i) + 10.0 * (i % 3);
+        temp[i] = 12.0 - 10.0 * std::cos(2.0 * 3.14159265 * i / N);
+    }
+    std::vector<double> km(M), h(M), miles(M), t(M), g(M), z(M), e(M);
+    for (int i = 0; i < M; ++i) {
+        km[i] = 50.0 * i / (M - 1);
+        h[i] = 200.0 + 150.0 * std::sin(km[i] / 6.0) + 2.0 * km[i];
+        miles[i] = km[i] / 1.609;
+        t[i] = 10.0 * i / (M - 1);
+        g[i] = std::sin(t[i]);
+        z[i] = std::cos(0.7 * t[i]);
+        e[i] = std::exp(0.5 * t[i]);
+    }
+
+    auto fig = sextant::Figure::create({.width = 1300, .height = 900, .title = "Twins"});
+    fig->suptitle("twinx / twiny: one frame, two scales, call order across both");
+
+    // Bars on the host, the twin's line over them, then host markers over that.
+    auto s1 = fig->add_subplot(2, 2, 1);
+    sextant::AxesStyle right;
+    right.yaxis_x = sextant::AxisPosition::High;   // ignored while twinned
+    s1->set_axes_style(right);
+    s1->bar(month, rain, {.name = "rain"}).set_ytitle("rain (mm)").set_xtitle("month");
+    auto t1 = s1->twinx();
+    t1->line(month, temp, {.linewidth = 3.0f, .name = "temperature"}).set_ytitle("temp (C)");
+    s1->scatter(month, rain, {.name = "rain (points)"});
+    t1->legend({.anchor = sextant::LegendAnchor::InsideTL});
+    t1->set_title("twinx: legend set on the twin, both layers listed");
+
+    // twiny: the same profile in km (bottom) and miles (top).
+    auto s2 = fig->add_subplot(2, 2, 2);
+    s2->line(km, h).set_xtitle("distance (km)").set_ytitle("height (m)");
+    auto t2 = s2->twiny();
+    t2->line(miles, h, {.linestyle = sextant::LineStyle::None}).set_xtitle("distance (miles)");
+    s2->set_title("twiny: its x axis on top");
+    s2->grid(true);
+
+    // Twins sharing y across cells: cell 3's twin labels hide toward cell 4.
+    auto s3 = fig->add_subplot(2, 2, 3);
+    s3->line(t, g, {.name = "g"}).set_ytitle("g").set_xtitle("t");
+    auto t3 = s3->twinx();
+    t3->scatter_z(t, e, z, {.colorbar = true, .name = "z"});
+    t3->set_yscale(sextant::Scale::Log);
+    t3->set_ytitle("e (log)");
+    s3->set_title("twin with a colorbar, log y shared with cell 4's twin");
+
+    auto s4 = fig->add_subplot(2, 2, 4);
+    s4->line(t, z).set_ytitle("z").set_xtitle("t");
+    auto t4 = s4->twinx();
+    t4->line(t, e, {.linestyle = sextant::LineStyle::Dashed}).set_ytitle("e (log)");
+    t4->sharey(*t3);
+    t4->grid(true);
+    s4->set_title("its twin's grid draws y lines only");
+
+    savefig_and_check_memory(fig, "test_twins");
+    fig->show(true);
+}
+
 int main() {
+    test_twins();
     test_shared_axes();
     test_scales();
     // test_axis_position3d();
     // test_axis_position();
-    test_axes_gallery();
-    test_axes3d_gallery();
+    // test_axes_gallery();
+    // test_axes3d_gallery();
     // test_errorbar3d_gallery();
     // test_line3d_gallery();
     // test_surface_tri_gallery();

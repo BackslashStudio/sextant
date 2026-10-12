@@ -142,6 +142,14 @@ PlotViewInfo PlotView::draw(FigureContext& fig, RenderDevice& dev, PlotViewState
             r.ymin = al.tr.ymin; r.ymax = al.tr.ymax;
         }
         info.resolved.push_back(r);
+        // A twin's under its edit key (axes_key()).
+        for (const AxesLayout::Twin& t : al.twins) {
+            DrawnLimits tw;
+            tw.slot = axes_key(al.slot.index, t.layer);
+            tw.xmin = t.tr.xmin; tw.xmax = t.tr.xmax;
+            tw.ymin = t.tr.ymin; tw.ymax = t.tr.ymax;
+            info.resolved.push_back(tw);
+        }
     }
 
     // GL textures are bottom-up; flip v.
@@ -228,7 +236,15 @@ PlotViewInfo PlotView::draw(FigureContext& fig, RenderDevice& dev, PlotViewState
             // 3D: ray cast against planes and bars, then the 2D search on the
             // nearest plane hit.
             std::optional<HintResult> hint;
-            if (fa && fa->snap2d()) {
+            if (fa && fa->snap2d() && !cell->twins.empty()) {
+                // A twinned cell: the nearest across its layers, in that
+                // object's own axes' values.
+                const CellLayers l = cell_layers(*fa, *cell);
+                std::size_t k = 0;
+                if (const auto hit = find_pick_layers(l, cursor_x, cursor_y, k, &pv.hint_index,
+                                                      fsnap.data_generation))
+                    hint = HintResult{format_pick(*l.snaps[k], *hit), hit->anchor_x, hit->anchor_y};
+            } else if (fa && fa->snap2d()) {
                 pv.hint_index.set_frame_key(fsnap.data_generation, cell->slot.index);
                 hint = find_hint(*fa->snap2d(), cell->tr, cursor_x, cursor_y,
                                  &pv.hint_index);
@@ -322,43 +338,54 @@ PlotViewInfo PlotView::draw(FigureContext& fig, RenderDevice& dev, PlotViewState
             }
         } else if (cur && sel2d) {
             const ImGuiIO& io = ImGui::GetIO();
-            const LimitStamps seen = sel2d->limit_stamps;
-            const int idx = cur->slot.index;
 
-            if (gate.drag && (io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f)) {
-                const auto lim = pan_limits(cur->tr,
-                    io.MouseDelta.x * to_plot, io.MouseDelta.y * to_plot);
-                sv.xmin_local = lim.xmin; sv.xmax_local = lim.xmax;
-                sv.ymin_local = lim.ymin; sv.ymax_local = lim.ymax;
-                sv.xauto_local = sv.yauto_local = false;
-                edit_box.update(idx, [&](AxesEdit& e) {
+            // Every layer of the cell (Axes::twinx()) moves as if the same input
+            // were applied to each, through its own transform; the cell's own
+            // axes also updates the slot view. A shared axis moves once through
+            // its group whichever layer wrote it.
+            struct Layer {
+                int key;
+                const CoordTransform* tr;
+                LimitStamps seen;
+            };
+            std::vector<Layer> layers{{cur->slot.index, &cur->tr, sel2d->limit_stamps}};
+            for (const AxesLayout::Twin& t : cur->twins) {
+                const int key = axes_key(cur->slot.index, t.layer);
+                if (const RenderSnapshot* ts = fsnap.find2d(key))
+                    layers.push_back({key, &t.tr, ts->limit_stamps});
+            }
+            const auto set_limits = [&](const Layer& l, const AxisLimits& lim) {
+                if (l.key == fig.selection.key()) {
+                    sv.xmin_local = lim.xmin; sv.xmax_local = lim.xmax;
+                    sv.ymin_local = lim.ymin; sv.ymax_local = lim.ymax;
+                    sv.xauto_local = sv.yauto_local = false;
+                }
+                edit_box.update(l.key, [&](AxesEdit& e) {
                     e.xmin = lim.xmin; e.xmax = lim.xmax; e.xlim_auto = false;
                     e.ymin = lim.ymin; e.ymax = lim.ymax; e.ylim_auto = false;
-                    e.lim_seen = seen;
+                    e.lim_seen = l.seen;
                 });
-            }
+            };
+
+            if (gate.drag && (io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f))
+                for (const Layer& l : layers)
+                    set_limits(l, pan_limits(*l.tr, io.MouseDelta.x * to_plot, io.MouseDelta.y * to_plot));
 
             if (gate.wheel && io.MouseWheel != 0.0f) {
                 const float cursor_x = (io.MousePos.x - image_pos.x) * to_plot;
                 const float cursor_y = (io.MousePos.y - image_pos.y) * to_plot;
                 const float factor = std::pow(0.9f, io.MouseWheel);
-                const auto lim = zoom_limits(cur->tr, cursor_x, cursor_y, factor);
-                sv.xmin_local = lim.xmin; sv.xmax_local = lim.xmax;
-                sv.ymin_local = lim.ymin; sv.ymax_local = lim.ymax;
-                sv.xauto_local = sv.yauto_local = false;
-                edit_box.update(idx, [&](AxesEdit& e) {
-                    e.xmin = lim.xmin; e.xmax = lim.xmax; e.xlim_auto = false;
-                    e.ymin = lim.ymin; e.ymax = lim.ymax; e.ylim_auto = false;
-                    e.lim_seen = seen;
-                });
+                for (const Layer& l : layers)
+                    set_limits(l, zoom_limits(*l.tr, cursor_x, cursor_y, factor));
             }
 
             if (gate.reset) {
                 sv.xauto_local = sv.yauto_local = true;
-                edit_box.update(idx, [&](AxesEdit& e) {
-                    e.xlim_auto = true; e.ylim_auto = true;
-                    e.lim_seen = seen;
-                });
+                for (const Layer& l : layers)
+                    edit_box.update(l.key, [&](AxesEdit& e) {
+                        e.xlim_auto = true; e.ylim_auto = true;
+                        e.lim_seen = l.seen;
+                    });
             }
         }
     }

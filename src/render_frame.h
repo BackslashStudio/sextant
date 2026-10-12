@@ -23,6 +23,14 @@ struct AxesLayout {
     // The whole subplot including decorations; used for click selection and
     // the selection outline.
     PlotRect cell{};
+
+    // 2D, a twinned cell (Axes::twinx()): each twin's layer (kLayerTwinX/Y) and
+    // the transform it was drawn with, over the same frame.
+    struct Twin {
+        int layer = 0;
+        CoordTransform tr;
+    };
+    std::vector<Twin> twins;
 };
 
 // The AxesLayout list for `layout`, one per cell in its order: what render_frame()

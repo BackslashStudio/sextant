@@ -336,4 +336,27 @@ namespace sextant {
         }
         return changed;
     }
+
+    // A twinned cell's layer selector (Axes::twinx()) in the menu bar, beside
+    // axes_selector(): "Host", "Twin x", "Twin y" for the layers `fa` has.
+    // Width from the caller's SetNextItemWidth(). Writes the chosen layer and
+    // returns true; the caller applies it via Selection::select_layer().
+    inline bool layer_selector(const char* label, const FigureAxesSnapshot& fa, int& layer) {
+        const auto name = [](int l) {
+            return l == kLayerTwinX ? "Twin x" : l == kLayerTwinY ? "Twin y" : "Host";
+        };
+        bool changed = false;
+        if (ImGui::BeginCombo(label, name(layer))) {
+            const auto item = [&](int l) {
+                if (ImGui::Selectable(name(l), layer == l)) {
+                    layer = l;
+                    changed = true;
+                }
+            };
+            item(0);
+            for (const TwinSnapshot& t: fa.twins) item(t.layer);
+            ImGui::EndCombo();
+        }
+        return changed;
+    }
 } // namespace sextant

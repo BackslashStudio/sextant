@@ -111,6 +111,17 @@ void draw_menu_bar(const FigureContext& fig, FigureWindowState& st) {
                 ImGui::SetTooltip("The subplot the panels edit and Navigate moves.\n"
                                   "Clicking a subplot selects it too.");
         }
+        // A twinned subplot: which of its axes the panels edit.
+        if (const FigureAxesSnapshot* fa = normalize_selection(fig.selection, fig.snap);
+            fa && !fa->twins.empty()) {
+            int layer = fig.selection.layer;
+            ImGui::SetNextItemWidth(90.0f);
+            if (layer_selector("##layersel", *fa, layer))
+                fig.selection.select_layer(layer);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("The axes of this subplot the panels edit: its own (Host)\n"
+                                  "or a twin. Navigate moves them all.");
+        }
         ImGui::EndMainMenuBar();
     }
 }

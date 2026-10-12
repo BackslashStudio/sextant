@@ -13,7 +13,12 @@
 namespace sextant {
 
 Axes::Axes() : d(std::make_unique<Impl>()) {}
-Axes::~Axes() { d->leave_groups(); }
+Axes::~Axes() {
+    d->leave_groups();
+    // A twin the caller still holds outlives its host as a plain axes.
+    for (auto* t : {&d->twin_x, &d->twin_y})
+        if (*t) (*t)->d->host = nullptr;
+}
 
 // ---------------------------------------------------------------------------
 // Share groups (sharex()/sharey())
@@ -109,6 +114,38 @@ void Axes::Impl::share(Impl& other, bool x, const char* who) {
     const unsigned long long st = next_snapshot_generation();
     for (Impl* m : tg->members) (x ? m->limit_stamps.x : m->limit_stamps.y) = st;
 }
+
+// ---------------------------------------------------------------------------
+// Twins (twinx()/twiny())
+// ---------------------------------------------------------------------------
+
+void Axes::Impl::twin_defaults() {
+    if (layer == kLayerTwinX) axes_style.show_xticks = false;
+    if (layer == kLayerTwinY) axes_style.show_yticks = false;
+}
+
+std::shared_ptr<Axes> Axes::Impl::make_twin(bool x, const char* who) {
+    if (host)
+        throw std::invalid_argument(std::string(who) + ": this axes is a twin; twin its host instead");
+    std::shared_ptr<Axes>& slot = x ? twin_x : twin_y;
+    if (slot) return slot;
+    auto t = std::shared_ptr<Axes>(new Axes());
+    Impl& td = *t->d;
+    td.owner = owner;
+    td.mathtext = mathtext;
+    td.host = this;
+    td.layer = x ? kLayerTwinX : kLayerTwinY;
+    td.cycle = cycle;
+    td.twin_defaults();
+    // Into the host's group on the shared axis, taking its limits and scale
+    // (a fresh axes holds no heatmap, so this cannot throw).
+    td.share(*this, x, who);
+    slot = t;
+    return t;
+}
+
+std::shared_ptr<Axes> Axes::twinx() { return d->make_twin(true, "Axes::twinx"); }
+std::shared_ptr<Axes> Axes::twiny() { return d->make_twin(false, "Axes::twiny"); }
 
 Axes& Axes::sharex(Axes& other) {
     d->share(*other.d, true, "Axes::sharex");
@@ -465,8 +502,9 @@ Axes& Axes::annotate(double px, double py, std::string_view s, Pos tx, Pos ty,
 
 Axes& Axes::set_title(std::string_view text, float fontsize) {
     warn_math(d->mathtext, "set_title", text);
-    d->title = text; d->title_stamps.title = next_snapshot_generation();
-    d->axes_style.title_fontsize = fontsize; return *this;
+    Impl& c = d->cell();
+    c.title = text; c.title_stamps.title = next_snapshot_generation();
+    c.axes_style.title_fontsize = fontsize; return *this;
 }
 Axes& Axes::set_xtitle(std::string_view text, float fontsize) {
     warn_math(d->mathtext, "set_xtitle", text);
@@ -519,12 +557,14 @@ Axes& Axes::set_axes_style(AxesStyle opts) {
     d->style_stamps.style = next_snapshot_generation(); return *this;
 }
 Axes& Axes::legend(LegendOptions opts) {
-    d->legend_enabled = true; d->legend_opts = opts;
-    d->style_stamps.legend = next_snapshot_generation(); return *this;
+    Impl& c = d->cell();
+    c.legend_enabled = true; c.legend_opts = opts;
+    c.style_stamps.legend = next_snapshot_generation(); return *this;
 }
 Axes& Axes::set_colorbar_style(ColorbarOptions opts) {
-    d->colorbar_opts = opts;
-    d->style_stamps.colorbar = next_snapshot_generation(); return *this;
+    Impl& c = d->cell();
+    c.colorbar_opts = opts;
+    c.style_stamps.colorbar = next_snapshot_generation(); return *this;
 }
 
 Axes& Axes::set_xticks(std::span<const double> pos, std::vector<std::string> labels) {
@@ -570,14 +610,27 @@ Axes& Axes::cla() {
     // Membership stays, and so do the shared limits and scale: they are the
     // group's, taken back from another member (as matplotlib re-takes the
     // sibling's).
+    // Twins stay too: a host keeps its twins and resets the color cycle they
+    // share in place; a twin keeps its host, the host's cycle and its defaults.
     const bool mathtext = d->mathtext;
     const std::uint64_t owner = d->owner;
     auto xs = std::move(d->xshare), ys = std::move(d->yshare);
+    auto tx = std::move(d->twin_x), ty = std::move(d->twin_y);
+    auto cycle = std::move(d->cycle);
+    Impl* host = d->host;
+    const int layer = d->layer;
     *d = Impl{};
     d->mathtext = mathtext;
     d->owner = owner;
     d->xshare = std::move(xs);
     d->yshare = std::move(ys);
+    d->twin_x = std::move(tx);
+    d->twin_y = std::move(ty);
+    d->host = host;
+    d->layer = layer;
+    if (!host) *cycle = ColorCycle{};
+    d->cycle = std::move(cycle);
+    d->twin_defaults();
     d->adopt_shared_x();
     d->adopt_shared_y();
     return *this;
@@ -587,7 +640,7 @@ Axes& Axes::cla() {
 
 namespace sextant {
 
-std::string Axes::title() const  { return d->title; }
+std::string Axes::title() const  { return d->cell().title; }
 std::string Axes::xtitle() const { return d->xtitle; }
 std::string Axes::ytitle() const { return d->ytitle; }
 

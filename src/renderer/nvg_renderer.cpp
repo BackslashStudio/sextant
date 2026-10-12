@@ -357,7 +357,7 @@ namespace sextant {
             for (const double v: cell.xminor) {
                 const float px = cell.tr.to_px(v);
                 if (px < r.x || px > r.x + r.w) continue;
-                if (grid_enabled && grid_opts.minor) {
+                if (grid_enabled && cell.xgrid && grid_opts.minor) {
                     begin_styled_segment(vg_, px, r.y, px, r.y + r.h, grid_opts.linestyle);
                     nvgStrokeColor(vg_, nvgRGBAf(mc.r, mc.g, mc.b, mc.a));
                     nvgStrokeWidth(vg_, grid_opts.linewidth);
@@ -375,7 +375,7 @@ namespace sextant {
             for (const double v: cell.yminor) {
                 const float py = cell.tr.to_py(v);
                 if (py < r.y || py > r.y + r.h) continue;
-                if (grid_enabled && grid_opts.minor) {
+                if (grid_enabled && cell.ygrid && grid_opts.minor) {
                     begin_styled_segment(vg_, r.x, py, r.x + r.w, py, grid_opts.linestyle);
                     nvgStrokeColor(vg_, nvgRGBAf(mc.r, mc.g, mc.b, mc.a));
                     nvgStrokeWidth(vg_, grid_opts.linewidth);
@@ -409,7 +409,7 @@ namespace sextant {
             }
 
             // Grid line, dashed via begin_styled_segment().
-            if (grid_enabled) {
+            if (grid_enabled && cell.xgrid) {
                 begin_styled_segment(vg_, px, r.y, px, r.y + r.h, grid_opts.linestyle);
                 const auto& gc = grid_opts.color;
                 nvgStrokeColor(vg_, nvgRGBAf(gc.r, gc.g, gc.b, gc.a));
@@ -441,7 +441,7 @@ namespace sextant {
             }
 
             // Grid line
-            if (grid_enabled) {
+            if (grid_enabled && cell.ygrid) {
                 begin_styled_segment(vg_, r.x, py, r.x + r.w, py, grid_opts.linestyle);
                 const auto& gc = grid_opts.color;
                 nvgStrokeColor(vg_, nvgRGBAf(gc.r, gc.g, gc.b, gc.a));

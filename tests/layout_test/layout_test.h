@@ -590,6 +590,9 @@ namespace lt {
     // share.cpp
     void test_share();
 
+    // twin.cpp
+    void test_twin();
+
     // edge_markers.cpp
     void test_edge_markers();
 

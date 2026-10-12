@@ -93,31 +93,49 @@ namespace sextant {
         return resolve_limits(snap, nullptr, nullptr, nullptr);
     }
 
-    // Every 2D axes' limits in a figure, index-parallel with `fs.axes` (3D
-    // entries are left default): one auto_bounds() per axes, and share groups
-    // resolved over all their members. Layout uses it.
+    // Every 2D axes' limits in a figure, flat: each cell's own axes, then its
+    // twins (FigureAxesSnapshot::twins), cell after cell; a 3D cell has one
+    // default entry. One auto_bounds() per axes, and share groups resolved over
+    // all their members, twins included. Layout uses it.
     inline std::vector<ResolvedLimits> resolve_figure_limits(const FigureSnapshot& fs) {
-        std::vector<ResolvedLimits> out(fs.axes.size(), ResolvedLimits{0.0, 1.0, 0.0, 1.0});
+        std::size_t n = 0;
+        for (const FigureAxesSnapshot& fa: fs.axes) n += 1 + fa.twins.size();
+        std::vector<ResolvedLimits> out(n, ResolvedLimits{0.0, 1.0, 0.0, 1.0});
+        // Every 2D axes in one list, and where its result goes.
+        struct Layer {
+            const RenderSnapshot* s;
+            std::size_t out;
+        };
+        std::vector<Layer> layers;
+        layers.reserve(n);
         bool shared = false;
-        for (const auto& fa: fs.axes)
-            if (const RenderSnapshot* s = fa.snap2d()) shared = shared || s->xshare || s->yshare;
+        std::size_t at = 0;
+        for (const FigureAxesSnapshot& fa: fs.axes) {
+            if (const RenderSnapshot* s = fa.snap2d()) {
+                layers.push_back({s, at});
+                shared = shared || s->xshare || s->yshare;
+                for (std::size_t k = 0; k < fa.twins.size(); ++k) {
+                    layers.push_back({&fa.twins[k].snap, at + 1 + k});
+                    shared = shared || fa.twins[k].snap.xshare || fa.twins[k].snap.yshare;
+                }
+            }
+            at += 1 + fa.twins.size();
+        }
         if (!shared) {
-            for (std::size_t i = 0; i < fs.axes.size(); ++i)
-                if (const RenderSnapshot* s = fs.axes[i].snap2d()) out[i] = resolve_limits(*s);
+            for (const Layer& l: layers) out[l.out] = resolve_limits(*l.s);
             return out;
         }
 
         // A member's auto flags are its group's, so only automatic axes need bounds.
-        std::vector<std::optional<AutoBounds>> own(fs.axes.size());
+        std::vector<std::optional<AutoBounds>> own(layers.size());
         std::vector<std::pair<unsigned long long, SharedAuto>> gx, gy;
         const auto group = [](std::vector<std::pair<unsigned long long, SharedAuto>>& v,
                               unsigned long long id) -> SharedAuto& {
             for (auto& [k, g]: v) if (k == id) return g;
             return v.emplace_back(id, SharedAuto{}).second;
         };
-        for (std::size_t i = 0; i < fs.axes.size(); ++i) {
-            const RenderSnapshot* s = fs.axes[i].snap2d();
-            if (!s) continue;
+        for (std::size_t i = 0; i < layers.size(); ++i) {
+            const RenderSnapshot* s = layers[i].s;
             const bool xauto = s->xlim_auto || !limits_fit(s->xscale, s->xmin, s->xmax);
             const bool yauto = s->ylim_auto || !limits_fit(s->yscale, s->ymin, s->ymax);
             if (!xauto && !yauto) continue;
@@ -125,12 +143,11 @@ namespace sextant {
             if (s->xshare) add_to_shared(group(gx, s->xshare), *s, *own[i], true);
             if (s->yshare) add_to_shared(group(gy, s->yshare), *s, *own[i], false);
         }
-        for (std::size_t i = 0; i < fs.axes.size(); ++i) {
-            const RenderSnapshot* s = fs.axes[i].snap2d();
-            if (!s) continue;
+        for (std::size_t i = 0; i < layers.size(); ++i) {
+            const RenderSnapshot* s = layers[i].s;
             const SharedAuto* x = s->xshare && own[i] ? &group(gx, s->xshare) : nullptr;
             const SharedAuto* y = s->yshare && own[i] ? &group(gy, s->yshare) : nullptr;
-            out[i] = resolve_limits(*s, own[i] ? &*own[i] : nullptr, x, y);
+            out[layers[i].out] = resolve_limits(*s, own[i] ? &*own[i] : nullptr, x, y);
         }
         return out;
     }

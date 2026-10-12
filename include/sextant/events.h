@@ -74,6 +74,12 @@ namespace sextant {
         double ydata = std::numeric_limits<double>::quiet_NaN();
         double zdata = std::numeric_limits<double>::quiet_NaN();
 
+        // A 2D axes with twins (Axes::twinx()/twiny()): xdata and ydata stay the
+        // axes' own; y2data is the twinx's y under (x, y) and x2data the twiny's
+        // x. NaN without that twin.
+        double x2data = std::numeric_limits<double>::quiet_NaN();
+        double y2data = std::numeric_limits<double>::quiet_NaN();
+
         // Scroll: the wheel offset, in notches (positive y = away from the user);
         // events queued back to back are summed.
         double scroll_x = 0.0;
@@ -105,6 +111,10 @@ namespace sextant {
         int pick_row = -1;
         int pick_col = -1;
         int pick_plane = -1;
+        // Whose object `pick_object` indexes in a 2D cell with twins: 0 the
+        // axes' own, 1 its twinx(), 2 its twiny(). Of two equally near objects
+        // the later call wins, whichever axes took it.
+        int pick_twin = 0;
     };
 
     using EventCallback = std::function<void(const Event&)>;

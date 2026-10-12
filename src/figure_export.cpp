@@ -196,23 +196,34 @@ std::string render_figure_svg(const FigureSnapshot& fsnap,
             continue;
         }
 
-        const RenderSnapshot& snap = *fsnap.axes[i].snap2d();
+        // A 2D axes' content; a twin's layout is its cell's twins entry.
+        const auto fill2d = [](SvgAxesData& sd, const RenderSnapshot& snap) {
+            sd.lines     = snap.lines;
+            sd.scatters  = snap.scatters;
+            sd.bars      = snap.bars;
+            sd.scatter_z = snap.scatter_z;
+            sd.heatmaps  = snap.heatmaps;
 
-        sd.lines     = snap.lines;
-        sd.scatters  = snap.scatters;
-        sd.bars      = snap.bars;
-        sd.scatter_z = snap.scatter_z;
-        sd.heatmaps  = snap.heatmaps;
-
-        sd.title           = snap.title;
-        sd.xtitle          = snap.xtitle;
-        sd.ytitle          = snap.ytitle;
-        sd.grid_enabled    = snap.grid_enabled;
-        sd.grid_opts       = snap.grid_opts;
-        sd.axes_style      = snap.axes_style;
-        sd.legend_opts     = snap.legend_opts;
-        sd.colorbar_opts   = snap.colorbar_opts;
-        sd.texts           = plan_texts(snap.texts, sd.layout.tr, sd.layout.frame);
+            sd.title           = snap.title;
+            sd.xtitle          = snap.xtitle;
+            sd.ytitle          = snap.ytitle;
+            sd.grid_enabled    = snap.grid_enabled;
+            sd.grid_opts       = snap.grid_opts;
+            sd.axes_style      = snap.axes_style;
+            sd.legend_opts     = snap.legend_opts;
+            sd.colorbar_opts   = snap.colorbar_opts;
+            sd.texts           = plan_texts(snap.texts, sd.layout.tr, sd.layout.frame);
+        };
+        fill2d(sd, *fsnap.axes[i].snap2d());
+        const auto& twins = fsnap.axes[i].twins;
+        for (std::size_t k = 0; k < twins.size(); ++k) {
+            SvgAxesData td;
+            td.width  = width;
+            td.height = height;
+            td.layout = layout.cells[i].twins[k];
+            fill2d(td, twins[k].snap);
+            sd.twins.push_back(std::move(td));
+        }
 
         fd.axes.push_back(std::move(sd));
     }

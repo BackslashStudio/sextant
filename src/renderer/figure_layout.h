@@ -47,6 +47,13 @@ namespace sextant {
     // 3D: the axes' own keys, then each plane's, in plane order.
     std::vector<LegendEntry> collect_legend_entries(const RenderSnapshot3D& snap);
 
+    // A whole cell's: with twins (Axes::twinx()), every layer's series in one
+    // call order (layered_call_order()), when the cell's own axes has its legend on.
+    std::vector<LegendEntry> collect_legend_entries(const FigureAxesSnapshot& fa);
+
+    // A whole cell's colorbars: its own axes' requests, then each twin's.
+    std::vector<ColorbarRequest> cell_colorbar_requests(const FigureAxesSnapshot& fa);
+
     // Legend box metrics, shared by sizing and both renderers.
     inline constexpr float kLegendPad = 8.0f;
     inline constexpr float kLegendSwatchW = 20.0f;
@@ -121,6 +128,9 @@ namespace sextant {
 
     // 3D: legend and colorbars are placed beside the cell's frame, as in 2D.
     CellDecorations compute_cell_decorations(const RenderSnapshot3D& snap);
+
+    // A whole cell's, twins included (styled by the cell's own axes).
+    CellDecorations compute_cell_decorations(const FigureAxesSnapshot& fa);
 
     // ---------------------------------------------------------------------------
     // Measurements: the stored half of the layout
@@ -253,6 +263,15 @@ namespace sextant {
         // 2D: whether each axis draws its tick labels, resolved
         // (AxesStyle::show_xtick_labels against the share groups).
         bool xlabels = true, ylabels = true;
+        // 2D: whether each axis draws its grid lines (a twin's shared axis doesn't).
+        bool xgrid = true, ygrid = true;
+
+        // 2D, a twinned cell (Axes::twinx()): one layout per twin, over the same
+        // frame, with its own transform, ticks, axis placement and title anchors
+        // (its legend and colorbars are the cell's, here). `layer` is the twin's
+        // (kLayerTwinX/Y); 0 here.
+        int layer = 0;
+        std::vector<CellLayout> twins;
 
         // 3D cells only (`tr`, tick lists and x/y title anchors are 2D only).
         std::optional<Box3DLayout> box3d;

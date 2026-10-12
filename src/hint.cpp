@@ -318,6 +318,58 @@ std::optional<PickHit> find_pick(const RenderSnapshot& snap, const HintProjector
     return cell;
 }
 
+CellLayers cell_layers(const FigureAxesSnapshot& fa, const AxesLayout& cell) {
+    CellLayers l;
+    const RenderSnapshot* s = fa.snap2d();
+    if (!s) return l;
+    l.snaps.push_back(s);
+    l.trs.push_back(&cell.tr);
+    l.keys.push_back(fa.slot.index);
+    l.layers.push_back(0);
+    for (const AxesLayout::Twin& t : cell.twins)
+        if (const RenderSnapshot* ts = fa.layer2d(t.layer)) {
+            l.snaps.push_back(ts);
+            l.trs.push_back(&t.tr);
+            l.keys.push_back(axes_key(fa.slot.index, t.layer));
+            l.layers.push_back(t.layer);
+        }
+    return l;
+}
+
+std::optional<PickHit> find_pick_layers(const CellLayers& l, float cursor_x, float cursor_y,
+                                        std::size_t& layer, HintIndexCache* index,
+                                        unsigned long long data_generation) {
+    std::optional<PickHit> best;
+    ObjectId best_id = 0;
+    float best_d2 = 0.0f;
+    for (std::size_t k = 0; k < l.snaps.size(); ++k) {
+        if (index) index->set_frame_key(data_generation, l.keys[k]);
+        const auto hit = find_pick(*l.snaps[k], HintProjector(*l.trs[k]), cursor_x, cursor_y, index);
+        if (!hit) continue;
+        const RenderSnapshot& s = *l.snaps[k];
+        ObjectId id = 0;
+        switch (hit->kind) {
+            case PickKind::Line:     id = s.lines[hit->object].id; break;
+            case PickKind::Scatter:  id = s.scatters[hit->object].id; break;
+            case PickKind::ScatterZ: id = s.scatter_z[hit->object].id; break;
+            case PickKind::Bar:      id = s.bars[hit->object].id; break;
+            case PickKind::Heatmap:  id = s.heatmaps[hit->object].id; break;
+            default: break;
+        }
+        const float dx = hit->anchor_x - cursor_x, dy = hit->anchor_y - cursor_y;
+        const float d2 = dx * dx + dy * dy;
+        const bool cells = hit->kind == PickKind::Heatmap || (best && best->kind == PickKind::Heatmap);
+        const bool wins = !best || (cells ? id >= best_id : (d2 < best_d2 || (d2 == best_d2 && id >= best_id)));
+        if (wins) {
+            best = hit;
+            best_id = id;
+            best_d2 = d2;
+            layer = k;
+        }
+    }
+    return best;
+}
+
 std::string format_pick(const RenderSnapshot& snap, const PickHit& hit) {
     const std::size_t i = hit.element;
     switch (hit.kind) {
