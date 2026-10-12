@@ -140,6 +140,21 @@ namespace sextant {
             return p;
         }
 
+        // The cell's own axes prepared again over other limits (Datalim's
+        // widened ones), keeping what prepare_all() resolved across the grid.
+        CellPrep reprepare(const FigureAxesSnapshot& fa, const RenderSnapshot& snap, const CellPrep& was,
+                           const ResolvedLimits& limits) {
+            bool tx = false, ty = false;
+            for (const TwinSnapshot& t: fa.twins) {
+                tx = tx || t.layer == kLayerTwinX;
+                ty = ty || t.layer == kLayerTwinY;
+            }
+            CellPrep p = fa.twins.empty() ? prepare(snap, limits) : prepare_layer(snap, limits, 0, tx, ty);
+            p.xlabels = was.xlabels;
+            p.ylabels = was.ylabels;
+            return p;
+        }
+
         // Once per frame (auto_scale3d() is O(N)).
         CellPrep prepare(const RenderSnapshot3D& snap, const ResolvedLimits&) {
             CellPrep p;
@@ -1168,6 +1183,59 @@ namespace sextant {
             }
         }
 
+        // An axis' span in scale units, or 0 when it has none to measure by.
+        double scale_span(const AxisScale& s, double lo, double hi) {
+            const double d = std::fabs(s.fwd(hi) - s.fwd(lo));
+            return std::isfinite(d) ? d : 0.0;
+        }
+
+        // Axes::set_aspect() with Adjustable::Box: the frame shrunk, centred, to
+        // the height-to-width ratio that draws a y unit `ratio` x units long.
+        PlotRect aspect_frame(const PlotRect& f, const RenderSnapshot& s, const ResolvedLimits& l) {
+            const double sx = scale_span(s.xscale, l.xmin, l.xmax);
+            const double sy = scale_span(s.yscale, l.ymin, l.ymax);
+            if (!(sx > 0.0) || !(sy > 0.0)) return f;
+            const double want = s.aspect.ratio * sy / sx;   // frame h / w
+            PlotRect r = f;
+            if (static_cast<double>(f.h) > static_cast<double>(f.w) * want) {
+                r.h = std::max(1.0f, static_cast<float>(static_cast<double>(f.w) * want));
+                r.y += (f.h - r.h) * 0.5f;
+            } else {
+                r.w = std::max(1.0f, static_cast<float>(static_cast<double>(f.h) / want));
+                r.x += (f.w - r.w) * 0.5f;
+            }
+            return r;
+        }
+
+        // Adjustable::Datalim: the cell's own axes' limits with one axis widened
+        // about its centre (in scale space) so the frame `f` draws the ratio --
+        // the unshared axis when the other is shared, else whichever must grow.
+        // Both shared is refused by the setters; drawn unwidened.
+        std::optional<ResolvedLimits> aspect_limits(const RenderSnapshot& s, const ResolvedLimits& l,
+                                                    const PlotRect& f) {
+            const bool xs = s.xshare != 0, ys = s.yshare != 0;
+            if (xs && ys) return std::nullopt;
+            const double sx = scale_span(s.xscale, l.xmin, l.xmax);
+            const double sy = scale_span(s.yscale, l.ymin, l.ymax);
+            if (!(sx > 0.0) || !(sy > 0.0) || !(f.w > 0.0f) || !(f.h > 0.0f)) return std::nullopt;
+            const double r = s.aspect.ratio;
+            const double need_y = static_cast<double>(f.h) * sx / (r * static_cast<double>(f.w));
+            const double need_x = r * static_cast<double>(f.w) * sy / static_cast<double>(f.h);
+            const bool widen_y = xs || (!ys && need_y > sy);
+            // About the centre, keeping the limits' direction.
+            const auto about = [](const AxisScale& sc, double& lo, double& hi, double span) {
+                const double a = sc.fwd(lo), b = sc.fwd(hi);
+                const double c = (a + b) * 0.5;
+                const double half = (b < a ? -span : span) * 0.5;
+                lo = sc.inv(c - half);
+                hi = sc.inv(c + half);
+            };
+            ResolvedLimits out = l;
+            if (widen_y) about(s.yscale, out.ymin, out.ymax, need_y);
+            else about(s.xscale, out.xmin, out.xmax, need_x);
+            return out;
+        }
+
         // One 2D axes' part of a cell's layout, its frame already placed: transform,
         // ticks, axis lines and label and title anchors. `al`: the cell's aligned
         // furniture (aligned()); fw/fh the figure size.
@@ -1276,6 +1344,13 @@ namespace sextant {
                     cx + c.reserved.left, cy + c.reserved.top, frame_w,
                     std::max(kMinFrameSize, ch - c.reserved.top - c.reserved.bottom)
                 };
+                // Axes::set_aspect(): Box shrinks the frame before anything is
+                // placed around it, so all of it follows; Datalim widens the
+                // limits below instead.
+                const RenderSnapshot* own2d = fa.snap2d();
+                const float frame_top = c.frame.y;
+                if (own2d && own2d->aspect.ratio > 0.0 && own2d->aspect.adjustable == Adjustable::Box)
+                    c.frame = aspect_frame(c.frame, *own2d, prep[i].limits);
 
                 const PlotInsets al = aligned(g, me, s);
                 const float ax_l = al.left, ax_r = al.right, ax_t = al.top, ax_b = al.bottom;
@@ -1297,7 +1372,9 @@ namespace sextant {
                 c.title_x = frame_cx;
                 const std::string& title = std::visit(
                     [](const auto& sn) -> const std::string& { return sn.title; }, fa.snap);
-                c.title_y = cy + title_height(title, st.font_path, st.title_fontsize) * 0.5f;
+                // (Down with a Box-shortened frame.)
+                c.title_y = cy + (c.frame.y - frame_top)
+                            + title_height(title, st.font_path, st.title_fontsize) * 0.5f;
 
                 // Legend first, then the bars outboard of it.
                 if (!me.dec.legend_entries.empty()) {
@@ -1331,8 +1408,12 @@ namespace sextant {
                         prep[i].xticks, prep[i].yticks, prep[i].zticks
                     };
                 } else {
-                    // Empty for 3D: its ticks are in `box3d`.
-                    layout_axes(c, *fa.snap2d(), prep[i], al, fw, fh);
+                    // Empty for 3D: its ticks are in `box3d`. The transform
+                    // carries Datalim's widened limits, so a pan keeps them.
+                    std::optional<ResolvedLimits> wide;
+                    if (own2d->aspect.datalim()) wide = aspect_limits(*own2d, prep[i].limits, c.frame);
+                    if (wide) layout_axes(c, *own2d, reprepare(fa, *own2d, prep[i], *wide), al, fw, fh);
+                    else layout_axes(c, *own2d, prep[i], al, fw, fh);
                     // Twins over the same frame; a twin's grid draws its own axis only.
                     for (std::size_t k = 0; k < fa.twins.size(); ++k) {
                         CellLayout tc;

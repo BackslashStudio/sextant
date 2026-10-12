@@ -104,6 +104,8 @@ struct Axes::Impl {
     void twin_defaults();
     // set_xtick_format()/set_ytick_format(); empty = the scale's default.
     std::string xtick_format, ytick_format;
+    // set_aspect() (v1.2 step 36b-3).
+    AxesAspect aspect;
 
     // Explicit tick override set via Axes::set_xticks/set_yticks (or the
     // widget panel's tick table). Absent = auto-generated ticks.
@@ -151,6 +153,7 @@ struct Axes::Impl {
         s.xshare = xshare ? xshare->id : 0;
         s.yshare = yshare ? yshare->id : 0;
         s.xtick_format = xtick_format; s.ytick_format = ytick_format;
+        s.aspect = aspect;
         s.xticks_override = xticks_override;
         s.yticks_override = yticks_override;
         return s;

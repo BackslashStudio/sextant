@@ -283,6 +283,9 @@ struct AxesEdit {
     // limits drops them to automatic, as Axes::set_xscale() does.
     std::optional<AxisScale>   xscale, yscale;
     std::optional<std::string> xtick_format, ytick_format;
+    // Axes::set_aspect() (StyleStamps::aspect). Datalim with a ratio is skipped
+    // on an axes whose two axes are both shared, as the setter refuses it.
+    std::optional<AxesAspect> aspect;
     std::optional<AxesStyle> axes_style;
 
     // Whole options structs; the panel republishes its local copy on change.
@@ -402,7 +405,7 @@ inline bool is_navigation_only(const FigureEdits& f) {
         return false;
     for (const auto& [idx, e] : f.per_axes) {
         if (e.title || e.xtitle || e.ytitle || e.grid_enabled || e.axes_style || e.grid_opts
-            || e.xscale || e.yscale || e.xtick_format || e.ytick_format
+            || e.xscale || e.yscale || e.xtick_format || e.ytick_format || e.aspect
             || e.legend_enabled || e.legend_opts || e.colorbar_opts
             || !e.plot_ops.empty() || !e.plot_styles.empty())
             return false;
@@ -1240,6 +1243,9 @@ void apply_style_edits(T& dst, const E& e, E* inv = nullptr) {
                   undo(&E::ylim_auto), undo(&E::ymin), undo(&E::ymax));
             put(dst.ytick_format, e.ytick_format, undo(&E::ytick_format));
         }
+        // Both shared (a share id or group on each): no axis left to widen.
+        if (e.aspect && have.aspect <= seen.aspect && !(e.aspect->datalim() && dst.xshare && dst.yshare))
+            put(dst.aspect, e.aspect, undo(&E::aspect));
     }
     if constexpr (requires { dst.zticks_override; e.zticks_override; })
         if (have.zticks <= seen.zticks)
@@ -1369,6 +1375,8 @@ void merge_style_edits(E& dst, const E& src) {
         take_latest(dst.xtick_format, src.xtick_format, ds.xticks, ss.xticks);
         take_latest(dst.ytick_format, src.ytick_format, ds.yticks, ss.yticks);
     }
+    // The 2D aspect, or the 3D box aspect.
+    take_latest(dst.aspect, src.aspect, ds.aspect, ss.aspect);
     for (const PlotStyleEdit& s : src.plot_styles)
         upsert(dst.plot_styles, s, [](const PlotStyleEdit& p) {
             return std::tuple(edits_detail::object_key(p.plane_index, p.plot_index, p.id),
@@ -1377,7 +1385,6 @@ void merge_style_edits(E& dst, const E& src) {
     if constexpr (requires { src.box_style; }) {
         take_latest(dst.zticks_override, src.zticks_override, ds.zticks, ss.zticks);
         take_latest(dst.box_style, src.box_style, ds.box, ss.box);
-        take_latest(dst.aspect, src.aspect, ds.aspect, ss.aspect);
         for (const auto& pe : src.planes) {
             auto it = std::find_if(dst.planes.begin(), dst.planes.end(),
                                    [&](const auto& d) {
@@ -1406,11 +1413,11 @@ template <class E>
 bool style_edits_empty(const E& e) {
     bool empty = !e.grid_enabled && !e.grid_opts && !e.axes_style && !e.legend_enabled
                  && !e.legend_opts && !e.colorbar_opts && !e.xticks_override
-                 && !e.yticks_override && e.plot_styles.empty();
+                 && !e.yticks_override && !e.aspect && e.plot_styles.empty();
     if constexpr (requires { e.xscale; })
         empty = empty && !e.xscale && !e.yscale && !e.xtick_format && !e.ytick_format;
     if constexpr (requires { e.box_style; })
-        empty = empty && !e.zticks_override && !e.box_style && !e.aspect && e.planes.empty()
+        empty = empty && !e.zticks_override && !e.box_style && e.planes.empty()
                 && e.bars3d.empty() && e.surfaces.empty() && e.scatter3d.empty()
                 && e.lines3d.empty() && e.surface_tri.empty() && e.texts.empty();
     return empty;
@@ -1518,6 +1525,7 @@ void compose_axes_inverse(E& older, const E& newer) {
     keep_older(older.colorbar_opts, newer.colorbar_opts);
     keep_older(older.xticks_override, newer.xticks_override);
     keep_older(older.yticks_override, newer.yticks_override);
+    keep_older(older.aspect, newer.aspect);
     if constexpr (requires { older.xscale; }) {
         keep_older(older.xscale, newer.xscale);
         keep_older(older.yscale, newer.yscale);
@@ -1537,7 +1545,6 @@ void compose_axes_inverse(E& older, const E& newer) {
         keep_older(older.zmax, newer.zmax);
         keep_older(older.zticks_override, newer.zticks_override);
         keep_older(older.box_style, newer.box_style);
-        keep_older(older.aspect, newer.aspect);
         keep_older(older.camera, newer.camera);
         // A plane's fields one by one: the older entry may hold only some.
         for (const auto& pe : newer.planes) {

@@ -175,6 +175,25 @@ namespace sextant {
         return false;
     }
 
+    // Names in Adjustable's order; Datalim greyed when `datalim_ok` is false
+    // (both axes shared, see Axes::set_aspect()).
+    inline bool adjustable_combo(const char* label, Adjustable& a, bool datalim_ok) {
+        static const char* kNames[] = {"Box", "Datalim"};
+        bool changed = false;
+        if (ImGui::BeginCombo(label, kNames[static_cast<int>(a)])) {
+            for (int k = 0; k < IM_ARRAYSIZE(kNames); ++k) {
+                const bool off = k == static_cast<int>(Adjustable::Datalim) && !datalim_ok;
+                if (ImGui::Selectable(kNames[k], static_cast<int>(a) == k,
+                                      off ? ImGuiSelectableFlags_Disabled : 0)) {
+                    a = static_cast<Adjustable>(k);
+                    changed = true;
+                }
+            }
+            ImGui::EndCombo();
+        }
+        return changed;
+    }
+
     // An optional<bool> as Auto / On / Off.
     inline bool auto_on_off_combo(const char* label, std::optional<bool>& v) {
         static const char* kNames[] = {"Auto", "On", "Off"};

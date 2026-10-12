@@ -593,6 +593,9 @@ namespace lt {
     // twin.cpp
     void test_twin();
 
+    // aspect.cpp
+    void test_aspect();
+
     // edge_markers.cpp
     void test_edge_markers();
 

@@ -289,6 +289,9 @@ int main() {
     // twin.cpp
     test_twin();
 
+    // aspect.cpp
+    test_aspect();
+
     // edge_markers.cpp
     test_edge_markers();
 

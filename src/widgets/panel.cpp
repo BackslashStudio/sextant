@@ -139,6 +139,8 @@ void seed_cosmetic(CosmeticState& c, const RenderSnapshot& sn) {
     std::snprintf(c.xfmt_buf, sizeof(c.xfmt_buf), "%s", sn.xtick_format.c_str());
     std::snprintf(c.yfmt_buf, sizeof(c.yfmt_buf), "%s", sn.ytick_format.c_str());
     c.xfmt_bad = c.yfmt_bad = false;
+    c.aspect2d_local = sn.aspect;
+    c.aspect_mode = sn.aspect.ratio == 0.0 ? 0 : sn.aspect.ratio == 1.0 ? 1 : 2;
     c.axes_style_local = sn.axes_style;
     c.origin_x_scratch = sn.axes_style.origin_x.value_or(0.0);
     c.origin_y_scratch = sn.axes_style.origin_y.value_or(0.0);
@@ -1442,6 +1444,42 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
                 ImGui::EndDisabled();
                 ImGui::PopID();
             }
+            end_field_table();
+        }
+        // Axes::set_aspect(), the cell's own axes' only: a twin draws in its
+        // host's frame.
+        if (host && begin_field_table("aspect", 2)) {
+            AxesAspect& asp = st.cosmetic.aspect2d_local;
+            int& mode = st.cosmetic.aspect_mode;
+            const auto push_aspect = [&] {
+                edit_box.update(idx, [&](AxesEdit& e) { e.aspect = asp; });
+            };
+            field_row("Aspect");
+            static const char* kModes[] = {"Auto", "Equal", "Ratio"};
+            if (ImGui::Combo("##aspect", &mode, kModes, IM_ARRAYSIZE(kModes))) {
+                asp.ratio = mode == 0 ? 0.0 : mode == 1 ? 1.0 : (asp.ratio > 0.0 ? asp.ratio : 1.0);
+                push_aspect();
+            }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("How long one y unit is drawn against one x unit.\n"
+                                  "Equal keeps a circle round; Auto fills the frame.");
+            field_next("Ratio");
+            ImGui::BeginDisabled(mode != 2);
+            if (drag_double("##aspratio", &asp.ratio, 0.01f, "%.3g")) {
+                asp.ratio = std::clamp(asp.ratio, 0.01, 100.0);
+                push_aspect();
+            }
+            ImGui::EndDisabled();
+            field_row("Adjust");
+            // Datalim widens an unshared axis (a twin shares one).
+            const bool datalim_ok = !(cur2d->xshare && cur2d->yshare);
+            ImGui::BeginDisabled(mode == 0);
+            if (adjustable_combo("##adjustable", asp.adjustable, datalim_ok)) push_aspect();
+            ImGui::EndDisabled();
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                ImGui::SetTooltip(datalim_ok ? "Box shrinks the frame; Datalim widens one axis' limits."
+                                             : "Box shrinks the frame. Datalim needs an unshared axis,\n"
+                                               "and both are shared here.");
             end_field_table();
         }
         // A shared axis' limits and scale are its group's (Axes::sharex()).

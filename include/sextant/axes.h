@@ -142,6 +142,22 @@ namespace sextant {
         // xaxis_y or origin_y hold), its x title above it.
         std::shared_ptr<Axes> twiny();
 
+        // Draw one y unit `ratio` times as long as one x unit on screen (1 =
+        // equal, a circle stays round), as matplotlib's set_aspect(); 0 = auto,
+        // the default: fill the frame. Units are the scales' (on log-log a
+        // decade is as long on both axes). Box shrinks the frame, centred in its
+        // space, with its ticks, titles, legend and colorbars (the frame then
+        // leaves its column's and row's alignment); Datalim keeps the frame and
+        // widens one axis' limits about their centre as drawn -- the unshared
+        // one when the other is shared, else whichever must grow. xlim()/ylim()
+        // report the limits before widening; a pan or zoom keeps the widened
+        // ones. Pan and zoom keep the ratio either way. Throws
+        // std::invalid_argument for a negative or non-finite ratio, on a twin
+        // (its host's aspect sets the cell), and for Datalim with a ratio when
+        // both axes are shared (a twin shares one); sharex(), sharey(), twinx()
+        // and twiny() throw when they would make that so. cla() resets it.
+        Axes& set_aspect(double ratio, Adjustable adjustable = Adjustable::Box);
+
         Axes& grid(bool enable = true, GridOptions opts = {});
 
         Axes& set_axes_style(AxesStyle opts = {});
@@ -199,6 +215,11 @@ namespace sextant {
         Scale xscale() const;
 
         Scale yscale() const;
+
+        // set_aspect()'s values.
+        double aspect() const;
+
+        Adjustable adjustable() const;
 
         // Plot objects of each kind, in the order they were added. `*_data(i)`
         // returns a copy and throws std::out_of_range for i >= `*_count()`.

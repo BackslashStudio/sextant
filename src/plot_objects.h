@@ -477,7 +477,8 @@ struct LimitStamps {
 struct StyleStamps {
     unsigned long long style = 0, grid = 0, legend = 0, colorbar = 0;
     unsigned long long xticks = 0, yticks = 0, zticks = 0;
-    unsigned long long box = 0, aspect = 0;   // 3D only
+    unsigned long long box = 0;     // 3D only
+    unsigned long long aspect = 0;  // 3D set_box_aspect(), 2D set_aspect()
 
     static constexpr StyleStamps any() {
         constexpr auto m = ~0ull;
@@ -495,6 +496,16 @@ struct FigureStamps {
         constexpr auto m = ~0ull;
         return { m, m, m, m };
     }
+};
+
+// Axes::set_aspect(): y units drawn `ratio` times as long as x units, 0 = auto.
+struct AxesAspect {
+    double ratio = 0.0;
+    Adjustable adjustable = Adjustable::Box;
+
+    // Whether layout widens limits for it (Adjustable::Datalim with a ratio).
+    bool datalim() const { return ratio > 0.0 && adjustable == Adjustable::Datalim; }
+    bool operator==(const AxesAspect&) const = default;
 };
 
 // Everything the render thread needs from Axes::Impl: decoration and limits
@@ -531,6 +542,8 @@ struct RenderSnapshot {
     unsigned long long xshare = 0, yshare = 0;
     // Axes::set_xtick_format()/set_ytick_format(); empty = the scale's default.
     std::string xtick_format, ytick_format;
+    // Axes::set_aspect(); a twin's is never set (layout reads the cell's own).
+    AxesAspect aspect;
 
     // Explicit ticks; absent = generate_ticks().
     std::optional<std::vector<Tick>> xticks_override, yticks_override;

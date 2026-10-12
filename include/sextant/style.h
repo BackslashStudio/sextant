@@ -369,6 +369,11 @@ namespace sextant {
     //           0 and negative values.
     enum class Scale { Linear, Log, Symlog };
 
+    // What Axes::set_aspect() changes to keep its ratio: the frame (Box, shrunk
+    // and centred in the space the grid gives it) or the limits (Datalim, one
+    // axis widened about its centre), as matplotlib's `adjustable`.
+    enum class Adjustable { Box, Datalim };
+
     // Read by the scales that use them; each must be finite.
     struct ScaleOptions {
         // Log and Symlog; > 1.

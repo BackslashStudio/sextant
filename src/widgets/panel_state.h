@@ -216,6 +216,11 @@ namespace sextant {
         char xfmt_buf[64]{}, yfmt_buf[64]{};
         bool xfmt_bad = false, yfmt_bad = false;
 
+        // 2D: Axes::set_aspect() as edited, and the Aspect combo's choice
+        // (0 Auto, 1 Equal, 2 Ratio), kept apart so Ratio stays chosen at 1.
+        AxesAspect aspect2d_local;
+        int aspect_mode = 0;
+
         // Live values for the optional origin_x/origin_y drag boxes; also restores
         // the previous number when a pin is re-ticked.
         double origin_x_scratch = 0.0, origin_y_scratch = 0.0;

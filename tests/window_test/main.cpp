@@ -2150,7 +2150,56 @@ static void test_twins() {
     fig->show(true);
 }
 
+// v1.2 step 36b-3: set_aspect(). Check: each circle stays round while the
+// window resizes, pans and zooms; cell 1's frame shrinks and re-centres with
+// its title, ticks and legend (leaving its column's alignment); cell 2 keeps
+// its frame and widens its limits; cell 3 is log-log in decades; cell 4 is a
+// Datalim axes sharing x with cell 1, so its y adjusts and its x pans with
+// cell 1's. The Ticks section's Aspect / Ratio / Adjust rows (Datalim greyed
+// when both axes are shared).
+static void test_aspect() {
+    constexpr int N = 181;
+    std::vector<double> cx(N), cy(N), lx(N), ly(N);
+    for (int i = 0; i < N; ++i) {
+        const double a = 2.0 * 3.14159265 * i / (N - 1);
+        cx[i] = 3.0 + 2.0 * std::cos(a);
+        cy[i] = 1.0 + 2.0 * std::sin(a);
+        // A circle of one decade's radius around (100, 100) in log space.
+        lx[i] = std::pow(10.0, 2.0 + std::cos(a));
+        ly[i] = std::pow(10.0, 2.0 + std::sin(a));
+    }
+    auto fig = sextant::Figure::create({.width = 1200, .height = 850, .title = "Aspect"});
+    fig->suptitle("set_aspect(1): circles stay round");
+
+    auto s1 = fig->add_subplot(2, 2, 1);
+    s1->line(cx, cy, {.name = "circle"}).set_xtitle("x").set_ytitle("y");
+    s1->set_xlim(-2.0, 8.0).set_ylim(-1.0, 3.0);
+    s1->set_aspect(1.0);
+    s1->legend({.anchor = sextant::LegendAnchor::OutsideRT});
+    s1->set_title("Box: the frame shrinks, centred");
+
+    auto s2 = fig->add_subplot(2, 2, 2);
+    s2->line(cx, cy).set_xtitle("x").set_ytitle("y");
+    s2->set_aspect(1.0, sextant::Adjustable::Datalim);
+    s2->set_title("Datalim: the limits widen");
+
+    auto s3 = fig->add_subplot(2, 2, 3);
+    s3->line(lx, ly).set_xscale(sextant::Scale::Log).set_yscale(sextant::Scale::Log);
+    s3->set_aspect(1.0);
+    s3->set_title("log-log, Box: a decade is as long on both");
+
+    auto s4 = fig->add_subplot(2, 2, 4);
+    s4->scatter(cx, cy);
+    s4->sharex(*s1);
+    s4->set_aspect(1.0, sextant::Adjustable::Datalim);
+    s4->set_title("Datalim, x shared with cell 1: y adjusts");
+
+    savefig_and_check_memory(fig, "test_aspect");
+    fig->show(true);
+}
+
 int main() {
+    test_aspect();
     test_twins();
     test_shared_axes();
     test_scales();

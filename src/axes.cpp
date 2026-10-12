@@ -86,6 +86,13 @@ void Axes::Impl::share(Impl& other, bool x, const char* who) {
     // Everyone joining takes other's scale: refuse a log or symlog over a heatmap.
     const AxisScale& to = x ? other.xscale : other.yscale;
     const std::vector<Impl*> joining = og ? og->members : std::vector<Impl*>{this};
+    // An axes new to sharing on this axis whose other axis is shared too can
+    // no longer widen one under Datalim (set_aspect()).
+    const auto boxed_in = [&](const Impl& m) { return m.aspect.datalim() && (x ? m.yshare : m.xshare); };
+    if ((!og && boxed_in(*this)) || (!tg && boxed_in(other)))
+        throw std::invalid_argument(
+            std::string(who) + ": both axes of an axes with a Datalim aspect would be shared, "
+            "leaving none to widen");
     if (!to.linear())
         for (const Impl* m : joining)
             if (!m->heatmaps.empty())
@@ -137,8 +144,9 @@ std::shared_ptr<Axes> Axes::Impl::make_twin(bool x, const char* who) {
     td.layer = x ? kLayerTwinX : kLayerTwinY;
     td.cycle = cycle;
     td.twin_defaults();
-    // Into the host's group on the shared axis, taking its limits and scale
-    // (a fresh axes holds no heatmap, so this cannot throw).
+    // Into the host's group on the shared axis, taking its limits and scale.
+    // A fresh axes holds no heatmap; this throws only for a host with a
+    // Datalim aspect whose other axis is shared already.
     td.share(*this, x, who);
     slot = t;
     return t;
@@ -146,6 +154,20 @@ std::shared_ptr<Axes> Axes::Impl::make_twin(bool x, const char* who) {
 
 std::shared_ptr<Axes> Axes::twinx() { return d->make_twin(true, "Axes::twinx"); }
 std::shared_ptr<Axes> Axes::twiny() { return d->make_twin(false, "Axes::twiny"); }
+
+Axes& Axes::set_aspect(double ratio, Adjustable adjustable) {
+    if (!std::isfinite(ratio) || ratio < 0.0)
+        throw std::invalid_argument("Axes::set_aspect: the ratio must be finite and >= 0");
+    if (d->host)
+        throw std::invalid_argument("Axes::set_aspect: this axes is a twin; its host's aspect sets the cell");
+    const AxesAspect a{ratio, adjustable};
+    if (a.datalim() && d->xshare && d->yshare)
+        throw std::invalid_argument("Axes::set_aspect: Datalim widens an unshared axis, and both are "
+                                    "shared (a twin shares one)");
+    d->aspect = a;
+    d->style_stamps.aspect = next_snapshot_generation();
+    return *this;
+}
 
 Axes& Axes::sharex(Axes& other) {
     d->share(*other.d, true, "Axes::sharex");
@@ -674,6 +696,9 @@ Range Axes::ylim() const {
 
 Scale Axes::xscale() const { return d->xscale.kind; }
 Scale Axes::yscale() const { return d->yscale.kind; }
+
+double Axes::aspect() const         { return d->aspect.ratio; }
+Adjustable Axes::adjustable() const { return d->aspect.adjustable; }
 
 std::size_t Axes::line_count() const      { return d->lines.size(); }
 std::size_t Axes::scatter_count() const   { return d->scatters.size(); }
