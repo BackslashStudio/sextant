@@ -156,8 +156,10 @@ namespace sextant {
     };
 
     // What one slot's auto limits resolved to in a drawn frame (the snapshot only
-    // has the declared limits).
-    struct ResolvedLimits {
+    // has the declared limits). Was also named ResolvedLimits, like
+    // axis_limits.h's: two types under one name broke the one-definition rule,
+    // and their std::vector code got merged at link time (heap corruption).
+    struct DrawnLimits {
         int slot = 0;
         bool is_3d = false;
         double xmin = 0.0, xmax = 1.0;
@@ -178,10 +180,10 @@ namespace sextant {
         std::shared_ptr<const FigureMeasure> measure;
 
         // One per slot drawn.
-        std::vector<ResolvedLimits> resolved;
+        std::vector<DrawnLimits> resolved;
 
-        const ResolvedLimits* resolved_for(int slot) const {
-            for (const ResolvedLimits& r: resolved)
+        const DrawnLimits* resolved_for(int slot) const {
+            for (const DrawnLimits& r: resolved)
                 if (r.slot == slot) return &r;
             return nullptr;
         }

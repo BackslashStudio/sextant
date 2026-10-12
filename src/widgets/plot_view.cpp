@@ -129,7 +129,7 @@ PlotViewInfo PlotView::draw(FigureContext& fig, RenderDevice& dev, PlotViewState
     info.measure = pv.layout.load();
     info.resolved.reserve(layout.size());
     for (const AxesLayout& al : layout) {
-        ResolvedLimits r;
+        DrawnLimits r;
         r.slot = al.slot.index;
         if (al.proj3d) {
             const Transform3D& t = al.proj3d->transform();

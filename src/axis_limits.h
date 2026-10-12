@@ -7,6 +7,8 @@
 #include "coord_transform3d.h"
 #include "plot_objects.h"
 #include <optional>
+#include <utility>
+#include <vector>
 
 namespace sextant {
     struct ResolvedLimits {
@@ -17,10 +19,32 @@ namespace sextant {
         double xmin, xmax, ymin, ymax, zmin, zmax;
     };
 
+    // One axis of a share group (Axes::sharex()): the union of its members'
+    // unpadded bounds and origin pins, in scale space. resolve_limits() settles,
+    // widens and pads it as it would one axes' own.
+    struct SharedAuto {
+        AutoAxis bounds;
+        AxisSpan pins;
+    };
+
+    // Adds one member: its raw bounds `b` (auto_bounds() of its data) and its
+    // origin pin on that axis.
+    inline void add_to_shared(SharedAuto& g, const RenderSnapshot& m, const AutoBounds& b, bool x) {
+        const AutoAxis& a = x ? b.x : b.y;
+        g.bounds.loose.add(a.loose);
+        g.bounds.tight.add(a.tight);
+        const std::optional<double>& pin = x ? m.axes_style.origin_x : m.axes_style.origin_y;
+        const AxisScale& s = x ? m.xscale : m.yscale;
+        if (pin && s.valid(*pin)) g.pins.add(s.fwd(*pin));
+    }
+
     // Automatic limits are worked out in each axis' scale space (settled,
     // widened, padded) and mapped back, so a log axis pads by a share of its
-    // decades and an empty one reads 1..10.
-    inline ResolvedLimits resolve_limits(const RenderSnapshot& snap) {
+    // decades and an empty one reads 1..10. `own`, if given, is
+    // auto_bounds() of this axes' data, already computed; `gx`/`gy` replace an
+    // axis' own bounds and pin with its share group's.
+    inline ResolvedLimits resolve_limits(const RenderSnapshot& snap, const AutoBounds* own,
+                                         const SharedAuto* gx, const SharedAuto* gy) {
         ResolvedLimits r{snap.xmin, snap.xmax, snap.ymin, snap.ymax};
         const AxisScale& xs = snap.xscale;
         const AxisScale& ys = snap.yscale;
@@ -32,14 +56,25 @@ namespace sextant {
             // axis is settled: with no data it widens 0..1. A pin the scale
             // can't place (<= 0 on log) widens nothing.
             const auto& st = snap.axes_style;
-            AutoBounds b = auto_bounds(snap.all(), xs, ys);
+            AutoBounds b = own ? *own : auto_bounds(snap.all(), xs, ys);
+            if (gx) b.x = gx->bounds;
+            if (gy) b.y = gy->bounds;
             settle_axis(b.x);
             settle_axis(b.y);
             const auto in_scale = [](const std::optional<double>& pin, const AxisScale& s) {
                 return pin && s.valid(*pin) ? std::optional<double>(s.fwd(*pin)) : std::nullopt;
             };
-            widen_for_origin(in_scale(st.origin_x, xs), xauto, b.x.loose.lo, b.x.loose.hi);
-            widen_for_origin(in_scale(st.origin_y, ys), yauto, b.y.loose.lo, b.y.loose.hi);
+            const auto widen = [](const SharedAuto* g, const std::optional<double>& pin, bool on,
+                                  AxisSpan& span) {
+                if (!g) {
+                    widen_for_origin(pin, on, span.lo, span.hi);
+                } else if (!g->pins.empty()) {
+                    widen_for_origin(g->pins.lo, on, span.lo, span.hi);
+                    widen_for_origin(g->pins.hi, on, span.lo, span.hi);
+                }
+            };
+            widen(gx, in_scale(st.origin_x, xs), xauto, b.x.loose);
+            widen(gy, in_scale(st.origin_y, ys), yauto, b.y.loose);
             if (xauto) {
                 pad_axis(b.x, kAutoScalePad, r.xmin, r.xmax);
                 r.xmin = xs.inv(r.xmin);
@@ -52,6 +87,52 @@ namespace sextant {
             }
         }
         return r;
+    }
+
+    inline ResolvedLimits resolve_limits(const RenderSnapshot& snap) {
+        return resolve_limits(snap, nullptr, nullptr, nullptr);
+    }
+
+    // Every 2D axes' limits in a figure, index-parallel with `fs.axes` (3D
+    // entries are left default): one auto_bounds() per axes, and share groups
+    // resolved over all their members. Layout uses it.
+    inline std::vector<ResolvedLimits> resolve_figure_limits(const FigureSnapshot& fs) {
+        std::vector<ResolvedLimits> out(fs.axes.size(), ResolvedLimits{0.0, 1.0, 0.0, 1.0});
+        bool shared = false;
+        for (const auto& fa: fs.axes)
+            if (const RenderSnapshot* s = fa.snap2d()) shared = shared || s->xshare || s->yshare;
+        if (!shared) {
+            for (std::size_t i = 0; i < fs.axes.size(); ++i)
+                if (const RenderSnapshot* s = fs.axes[i].snap2d()) out[i] = resolve_limits(*s);
+            return out;
+        }
+
+        // A member's auto flags are its group's, so only automatic axes need bounds.
+        std::vector<std::optional<AutoBounds>> own(fs.axes.size());
+        std::vector<std::pair<unsigned long long, SharedAuto>> gx, gy;
+        const auto group = [](std::vector<std::pair<unsigned long long, SharedAuto>>& v,
+                              unsigned long long id) -> SharedAuto& {
+            for (auto& [k, g]: v) if (k == id) return g;
+            return v.emplace_back(id, SharedAuto{}).second;
+        };
+        for (std::size_t i = 0; i < fs.axes.size(); ++i) {
+            const RenderSnapshot* s = fs.axes[i].snap2d();
+            if (!s) continue;
+            const bool xauto = s->xlim_auto || !limits_fit(s->xscale, s->xmin, s->xmax);
+            const bool yauto = s->ylim_auto || !limits_fit(s->yscale, s->ymin, s->ymax);
+            if (!xauto && !yauto) continue;
+            own[i] = auto_bounds(s->all(), s->xscale, s->yscale);
+            if (s->xshare) add_to_shared(group(gx, s->xshare), *s, *own[i], true);
+            if (s->yshare) add_to_shared(group(gy, s->yshare), *s, *own[i], false);
+        }
+        for (std::size_t i = 0; i < fs.axes.size(); ++i) {
+            const RenderSnapshot* s = fs.axes[i].snap2d();
+            if (!s) continue;
+            const SharedAuto* x = s->xshare && own[i] ? &group(gx, s->xshare) : nullptr;
+            const SharedAuto* y = s->yshare && own[i] ? &group(gy, s->yshare) : nullptr;
+            out[i] = resolve_limits(*s, own[i] ? &*own[i] : nullptr, x, y);
+        }
+        return out;
     }
 
     // Each axis independent.

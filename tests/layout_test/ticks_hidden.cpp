@@ -132,5 +132,65 @@ namespace lt {
         const std::size_t t3_noz = count(svg3d(no_z), "<text");
         check(t3_noz > 0 && t3_noz < t3_all, "3D: hiding z drops its labels only");
         check(count(svg3d(none3), "<text") == 0, "3D: hiding all three draws no tick labels");
+
+        // In a grid (36g): a hidden axis gives its side back even while other
+        // cells of its column or row still need the band, and stops widening it.
+        {
+            constexpr int W = 900, H = 600;
+            auto grid = [](int rows, int cols) {
+                FigureSnapshot fs = make_snapshot(rows, cols, rows * cols);
+                for (auto& fa: fs.axes) {
+                    RenderSnapshot& s = *fa.snap2d();
+                    s.xtitle = "x";
+                    s.ytitle = "y";
+                }
+                fs.generation = fs.data_generation = fs.layout_generation = 1;
+                return fs;
+            };
+
+            // Two rows: the top cell's y labels are wide, the bottom's narrow.
+            auto column = [&](bool hide_top) {
+                FigureSnapshot fs = grid(2, 1);
+                RenderSnapshot& top = *fs.axes[0].snap2d();
+                top.ymin = 0.0; top.ymax = 1.0e6; top.ylim_auto = false;
+                top.axes_style.show_yticks = !hide_top;
+                return compute_figure_layout(fs, W, H);
+            };
+            const FigureLayout shown2 = column(false), hidden2 = column(true);
+            check(near_px(shown2.cells[0].frame.x, shown2.cells[1].frame.x, 1e-3f),
+                  "grid: with both shown the column's frames line up");
+            check(hidden2.cells[0].frame.x < hidden2.cells[1].frame.x,
+                  "grid: the hidden cell's frame takes its left band back");
+            const PlotRect& was = shown2.cells[1].frame;
+            const PlotRect& now = hidden2.cells[1].frame;
+            check(now.x == was.x && now.w == was.w && now.y == was.y && now.h == was.h,
+                  "grid: the other cell of its column does not move (its labels still set the band)");
+            check(hidden2.cells[0].ytitle_x > hidden2.cells[0].cell.x
+                      && hidden2.cells[0].ytitle_x < hidden2.cells[0].frame.x,
+                  "grid: its y title sits in its own band, beside its frame");
+
+            // Two columns: the left cell hides x.
+            FigureSnapshot fs = grid(1, 2);
+            fs.axes[0].snap2d()->axes_style.show_xticks = false;
+            const FigureLayout row = compute_figure_layout(fs, W, H);
+            const PlotRect& l = row.cells[0].frame;
+            const PlotRect& r = row.cells[1].frame;
+            check(l.y + l.h > r.y + r.h + 1.0f && near_px(l.y, r.y, 1e-3f),
+                  "grid: hiding x in one cell of a row frees its bottom band only");
+            const FigureLayout row0 = compute_figure_layout(grid(1, 2), W, H);
+            const PlotRect& r0 = row0.cells[1].frame;
+            check(r.x == r0.x && r.w == r0.w && r.y == r0.y && r.h == r0.h,
+                  "grid: and its neighbour does not move");
+            check(row.cells[0].xtitle_y > l.y + l.h
+                      && near_px(row.cells[0].xtitle_y, row.cells[1].xtitle_y, 1e-3f),
+                  "grid: its x title stays below its frame, level with its neighbour's");
+
+            // The inverse agrees: the hidden cell's frame comes out as asked.
+            const LayoutSize sz = figure_size_for_frame(fs, 1, 300.0f, 200.0f);
+            const FigureLayout inv = compute_figure_layout(fs, int(std::lround(sz.width)),
+                                                           int(std::lround(sz.height)));
+            check(near_px(inv.cells[0].frame.w, 300.0f, 1.0f) && near_px(inv.cells[0].frame.h, 200.0f, 1.0f),
+                  "grid: figure_size_for_frame() gives the hidden cell the frame asked for");
+        }
     }
 } // namespace lt

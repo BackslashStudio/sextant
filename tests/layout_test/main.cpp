@@ -283,6 +283,9 @@ int main() {
     // scale.cpp
     test_scale();
 
+    // share.cpp
+    test_share();
+
     // edge_markers.cpp
     test_edge_markers();
 

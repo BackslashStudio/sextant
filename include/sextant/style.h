@@ -414,6 +414,15 @@ namespace sextant {
         // is read by an Axes3D only.
         bool show_xticks = true, show_yticks = true, show_zticks = true;
 
+        // 2D, per axis: draw its tick labels (the marks follow show_xticks). Unset
+        // hides them on an inner axes of a share group (Axes::sharex()): x labels
+        // at the bottom when another axes sharing x sits lower in the grid under
+        // the same columns (at the top: higher), y labels on the left when one
+        // sharing y sits to the left in the same rows (on the right: to the
+        // right), as matplotlib's subplots(sharex=True). Hidden labels reserve no
+        // room.
+        std::optional<bool> show_xtick_labels, show_ytick_labels;
+
         Color tick_color = {0.3f, 0.3f, 0.3f, 1.0f};
         float tick_length = 5.0f;
         float tick_linewidth = 1.0f;

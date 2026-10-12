@@ -2028,7 +2028,62 @@ static void test_scales() {
     fig->show(true);
 }
 
+// -------------------------------------------------------------------------
+// Shared axes (v1.2 step 36b): sharex down the left column, sharey across the
+// top row, and a heatmap sharing x below. Interactive: pan or zoom one cell of
+// a group and the others follow on that axis only; the inner cells' tick labels
+// are hidden (their room given back), the bottom row's shown; cell 1's legend
+// and cell 5's colorbar narrow all three frames of the column alike; the Cosmetic
+// panel says "X shared with ..." under Limits, its Labels X/Y combos override
+// the hiding, and a scale set on one member is the group's (disabled on the
+// heatmap's group).
+static void test_shared_axes() {
+    constexpr int N = 300;
+    std::vector<double> t(N), a(N), b(N), c(N), d(N);
+    for (int i = 0; i < N; ++i) {
+        t[i] = 20.0 * i / (N - 1);
+        a[i] = std::sin(t[i]);
+        b[i] = 3.0 * std::cos(0.5 * t[i]) + 2.0;
+        c[i] = std::exp(-0.1 * t[i]) * std::sin(3.0 * t[i]);
+        d[i] = 0.6 * std::sin(t[i] + 1.0);
+    }
+    std::vector<double> cells(4 * 10);
+    for (int i = 0; i < 40; ++i) cells[i] = std::sin(0.4 * i);
+    std::vector<double> tx(N), ty(N);
+    for (int i = 0; i < N; ++i) {
+        tx[i] = 5.0 + 10.0 * i / (N - 1);
+        ty[i] = std::cos(tx[i]);
+    }
+
+    auto fig = sextant::Figure::create({.width = 1300, .height = 900, .title = "Shared axes"});
+    fig->suptitle("sharex down the left column, sharey across the top row");
+
+    auto s1 = fig->add_subplot(3, 2, 1);
+    s1->line(t, a, {.name = "sin t"}).legend()
+        .set_title("x shared (col 1), y shared (row 1)").set_ytitle("a");
+    auto s3 = fig->add_subplot(3, 2, 3);
+    s3->line(t, b).set_ytitle("b");
+    auto s5 = fig->add_subplot(3, 2, 5);
+    s5->scatter_z(t, c, b, {.colorbar = true, .name = "b"}).set_xtitle("t").set_ytitle("c");
+    s3->sharex(*s1);
+    s5->sharex(*s1);
+
+    auto s2 = fig->add_subplot(3, 2, 2);
+    s2->line(t, d).set_title("y shared with the left cell");
+    s2->sharey(*s1);
+
+    auto s4 = fig->add_subplot(3, 2, 4);
+    s4->imshow(cells, 4, 10).set_title("heatmap: its x group stays linear");
+    auto s6 = fig->add_subplot(3, 2, 6);
+    s6->line(tx, ty).set_title("shares x with the heatmap").set_xtitle("column");
+    s6->sharex(*s4);
+
+    savefig_and_check_memory(fig, "test_shared_axes");
+    fig->show(true);
+}
+
 int main() {
+    test_shared_axes();
     test_scales();
     // test_axis_position3d();
     // test_axis_position();

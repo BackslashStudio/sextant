@@ -587,6 +587,9 @@ namespace lt {
     // scale.cpp
     void test_scale();
 
+    // share.cpp
+    void test_share();
+
     // edge_markers.cpp
     void test_edge_markers();
 

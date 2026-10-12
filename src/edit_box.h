@@ -240,6 +240,7 @@ private:
             journal_titles(idx, e);
             journal_limits(idx, e);
             journal_style(journal_.styles, idx, e);
+            journal_shared(idx, e);
             if (e.plot_ops.empty()) continue;
             auto& dst = journal_slot(idx);
             dst.insert(dst.end(), e.plot_ops.begin(), e.plot_ops.end());
@@ -298,6 +299,37 @@ private:
         for (auto& [i, l] : journal_.limits)
             if (i == idx) { merge_limit_edits(l, made); return; }
         journal_.limits.push_back({idx, std::move(made)});
+    }
+
+    // A shared axis' limits and scale (Axes::sharex()), journaled for every
+    // other member of its group too. The journal keeps one latest value per
+    // slot and no order across slots, so a replay member by member would
+    // otherwise end on whichever slot comes last, not on the latest edit.
+    void journal_shared(int idx, const AxesEdit& e) {
+        const RenderSnapshot* s = drawn_axes<RenderSnapshot>(idx);
+        if (!s || (!s->xshare && !s->yshare)) return;
+        for (const auto& fa : drawn_->axes) {
+            const RenderSnapshot* m = fa.snap2d();
+            if (!m || fa.slot.index == idx) continue;
+            const bool x = s->xshare && m->xshare == s->xshare;
+            const bool y = s->yshare && m->yshare == s->yshare;
+            if (!x && !y) continue;
+            AxesEdit part;
+            if (x) {
+                part.xlim_auto = e.xlim_auto; part.xmin = e.xmin; part.xmax = e.xmax;
+                part.lim_seen.x = e.lim_seen.x;
+                part.xscale = e.xscale;
+            }
+            if (y) {
+                part.ylim_auto = e.ylim_auto; part.ymin = e.ymin; part.ymax = e.ymax;
+                part.lim_seen.y = e.lim_seen.y;
+                part.yscale = e.yscale;
+            }
+            // The member's own ticks-lane stamps, as if pushed over it.
+            part.style_seen = m->style_stamps;
+            journal_limits(fa.slot.index, part);
+            journal_style(journal_.styles, fa.slot.index, part);
+        }
     }
 
     // The camera, latest value only.

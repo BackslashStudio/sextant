@@ -420,7 +420,7 @@ namespace sextant {
             }
 
             // Label
-            if (font_ != -1 && style.show_xticks) {
+            if (font_ != -1 && style.show_xticks && cell.xlabels) {
                 label(px, cell.xlabel_top, NVG_ALIGN_CENTER | NVG_ALIGN_TOP, t.label,
                       style.font_path, font_size);
             }
@@ -452,7 +452,7 @@ namespace sextant {
             }
 
             // Label
-            if (font_ != -1 && style.show_yticks) {
+            if (font_ != -1 && style.show_yticks && cell.ylabels) {
                 const int halign = cell.ylabel_align == HAlign::Left ? NVG_ALIGN_LEFT : NVG_ALIGN_RIGHT;
                 label(cell.ylabel_x, py, halign | NVG_ALIGN_MIDDLE, t.label, style.font_path, font_size);
             }

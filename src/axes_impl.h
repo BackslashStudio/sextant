@@ -5,6 +5,7 @@
 #include "color_cycle.h"
 #include "plot_objects.h"
 #include "tick.h"
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <span>
@@ -12,6 +13,9 @@
 #include <vector>
 
 namespace sextant {
+
+struct ResolvedLimits;
+struct AxesEdit;
 
 struct Axes::Impl {
     std::vector<LinePlot>     lines;
@@ -50,6 +54,40 @@ struct Axes::Impl {
     // set_xscale()/set_yscale(). A plane's sheet keeps Linear (Plane2D has no
     // scale), so ingest_heatmap() only refuses on an Axes.
     AxisScale xscale, yscale;
+
+    // The figure that made this axes (its process-unique figure id, never
+    // reused, unlike an address); sharex() refuses another figure's axes. 0 for
+    // a plane's sheet, which never shares.
+    std::uint64_t owner = 0;
+
+    // sharex()/sharey() (v1.2 step 36b). A group owns one axis' value domain:
+    // its limits (lo, hi, auto), their LimitStamps part and its scale. Every
+    // member holds the same copy of those fields, so readers stay per-axes;
+    // whatever writes them on one member copies them to the rest
+    // (sync_shared_x/y()). Members leave in ~Axes(); cla() keeps membership.
+    struct ShareGroup {
+        unsigned long long id = 0;   // process-unique; RenderSnapshot::xshare/yshare
+        std::vector<Impl*> members;
+    };
+    std::shared_ptr<ShareGroup> xshare, yshare;
+
+    // Copy this axes' shared x (y) fields to the other members of its group.
+    void sync_shared_x() const;
+    void sync_shared_y() const;
+    // Take the shared fields from another member, if there is one (cla()).
+    void adopt_shared_x();
+    void adopt_shared_y();
+    // Whether any member of the x (y) group, or this axes alone, holds a heatmap.
+    bool group_has_heatmap_x() const;
+    bool group_has_heatmap_y() const;
+    void leave_groups();
+    // sharex() (x) / sharey() on `other`; see Axes::sharex().
+    void share(Impl& other, bool x, const char* who);
+    // The limits as layout resolves them: a shared axis over its whole group.
+    ResolvedLimits resolve_live() const;
+    // A panel edit replayed on the caller thread: applied (minus a scale the
+    // group can't take), then the group follows. Defined in figure.cpp.
+    void apply_shared_edit(const AxesEdit& e);
     // set_xtick_format()/set_ytick_format(); empty = the scale's default.
     std::string xtick_format, ytick_format;
 
@@ -96,6 +134,8 @@ struct Axes::Impl {
         s.limit_stamps = limit_stamps;
         s.style_stamps = style_stamps;
         s.xscale = xscale; s.yscale = yscale;
+        s.xshare = xshare ? xshare->id : 0;
+        s.yshare = yshare ? yshare->id : 0;
         s.xtick_format = xtick_format; s.ytick_format = ytick_format;
         s.xticks_override = xticks_override;
         s.yticks_override = yticks_override;

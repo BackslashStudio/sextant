@@ -75,15 +75,20 @@ namespace sextant {
             // Axis line placement; insets_for() needs it to know which band labels use.
             AxisPlacement xaxis, yaxis;
 
+            // 2D: whether each axis draws its tick labels (AxesStyle::show_xtick_labels,
+            // resolved against the share groups by prepare_all()).
+            bool xlabels = true, ylabels = true;
+
             // 3D only: z ticks and the data->box transform, resolved once.
             bool is_3d = false;
             std::vector<Tick> zticks;
             Transform3D tf3;
         };
 
-        CellPrep prepare(const RenderSnapshot& snap) {
+        // `limits` from resolve_figure_limits(), which sees share groups whole.
+        CellPrep prepare(const RenderSnapshot& snap, const ResolvedLimits& limits) {
             CellPrep p;
-            p.limits = resolve_limits(snap);
+            p.limits = limits;
             p.xticks = ticks_for(snap.xticks_override, p.limits.xmin, p.limits.xmax, snap.xscale,
                                  snap.xtick_format);
             p.yticks = ticks_for(snap.yticks_override, p.limits.ymin, p.limits.ymax, snap.yscale,
@@ -103,7 +108,7 @@ namespace sextant {
         }
 
         // Once per frame (auto_scale3d() is O(N)).
-        CellPrep prepare(const RenderSnapshot3D& snap) {
+        CellPrep prepare(const RenderSnapshot3D& snap, const ResolvedLimits&) {
             CellPrep p;
             p.is_3d = true;
             const ResolvedLimits3D l = resolve_limits(snap);
@@ -119,19 +124,29 @@ namespace sextant {
 
         // One axes' furniture around its frame: ticks, tick labels, x/y titles. The
         // axes title is a separate band (title_band()).
-        PlotInsets insets_for(const RenderSnapshot& snap, const CellPrep& prep) {
+        // `as_shown`: as if every axis and tick label were shown (what the cell
+        // asks of its column's and row's band; see CellMeasure::band).
+        PlotInsets insets_for(const RenderSnapshot& snap, const CellPrep& prep, bool as_shown = false) {
             const auto& st = snap.axes_style;
-            const float xlabel_lh = tallest_label(prep.xticks, st.font_path, st.label_fontsize);
-            const float ylabel_lh = tallest_label(prep.yticks, st.font_path, st.label_fontsize);
+            const bool sx = as_shown || st.show_xticks;
+            const bool sy = as_shown || st.show_yticks;
+            const bool xl = sx && (as_shown || prep.xlabels);
+            const bool yl = sy && (as_shown || prep.ylabels);
+            const float xlabel_lh = xl ? tallest_label(prep.xticks, st.font_path, st.label_fontsize) : 0.0f;
+            const float ylabel_lh = yl ? tallest_label(prep.yticks, st.font_path, st.label_fontsize) : 0.0f;
 
             PlotInsets in;
 
             // The tick band goes on the side its labels fall; an interior axis
             // reserves nothing. Titles don't move with it.
-            // A hidden axis (AxesStyle::show_xticks/show_yticks) reserves nothing.
-            const float x_band = st.show_xticks ? st.tick_length + kTickLabelGap + xlabel_lh : 0.0f;
-            const float y_band = st.show_yticks ? st.tick_length + kTickLabelGap + prep.max_ylabel_w
-                                                : 0.0f;
+            // A hidden axis (AxesStyle::show_xticks/show_yticks) reserves nothing,
+            // and hidden labels (show_xtick_labels) leave the marks only.
+            const float x_band = !sx ? 0.0f
+                                 : xl ? st.tick_length + kTickLabelGap + xlabel_lh
+                                      : st.tick_length;
+            const float y_band = !sy ? 0.0f
+                                 : yl ? st.tick_length + kTickLabelGap + prep.max_ylabel_w
+                                      : st.tick_length;
 
             if (!prep.xaxis.interior) (prep.xaxis.high ? in.top : in.bottom) = x_band;
             if (!prep.yaxis.interior) (prep.yaxis.high ? in.right : in.left) = y_band;
@@ -143,7 +158,7 @@ namespace sextant {
 
             // End x labels are centred on the frame corners and hang half outside;
             // reserve for that (wherever the axis line is).
-            if (st.show_xticks) {
+            if (xl) {
                 in.left = std::max(in.left, half_label_width(prep.xticks, 0, st.font_path, st.label_fontsize));
                 in.right = std::max(in.right, prep.xticks.empty()
                                                   ? 0.0f
@@ -152,7 +167,7 @@ namespace sextant {
             }
 
             // Likewise the outermost y labels at the top and bottom edges.
-            if (st.show_yticks) {
+            if (yl) {
                 in.top = std::max(in.top, ylabel_lh * 0.5f);
                 in.bottom = std::max(in.bottom, ylabel_lh * 0.5f);
             }
@@ -162,7 +177,7 @@ namespace sextant {
 
         // A 3D cell reserves nothing: labels sit inside the frame, in the
         // Box3DStyle::margin fraction (their position depends on the camera fit).
-        PlotInsets insets_for(const RenderSnapshot3D&, const CellPrep&) { return {}; }
+        PlotInsets insets_for(const RenderSnapshot3D&, const CellPrep&, bool = false) { return {}; }
 
         float title_band(const std::string& title, const AxesStyle& st) {
             return title.empty()
@@ -170,11 +185,50 @@ namespace sextant {
                        : title_height(title, st.font_path, st.title_fontsize) + kTitleGap;
         }
 
+        // AxesStyle::show_xtick_labels/show_ytick_labels: unset hides an axis'
+        // labels when they face another member of its share group across the
+        // grid -- x labels at the bottom (top) with a member in a lower (higher)
+        // row under overlapping columns, y labels at the left (right) with one in
+        // a column to the left (right) over overlapping rows. An interior axis
+        // keeps its labels; axes in the same cell don't count.
+        void resolve_tick_labels(const FigureSnapshot& fsnap, std::vector<CellPrep>& prep) {
+            const auto& cells = fsnap.axes;
+            for (std::size_t i = 0; i < cells.size(); ++i) {
+                const RenderSnapshot* s = cells[i].snap2d();
+                if (!s) continue;
+                const AxesStyle& st = s->axes_style;
+                const AxesSlot& a = cells[i].slot;
+                const auto faces_member = [&](bool x) {
+                    const unsigned long long id = x ? s->xshare : s->yshare;
+                    const AxisPlacement& pl = x ? prep[i].xaxis : prep[i].yaxis;
+                    if (!id || pl.interior) return false;
+                    for (std::size_t j = 0; j < cells.size(); ++j) {
+                        const RenderSnapshot* o = cells[j].snap2d();
+                        if (j == i || !o || (x ? o->xshare : o->yshare) != id) continue;
+                        const AxesSlot& b = cells[j].slot;
+                        if (x) {
+                            const bool cols = b.col0() <= a.col1() && a.col0() <= b.col1();
+                            if (cols && (pl.high ? b.row1() < a.row0() : b.row0() > a.row1())) return true;
+                        } else {
+                            const bool rows = b.row0() <= a.row1() && a.row0() <= b.row1();
+                            if (rows && (pl.high ? b.col0() > a.col1() : b.col1() < a.col0())) return true;
+                        }
+                    }
+                    return false;
+                };
+                prep[i].xlabels = st.show_xtick_labels.value_or(!faces_member(true));
+                prep[i].ylabels = st.show_ytick_labels.value_or(!faces_member(false));
+            }
+        }
+
         std::vector<CellPrep> prepare_all(const FigureSnapshot& fsnap) {
             std::vector<CellPrep> prep;
             prep.reserve(fsnap.axes.size());
-            for (const auto& fa: fsnap.axes)
-                prep.push_back(std::visit([](const auto& s) { return prepare(s); }, fa.snap));
+            const std::vector<ResolvedLimits> limits = resolve_figure_limits(fsnap);
+            for (std::size_t i = 0; i < fsnap.axes.size(); ++i)
+                prep.push_back(std::visit([&](const auto& s) { return prepare(s, limits[i]); },
+                                          fsnap.axes[i].snap));
+            resolve_tick_labels(fsnap, prep);
             return prep;
         }
 
@@ -252,6 +306,10 @@ namespace sextant {
             m.is3d = fa.snap3d() != nullptr;
             std::visit([&](const auto& s) {
                 m.axis = insets_for(s, prep);
+                // Measured again only when something is hidden (text is the cost).
+                const auto& st = s.axes_style;
+                const bool all_shown = st.show_xticks && st.show_yticks && prep.xlabels && prep.ylabels;
+                m.band = all_shown ? m.axis : insets_for(s, prep, true);
                 m.title = title_band(s.title, s.axes_style);
                 m.frame_margin = std::max(0.0f, s.axes_style.frame_margin);
                 m.dec = compute_cell_decorations(s);
@@ -260,6 +318,14 @@ namespace sextant {
                 if (!m.dec.legend_entries.empty()) m.legend = legend_side(s.legend_opts.anchor);
                 m.bars = colorbar_side(s.colorbar_opts.anchor);
             }, fa.snap);
+            // A hidden axis gives its side back; an interior one never had a band.
+            if (const RenderSnapshot* s2 = fa.snap2d()) {
+                const AxesStyle& st = s2->axes_style;
+                if ((!st.show_xticks || !prep.xlabels) && !prep.xaxis.interior)
+                    (prep.xaxis.high ? m.own.top : m.own.bottom) = true;
+                if ((!st.show_yticks || !prep.ylabels) && !prep.yaxis.interior)
+                    (prep.yaxis.high ? m.own.right : m.own.left) = true;
+            }
             return m;
         }
 
@@ -285,15 +351,50 @@ namespace sextant {
                 const AxesSlot& s = m.slot;
                 g.title[s.row0()] = std::max(g.title[s.row0()], m.title);
                 if (m.is3d) continue;
-                g.ax_l[s.col0()] = std::max(g.ax_l[s.col0()], m.axis.left);
-                g.ax_r[s.col1()] = std::max(g.ax_r[s.col1()], m.axis.right);
-                g.ax_t[s.row0()] = std::max(g.ax_t[s.row0()], m.axis.top);
-                g.ax_b[s.row1()] = std::max(g.ax_b[s.row1()], m.axis.bottom);
+                // As if shown, so hiding an axis never moves another cell.
+                g.ax_l[s.col0()] = std::max(g.ax_l[s.col0()], m.band.left);
+                g.ax_r[s.col1()] = std::max(g.ax_r[s.col1()], m.band.right);
+                g.ax_t[s.row0()] = std::max(g.ax_t[s.row0()], m.band.top);
+                g.ax_b[s.row1()] = std::max(g.ax_b[s.row1()], m.band.bottom);
             }
             return g;
         }
 
-        float aligned(const std::vector<float>& v, bool is3d, int i) { return is3d ? 0.0f : v[i]; }
+        // A cell's axis furniture per side as reserved: the grid's aligned band, or
+        // its own on a side it keeps (CellMeasure::own). A 3D cell takes the bands
+        // (it adds none) but draws nothing in them; see aligned().
+        PlotInsets band_of(const GridMeasure& g, const CellMeasure& m, const AxesSlot& s) {
+            return {
+                m.own.left ? m.axis.left : g.ax_l[s.col0()],
+                m.own.right ? m.axis.right : g.ax_r[s.col1()],
+                m.own.top ? m.axis.top : g.ax_t[s.row0()],
+                m.own.bottom ? m.axis.bottom : g.ax_b[s.row1()]
+            };
+        }
+
+        // The furniture the extended frame and the x/y titles go around: none in 3D.
+        PlotInsets aligned(const GridMeasure& g, const CellMeasure& m, const AxesSlot& s) {
+            return m.is3d ? PlotInsets{} : band_of(g, m, s);
+        }
+
+        // Whether cell i shares its x (y) axis with another cell over overlapping
+        // columns (rows): then their frames must span the same x (y), so the cell
+        // keeps the grid's band on its left/right (top/bottom) sides.
+        bool shares_extent(const FigureSnapshot& fsnap, std::size_t i, bool x) {
+            const RenderSnapshot* s = fsnap.axes[i].snap2d();
+            const unsigned long long id = s ? (x ? s->xshare : s->yshare) : 0;
+            if (!id) return false;
+            const AxesSlot& a = fsnap.axes[i].slot;
+            for (std::size_t j = 0; j < fsnap.axes.size(); ++j) {
+                const RenderSnapshot* o = fsnap.axes[j].snap2d();
+                if (j == i || !o || (x ? o->xshare : o->yshare) != id) continue;
+                const AxesSlot& b = fsnap.axes[j].slot;
+                if (x ? (b.col0() <= a.col1() && a.col0() <= b.col1())
+                      : (b.row0() <= a.row1() && a.row0() <= b.row1()))
+                    return true;
+            }
+            return false;
+        }
 
         FigureMeasure measure_with(const FigureSnapshot& fsnap, const std::vector<CellPrep>& prep,
                                    const FigureMeasure* frozen) {
@@ -302,10 +403,16 @@ namespace sextant {
             out.cells.reserve(fsnap.axes.size());
             for (std::size_t i = 0; i < fsnap.axes.size(); ++i) {
                 CellMeasure m = measure(fsnap.axes[i], prep[i]);
+                // A shared axis keeps its frame's extent along it the same as its
+                // group's in the same columns (rows): no side given back there.
+                if (shares_extent(fsnap, i, true)) m.own.left = m.own.right = false;
+                if (shares_extent(fsnap, i, false)) m.own.top = m.own.bottom = false;
                 if (frozen && !m.is3d)
                     for (const CellMeasure& f: frozen->cells)
                         if (f.slot.index == m.slot.index && !f.is3d) {
                             m.axis = f.axis;
+                            m.band = f.band;
+                            m.own = f.own;
                             break;
                         }
                 out.cells.push_back(std::move(m));
@@ -340,8 +447,8 @@ namespace sextant {
 
         // The extended frame's width for a frame `frame_w` wide.
         float extended_width(const GridMeasure& g, const CellMeasure& m, const AxesSlot& s, float frame_w) {
-            return frame_w + aligned(g.ax_l, m.is3d, s.col0()) + aligned(g.ax_r, m.is3d, s.col1())
-                   + 2.0f * m.frame_margin;
+            const PlotInsets a = aligned(g, m, s);
+            return frame_w + a.left + a.right + 2.0f * m.frame_margin;
         }
 
         LegendRows legend_rows_for(const CellMeasure& m, float extended_w) {
@@ -364,8 +471,9 @@ namespace sextant {
 
         // A cell's left/right space between edge and frame (size-independent).
         void reserve_horizontal(const GridMeasure& g, const CellMeasure& m, const AxesSlot& s, PlotInsets& res) {
-            res.left = g.ax_l[s.col0()] + m.frame_margin;
-            res.right = g.ax_r[s.col1()] + m.frame_margin;
+            const PlotInsets b = band_of(g, m, s);
+            res.left = b.left + m.frame_margin;
+            res.right = b.right + m.frame_margin;
             if (m.legend == DecorSide::Left) res.left += m.dec.legend_block;
             if (m.legend == DecorSide::Right) res.right += m.dec.legend_block;
             if (m.bars == DecorSide::Left) res.left += m.dec.colorbar_block;
@@ -376,12 +484,66 @@ namespace sextant {
         void reserve_vertical(const GridMeasure& g, const CellMeasure& m, const AxesSlot& s, float frame_w,
                               PlotInsets& res, LegendRows& rows) {
             rows = legend_rows_for(m, extended_width(g, m, s, frame_w));
-            res.top = g.title[s.row0()] + g.ax_t[s.row0()] + m.frame_margin;
-            res.bottom = g.ax_b[s.row1()] + m.frame_margin;
+            const PlotInsets b = band_of(g, m, s);
+            res.top = g.title[s.row0()] + b.top + m.frame_margin;
+            res.bottom = b.bottom + m.frame_margin;
             if (m.legend == DecorSide::Top) res.top += m.legend_margin + rows.h;
             if (m.legend == DecorSide::Bottom) res.bottom += m.legend_margin + rows.h;
             if (m.bars == DecorSide::Top) res.top += m.dec.colorbar_block;
             if (m.bars == DecorSide::Bottom) res.bottom += m.dec.colorbar_block;
+        }
+
+        unsigned long long share_id(const FigureSnapshot& fsnap, std::size_t i, bool x) {
+            const RenderSnapshot* s = fsnap.axes[i].snap2d();
+            return s ? (x ? s->xshare : s->yshare) : 0;
+        }
+
+        // Frames along a shared axis keep their edges together (v1.2 step 36b-1b):
+        // members of cell i's x share group whose cells start (end) on the same
+        // grid column line reserve the same on the left (right) -- the largest
+        // of them -- so an Outside legend or a colorbar on one narrows them all
+        // alike and their ticks line up. Size-independent, like
+        // reserve_horizontal(); identical to it for an unshared cell.
+        PlotInsets shared_horizontal(const FigureSnapshot& fsnap, const std::vector<CellMeasure>& ms,
+                                     const GridMeasure& g, std::size_t i) {
+            PlotInsets res;
+            reserve_horizontal(g, ms[i], ms[i].slot, res);
+            const unsigned long long id = share_id(fsnap, i, true);
+            if (!id) return res;
+            const AxesSlot& a = ms[i].slot;
+            for (std::size_t j = 0; j < ms.size(); ++j) {
+                if (j == i || share_id(fsnap, j, true) != id) continue;
+                const AxesSlot& b = ms[j].slot;
+                if (b.col0() != a.col0() && b.col1() != a.col1()) continue;
+                PlotInsets r;
+                reserve_horizontal(g, ms[j], b, r);
+                if (b.col0() == a.col0()) res.left = std::max(res.left, r.left);
+                if (b.col1() == a.col1()) res.right = std::max(res.right, r.right);
+            }
+            return res;
+        }
+
+        // The same for top/bottom along a shared y axis, given every cell's frame
+        // width (a wrapped Outside top/bottom legend depends on it). `rows` is
+        // cell i's own legend layout.
+        template <class FrameW>
+        void shared_vertical(const FigureSnapshot& fsnap, const std::vector<CellMeasure>& ms,
+                             const GridMeasure& g, std::size_t i, FrameW frame_w_of,
+                             PlotInsets& res, LegendRows& rows) {
+            reserve_vertical(g, ms[i], ms[i].slot, frame_w_of(i), res, rows);
+            const unsigned long long id = share_id(fsnap, i, false);
+            if (!id) return;
+            const AxesSlot& a = ms[i].slot;
+            for (std::size_t j = 0; j < ms.size(); ++j) {
+                if (j == i || share_id(fsnap, j, false) != id) continue;
+                const AxesSlot& b = ms[j].slot;
+                if (b.row0() != a.row0() && b.row1() != a.row1()) continue;
+                PlotInsets r;
+                LegendRows unused;
+                reserve_vertical(g, ms[j], b, frame_w_of(j), r, unused);
+                if (b.row0() == a.row0()) res.top = std::max(res.top, r.top);
+                if (b.row1() == a.row1()) res.bottom = std::max(res.bottom, r.bottom);
+            }
         }
     } // namespace
 
@@ -625,12 +787,11 @@ namespace sextant {
         const int span_c = s.col1() - s.col0() + 1;
         const int span_r = s.row1() - s.row0() + 1;
 
-        // The slot's reservation at the requested frame width.
+        // The slot's reservation at the requested frame width: its widths first
+        // (shared ones with its group's, see shared_horizontal()).
         const float fw_req = std::max(kMinFrameSize, frame_w);
-        PlotInsets res;
+        PlotInsets res = shared_horizontal(fsnap, ms, g, si);
         LegendRows rows;
-        reserve_horizontal(g, ms[si], s, res);
-        reserve_vertical(g, ms[si], s, fw_req, res, rows);
 
         // A span's tracks share its length by weight; the figure is one weight
         // unit times all the weights.
@@ -642,6 +803,18 @@ namespace sextant {
                                             / weight_sum(wc, s.col0(), s.col1()));
         const float fig_w = unit_w * weight_sum(wc, 0, g.cols - 1) + m.left + m.right
                             + static_cast<float>(g.cols - 1) * fsnap.col_gap;
+
+        // Then its heights, which along a shared y axis need the other members'
+        // frame widths: known now that the width is.
+        const auto frame_w_of = [&](std::size_t j) {
+            if (j == si) return fw_req;
+            const AxesSlot& b = ms[j].slot;
+            const PlotInsets h = shared_horizontal(fsnap, ms, g, j);
+            const float cw = unit_w * weight_sum(wc, b.col0(), b.col1())
+                             + static_cast<float>(b.col1() - b.col0()) * fsnap.col_gap;
+            return std::max(kMinFrameSize, cw - h.left - h.right);
+        };
+        shared_vertical(fsnap, ms, g, si, frame_w_of, res, rows);
 
         const float span_h = std::max(kMinFrameSize, frame_h) + res.top + res.bottom;
         const float unit_h = std::max(0.0f, (span_h - static_cast<float>(span_r - 1) * fsnap.row_gap)
@@ -849,39 +1022,50 @@ namespace sextant {
             const GridMeasure& g = measure.grid;
             const GridTracks t = grid_tracks(fsnap, out.suptitle_band, fig_w, fig_h);
 
+            // A cell is the whole subplot, so gaps are between subplots. A span
+            // runs from its first cell to its last, including inner gaps. Track
+            // sizes are weighted shares.
+            const auto cell_w = [&](const AxesSlot& s) {
+                return t.col_x[s.col1()] + t.col_w[s.col1()] - t.col_x[s.col0()];
+            };
+
+            // Widths first, for every cell (size-independent; a shared axis' members
+            // reserve alike), then heights (a wrapped legend depends on the frame
+            // width, a member's on its own).
+            std::vector<PlotInsets> hres(fsnap.axes.size());
+            std::vector<float> frame_ws(fsnap.axes.size());
+            for (std::size_t i = 0; i < fsnap.axes.size(); ++i) {
+                hres[i] = shared_horizontal(fsnap, ms, g, i);
+                frame_ws[i] = std::max(kMinFrameSize, cell_w(ms[i].slot) - hres[i].left - hres[i].right);
+            }
+
             out.cells.reserve(fsnap.axes.size());
             for (std::size_t i = 0; i < fsnap.axes.size(); ++i) {
                 const auto& fa = fsnap.axes[i];
                 const CellMeasure& me = ms[i];
                 const AxesSlot& s = fa.slot;
 
-                // A cell is the whole subplot, so gaps are between subplots. A span
-                // runs from its first cell to its last, including inner gaps. Track
-                // sizes are weighted shares.
                 const float cx = t.col_x[s.col0()];
                 const float cy = t.row_y[s.row0()];
-                const float cw = t.col_x[s.col1()] + t.col_w[s.col1()] - cx;
+                const float cw = cell_w(s);
                 const float ch = t.row_y[s.row1()] + t.row_h[s.row1()] - cy;
 
                 CellLayout c;
                 c.slot = s;
                 c.cell = {cx, cy, cw, ch};
 
-                // Widths first (size-independent), then heights (a wrapped legend
-                // depends on the frame width).
                 LegendRows rows;
-                reserve_horizontal(g, me, s, c.reserved);
-                const float frame_w = std::max(kMinFrameSize, cw - c.reserved.left - c.reserved.right);
-                reserve_vertical(g, me, s, frame_w, c.reserved, rows);
+                c.reserved = hres[i];
+                const float frame_w = frame_ws[i];
+                shared_vertical(fsnap, ms, g, i, [&](std::size_t j) { return frame_ws[j]; },
+                                c.reserved, rows);
                 c.frame = {
                     cx + c.reserved.left, cy + c.reserved.top, frame_w,
                     std::max(kMinFrameSize, ch - c.reserved.top - c.reserved.bottom)
                 };
 
-                const float ax_l = aligned(g.ax_l, me.is3d, s.col0());
-                const float ax_r = aligned(g.ax_r, me.is3d, s.col1());
-                const float ax_t = aligned(g.ax_t, me.is3d, s.row0());
-                const float ax_b = aligned(g.ax_b, me.is3d, s.row1());
+                const PlotInsets al = aligned(g, me, s);
+                const float ax_l = al.left, ax_r = al.right, ax_t = al.top, ax_b = al.bottom;
                 const float fm = me.frame_margin;
                 c.extended = {
                     c.frame.x - ax_l - fm, c.frame.y - ax_t - fm,
@@ -939,6 +1123,8 @@ namespace sextant {
                     c.yticks = prep[i].yticks;
                     c.xminor = prep[i].xminor;
                     c.yminor = prep[i].yminor;
+                    c.xlabels = prep[i].xlabels;
+                    c.ylabels = prep[i].ylabels;
 
                     c.tr = {
                         prep[i].limits.xmin, prep[i].limits.xmax,

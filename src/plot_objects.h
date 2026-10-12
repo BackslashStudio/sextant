@@ -524,6 +524,9 @@ struct RenderSnapshot {
 
     // Axes::set_xscale()/set_yscale(); a plane's sheet keeps Linear.
     AxisScale xscale, yscale;
+    // Axes::sharex()/sharey(): the share group's id, 0 = not shared. Members
+    // hold the same limits, limit stamp and scale (copy_shared_x/y()).
+    unsigned long long xshare = 0, yshare = 0;
     // Axes::set_xtick_format()/set_ytick_format(); empty = the scale's default.
     std::string xtick_format, ytick_format;
 
@@ -532,6 +535,21 @@ struct RenderSnapshot {
 
     AllPlotData all() const { return { lines, scatters, bars, heatmaps, scatter_z }; }
 };
+
+// What a share group holds in common, copied from one member to another;
+// written once for Axes::Impl and RenderSnapshot (the same field names).
+template <class D, class S>
+void copy_shared_x(D& d, const S& s) {
+    d.xmin = s.xmin; d.xmax = s.xmax; d.xlim_auto = s.xlim_auto;
+    d.limit_stamps.x = s.limit_stamps.x;
+    d.xscale = s.xscale;
+}
+template <class D, class S>
+void copy_shared_y(D& d, const S& s) {
+    d.ymin = s.ymin; d.ymax = s.ymax; d.ylim_auto = s.ylim_auto;
+    d.limit_stamps.y = s.limit_stamps.y;
+    d.yscale = s.yscale;
+}
 
 // One 2D plane in a 3D scene. `sheet` is the Plane2D's Axes::Impl snapshot;
 // only its plot vectors and colorbar/legend options are read (limits, ticks and

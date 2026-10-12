@@ -7,12 +7,117 @@
 #include <string>
 #include <algorithm>
 #include <cmath>
+#include <atomic>
 #include <cstdio>
 
 namespace sextant {
 
 Axes::Axes() : d(std::make_unique<Impl>()) {}
-Axes::~Axes() = default;
+Axes::~Axes() { d->leave_groups(); }
+
+// ---------------------------------------------------------------------------
+// Share groups (sharex()/sharey())
+// ---------------------------------------------------------------------------
+
+void Axes::Impl::sync_shared_x() const {
+    if (xshare)
+        for (Impl* m : xshare->members)
+            if (m != this) copy_shared_x(*m, *this);
+}
+void Axes::Impl::sync_shared_y() const {
+    if (yshare)
+        for (Impl* m : yshare->members)
+            if (m != this) copy_shared_y(*m, *this);
+}
+void Axes::Impl::adopt_shared_x() {
+    if (xshare)
+        for (const Impl* m : xshare->members)
+            if (m != this) { copy_shared_x(*this, *m); return; }
+}
+void Axes::Impl::adopt_shared_y() {
+    if (yshare)
+        for (const Impl* m : yshare->members)
+            if (m != this) { copy_shared_y(*this, *m); return; }
+}
+
+namespace {
+unsigned long long next_share_id() {
+    static std::atomic<unsigned long long> counter{0};
+    return counter.fetch_add(1, std::memory_order_relaxed) + 1;
+}
+} // namespace
+
+bool Axes::Impl::group_has_heatmap_x() const {
+    if (!xshare) return !heatmaps.empty();
+    for (const Impl* m : xshare->members)
+        if (!m->heatmaps.empty()) return true;
+    return false;
+}
+bool Axes::Impl::group_has_heatmap_y() const {
+    if (!yshare) return !heatmaps.empty();
+    for (const Impl* m : yshare->members)
+        if (!m->heatmaps.empty()) return true;
+    return false;
+}
+
+void Axes::Impl::leave_groups() {
+    for (auto* g : {&xshare, &yshare}) {
+        if (!*g) continue;
+        std::erase((*g)->members, this);
+        g->reset();
+    }
+}
+
+// Joins the two groups, everyone joining taking `other`'s shared fields.
+void Axes::Impl::share(Impl& other, bool x, const char* who) {
+    if (this == &other) return;
+    if (!owner || owner != other.owner)
+        throw std::invalid_argument(std::string(who) + ": the two axes belong to different figures");
+    std::shared_ptr<ShareGroup> Impl::* group = x ? &Impl::xshare : &Impl::yshare;
+    const auto og = this->*group;
+    auto& tg = other.*group;
+    if (og && og == tg) return;
+
+    // Everyone joining takes other's scale: refuse a log or symlog over a heatmap.
+    const AxisScale& to = x ? other.xscale : other.yscale;
+    const std::vector<Impl*> joining = og ? og->members : std::vector<Impl*>{this};
+    if (!to.linear())
+        for (const Impl* m : joining)
+            if (!m->heatmaps.empty())
+                throw std::invalid_argument(
+                    std::string(who) + ": an axes holding a heatmap stays linear, and the other "
+                    "axes' scale is not");
+
+    if (!tg) {
+        tg = std::make_shared<ShareGroup>();
+        tg->id = next_share_id();
+        tg->members.push_back(&other);
+    }
+    for (Impl* m : joining) {
+        // A changed scale re-stamps the ticks lane, as set_xscale() does.
+        const AxisScale& was = x ? m->xscale : m->yscale;
+        if (was.kind != to.kind || was.base != to.base || was.linthresh != to.linthresh
+            || was.linscale != to.linscale)
+            (x ? m->style_stamps.xticks : m->style_stamps.yticks) = next_snapshot_generation();
+        m->*group = tg;
+        tg->members.push_back(m);
+        if (x) copy_shared_x(*m, other);
+        else   copy_shared_y(*m, other);
+    }
+    // A program change for the whole group: a pan made over the old limits on
+    // any member is not replayed, and the members' stamps stay one.
+    const unsigned long long st = next_snapshot_generation();
+    for (Impl* m : tg->members) (x ? m->limit_stamps.x : m->limit_stamps.y) = st;
+}
+
+Axes& Axes::sharex(Axes& other) {
+    d->share(*other.d, true, "Axes::sharex");
+    return *this;
+}
+Axes& Axes::sharey(Axes& other) {
+    d->share(*other.d, false, "Axes::sharey");
+    return *this;
+}
 
 namespace {
 
@@ -376,21 +481,33 @@ Axes& Axes::set_ytitle(std::string_view text, float fontsize) {
 Axes& Axes::set_xlim(double lo, double hi) {
     check_limits_fit(d->xscale, lo, hi, "set_xlim");
     d->xmin = lo; d->xmax = hi; d->xlim_auto = false;
-    d->limit_stamps.x = next_snapshot_generation(); return *this;
+    d->limit_stamps.x = next_snapshot_generation();
+    d->sync_shared_x();
+    return *this;
 }
 Axes& Axes::set_ylim(double lo, double hi) {
     check_limits_fit(d->yscale, lo, hi, "set_ylim");
     d->ymin = lo; d->ymax = hi; d->ylim_auto = false;
-    d->limit_stamps.y = next_snapshot_generation(); return *this;
+    d->limit_stamps.y = next_snapshot_generation();
+    d->sync_shared_y();
+    return *this;
 }
 Axes& Axes::set_xscale(Scale scale, ScaleOptions opts) {
-    set_scale(!d->heatmaps.empty(), d->xscale, d->xmin, d->xmax, d->xlim_auto, d->limit_stamps.x,
+    // The scale is the group's: a heatmap on any member refuses it, and every
+    // member's ticks lane takes the new stamp.
+    set_scale(d->group_has_heatmap_x(), d->xscale, d->xmin, d->xmax, d->xlim_auto, d->limit_stamps.x,
               d->style_stamps.xticks, scale, opts, "set_xscale");
+    d->sync_shared_x();
+    if (d->xshare)
+        for (Impl* m : d->xshare->members) m->style_stamps.xticks = d->style_stamps.xticks;
     return *this;
 }
 Axes& Axes::set_yscale(Scale scale, ScaleOptions opts) {
-    set_scale(!d->heatmaps.empty(), d->yscale, d->ymin, d->ymax, d->ylim_auto, d->limit_stamps.y,
+    set_scale(d->group_has_heatmap_y(), d->yscale, d->ymin, d->ymax, d->ylim_auto, d->limit_stamps.y,
               d->style_stamps.yticks, scale, opts, "set_yscale");
+    d->sync_shared_y();
+    if (d->yshare)
+        for (Impl* m : d->yshare->members) m->style_stamps.yticks = d->style_stamps.yticks;
     return *this;
 }
 Axes& Axes::grid(bool enable, GridOptions opts) {
@@ -450,9 +567,19 @@ Axes& Axes::cla() {
     // Reset to defaults. Panel edits made before it name objects by id, and the
     // objects plotted after it get new ones, so none of those edits lands. The
     // figure's setting stays.
+    // Membership stays, and so do the shared limits and scale: they are the
+    // group's, taken back from another member (as matplotlib re-takes the
+    // sibling's).
     const bool mathtext = d->mathtext;
+    const std::uint64_t owner = d->owner;
+    auto xs = std::move(d->xshare), ys = std::move(d->yshare);
     *d = Impl{};
     d->mathtext = mathtext;
+    d->owner = owner;
+    d->xshare = std::move(xs);
+    d->yshare = std::move(ys);
+    d->adopt_shared_x();
+    d->adopt_shared_y();
     return *this;
 }
 
@@ -464,13 +591,31 @@ std::string Axes::title() const  { return d->title; }
 std::string Axes::xtitle() const { return d->xtitle; }
 std::string Axes::ytitle() const { return d->ytitle; }
 
+// resolve_figure_limits()'s rule, from the live members.
+ResolvedLimits Axes::Impl::resolve_live() const {
+    const RenderSnapshot s = build_snapshot();
+    if (!xshare && !yshare) return resolve_limits(s);
+    const auto group = [&](const ShareGroup* g, bool x) -> std::optional<SharedAuto> {
+        if (!g) return std::nullopt;
+        SharedAuto a;
+        for (const Impl* m : g->members) {
+            const RenderSnapshot ms = m == this ? s : m->build_snapshot();
+            add_to_shared(a, ms, auto_bounds(ms.all(), ms.xscale, ms.yscale), x);
+        }
+        return a;
+    };
+    const std::optional<SharedAuto> gx = group(xshare.get(), true);
+    const std::optional<SharedAuto> gy = group(yshare.get(), false);
+    return resolve_limits(s, nullptr, gx ? &*gx : nullptr, gy ? &*gy : nullptr);
+}
+
 Range Axes::xlim() const {
-    const ResolvedLimits l = resolve_limits(d->build_snapshot());
+    const ResolvedLimits l = d->resolve_live();
     return { l.xmin, l.xmax };
 }
 
 Range Axes::ylim() const {
-    const ResolvedLimits l = resolve_limits(d->build_snapshot());
+    const ResolvedLimits l = d->resolve_live();
     return { l.ymin, l.ymax };
 }
 

@@ -134,6 +134,18 @@ namespace sextant {
         AxesSlot slot;
         bool is3d = false;
         PlotInsets axis; // furniture around the frame; zero for 3D
+        // What the cell asks of its column's and row's aligned band: `axis` as if
+        // every axis and tick label were shown, so hiding one in a cell never
+        // moves another cell's frame.
+        PlotInsets band;
+        // Sides that keep to `axis` instead of the band: the side a hidden axis'
+        // ticks or labels would take (AxesStyle::show_xticks, show_xtick_labels
+        // and the y ones), so that frame alone takes the room back. Not on the
+        // sides along a shared axis whose group has another cell in the same
+        // columns (rows): those frames keep one extent.
+        struct OwnSides {
+            bool left = false, right = false, top = false, bottom = false;
+        } own;
         float title = 0.0f; // band above everything else
         float frame_margin = 0.0f;
         CellDecorations dec;
@@ -238,6 +250,9 @@ namespace sextant {
         std::vector<Tick> xticks, yticks;
         // 2D: unlabelled minor tick positions (AxesStyle::minor_xticks).
         std::vector<double> xminor, yminor;
+        // 2D: whether each axis draws its tick labels, resolved
+        // (AxesStyle::show_xtick_labels against the share groups).
+        bool xlabels = true, ylabels = true;
 
         // 3D cells only (`tr`, tick lists and x/y title anchors are 2D only).
         std::optional<Box3DLayout> box3d;

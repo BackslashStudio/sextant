@@ -108,6 +108,19 @@ namespace sextant {
 
         Axes& set_yscale(Scale scale, ScaleOptions opts = {});
 
+        // Share this axes' x (y) axis with `other`'s, as matplotlib's sharex():
+        // the two, and every axes either already shares it with, then hold one
+        // set of x limits and one x scale. This side takes `other`'s. A
+        // set_xlim(), set_xscale(), pan or zoom on any of them moves them all,
+        // and automatic limits cover all their data. Tick positions, formats and
+        // titles stay per axes. Inner tick labels hide by themselves (see
+        // AxesStyle::show_xtick_labels). Throws std::invalid_argument for an axes
+        // of another Figure, and when an axes holding a heatmap would take a Log
+        // or Symlog scale; nothing changes then. There is no unsharing.
+        Axes& sharex(Axes& other);
+
+        Axes& sharey(Axes& other);
+
         Axes& grid(bool enable = true, GridOptions opts = {});
 
         Axes& set_axes_style(AxesStyle opts = {});
@@ -141,7 +154,8 @@ namespace sextant {
         // plotted keep theirs.
         Axes& set_color_cycle(std::vector<Color> colors);
 
-        // Clear all plot objects and reset limits and the color cycle.
+        // Clear all plot objects and reset limits and the color cycle. A shared
+        // axis stays shared and keeps the group's limits and scale.
         Axes& cla();
 
         // ----------------------------------------------------------------

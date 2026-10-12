@@ -653,14 +653,14 @@ static void emit_ticks_and_labels(std::ostringstream& o, const SvgAxesData& d) {
     // matching NanoVG's top-hung x labels and centred y labels.
     const std::string& fp = d.axes_style.font_path;
     for (const auto& t : d.layout.xticks) {
-        if (!d.axes_style.show_xticks) break;
+        if (!d.axes_style.show_xticks || !d.layout.xlabels) break;
         float px = d.layout.tr.to_px(t.value);
         o << "    <text x=\"" << px << "\" y=\"" << d.layout.xlabel_top + top_baseline_offset(fp, fsz, t.label)
           << "\" text-anchor=\"middle\">" << text_body(t.label, fp, fsz) << "</text>\n";
     }
     const char* y_anchor = d.layout.ylabel_align == HAlign::Left ? "start" : "end";
     for (const auto& t : d.layout.yticks) {
-        if (!d.axes_style.show_yticks) break;
+        if (!d.axes_style.show_yticks || !d.layout.ylabels) break;
         float py = d.layout.tr.to_py(t.value);
         o << "    <text x=\"" << d.layout.ylabel_x
           << "\" y=\"" << py + middle_baseline_offset(fp, fsz, t.label)

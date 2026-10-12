@@ -141,7 +141,7 @@ namespace lt {
             axes_layouts(compute_figure_layout(fs, *info.measure, 420, 300));
         bool limits = info.resolved.size() == want.size() && want.size() == 2;
         for (const AxesLayout& al : want) {
-            const ResolvedLimits* r = info.resolved_for(al.slot.index);
+            const DrawnLimits* r = info.resolved_for(al.slot.index);
             if (!r) { limits = false; break; }
             if (al.proj3d) {
                 const Transform3D& t = al.proj3d->transform();
@@ -155,7 +155,7 @@ namespace lt {
         }
         check(limits, "plot view: returns every slot's resolved limits, 2D and 3D");
         // A copy: the frames below replace st.plot_info.
-        const std::optional<ResolvedLimits> r2 =
+        const std::optional<DrawnLimits> r2 =
             info.resolved_for(1) ? std::optional(*info.resolved_for(1)) : std::nullopt;
         check(r2 && r2->xmin <= 0.0 && r2->xmax >= 2.0 && r2->ymin <= 0.0 && r2->ymax >= 4.0,
               "plot view: (the 2D slot's auto limits cover its data)");

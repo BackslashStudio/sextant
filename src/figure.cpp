@@ -44,7 +44,45 @@ void warn_if_inexact(std::string_view path, const SvgSaveReport& r) {
     emit_message(std::string(path) + ": " + r.warning);
 }
 
+// Share groups (Axes::sharex()) on the snapshot: whether a group holds a
+// heatmap, and copying one member's shared fields to the rest.
+bool snapshot_group_has_heatmap(const FigureSnapshot& fs, unsigned long long id, bool x) {
+    for (const auto& fa : fs.axes)
+        if (const RenderSnapshot* s = fa.snap2d())
+            if ((x ? s->xshare : s->yshare) == id && !s->heatmaps.empty()) return true;
+    return false;
+}
+
+void sync_snapshot_groups(FigureSnapshot& fs, const RenderSnapshot& src) {
+    for (auto& fa : fs.axes) {
+        RenderSnapshot* s = fa.snap2d();
+        if (!s || s == &src) continue;
+        if (src.xshare && s->xshare == src.xshare) copy_shared_x(*s, src);
+        if (src.yshare && s->yshare == src.yshare) copy_shared_y(*s, src);
+    }
+}
+
+// `e` without a Log/Symlog scale the axis' group can't take (a heatmap on any
+// member), as Axes::set_xscale() refuses it. `hx`/`hy`: the groups hold one.
+const AxesEdit& without_refused_scale(const AxesEdit& e, bool hx, bool hy, AxesEdit& scratch) {
+    const bool rx = hx && e.xscale && !e.xscale->linear();
+    const bool ry = hy && e.yscale && !e.yscale->linear();
+    if (!rx && !ry) return e;
+    scratch = e;
+    if (rx) scratch.xscale.reset();
+    if (ry) scratch.yscale.reset();
+    return scratch;
+}
+
 } // namespace
+
+void Axes::Impl::apply_shared_edit(const AxesEdit& e) {
+    AxesEdit scratch;
+    apply_axes_edit(*this, without_refused_scale(e, group_has_heatmap_x(), group_has_heatmap_y(),
+                                                 scratch));
+    sync_shared_x();
+    sync_shared_y();
+}
 
 // -------------------------------------------------------------------------
 // Figure::Impl (declared in figure_impl.h)
@@ -114,6 +152,7 @@ std::shared_ptr<A> Figure::Impl::add_impl(const char* who, const char* other,
     }
     auto ax = std::shared_ptr<A>(new A());
     ax->d->mathtext = opts.mathtext;
+    if constexpr (std::is_same_v<A, Axes>) ax->d->owner = window_state.figure_id;
     slots.push_back({rows, cols, first, last, ax});
     return ax;
 }
@@ -188,8 +227,11 @@ void Figure::Impl::apply_edits_and_publish() {
                 apply_title_edits(*d3, t);
         }
         for (const auto& [idx, l] : journal->limits) {
-            if (Axes::Impl* d2 = find_slot_impl(idx))
+            if (Axes::Impl* d2 = find_slot_impl(idx)) {
                 apply_limit_edits(*d2, l);
+                d2->sync_shared_x();
+                d2->sync_shared_y();
+            }
             else if (Axes3D::Impl* d3 = find_slot_impl3d(idx))
                 apply_limit_edits(*d3, l);
         }
@@ -199,7 +241,7 @@ void Figure::Impl::apply_edits_and_publish() {
         // The style lane holds no titles, limits, camera or ops, so the
         // whole-edit appliers apply just its styles.
         for (const auto& [idx, e] : journal->styles)
-            if (Axes::Impl* d2 = find_slot_impl(idx)) apply_axes_edit(*d2, e);
+            if (Axes::Impl* d2 = find_slot_impl(idx)) d2->apply_shared_edit(e);
         for (const auto& [idx, e] : journal->styles3d)
             if (Axes3D::Impl* d3 = find_slot_impl3d(idx)) apply_axes3d_edit(*d3, e);
         apply_figure_level(journal->figure);
@@ -208,7 +250,7 @@ void Figure::Impl::apply_edits_and_publish() {
 
     if (auto edits = edit_box.load_and_clear()) {
         for (const auto& [idx, e] : edits->per_axes)
-            if (Axes::Impl* d2 = find_slot_impl(idx)) apply_axes_edit(*d2, e);
+            if (Axes::Impl* d2 = find_slot_impl(idx)) d2->apply_shared_edit(e);
         for (const auto& [idx, e] : edits->per_axes3d)
             if (Axes3D::Impl* d3 = find_slot_impl3d(idx)) apply_axes3d_edit(*d3, e);
         // Figure-level, outside the per-axes loop.
@@ -248,8 +290,13 @@ void Figure::Impl::patch_snapshot(const FigureEdits& edits, FigureEdits* inv) {
             if (fa.slot.index != idx) continue;
             RenderSnapshot* sp = fa.snap2d();
             if (!sp) break;   // a 3D slot is addressed on the other lane
-            AxesEdit undo;
-            apply_axes_edit(*sp, e, inv ? &undo : nullptr);
+            AxesEdit undo, scratch;
+            const AxesEdit& ok = without_refused_scale(
+                e, sp->xshare && snapshot_group_has_heatmap(*next, sp->xshare, true),
+                sp->yshare && snapshot_group_has_heatmap(*next, sp->yshare, false), scratch);
+            apply_axes_edit(*sp, ok, inv ? &undo : nullptr);
+            // The group follows; the inverse, applied to this axes, brings it back the same way.
+            sync_snapshot_groups(*next, *sp);
             if (inv && !axes_edit_empty(undo)) inv->per_axes.push_back({idx, std::move(undo)});
             break;
         }

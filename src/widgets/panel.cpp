@@ -107,6 +107,22 @@ bool sheet_objects_differ(const DataPanelState::SheetStyles& s, const RenderSnap
 
 // The Cosmetic inspector's per-slot fields. Takes the 2D snapshot; never call
 // with a 3D cell.
+// The other subplots sharing cur's x (y) axis, as add_subplot() indices
+// ("2, 3"); empty when it isn't shared.
+std::string shared_with(const FigureSnapshot& fsnap, const FigureAxesSnapshot& cur, bool x) {
+    const RenderSnapshot* s = cur.snap2d();
+    const unsigned long long id = s ? (x ? s->xshare : s->yshare) : 0;
+    std::string out;
+    if (!id) return out;
+    for (const auto& fa : fsnap.axes) {
+        const RenderSnapshot* o = fa.snap2d();
+        if (&fa == &cur || !o || (x ? o->xshare : o->yshare) != id) continue;
+        if (!out.empty()) out += ", ";
+        out += std::to_string(fa.slot.index);
+    }
+    return out;
+}
+
 void seed_cosmetic(CosmeticState& c, const RenderSnapshot& sn) {
     std::snprintf(c.title_buf,  sizeof(c.title_buf),  "%s", sn.title.c_str());
     std::snprintf(c.xtitle_buf, sizeof(c.xtitle_buf), "%s", sn.xtitle.c_str());
@@ -218,7 +234,7 @@ void sync_scene_objects(DataPanelState& d, const RenderSnapshot3D& sn) {
 // headless panel test, or a figure no plot view shows): declared values.
 void track_resolved_limits(SlotViewState& v, const PlotViewInfo* view, int slot,
                            bool xauto, bool yauto, bool zauto) {
-    const ResolvedLimits* r = view ? view->resolved_for(slot) : nullptr;
+    const DrawnLimits* r = view ? view->resolved_for(slot) : nullptr;
     if (!r) return;
     if (xauto) { v.xmin_local = r->xmin; v.xmax_local = r->xmax; }
     if (yauto) { v.ymin_local = r->ymin; v.ymax_local = r->ymax; }
@@ -1387,6 +1403,12 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
             }
             end_field_table();
         }
+        // A shared axis' limits and scale are its group's (Axes::sharex()).
+        for (const bool x : {true, false}) {
+            const std::string with = shared_with(fsnap, *cur, x);
+            if (!with.empty())
+                ImGui::TextDisabled("%s shared with %s", x ? "X" : "Y", with.c_str());
+        }
         ImGui::SeparatorText("Ticks & labels");
         // Per axis: marks and labels together (the grid stays).
         if (begin_field_table("tickshow", 2)) {
@@ -1399,6 +1421,11 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
             if (auto_on_off_combo("##minorx", sty.minor_xticks)) push_style();
             field_next("Minor Y");
             if (auto_on_off_combo("##minory", sty.minor_yticks)) push_style();
+            // Tick labels only; Auto = hidden on an inner axes of a share group.
+            field_row("Labels X");
+            if (auto_on_off_combo("##labelsx", sty.show_xtick_labels)) push_style();
+            field_next("Labels Y");
+            if (auto_on_off_combo("##labelsy", sty.show_ytick_labels)) push_style();
             end_field_table();
         }
         // Mark over Label in one table, so pairs line up.
@@ -1419,10 +1446,19 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
         // Scale and label format, per axis.
         ImGui::SeparatorText("Scale & format");
         {
-            // An even-mesh heatmap takes no scale (see Axes::set_xscale()).
-            const bool has_heatmap = !cur2d->heatmaps.empty();
+            // An even-mesh heatmap takes no scale (see Axes::set_xscale()), on
+            // this axes or any sharing the axis.
+            const auto group_heatmap = [&](bool x) {
+                const unsigned long long id = x ? cur2d->xshare : cur2d->yshare;
+                if (!id) return !cur2d->heatmaps.empty();
+                for (const auto& fa : fsnap.axes)
+                    if (const RenderSnapshot* o = fa.snap2d())
+                        if ((x ? o->xshare : o->yshare) == id && !o->heatmaps.empty()) return true;
+                return false;
+            };
             struct ScaleAxis {
                 const char* id;
+                bool has_heatmap;
                 AxisScale* scale;
                 std::optional<AxisScale> AxesEdit::* field;
                 char* fmt;
@@ -1432,12 +1468,13 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
             };
             auto& c = st.cosmetic;
             ScaleAxis axes[2] = {
-                {"X", &c.xscale_local, &AxesEdit::xscale, c.xfmt_buf, sizeof(c.xfmt_buf),
+                {"X", group_heatmap(true), &c.xscale_local, &AxesEdit::xscale, c.xfmt_buf, sizeof(c.xfmt_buf),
                  &c.xfmt_bad, &AxesEdit::xtick_format},
-                {"Y", &c.yscale_local, &AxesEdit::yscale, c.yfmt_buf, sizeof(c.yfmt_buf),
+                {"Y", group_heatmap(false), &c.yscale_local, &AxesEdit::yscale, c.yfmt_buf, sizeof(c.yfmt_buf),
                  &c.yfmt_bad, &AxesEdit::ytick_format},
             };
             for (ScaleAxis& a : axes) {
+                const bool has_heatmap = a.has_heatmap;
                 ImGui::PushID(a.id);
                 ImGui::TextDisabled("%s axis", a.id);
                 if (begin_field_table("scale", 2)) {
@@ -1450,7 +1487,8 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
                     if (scale_combo("##scale", a.scale->kind)) push_scale();
                     ImGui::EndDisabled();
                     if (has_heatmap && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-                        ImGui::SetTooltip("A heatmap's cells are even in data units, so this axes stays linear.");
+                        ImGui::SetTooltip("A heatmap's cells are even in data units, so this axis stays linear\n"
+                                          "(the heatmap may be on an axes sharing it).");
                     if (!a.scale->linear()) {
                         field_row("Base");
                         double b = a.scale->base;

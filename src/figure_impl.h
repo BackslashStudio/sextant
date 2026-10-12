@@ -98,7 +98,9 @@ struct Figure::Impl {
     void ensure_any_axes() {
         if (slots.empty()) {
             check_ratios_for_shape("Figure", 1, 1);
-            slots.push_back({1, 1, 1, 1, std::shared_ptr<Axes>(new Axes())});
+            auto ax = std::shared_ptr<Axes>(new Axes());
+            ax->d->owner = window_state.figure_id;
+            slots.push_back({1, 1, 1, 1, std::move(ax)});
         }
     }
 
