@@ -11,6 +11,7 @@
 #include "../plot_data_view.h"
 #include "../renderer/figure_layout.h"
 #include "../font_discovery.h"
+#include "../ticker.h"
 #include "../messages.h"
 #include "sextant/figure.h"
 #include <imgui.h>
@@ -113,6 +114,11 @@ void seed_cosmetic(CosmeticState& c, const RenderSnapshot& sn) {
     c.grid_local = sn.grid_enabled;
     c.xticks_scratch = sn.xticks_override.value_or(std::vector<Tick>{});
     c.yticks_scratch = sn.yticks_override.value_or(std::vector<Tick>{});
+    c.xscale_local = sn.xscale;
+    c.yscale_local = sn.yscale;
+    std::snprintf(c.xfmt_buf, sizeof(c.xfmt_buf), "%s", sn.xtick_format.c_str());
+    std::snprintf(c.yfmt_buf, sizeof(c.yfmt_buf), "%s", sn.ytick_format.c_str());
+    c.xfmt_bad = c.yfmt_bad = false;
     c.axes_style_local = sn.axes_style;
     c.origin_x_scratch = sn.axes_style.origin_x.value_or(0.0);
     c.origin_y_scratch = sn.axes_style.origin_y.value_or(0.0);
@@ -1321,6 +1327,13 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
             if (linestyle_combo("##gridls", st.cosmetic.grid_opts_local.linestyle)) push_grid();
             field_next("Width");
             if (drag_float("##gridw", &st.cosmetic.grid_opts_local.linewidth, 0.1f, 6.0f, 0.02f, "%.2f px")) push_grid();
+            // Lines at the minor ticks too (the Ticks section's Minor), in their own colour.
+            field_row("Minor");
+            if (ImGui::Checkbox("##gridminor", &st.cosmetic.grid_opts_local.minor)) push_grid();
+            field_next("Color");
+            ImGui::BeginDisabled(!st.cosmetic.grid_opts_local.minor);
+            if (color_swatch("##gridmincol", st.cosmetic.grid_opts_local.minor_color)) push_grid();
+            ImGui::EndDisabled();
             end_field_table();
         }
         ImGui::EndDisabled();
@@ -1381,6 +1394,11 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
             if (ImGui::Checkbox("##showx", &sty.show_xticks)) push_style();
             field_next("Show Y");
             if (ImGui::Checkbox("##showy", &sty.show_yticks)) push_style();
+            // Unlabelled marks between the majors; Auto = on for log/symlog.
+            field_row("Minor X");
+            if (auto_on_off_combo("##minorx", sty.minor_xticks)) push_style();
+            field_next("Minor Y");
+            if (auto_on_off_combo("##minory", sty.minor_yticks)) push_style();
             end_field_table();
         }
         // Mark over Label in one table, so pairs line up.
@@ -1396,6 +1414,75 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
             field_next("Size");
             if (drag_float("##labelsz", &sty.label_fontsize, 1.0f, 96.0f, 0.2f, "%.1f px")) push_style();
             end_field_table();
+        }
+
+        // Scale and label format, per axis.
+        ImGui::SeparatorText("Scale & format");
+        {
+            // An even-mesh heatmap takes no scale (see Axes::set_xscale()).
+            const bool has_heatmap = !cur2d->heatmaps.empty();
+            struct ScaleAxis {
+                const char* id;
+                AxisScale* scale;
+                std::optional<AxisScale> AxesEdit::* field;
+                char* fmt;
+                std::size_t fmt_size;
+                bool* bad;
+                std::optional<std::string> AxesEdit::* fmt_field;
+            };
+            auto& c = st.cosmetic;
+            ScaleAxis axes[2] = {
+                {"X", &c.xscale_local, &AxesEdit::xscale, c.xfmt_buf, sizeof(c.xfmt_buf),
+                 &c.xfmt_bad, &AxesEdit::xtick_format},
+                {"Y", &c.yscale_local, &AxesEdit::yscale, c.yfmt_buf, sizeof(c.yfmt_buf),
+                 &c.yfmt_bad, &AxesEdit::ytick_format},
+            };
+            for (ScaleAxis& a : axes) {
+                ImGui::PushID(a.id);
+                ImGui::TextDisabled("%s axis", a.id);
+                if (begin_field_table("scale", 2)) {
+                    auto push_scale = [&]{
+                        const AxisScale v = *a.scale;
+                        edit_box.update(idx, [&](AxesEdit& e){ e.*a.field = v; });
+                    };
+                    field_row("Scale");
+                    ImGui::BeginDisabled(has_heatmap);
+                    if (scale_combo("##scale", a.scale->kind)) push_scale();
+                    ImGui::EndDisabled();
+                    if (has_heatmap && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                        ImGui::SetTooltip("A heatmap's cells are even in data units, so this axes stays linear.");
+                    if (!a.scale->linear()) {
+                        field_row("Base");
+                        double b = a.scale->base;
+                        if (drag_double("##base", &b, 0.05f, "%.4g") && std::isfinite(b) && b > 1.0) {
+                            a.scale->base = b;
+                            push_scale();
+                        }
+                        if (a.scale->kind == Scale::Symlog) {
+                            field_next("Linear to");
+                            double t = a.scale->linthresh;
+                            if (drag_double("##linthresh", &t, 0.01f, "%.4g") && std::isfinite(t) && t > 0.0) {
+                                a.scale->linthresh = t;
+                                push_scale();
+                            }
+                        }
+                    }
+                    field_row("Format");
+                    // Red while the text is not one %f/%e/%g conversion; sent once it is.
+                    if (*a.bad) ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.55f, 0.15f, 0.15f, 1.0f));
+                    const bool typed = ImGui::InputTextWithHint("##fmt", "%g", a.fmt, a.fmt_size);
+                    if (*a.bad) ImGui::PopStyleColor();
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("printf for one number: %%.2f, %%.0f%%%%, %%.1e ... Empty = the scale's default.");
+                    if (typed) {
+                        const std::string f = a.fmt;
+                        *a.bad = !f.empty() && !tick_format_ok(f);
+                        if (!*a.bad) edit_box.update(idx, [&](AxesEdit& e){ e.*a.fmt_field = f; });
+                    }
+                    end_field_table();
+                }
+                ImGui::PopID();
+            }
         }
 
         ImGui::TextDisabled("X ticks");

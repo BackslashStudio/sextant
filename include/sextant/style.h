@@ -340,6 +340,11 @@ namespace sextant {
         // `None` draws no grid lines.
         LineStyle linestyle = LineStyle::Solid;
         float linewidth = 0.5f;
+
+        // 2D: also a line at each minor tick (see AxesStyle::minor_xticks), in
+        // `minor_color` with the same style and width.
+        bool minor = false;
+        Color minor_color = {0.9f, 0.9f, 0.9f, 1.0f};
     };
 
     // Where an axis line sits along each coordinate that is not its own (an x axis
@@ -353,6 +358,26 @@ namespace sextant {
     //
     // An AxesStyle::origin_* component supersedes the matching enum.
     enum class AxisPosition { Auto, Low, Mid, High };
+
+    // How a 2D axis maps data to its length (Axes::set_xscale()), as matplotlib's.
+    //
+    //   Linear  evenly.
+    //   Log     log_base(v). Values <= 0 have no place on it: drawn clipped far
+    //           below the frame (a line through 0 runs off its edge, a bar
+    //           stands on the frame's bottom), ignored by the automatic limits.
+    //   Symlog  linear within +-linthresh, logarithmic outside it, so it takes
+    //           0 and negative values.
+    enum class Scale { Linear, Log, Symlog };
+
+    // Read by the scales that use them; each must be finite.
+    struct ScaleOptions {
+        // Log and Symlog; > 1.
+        double base = 10.0;
+        // Symlog: the half-width of the linear part around 0; > 0.
+        double linthresh = 1.0;
+        // Symlog: the linear part's length, in decades; > 0.
+        double linscale = 1.0;
+    };
 
     // Axes-frame cosmetics: spine, ticks, tick labels and titles. Font sizes are
     // in pixels as drawn.
@@ -392,6 +417,12 @@ namespace sextant {
         Color tick_color = {0.3f, 0.3f, 0.3f, 1.0f};
         float tick_length = 5.0f;
         float tick_linewidth = 1.0f;
+
+        // 2D: unlabelled marks between the major ticks, `minor_tick_length` long.
+        // Unset = on for a Log or Symlog axis, off for Linear (as matplotlib). A
+        // linear axis with set_xticks() positions has none.
+        std::optional<bool> minor_xticks, minor_yticks;
+        float minor_tick_length = 2.5f;
         Color label_color = {0.2f, 0.2f, 0.2f, 1.0f};
         float label_fontsize = 11.0f;
         Color title_color = {0.15f, 0.15f, 0.15f, 1.0f};

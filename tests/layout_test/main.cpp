@@ -280,6 +280,9 @@ int main() {
     // ticks_hidden.cpp
     test_ticks_hidden();
 
+    // scale.cpp
+    test_scale();
+
     // edge_markers.cpp
     test_edge_markers();
 

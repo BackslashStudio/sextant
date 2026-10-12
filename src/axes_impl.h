@@ -47,6 +47,12 @@ struct Axes::Impl {
     LimitStamps limit_stamps;
     StyleStamps style_stamps;
 
+    // set_xscale()/set_yscale(). A plane's sheet keeps Linear (Plane2D has no
+    // scale), so ingest_heatmap() only refuses on an Axes.
+    AxisScale xscale, yscale;
+    // set_xtick_format()/set_ytick_format(); empty = the scale's default.
+    std::string xtick_format, ytick_format;
+
     // Explicit tick override set via Axes::set_xticks/set_yticks (or the
     // widget panel's tick table). Absent = auto-generated ticks.
     std::optional<std::vector<Tick>> xticks_override, yticks_override;
@@ -89,6 +95,8 @@ struct Axes::Impl {
         s.xlim_auto = xlim_auto; s.ylim_auto = ylim_auto;
         s.limit_stamps = limit_stamps;
         s.style_stamps = style_stamps;
+        s.xscale = xscale; s.yscale = yscale;
+        s.xtick_format = xtick_format; s.ytick_format = ytick_format;
         s.xticks_override = xticks_override;
         s.yticks_override = yticks_override;
         return s;

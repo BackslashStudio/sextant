@@ -1058,14 +1058,16 @@ void main() {
             float offset[2];
         };
 
+        // In scale space (see CoordTransform): the buffers hold sx()/sy() of the
+        // data, and the anchor is a scale-space value.
         DataToPixel data_to_pixel(const CoordTransform& tr, double ax, double ay) {
-            const double sx = static_cast<double>(tr.pw) / (tr.xmax - tr.xmin);
-            const double sy = static_cast<double>(tr.ph) / (tr.ymax - tr.ymin);
+            const double sx = static_cast<double>(tr.pw) / tr.sxspan();
+            const double sy = static_cast<double>(tr.ph) / tr.syspan();
             DataToPixel m;
             m.scale[0] = static_cast<float>(sx);
             m.scale[1] = static_cast<float>(-sy); // data y up, pixel y down
-            m.offset[0] = static_cast<float>(tr.px + (ax - tr.xmin) * sx);
-            m.offset[1] = static_cast<float>(tr.py + tr.ph - (ay - tr.ymin) * sy);
+            m.offset[0] = static_cast<float>(tr.px + (ax - tr.sxmin()) * sx);
+            m.offset[1] = static_cast<float>(tr.py + tr.ph - (ay - tr.symin()) * sy);
             return m;
         }
 
@@ -1080,8 +1082,15 @@ void main() {
         }
     } // namespace
 
+    // Data-space buffers hold scale-space values, so a scale change (a panel
+    // edit keeps the data generation) rebuilds them.
+    static bool same_scales(const CoordTransform& a, const CoordTransform& b) {
+        return a.xs == b.xs && a.ys == b.ys;
+    }
+
     static bool same_view(const CoordTransform& a, const CoordTransform& b) {
-        return a.xmin == b.xmin && a.xmax == b.xmax
+        return same_scales(a, b)
+               && a.xmin == b.xmin && a.xmax == b.xmax
                && a.ymin == b.ymin && a.ymax == b.ymax
                && a.px == b.px && a.py == b.py && a.pw == b.pw && a.ph == b.ph
                && a.win_w == b.win_w && a.win_h == b.win_h;
@@ -1820,30 +1829,31 @@ void main() {
 
             // The buffer holds only points; view and width are uniforms. Rebuilt on
             // data change or when leaving the float-precision regime.
-            const bool precise = float_resolves_view(e.span_x, tr.xmax - tr.xmin, tr.pw)
-                                 && float_resolves_view(e.span_y, tr.ymax - tr.ymin, tr.ph);
+            const bool precise = float_resolves_view(e.span_x, tr.sxspan(), tr.pw)
+                                 && float_resolves_view(e.span_y, tr.syspan(), tr.ph);
             const bool usable = e.vbo != 0
                                 && e.segments > 0
                                 && e.data_generation != 0
                                 && e.data_generation == data_generation_
+                                && same_scales(e.tr, tr)
                                 && e.loop == lp.opts.loop
                                 && (e.data_space
                                         ? precise
                                         : (!precise && same_view(e.tr, tr)));
             if (!usable) {
-                double xlo = lp.x[0], xhi = lp.x[0], ylo = lp.y[0], yhi = lp.y[0];
+                double xlo = tr.sx(lp.x[0]), xhi = xlo, ylo = tr.sy(lp.y[0]), yhi = ylo;
                 for (std::size_t i = 1; i < lp.x.size(); ++i) {
-                    xlo = std::min(xlo, lp.x[i]);
-                    xhi = std::max(xhi, lp.x[i]);
-                    ylo = std::min(ylo, lp.y[i]);
-                    yhi = std::max(yhi, lp.y[i]);
+                    xlo = std::min(xlo, tr.sx(lp.x[i]));
+                    xhi = std::max(xhi, tr.sx(lp.x[i]));
+                    ylo = std::min(ylo, tr.sy(lp.y[i]));
+                    yhi = std::max(yhi, tr.sy(lp.y[i]));
                 }
                 e.anchor_x = 0.5 * (xlo + xhi);
                 e.span_x = xhi - xlo;
                 e.anchor_y = 0.5 * (ylo + yhi);
                 e.span_y = yhi - ylo;
-                e.data_space = float_resolves_view(e.span_x, tr.xmax - tr.xmin, tr.pw)
-                               && float_resolves_view(e.span_y, tr.ymax - tr.ymin, tr.ph);
+                e.data_space = float_resolves_view(e.span_x, tr.sxspan(), tr.pw)
+                               && float_resolves_view(e.span_y, tr.syspan(), tr.ph);
 
                 // Padded so instance i reads points [i, i+3]. An open path repeats
                 // its ends (butt caps); a looped path pads with the real neighbours
@@ -1853,8 +1863,8 @@ void main() {
                 pts.reserve((n + 3) * 2);
                 auto emit = [&](std::size_t i) {
                     if (e.data_space) {
-                        pts.push_back(static_cast<float>(lp.x[i] - e.anchor_x));
-                        pts.push_back(static_cast<float>(lp.y[i] - e.anchor_y));
+                        pts.push_back(static_cast<float>(tr.sx(lp.x[i]) - e.anchor_x));
+                        pts.push_back(static_cast<float>(tr.sy(lp.y[i]) - e.anchor_y));
                     } else {
                         pts.push_back(tr.to_px(lp.x[i]));
                         pts.push_back(tr.to_py(lp.y[i]));
@@ -1936,8 +1946,8 @@ void main() {
                     for (std::size_t i = 0; i < n; ++i) {
                         float fx, fy;
                         if (e.data_space) {
-                            fx = static_cast<float>(lp.x[i] - e.anchor_x);
-                            fy = static_cast<float>(lp.y[i] - e.anchor_y);
+                            fx = static_cast<float>(tr.sx(lp.x[i]) - e.anchor_x);
+                            fy = static_cast<float>(tr.sy(lp.y[i]) - e.anchor_y);
                         } else {
                             fx = tr.to_px(lp.x[i]);
                             fy = tr.to_py(lp.y[i]);
@@ -2010,12 +2020,13 @@ void main() {
             InstanceCache& e = scatter_cache_[key];
 
             // Only the pixel-space fallback goes stale on a view change.
-            const bool precise = float_resolves_view(e.span_x, tr.xmax - tr.xmin, tr.pw)
-                                 && float_resolves_view(e.span_y, tr.ymax - tr.ymin, tr.ph);
+            const bool precise = float_resolves_view(e.span_x, tr.sxspan(), tr.pw)
+                                 && float_resolves_view(e.span_y, tr.syspan(), tr.ph);
             const bool usable = e.vbo != 0
                                 && e.instances > 0
                                 && e.data_generation != 0
                                 && e.data_generation == data_generation_
+                                && same_scales(e.tr, tr)
                                 && e.size == sp.opts.size
                                 && (e.data_space
                                         ? precise
@@ -2024,26 +2035,26 @@ void main() {
             if (!usable) {
                 // Anchor at the data extent's midpoint (residuals <= half the span),
                 // independent of the view.
-                double xlo = sp.x[0], xhi = sp.x[0], ylo = sp.y[0], yhi = sp.y[0];
+                double xlo = tr.sx(sp.x[0]), xhi = xlo, ylo = tr.sy(sp.y[0]), yhi = ylo;
                 for (std::size_t i = 1; i < sp.x.size(); ++i) {
-                    xlo = std::min(xlo, sp.x[i]);
-                    xhi = std::max(xhi, sp.x[i]);
-                    ylo = std::min(ylo, sp.y[i]);
-                    yhi = std::max(yhi, sp.y[i]);
+                    xlo = std::min(xlo, tr.sx(sp.x[i]));
+                    xhi = std::max(xhi, tr.sx(sp.x[i]));
+                    ylo = std::min(ylo, tr.sy(sp.y[i]));
+                    yhi = std::max(yhi, tr.sy(sp.y[i]));
                 }
                 e.anchor_x = 0.5 * (xlo + xhi);
                 e.span_x = xhi - xlo;
                 e.anchor_y = 0.5 * (ylo + yhi);
                 e.span_y = yhi - ylo;
-                e.data_space = float_resolves_view(e.span_x, tr.xmax - tr.xmin, tr.pw)
-                               && float_resolves_view(e.span_y, tr.ymax - tr.ymin, tr.ph);
+                e.data_space = float_resolves_view(e.span_x, tr.sxspan(), tr.pw)
+                               && float_resolves_view(e.span_y, tr.syspan(), tr.ph);
 
                 inst.clear();
                 inst.reserve(sp.x.size() * 3);
                 for (std::size_t i = 0; i < sp.x.size(); ++i) {
                     if (e.data_space) {
-                        inst.push_back(static_cast<float>(sp.x[i] - e.anchor_x));
-                        inst.push_back(static_cast<float>(sp.y[i] - e.anchor_y));
+                        inst.push_back(static_cast<float>(tr.sx(sp.x[i]) - e.anchor_x));
+                        inst.push_back(static_cast<float>(tr.sy(sp.y[i]) - e.anchor_y));
                     } else {
                         inst.push_back(tr.to_px(sp.x[i]));
                         inst.push_back(tr.to_py(sp.y[i]));
@@ -2120,13 +2131,14 @@ void main() {
             const CacheKey key{axes_index_, plane_index_, static_cast<int>(si)};
             InstanceCache& e = scatterz_cache_[key];
 
-            const bool precise = float_resolves_view(e.span_x, tr.xmax - tr.xmin, tr.pw)
-                                 && float_resolves_view(e.span_y, tr.ymax - tr.ymin, tr.ph);
+            const bool precise = float_resolves_view(e.span_x, tr.sxspan(), tr.pw)
+                                 && float_resolves_view(e.span_y, tr.syspan(), tr.ph);
             // The colormap is baked into the buffer, so it's in the key.
             const bool usable = e.vbo != 0
                                 && e.instances > 0
                                 && e.data_generation != 0
                                 && e.data_generation == data_generation_
+                                && same_scales(e.tr, tr)
                                 && e.size == sp.opts.size
                                 && e.cmap == sp.opts.cmap
                                 && e.vmin == sp.opts.vmin && e.vmax == sp.opts.vmax
@@ -2136,19 +2148,19 @@ void main() {
                                         : (!precise && same_view(e.tr, tr)));
 
             if (!usable) {
-                double xlo = sp.x[0], xhi = sp.x[0], ylo = sp.y[0], yhi = sp.y[0];
+                double xlo = tr.sx(sp.x[0]), xhi = xlo, ylo = tr.sy(sp.y[0]), yhi = ylo;
                 for (std::size_t i = 1; i < sp.x.size(); ++i) {
-                    xlo = std::min(xlo, sp.x[i]);
-                    xhi = std::max(xhi, sp.x[i]);
-                    ylo = std::min(ylo, sp.y[i]);
-                    yhi = std::max(yhi, sp.y[i]);
+                    xlo = std::min(xlo, tr.sx(sp.x[i]));
+                    xhi = std::max(xhi, tr.sx(sp.x[i]));
+                    ylo = std::min(ylo, tr.sy(sp.y[i]));
+                    yhi = std::max(yhi, tr.sy(sp.y[i]));
                 }
                 e.anchor_x = 0.5 * (xlo + xhi);
                 e.span_x = xhi - xlo;
                 e.anchor_y = 0.5 * (ylo + yhi);
                 e.span_y = yhi - ylo;
-                e.data_space = float_resolves_view(e.span_x, tr.xmax - tr.xmin, tr.pw)
-                               && float_resolves_view(e.span_y, tr.ymax - tr.ymin, tr.ph);
+                e.data_space = float_resolves_view(e.span_x, tr.sxspan(), tr.pw)
+                               && float_resolves_view(e.span_y, tr.syspan(), tr.ph);
 
                 // Per-point color via the colormap LUT.
                 const uint8_t* lut = colormaps::get(sp.opts.cmap);
@@ -2161,8 +2173,8 @@ void main() {
                     const uint8_t* c = &lut[colormaps::index(t, sp.opts.cmap.is_cyclic()) * 4];
 
                     if (e.data_space) {
-                        inst.push_back(static_cast<float>(sp.x[i] - e.anchor_x));
-                        inst.push_back(static_cast<float>(sp.y[i] - e.anchor_y));
+                        inst.push_back(static_cast<float>(tr.sx(sp.x[i]) - e.anchor_x));
+                        inst.push_back(static_cast<float>(tr.sy(sp.y[i]) - e.anchor_y));
                     } else {
                         inst.push_back(tr.to_px(sp.x[i]));
                         inst.push_back(tr.to_py(sp.y[i]));
@@ -2264,42 +2276,43 @@ void main() {
             const bool width_same = (e.bar_width == bp.bar_width);
 
             // --- filled rectangles (2 triangles = 6 verts each), in data space ---
-            const bool precise = float_resolves_view(e.span_x, tr.xmax - tr.xmin, tr.pw)
-                                 && float_resolves_view(e.span_y, tr.ymax - tr.ymin, tr.ph);
+            const bool precise = float_resolves_view(e.span_x, tr.sxspan(), tr.pw)
+                                 && float_resolves_view(e.span_y, tr.syspan(), tr.ph);
             const bool fill_ok = e.fill_vbo != 0
                                  && e.fill_verts > 0
                                  && e.fill_generation != 0
                                  && e.fill_generation == data_generation_
+                                 && same_scales(e.fill_tr, tr)
                                  && width_same
                                  && (e.data_space
                                          ? precise
                                          : (!precise && same_view(e.fill_tr, tr)));
             if (!fill_ok) {
-                // Extent includes the zero baseline.
-                double xlo = bp.centers[0] - half, xhi = bp.centers[0] + half;
-                double ylo = 0.0, yhi = 0.0;
+                // Extent includes the zero baseline. In scale space, as uploaded.
+                double xlo = tr.sx(bp.centers[0] - half), xhi = tr.sx(bp.centers[0] + half);
+                double ylo = tr.sy(0.0), yhi = ylo;
                 for (std::size_t i = 0; i < n; ++i) {
-                    xlo = std::min(xlo, bp.centers[i] - half);
-                    xhi = std::max(xhi, bp.centers[i] + half);
-                    ylo = std::min(ylo, bp.heights[i]);
-                    yhi = std::max(yhi, bp.heights[i]);
+                    xlo = std::min(xlo, tr.sx(bp.centers[i] - half));
+                    xhi = std::max(xhi, tr.sx(bp.centers[i] + half));
+                    ylo = std::min(ylo, tr.sy(bp.heights[i]));
+                    yhi = std::max(yhi, tr.sy(bp.heights[i]));
                 }
                 e.anchor_x = 0.5 * (xlo + xhi);
                 e.span_x = xhi - xlo;
                 e.anchor_y = 0.5 * (ylo + yhi);
                 e.span_y = yhi - ylo;
-                e.data_space = float_resolves_view(e.span_x, tr.xmax - tr.xmin, tr.pw)
-                               && float_resolves_view(e.span_y, tr.ymax - tr.ymin, tr.ph);
+                e.data_space = float_resolves_view(e.span_x, tr.sxspan(), tr.pw)
+                               && float_resolves_view(e.span_y, tr.syspan(), tr.ph);
 
                 scratch.clear();
                 scratch.reserve(n * 12);
                 for (std::size_t i = 0; i < n; ++i) {
                     float xl, xr, yt, yb;
                     if (e.data_space) {
-                        xl = static_cast<float>(bp.centers[i] - half - e.anchor_x);
-                        xr = static_cast<float>(bp.centers[i] + half - e.anchor_x);
-                        yt = static_cast<float>(bp.heights[i] - e.anchor_y);
-                        yb = static_cast<float>(0.0 - e.anchor_y);
+                        xl = static_cast<float>(tr.sx(bp.centers[i] - half) - e.anchor_x);
+                        xr = static_cast<float>(tr.sx(bp.centers[i] + half) - e.anchor_x);
+                        yt = static_cast<float>(tr.sy(bp.heights[i]) - e.anchor_y);
+                        yb = static_cast<float>(tr.sy(0.0) - e.anchor_y);
                     } else {
                         xl = tr.to_px(bp.centers[i] - half);
                         xr = tr.to_px(bp.centers[i] + half);

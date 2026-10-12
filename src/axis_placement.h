@@ -1,5 +1,6 @@
 #pragma once
 #include "sextant/style.h"
+#include "axis_scale.h"
 #include <algorithm>
 #include <optional>
 
@@ -18,16 +19,17 @@ namespace sextant {
     };
 
     // `lo`/`hi` are resolved limits (pin already folded in when auto). A pin
-    // outside them clamps to the frame edge.
+    // outside them clamps to the frame edge. `s` is the scale of the axis `lo`
+    // and `hi` belong to: Mid is the middle of the frame, not of the values.
     inline AxisPlacement place_axis(AxisPosition p, const std::optional<double>& pin,
-                                    double lo, double hi) {
+                                    double lo, double hi, const AxisScale& s = {}) {
         AxisPlacement a;
         if (pin) {
             a.pos = std::clamp(*pin, lo, hi);
         } else {
             switch (p) {
-                // Assumes a linear scale.
-                case AxisPosition::Mid: a.pos = lo + (hi - lo) * 0.5;
+                case AxisPosition::Mid:
+                    a.pos = s.linear() ? lo + (hi - lo) * 0.5 : s.inv((s.fwd(lo) + s.fwd(hi)) * 0.5);
                     break;
                 case AxisPosition::High: a.pos = hi;
                     break;

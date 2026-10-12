@@ -162,6 +162,25 @@ static void emit_grid(std::ostringstream& o, const SvgAxesData& d) {
     const auto& g = d.grid_opts;
     // LineStyle::None draws no grid line, as for data lines.
     if (g.linestyle == LineStyle::None) return;
+    // Minor lines first, under the major ones (as NanoVG); only those in the frame.
+    if (g.minor && (!d.layout.xminor.empty() || !d.layout.yminor.empty())) {
+        const PlotRect& f = d.layout.frame;
+        o << "  <g stroke=\"" << rgb(g.minor_color) << "\" stroke-opacity=\"" << g.minor_color.a
+          << "\" stroke-width=\"" << g.linewidth << "\"" << dash_attr(g.linestyle) << ">\n";
+        for (const double v : d.layout.xminor) {
+            const float px = d.layout.tr.to_px(v);
+            if (px < f.x || px > f.x + f.w) continue;
+            o << "    <line x1=\"" << px << "\" y1=\"" << f.y
+              <<         "\" x2=\"" << px << "\" y2=\"" << f.y + f.h << "\"/>\n";
+        }
+        for (const double v : d.layout.yminor) {
+            const float py = d.layout.tr.to_py(v);
+            if (py < f.y || py > f.y + f.h) continue;
+            o << "    <line x1=\"" << f.x << "\" y1=\"" << py
+              <<         "\" x2=\"" << f.x + f.w << "\" y2=\"" << py << "\"/>\n";
+        }
+        o << "  </g>\n";
+    }
     o << "  <g stroke=\"" << rgb(g.color) << "\" stroke-opacity=\"" << g.color.a
       << "\" stroke-width=\"" << g.linewidth << "\"";
     o << dash_attr(g.linestyle) << ">\n";
@@ -607,6 +626,23 @@ static void emit_ticks_and_labels(std::ostringstream& o, const SvgAxesData& d) {
         if (!d.axes_style.show_yticks) break;
         float py = d.layout.tr.to_py(t.value);
         o << "    <line x1=\"" << ya + d.layout.ytick_dir * tick_len << "\" y1=\"" << py
+          <<        "\" x2=\"" << ya << "\" y2=\"" << py << "\"/>\n";
+    }
+    // Minor marks, only those in the frame (as NanoVG).
+    const PlotRect& f = d.layout.frame;
+    const float mlen = d.axes_style.minor_tick_length;
+    for (const double v : d.layout.xminor) {
+        if (!d.axes_style.show_xticks) break;
+        const float px = d.layout.tr.to_px(v);
+        if (px < f.x || px > f.x + f.w) continue;
+        o << "    <line x1=\"" << px << "\" y1=\"" << xa
+          <<        "\" x2=\"" << px << "\" y2=\"" << xa + d.layout.xtick_dir * mlen << "\"/>\n";
+    }
+    for (const double v : d.layout.yminor) {
+        if (!d.axes_style.show_yticks) break;
+        const float py = d.layout.tr.to_py(v);
+        if (py < f.y || py > f.y + f.h) continue;
+        o << "    <line x1=\"" << ya + d.layout.ytick_dir * mlen << "\" y1=\"" << py
           <<        "\" x2=\"" << ya << "\" y2=\"" << py << "\"/>\n";
     }
     o << "  </g>\n";

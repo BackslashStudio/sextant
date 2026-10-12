@@ -2,6 +2,7 @@
 #include "axis_limits.h"
 #include "read_back.h"
 #include "rich_text.h"
+#include "ticker.h"
 #include <stdexcept>
 #include <string>
 #include <algorithm>
@@ -42,6 +43,41 @@ ErrorBarData take_error_bars(const ErrorBar& eb, std::size_t n, const char* who)
 double bar_width_for(std::span<const double> x, const BarOptions& opts) {
     const double spacing = x.size() > 1 ? std::abs(x[1] - x[0]) : 1.0;
     return spacing * static_cast<double>(opts.width);
+}
+
+void check_limits_fit(const AxisScale& s, double lo, double hi, const char* who) {
+    if (!limits_fit(s, lo, hi))
+        throw std::invalid_argument(std::string(who) + ": a log axis needs limits above 0");
+}
+
+// One axis' set_*scale(). Validates what the scale reads, refuses a heatmap
+// (see ingest_heatmap()), and drops set limits the new scale can't place.
+// Takes fresh limit and tick stamps either way: a pan, zoom or panel scale
+// made over the old scale is not replayed onto the new one.
+void set_scale(bool has_heatmap, AxisScale& slot, double lo, double hi, bool& lim_auto,
+               unsigned long long& lim_stamp, unsigned long long& tick_stamp, Scale scale,
+               const ScaleOptions& o, const char* who) {
+    const std::string w = who;
+    auto positive = [&w](double v, const char* field) {
+        if (!(std::isfinite(v) && v > 0.0))
+            throw std::invalid_argument(w + ": " + field + " must be finite and > 0");
+    };
+    if (scale != Scale::Linear) {
+        if (!(std::isfinite(o.base) && o.base > 1.0))
+            throw std::invalid_argument(w + ": base must be finite and > 1");
+        if (scale == Scale::Symlog) {
+            positive(o.linthresh, "linthresh");
+            positive(o.linscale, "linscale");
+        }
+        if (has_heatmap)
+            throw std::invalid_argument(w + ": an axes holding a heatmap stays linear");
+    }
+    if (scale != Scale::Linear && scale != Scale::Log && scale != Scale::Symlog)
+        throw std::invalid_argument(w + ": unknown scale");
+    slot = make_axis_scale(scale, o);
+    if (!lim_auto && !limits_fit(slot, lo, hi)) lim_auto = true;
+    lim_stamp = next_snapshot_generation();
+    tick_stamp = next_snapshot_generation();
 }
 
 // Checks a heatmap's shape and ranges and narrows the cells to float (they are
@@ -247,6 +283,11 @@ void Axes::Impl::ingest_heatmap(std::span<const double> data, int rows, int cols
                                 Range xrange, Range yrange, HeatmapOptions opts,
                                 const char* who) {
     const std::string w = who;
+    // Cells are even in data units, so they cannot follow a scale; a mesh kind
+    // with its own cell edges is the way to scaled cells.
+    if (!xscale.linear() || !yscale.linear())
+        throw std::invalid_argument(w + ": a heatmap needs linear axes; this axes has a "
+                                    + std::string(!xscale.linear() ? "x" : "y") + " scale set");
     std::vector<float> cells = heatmap_cells(data, rows, cols, xrange, yrange, w);
 
     // Every reader tests == "lower", so anything else would silently mean upper.
@@ -333,12 +374,24 @@ Axes& Axes::set_ytitle(std::string_view text, float fontsize) {
     d->axes_style.ytitle_fontsize = fontsize; return *this;
 }
 Axes& Axes::set_xlim(double lo, double hi) {
+    check_limits_fit(d->xscale, lo, hi, "set_xlim");
     d->xmin = lo; d->xmax = hi; d->xlim_auto = false;
     d->limit_stamps.x = next_snapshot_generation(); return *this;
 }
 Axes& Axes::set_ylim(double lo, double hi) {
+    check_limits_fit(d->yscale, lo, hi, "set_ylim");
     d->ymin = lo; d->ymax = hi; d->ylim_auto = false;
     d->limit_stamps.y = next_snapshot_generation(); return *this;
+}
+Axes& Axes::set_xscale(Scale scale, ScaleOptions opts) {
+    set_scale(!d->heatmaps.empty(), d->xscale, d->xmin, d->xmax, d->xlim_auto, d->limit_stamps.x,
+              d->style_stamps.xticks, scale, opts, "set_xscale");
+    return *this;
+}
+Axes& Axes::set_yscale(Scale scale, ScaleOptions opts) {
+    set_scale(!d->heatmaps.empty(), d->yscale, d->ymin, d->ymax, d->ylim_auto, d->limit_stamps.y,
+              d->style_stamps.yticks, scale, opts, "set_yscale");
+    return *this;
 }
 Axes& Axes::grid(bool enable, GridOptions opts) {
     d->grid_enabled = enable; d->grid_opts = opts;
@@ -368,6 +421,24 @@ Axes& Axes::set_yticks(std::span<const double> pos, std::vector<std::string> lab
     for (const auto& l : labels) warn_math(d->mathtext, "set_yticks", l);
     if (pos.empty()) d->yticks_override.reset();
     else             d->yticks_override = make_tick_override(pos, labels);
+    d->style_stamps.yticks = next_snapshot_generation();
+    return *this;
+}
+Axes& Axes::set_xtick_format(std::string_view fmt) {
+    if (!fmt.empty() && !tick_format_ok(fmt))
+        throw std::invalid_argument("set_xtick_format: \"" + std::string(fmt)
+                                    + "\" is not one %f/%e/%g conversion and text");
+    warn_math(d->mathtext, "set_xtick_format", fmt);
+    d->xtick_format = fmt;
+    d->style_stamps.xticks = next_snapshot_generation();
+    return *this;
+}
+Axes& Axes::set_ytick_format(std::string_view fmt) {
+    if (!fmt.empty() && !tick_format_ok(fmt))
+        throw std::invalid_argument("set_ytick_format: \"" + std::string(fmt)
+                                    + "\" is not one %f/%e/%g conversion and text");
+    warn_math(d->mathtext, "set_ytick_format", fmt);
+    d->ytick_format = fmt;
     d->style_stamps.yticks = next_snapshot_generation();
     return *this;
 }
@@ -402,6 +473,9 @@ Range Axes::ylim() const {
     const ResolvedLimits l = resolve_limits(d->build_snapshot());
     return { l.ymin, l.ymax };
 }
+
+Scale Axes::xscale() const { return d->xscale.kind; }
+Scale Axes::yscale() const { return d->yscale.kind; }
 
 std::size_t Axes::line_count() const      { return d->lines.size(); }
 std::size_t Axes::scatter_count() const   { return d->scatters.size(); }

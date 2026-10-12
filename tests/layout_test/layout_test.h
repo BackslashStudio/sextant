@@ -584,6 +584,9 @@ namespace lt {
     // ticks_hidden.cpp
     void test_ticks_hidden();
 
+    // scale.cpp
+    void test_scale();
+
     // edge_markers.cpp
     void test_edge_markers();
 

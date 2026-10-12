@@ -58,7 +58,7 @@ namespace sextant {
 
         // `data` is row-major rows x cols, drawn as a uniform mesh over
         // xrange x yrange (cell edges, see Range). Throws if either range is
-        // non-finite or degenerate.
+        // non-finite or degenerate, or if either axis is Log or Symlog.
         Axes& heatmap(std::span<const double> data, int rows, int cols,
                       Range xrange, Range yrange, HeatmapOptions opts = {});
 
@@ -99,6 +99,15 @@ namespace sextant {
 
         Axes& set_ylim(double lo, double hi);
 
+        // The axis' scale (see Scale); the limits stay in data units. Throws
+        // std::invalid_argument for options the scale cannot use, and for Log or
+        // Symlog on an axes holding a heatmap (an even mesh takes no scale).
+        // Switching to Log drops set limits that reach 0 or below back to
+        // automatic. On a log axis, set_xlim()/set_ylim() throw for an end <= 0.
+        Axes& set_xscale(Scale scale, ScaleOptions opts = {});
+
+        Axes& set_yscale(Scale scale, ScaleOptions opts = {});
+
         Axes& grid(bool enable = true, GridOptions opts = {});
 
         Axes& set_axes_style(AxesStyle opts = {});
@@ -113,6 +122,17 @@ namespace sextant {
 
         Axes& set_yticks(std::span<const double> positions,
                          std::vector<std::string> labels = {});
+
+        // printf's format for one double, used for every tick label this axes
+        // makes: the generated ones, and set_xticks() positions given without a
+        // label. Exactly one %f, %F, %e, %E, %g or %G (flags, width and
+        // precision allowed), plus any %% and other text, math included:
+        // "%.1f", "%.0f%%", "$%.2g$ s". Throws std::invalid_argument otherwise.
+        // Empty restores the default: "%g" on a linear axis, powers ("10^3") on
+        // a log or symlog one.
+        Axes& set_xtick_format(std::string_view fmt);
+
+        Axes& set_ytick_format(std::string_view fmt);
 
         // The colors an unset `color` takes in turn, one per call that draws in a
         // flat color: line(), scatter(), bar(), hist() (scatter_z() and heatmap()
@@ -140,6 +160,10 @@ namespace sextant {
         Range xlim() const;
 
         Range ylim() const;
+
+        Scale xscale() const;
+
+        Scale yscale() const;
 
         // Plot objects of each kind, in the order they were added. `*_data(i)`
         // returns a copy and throws std::out_of_range for i >= `*_count()`.

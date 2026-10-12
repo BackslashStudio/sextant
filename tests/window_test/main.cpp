@@ -1942,7 +1942,94 @@ static void test_events() {
     printf("[main] done\n");
 }
 
+// -------------------------------------------------------------------------
+// Axis scales (v1.2 step 36a): log, log-log, symlog, minor ticks and grid, tick
+// formats. Interactive: pan and zoom move whole decades on a log axis and keep
+// the point under the cursor; the hover readout shows data values; the
+// Cosmetic panel's Ticks section switches each axis' scale (disabled on the
+// heatmap cell), its minor marks and its format (red while not a %f/%e/%g).
+static void test_scales() {
+    constexpr int N = 200;
+    std::vector<double> t(N), growth(N), decay(N);
+    for (int i = 0; i < N; ++i) {
+        t[i] = 10.0 * i / (N - 1);
+        growth[i] = std::exp(t[i]);
+        decay[i] = 1e4 * std::exp(-1.5 * t[i]);
+    }
+    std::vector<double> f(N), mag(N);
+    for (int i = 0; i < N; ++i) {
+        f[i] = std::pow(10.0, -1.0 + 5.0 * i / (N - 1));
+        mag[i] = 100.0 / std::sqrt(1.0 + std::pow(f[i] / 100.0, 4.0));   // 2nd-order low-pass, in %
+    }
+    std::vector<double> px, p1, p2, pm, perr;
+    for (int i = 0; i <= 12; ++i) {
+        const double v = std::pow(10.0, -1.0 + 4.0 * i / 12.0);
+        px.push_back(v);
+        p1.push_back(v);
+        p2.push_back(v * v);
+        pm.push_back(1.0 / v);
+        perr.push_back(0.3 * v * v);
+    }
+    std::vector<double> s(N), sy(N);
+    for (int i = 0; i < N; ++i) {
+        s[i] = -10.0 + 20.0 * i / (N - 1);
+        sy[i] = std::sinh(s[i]);
+    }
+    const std::vector<double> cells{1, 2, 3, 4, 5, 6};
+    const std::vector<double> bins{1, 2, 3, 4, 5}, counts{3, 40, 700, 9000, 120000};
+    const std::vector<double> count_err{1, 10, 100, 1000, 30000};
+
+    auto fig = sextant::Figure::create({.width = 1400, .height = 850, .title = "Axis scales"});
+    fig->suptitle("set_xscale / set_yscale, minor ticks, tick formats");
+
+    fig->add_subplot(2, 3, 1)
+            ->line(t, growth, {.name = "e^t"})
+            .line(t, decay, {.name = "1e4 e^{-1.5t}"})
+            .set_yscale(sextant::Scale::Log)
+            .grid(true, {.minor = true})
+            .legend()
+            .set_title("semilog y, minor grid").set_xtitle("t").set_ytitle("value");
+
+    fig->add_subplot(2, 3, 2)
+            ->scatter(px, p1, {.name = "x"})
+            .line(px, p2, {.y_cap_lo = perr}, {.name = "x^2 +- 30%"})
+            .scatter(px, pm, {.name = "1/x"})
+            .set_xscale(sextant::Scale::Log)
+            .set_yscale(sextant::Scale::Log)
+            .grid()
+            .legend()
+            .set_title("log-log, error bars").set_xtitle("x").set_ytitle("y");
+
+    fig->add_subplot(2, 3, 3)
+            ->line(f, mag, {.linewidth = 2.0f})
+            .set_xscale(sextant::Scale::Log)
+            .set_ytick_format("%.0f%%")
+            .set_ylim(0.0, 110.0)
+            .grid(true, {.minor = true})
+            .set_title("semilog x, y as %.0f%%").set_xtitle("frequency (Hz)").set_ytitle("gain");
+
+    fig->add_subplot(2, 3, 4)
+            ->line(s, sy, {.linewidth = 2.0f})
+            .set_yscale(sextant::Scale::Symlog, {.linthresh = 1.0})
+            .grid()
+            .set_title("symlog y: sinh(x)").set_xtitle("x").set_ytitle("sinh(x)");
+
+    fig->add_subplot(2, 3, 5)
+            ->bar(bins, counts, {.y_cap_lo = count_err}, {})
+            .set_yscale(sextant::Scale::Log, {.base = 2.0})
+            .set_xtick_format("#%.0f")
+            .set_title("bars on log2 y (stand on the frame)").set_xtitle("bin").set_ytitle("count");
+
+    fig->add_subplot(2, 3, 6)
+            ->imshow(cells, 2, 3, {.vmin = 1.0f, .vmax = 6.0f})
+            .set_title("heatmap: linear only (scale combo disabled)");
+
+    savefig_and_check_memory(fig, "test_scales");
+    fig->show(true);
+}
+
 int main() {
+    test_scales();
     // test_axis_position3d();
     // test_axis_position();
     test_axes_gallery();

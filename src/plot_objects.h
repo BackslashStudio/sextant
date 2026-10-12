@@ -1,6 +1,7 @@
 #pragma once
 #include "sextant/style.h"
 #include "sextant/axes3d.h"
+#include "axis_scale.h"
 #include "cow_vec.h"
 #include "tick.h"
 #include <algorithm>
@@ -520,6 +521,11 @@ struct RenderSnapshot {
     bool   xlim_auto = true, ylim_auto = true;
     LimitStamps limit_stamps;
     StyleStamps style_stamps;
+
+    // Axes::set_xscale()/set_yscale(); a plane's sheet keeps Linear.
+    AxisScale xscale, yscale;
+    // Axes::set_xtick_format()/set_ytick_format(); empty = the scale's default.
+    std::string xtick_format, ytick_format;
 
     // Explicit ticks; absent = generate_ticks().
     std::optional<std::vector<Tick>> xticks_override, yticks_override;

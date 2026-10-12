@@ -2,6 +2,7 @@
 #include "../axis_limits.h"
 #include "../axis_placement.h"
 #include "../rich_text.h"
+#include "../ticker.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -49,9 +50,26 @@ namespace sextant {
             return generate_ticks(lo, hi);
         }
 
+        // A 2D axis' drawn ticks: set_xticks() ones (relabelled by a tick
+        // format), or the scale's.
+        std::vector<Tick> ticks_for(const std::optional<std::vector<Tick>>& override_,
+                                    double lo, double hi, const AxisScale& s, const std::string& fmt) {
+            if (override_) return relabel_ticks(*override_, fmt);
+            return scale_ticks(lo, hi, s, fmt, mathtext_on());
+        }
+
+        // Minor positions, when the axis has them (AxesStyle::minor_xticks).
+        std::vector<double> minors_for(const std::optional<bool>& on, const std::optional<std::vector<Tick>>& override_,
+                                       double lo, double hi, const AxisScale& s) {
+            if (!on.value_or(!s.linear())) return {};
+            return scale_minor_ticks(lo, hi, s, override_.has_value());
+        }
+
         struct CellPrep {
             ResolvedLimits limits;
             std::vector<Tick> xticks, yticks;
+            // 2D only: minor tick positions.
+            std::vector<double> xminor, yminor;
             float max_ylabel_w = 0.0f;
 
             // Axis line placement; insets_for() needs it to know which band labels use.
@@ -66,14 +84,21 @@ namespace sextant {
         CellPrep prepare(const RenderSnapshot& snap) {
             CellPrep p;
             p.limits = resolve_limits(snap);
-            p.xticks = ticks_for(snap.xticks_override, p.limits.xmin, p.limits.xmax);
-            p.yticks = ticks_for(snap.yticks_override, p.limits.ymin, p.limits.ymax);
+            p.xticks = ticks_for(snap.xticks_override, p.limits.xmin, p.limits.xmax, snap.xscale,
+                                 snap.xtick_format);
+            p.yticks = ticks_for(snap.yticks_override, p.limits.ymin, p.limits.ymax, snap.yscale,
+                                 snap.ytick_format);
+            const auto& sty = snap.axes_style;
+            p.xminor = minors_for(sty.minor_xticks, snap.xticks_override, p.limits.xmin, p.limits.xmax,
+                                  snap.xscale);
+            p.yminor = minors_for(sty.minor_yticks, snap.yticks_override, p.limits.ymin, p.limits.ymax,
+                                  snap.yscale);
             p.max_ylabel_w = widest_label(p.yticks, snap.axes_style.font_path,
                                           snap.axes_style.label_fontsize);
 
             const auto& st = snap.axes_style;
-            p.xaxis = place_axis(st.xaxis_y, st.origin_y, p.limits.ymin, p.limits.ymax);
-            p.yaxis = place_axis(st.yaxis_x, st.origin_x, p.limits.xmin, p.limits.xmax);
+            p.xaxis = place_axis(st.xaxis_y, st.origin_y, p.limits.ymin, p.limits.ymax, snap.yscale);
+            p.yaxis = place_axis(st.yaxis_x, st.origin_x, p.limits.xmin, p.limits.xmax, snap.xscale);
             return p;
         }
 
@@ -912,11 +937,14 @@ namespace sextant {
                     // Empty for 3D: its ticks are in `box3d`.
                     c.xticks = prep[i].xticks;
                     c.yticks = prep[i].yticks;
+                    c.xminor = prep[i].xminor;
+                    c.yminor = prep[i].yminor;
 
                     c.tr = {
                         prep[i].limits.xmin, prep[i].limits.xmax,
                         prep[i].limits.ymin, prep[i].limits.ymax,
-                        c.frame.x, c.frame.y, c.frame.w, c.frame.h, fw, fh
+                        c.frame.x, c.frame.y, c.frame.w, c.frame.h, fw, fh,
+                        fa.snap2d()->xscale, fa.snap2d()->yscale
                     };
 
                     // Axis lines through the transform, so Mid and pins need no special

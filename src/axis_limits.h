@@ -17,20 +17,39 @@ namespace sextant {
         double xmin, xmax, ymin, ymax, zmin, zmax;
     };
 
+    // Automatic limits are worked out in each axis' scale space (settled,
+    // widened, padded) and mapped back, so a log axis pads by a share of its
+    // decades and an empty one reads 1..10.
     inline ResolvedLimits resolve_limits(const RenderSnapshot& snap) {
         ResolvedLimits r{snap.xmin, snap.xmax, snap.ymin, snap.ymax};
-        if (snap.xlim_auto || snap.ylim_auto) {
+        const AxisScale& xs = snap.xscale;
+        const AxisScale& ys = snap.yscale;
+        const bool xauto = snap.xlim_auto || !limits_fit(xs, snap.xmin, snap.xmax);
+        const bool yauto = snap.ylim_auto || !limits_fit(ys, snap.ymin, snap.ymax);
+        if (xauto || yauto) {
             // An origin pin is folded in before padding, as data (otherwise it
             // would land exactly on the frame edge and read as Low), after the
-            // axis is settled: with no data it widens 0..1.
+            // axis is settled: with no data it widens 0..1. A pin the scale
+            // can't place (<= 0 on log) widens nothing.
             const auto& st = snap.axes_style;
-            AutoBounds b = auto_bounds(snap.all());
+            AutoBounds b = auto_bounds(snap.all(), xs, ys);
             settle_axis(b.x);
             settle_axis(b.y);
-            widen_for_origin(st.origin_x, snap.xlim_auto, b.x.loose.lo, b.x.loose.hi);
-            widen_for_origin(st.origin_y, snap.ylim_auto, b.y.loose.lo, b.y.loose.hi);
-            if (snap.xlim_auto) pad_axis(b.x, kAutoScalePad, r.xmin, r.xmax);
-            if (snap.ylim_auto) pad_axis(b.y, kAutoScalePad, r.ymin, r.ymax);
+            const auto in_scale = [](const std::optional<double>& pin, const AxisScale& s) {
+                return pin && s.valid(*pin) ? std::optional<double>(s.fwd(*pin)) : std::nullopt;
+            };
+            widen_for_origin(in_scale(st.origin_x, xs), xauto, b.x.loose.lo, b.x.loose.hi);
+            widen_for_origin(in_scale(st.origin_y, ys), yauto, b.y.loose.lo, b.y.loose.hi);
+            if (xauto) {
+                pad_axis(b.x, kAutoScalePad, r.xmin, r.xmax);
+                r.xmin = xs.inv(r.xmin);
+                r.xmax = xs.inv(r.xmax);
+            }
+            if (yauto) {
+                pad_axis(b.y, kAutoScalePad, r.ymin, r.ymax);
+                r.ymin = ys.inv(r.ymin);
+                r.ymax = ys.inv(r.ymax);
+            }
         }
         return r;
     }

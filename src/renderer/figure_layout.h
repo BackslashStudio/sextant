@@ -236,6 +236,8 @@ namespace sextant {
         PlotRect frame; // the data area, i.e. what the spine outlines
         CoordTransform tr;
         std::vector<Tick> xticks, yticks;
+        // 2D: unlabelled minor tick positions (AxesStyle::minor_xticks).
+        std::vector<double> xminor, yminor;
 
         // 3D cells only (`tr`, tick lists and x/y title anchors are 2D only).
         std::optional<Box3DLayout> box3d;

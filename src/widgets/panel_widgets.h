@@ -164,6 +164,28 @@ namespace sextant {
         return false;
     }
 
+    // Names in Scale's order.
+    inline bool scale_combo(const char* label, Scale& s) {
+        static const char* kNames[] = {"Linear", "Log", "Symlog"};
+        int cur = static_cast<int>(s);
+        if (ImGui::Combo(label, &cur, kNames, IM_ARRAYSIZE(kNames))) {
+            s = static_cast<Scale>(cur);
+            return true;
+        }
+        return false;
+    }
+
+    // An optional<bool> as Auto / On / Off.
+    inline bool auto_on_off_combo(const char* label, std::optional<bool>& v) {
+        static const char* kNames[] = {"Auto", "On", "Off"};
+        int cur = !v ? 0 : (*v ? 1 : 2);
+        if (ImGui::Combo(label, &cur, kNames, IM_ARRAYSIZE(kNames))) {
+            v = cur == 0 ? std::nullopt : std::optional<bool>(cur == 1);
+            return true;
+        }
+        return false;
+    }
+
     inline bool linestyle_combo(const char* label, LineStyle& s) {
         static const char* kNames[] = {"Solid", "Dashed", "Dotted", "Dash-dot", "None"};
         int cur = static_cast<int>(s);

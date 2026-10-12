@@ -196,6 +196,12 @@ namespace sextant {
         bool grid_local = false;
         std::vector<Tick> xticks_scratch, yticks_scratch;
 
+        // 2D: each axis' scale and tick format as edited; a format the check
+        // refuses stays in its buffer, marked bad, and is not sent.
+        AxisScale xscale_local, yscale_local;
+        char xfmt_buf[64]{}, yfmt_buf[64]{};
+        bool xfmt_bad = false, yfmt_bad = false;
+
         // Live values for the optional origin_x/origin_y drag boxes; also restores
         // the previous number when a pin is re-ticked.
         double origin_x_scratch = 0.0, origin_y_scratch = 0.0;

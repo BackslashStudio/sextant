@@ -335,8 +335,6 @@ namespace sextant {
         const PlotRect& r = cell.frame;
         const auto& xticks = cell.xticks;
         const auto& yticks = cell.yticks;
-        const double xmin = cell.tr.xmin, xmax = cell.tr.xmax;
-        const double ymin = cell.tr.ymin, ymax = cell.tr.ymax;
 
         const float tick_len = style.tick_length;
         const float font_size = style.label_fontsize;
@@ -352,10 +350,54 @@ namespace sextant {
             nvgFillColor(vg_, nvgRGBAf(tlc.r, tlc.g, tlc.b, tlc.a));
         }
 
+        // Minor ticks first, so their grid lines go under the major ones.
+        if (!cell.xminor.empty() || !cell.yminor.empty()) {
+            const float mlen = style.minor_tick_length;
+            const auto& mc = grid_opts.minor_color;
+            for (const double v: cell.xminor) {
+                const float px = cell.tr.to_px(v);
+                if (px < r.x || px > r.x + r.w) continue;
+                if (grid_enabled && grid_opts.minor) {
+                    begin_styled_segment(vg_, px, r.y, px, r.y + r.h, grid_opts.linestyle);
+                    nvgStrokeColor(vg_, nvgRGBAf(mc.r, mc.g, mc.b, mc.a));
+                    nvgStrokeWidth(vg_, grid_opts.linewidth);
+                    nvgStroke(vg_);
+                }
+                if (style.show_xticks) {
+                    nvgBeginPath(vg_);
+                    nvgMoveTo(vg_, px, cell.xaxis_y);
+                    nvgLineTo(vg_, px, cell.xaxis_y + cell.xtick_dir * mlen);
+                    nvgStrokeColor(vg_, nvgRGBAf(tc.r, tc.g, tc.b, tc.a));
+                    nvgStrokeWidth(vg_, style.tick_linewidth);
+                    nvgStroke(vg_);
+                }
+            }
+            for (const double v: cell.yminor) {
+                const float py = cell.tr.to_py(v);
+                if (py < r.y || py > r.y + r.h) continue;
+                if (grid_enabled && grid_opts.minor) {
+                    begin_styled_segment(vg_, r.x, py, r.x + r.w, py, grid_opts.linestyle);
+                    nvgStrokeColor(vg_, nvgRGBAf(mc.r, mc.g, mc.b, mc.a));
+                    nvgStrokeWidth(vg_, grid_opts.linewidth);
+                    nvgStroke(vg_);
+                }
+                if (style.show_yticks) {
+                    nvgBeginPath(vg_);
+                    nvgMoveTo(vg_, cell.yaxis_x + cell.ytick_dir * mlen, py);
+                    nvgLineTo(vg_, cell.yaxis_x, py);
+                    nvgStrokeColor(vg_, nvgRGBAf(tc.r, tc.g, tc.b, tc.a));
+                    nvgStrokeWidth(vg_, style.tick_linewidth);
+                    nvgStroke(vg_);
+                }
+            }
+            nvgStrokeColor(vg_, nvgRGBAf(tc.r, tc.g, tc.b, tc.a));
+            nvgStrokeWidth(vg_, style.tick_linewidth);
+        }
+
         // X ticks — along the axis line, wherever the layout put it
         const float xa = cell.xaxis_y;
         for (const auto& t: xticks) {
-            const float px = r.x + static_cast<float>((t.value - xmin) / (xmax - xmin)) * r.w;
+            const float px = cell.tr.to_px(t.value);
             if (px < r.x || px > r.x + r.w) continue;
 
             // Tick mark (a hidden axis keeps its grid line below)
@@ -387,7 +429,7 @@ namespace sextant {
         // Y ticks — along the axis line, wherever the layout put it
         const float ya = cell.yaxis_x;
         for (const auto& t: yticks) {
-            const float py = r.y + r.h - static_cast<float>((t.value - ymin) / (ymax - ymin)) * r.h;
+            const float py = cell.tr.to_py(t.value);
             if (py < r.y || py > r.y + r.h) continue;
 
             // Tick mark

@@ -278,6 +278,11 @@ struct AxesEdit {
     // The style stamps of the snapshot the panel drew; filled in by FigureEditBox.
     StyleStamps style_seen = StyleStamps::any();
     std::optional<std::vector<Tick>> xticks_override, yticks_override;
+    // An axis' scale and tick format, in its ticks group (StyleStamps::xticks).
+    // A scale is skipped on an axes holding a heatmap; one that can't place set
+    // limits drops them to automatic, as Axes::set_xscale() does.
+    std::optional<AxisScale>   xscale, yscale;
+    std::optional<std::string> xtick_format, ytick_format;
     std::optional<AxesStyle> axes_style;
 
     // Whole options structs; the panel republishes its local copy on change.
@@ -397,6 +402,7 @@ inline bool is_navigation_only(const FigureEdits& f) {
         return false;
     for (const auto& [idx, e] : f.per_axes) {
         if (e.title || e.xtitle || e.ytitle || e.grid_enabled || e.axes_style || e.grid_opts
+            || e.xscale || e.yscale || e.xtick_format || e.ytick_format
             || e.legend_enabled || e.legend_opts || e.colorbar_opts
             || !e.plot_ops.empty() || !e.plot_styles.empty())
             return false;
@@ -1207,6 +1213,34 @@ void apply_style_edits(T& dst, const E& e, E* inv = nullptr) {
         ticks(dst.xticks_override, e.xticks_override, undo(&E::xticks_override));
     if (have.yticks <= seen.yticks)
         ticks(dst.yticks_override, e.yticks_override, undo(&E::yticks_override));
+    if constexpr (requires { dst.xscale; e.xscale; }) {
+        // A scale is refused over a heatmap, and drops set limits it can't place
+        // (the inverse restores them, unless the limit lane already recorded older).
+        auto scale = [&](AxisScale& d, const std::optional<AxisScale>& v, std::optional<AxisScale>* old,
+                         bool& lim_auto, double lo, double hi, std::optional<bool>* old_auto,
+                         std::optional<double>* old_lo, std::optional<double>* old_hi) {
+            if (!v || (!v->linear() && !dst.heatmaps.empty())) return;
+            if (old) *old = d;
+            d = *v;
+            if (lim_auto || limits_fit(d, lo, hi)) return;
+            if (old_auto && !*old_auto) {
+                *old_auto = false;
+                *old_lo = lo;
+                *old_hi = hi;
+            }
+            lim_auto = true;
+        };
+        if (have.xticks <= seen.xticks) {
+            scale(dst.xscale, e.xscale, undo(&E::xscale), dst.xlim_auto, dst.xmin, dst.xmax,
+                  undo(&E::xlim_auto), undo(&E::xmin), undo(&E::xmax));
+            put(dst.xtick_format, e.xtick_format, undo(&E::xtick_format));
+        }
+        if (have.yticks <= seen.yticks) {
+            scale(dst.yscale, e.yscale, undo(&E::yscale), dst.ylim_auto, dst.ymin, dst.ymax,
+                  undo(&E::ylim_auto), undo(&E::ymin), undo(&E::ymax));
+            put(dst.ytick_format, e.ytick_format, undo(&E::ytick_format));
+        }
+    }
     if constexpr (requires { dst.zticks_override; e.zticks_override; })
         if (have.zticks <= seen.zticks)
             ticks(dst.zticks_override, e.zticks_override, undo(&E::zticks_override));
@@ -1329,6 +1363,12 @@ void merge_style_edits(E& dst, const E& src) {
     take_latest(dst.colorbar_opts, src.colorbar_opts, ds.colorbar, ss.colorbar);
     take_latest(dst.xticks_override, src.xticks_override, ds.xticks, ss.xticks);
     take_latest(dst.yticks_override, src.yticks_override, ds.yticks, ss.yticks);
+    if constexpr (requires { src.xscale; }) {
+        take_latest(dst.xscale, src.xscale, ds.xticks, ss.xticks);
+        take_latest(dst.yscale, src.yscale, ds.yticks, ss.yticks);
+        take_latest(dst.xtick_format, src.xtick_format, ds.xticks, ss.xticks);
+        take_latest(dst.ytick_format, src.ytick_format, ds.yticks, ss.yticks);
+    }
     for (const PlotStyleEdit& s : src.plot_styles)
         upsert(dst.plot_styles, s, [](const PlotStyleEdit& p) {
             return std::tuple(edits_detail::object_key(p.plane_index, p.plot_index, p.id),
@@ -1367,6 +1407,8 @@ bool style_edits_empty(const E& e) {
     bool empty = !e.grid_enabled && !e.grid_opts && !e.axes_style && !e.legend_enabled
                  && !e.legend_opts && !e.colorbar_opts && !e.xticks_override
                  && !e.yticks_override && e.plot_styles.empty();
+    if constexpr (requires { e.xscale; })
+        empty = empty && !e.xscale && !e.yscale && !e.xtick_format && !e.ytick_format;
     if constexpr (requires { e.box_style; })
         empty = empty && !e.zticks_override && !e.box_style && !e.aspect && e.planes.empty()
                 && e.bars3d.empty() && e.surfaces.empty() && e.scatter3d.empty()
@@ -1476,6 +1518,12 @@ void compose_axes_inverse(E& older, const E& newer) {
     keep_older(older.colorbar_opts, newer.colorbar_opts);
     keep_older(older.xticks_override, newer.xticks_override);
     keep_older(older.yticks_override, newer.yticks_override);
+    if constexpr (requires { older.xscale; }) {
+        keep_older(older.xscale, newer.xscale);
+        keep_older(older.yscale, newer.yscale);
+        keep_older(older.xtick_format, newer.xtick_format);
+        keep_older(older.ytick_format, newer.ytick_format);
+    }
     older.plot_ops.insert(older.plot_ops.begin(), newer.plot_ops.begin(), newer.plot_ops.end());
     edits_detail::compose_entries(older.plot_styles, newer.plot_styles,
                                   [](const PlotStyleEdit& p) {

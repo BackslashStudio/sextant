@@ -67,6 +67,8 @@ namespace lt {
                 return x ? "+" + encode_color(*x) : "-";
             else if constexpr (std::is_same_v<X, std::optional<double>>)
                 return x ? "+" + num(*x, 17) : "-";
+            else if constexpr (std::is_same_v<X, std::optional<bool>>)
+                return x ? (*x ? "+true" : "+false") : "-";
             else if constexpr (std::is_same_v<X, std::vector<double>>) {
                 std::string s = std::to_string(x.size());
                 for (double d : x) s += kSep + num(d, 17);
@@ -95,6 +97,9 @@ namespace lt {
             } else if constexpr (std::is_same_v<X, std::optional<double>>) {
                 if (s == "-") x.reset();
                 else x = std::strtod(s.c_str() + 1, nullptr);
+            } else if constexpr (std::is_same_v<X, std::optional<bool>>) {
+                if (s == "-") x.reset();
+                else x = s == "+true";
             } else if constexpr (std::is_same_v<X, std::vector<double>>) {
                 x.clear();
                 for (const auto& e : split(s)) x.push_back(std::strtod(e.c_str(), nullptr));
@@ -145,6 +150,7 @@ namespace lt {
             else if constexpr (std::is_same_v<X, std::optional<Color>>)
                 x = Color{f, 0.375f, 0.625f, 0.75f};
             else if constexpr (std::is_same_v<X, std::optional<double>>) x = 1.5 + k;
+            else if constexpr (std::is_same_v<X, std::optional<bool>>) x = (k % 2) == 0;
             else if constexpr (std::is_same_v<X, std::vector<double>>) {
                 x.push_back(0.5 + k);
                 x.push_back(-1.0 / 3.0);
