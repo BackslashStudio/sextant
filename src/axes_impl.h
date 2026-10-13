@@ -102,6 +102,13 @@ struct Axes::Impl {
     std::shared_ptr<Axes> make_twin(bool x, const char* who);
     // What a twin starts with: its shared axis hidden.
     void twin_defaults();
+    // Whose x (y) axis this axes' x (y) calls address (v1.2 step 36i): the
+    // host's for a twin's shared axis (a twinx's x), else its own.
+    bool shares_host_axis(bool x) const { return host && layer == (x ? kLayerTwinX : kLayerTwinY); }
+    Impl& axis_owner(bool x) { return shares_host_axis(x) ? *host : *this; }
+    const Impl& axis_owner(bool x) const { return shares_host_axis(x) ? *host : *this; }
+    // set_axes_style() on a twin: see Axes::twinx().
+    void set_twin_style(const AxesStyle& s);
     // set_xtick_format()/set_ytick_format(); empty = the scale's default.
     std::string xtick_format, ytick_format;
     // set_aspect() (v1.2 step 36b-3).

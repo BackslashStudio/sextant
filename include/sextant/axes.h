@@ -126,15 +126,20 @@ namespace sextant {
         // the frame, this one's y axis then staying on the left whatever
         // AxesStyle::yaxis_x or origin_x either holds. Plot into it as into any
         // axes; objects of the two draw in call order, whichever took them. The
-        // cell's title, legend and colorbars stay one: set_title(), legend() and
-        // set_colorbar_style() on the twin set this axes', title() reads it, and
-        // the legend lists both axes' series. The twin takes this axes' color
-        // cycle, so its series continue the colors. Its x axis is hidden
-        // (AxesStyle::show_xticks, which a set_axes_style() on it replaces too);
-        // its frame and background are never drawn, its grid draws its y lines
-        // only, and its y title sits on the right. Pan and zoom move both axes.
-        // A second call returns the same twin; cla() on this axes keeps it. The
-        // twin lives as long as this axes. Throws std::invalid_argument on a twin.
+        // cell's title, legend, colorbars and x axis stay one: set_title(),
+        // legend(), set_colorbar_style(), set_xtitle(), set_xticks() and
+        // set_xtick_format() on the twin set this axes', title() and xtitle()
+        // read it, and the legend lists both axes' series. set_axes_style() on
+        // the twin likewise keeps the fields of its y axis (and the shared tick
+        // and label fields that axis falls back on), gives those of the x axis
+        // and of the cell (background, frame, axes title) to this axes, and
+        // drops what a twin can't use (axis positions, origins, z). The twin
+        // takes this axes' color cycle, so its series continue the colors. Its
+        // own x axis, frame and background are never drawn, its grid draws its
+        // y lines only, and its y title sits on the right; AxesStyle::yaxis_color
+        // colors each one's frame edge. Pan and zoom move both axes. A second
+        // call returns the same twin; cla() on this axes keeps it. The twin
+        // lives as long as this axes. Throws std::invalid_argument on a twin.
         std::shared_ptr<Axes> twinx();
 
         // The same with the axes swapped: shares the y axis, its own x axis at

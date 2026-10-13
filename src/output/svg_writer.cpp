@@ -3,6 +3,7 @@
 #include "../font_discovery.h"
 #include "../line_dash.h"
 #include "../rich_text.h"
+#include "../tick_style.h"
 #include "../contour.h"
 #include "../renderer/marker_shape.h"
 #include "../renderer/error_bar_shape.h"
@@ -592,20 +593,37 @@ static void emit_contours3d(std::ostringstream& o, const SvgAxesData& d) {
         emit_contour_draw(o, d, p.draw, p.color, p.linewidth, p.fontsize);
 }
 
-// The frame outline: one <path> of up to four visible edges.
+// The frame outline: one <path> of the visible edges in spine_color, then one
+// per edge in an axis color of its own (a twinned cell, SvgAxesData::edges).
 static void emit_spines(std::ostringstream& o, const SvgAxesData& d) {
     const AxesStyle& st = d.axes_style;
     const PlotRect&  r  = d.layout.frame;
-    if (!(st.spine_bottom || st.spine_left || st.spine_top || st.spine_right)) return;
+    struct Edge { bool on; const std::optional<Color>* own; char dir; float x, y, to; };
+    const Edge all[4] = {
+        {st.spine_bottom, &d.edges.bottom, 'H', r.x, r.y + r.h, r.x + r.w},
+        {st.spine_top, &d.edges.top, 'H', r.x, r.y, r.x + r.w},
+        {st.spine_left, &d.edges.left, 'V', r.x, r.y, r.y + r.h},
+        {st.spine_right, &d.edges.right, 'V', r.x + r.w, r.y, r.y + r.h},
+    };
+    const auto end_path = [&](const Color& c) {
+        o << "\" fill=\"none\" stroke=\"" << rgb(c)
+          << "\" stroke-opacity=\"" << c.a
+          << "\" stroke-width=\"" << st.spine_linewidth << "\"/>\n";
+    };
 
-    o << "  <path d=\"";
-    if (st.spine_bottom) o << "M" << r.x << " " << r.y + r.h << "H" << r.x + r.w << " ";
-    if (st.spine_top)    o << "M" << r.x << " " << r.y        << "H" << r.x + r.w << " ";
-    if (st.spine_left)   o << "M" << r.x << " " << r.y        << "V" << r.y + r.h << " ";
-    if (st.spine_right)  o << "M" << r.x + r.w << " " << r.y  << "V" << r.y + r.h << " ";
-    o << "\" fill=\"none\" stroke=\"" << rgb(st.spine_color)
-      << "\" stroke-opacity=\"" << st.spine_color.a
-      << "\" stroke-width=\"" << st.spine_linewidth << "\"/>\n";
+    bool any = false;
+    for (const Edge& e : all)
+        if (e.on && !e.own->has_value()) {
+            if (!any) o << "  <path d=\"";
+            any = true;
+            o << "M" << e.x << " " << e.y << e.dir << e.to << " ";
+        }
+    if (any) end_path(st.spine_color);
+    for (const Edge& e : all)
+        if (e.on && e.own->has_value()) {
+            o << "  <path d=\"M" << e.x << " " << e.y << e.dir << e.to << " ";
+            end_path(**e.own);
+        }
 }
 
 // An axis that landed off the frame's edges, so no spine draws it.
@@ -624,66 +642,114 @@ static void emit_interior_axes(std::ostringstream& o, const SvgAxesData& d) {
       << "\" stroke-width=\"" << st.spine_linewidth << "\"/>\n";
 }
 
+// Each axis in its own look (tick_look()); axes that look alike share one
+// group, marks and labels apart.
 static void emit_ticks_and_labels(std::ostringstream& o, const SvgAxesData& d) {
-    const float tick_len = d.axes_style.tick_length;
-    const float fsz      = d.axes_style.label_fontsize;
+    const AxesStyle& st = d.axes_style;
+    const TickLook xk = tick_look(st, TickAxis::X);
+    const TickLook yk = tick_look(st, TickAxis::Y);
+    const auto open_marks = [&](const TickLook& k) {
+        o << "  <g stroke=\"" << rgb(k.color) << "\" stroke-opacity=\""
+          << k.color.a << "\" stroke-width=\"" << k.linewidth << "\">\n";
+    };
 
-    o << "  <g stroke=\"" << rgb(d.axes_style.tick_color) << "\" stroke-opacity=\""
-      << d.axes_style.tick_color.a << "\" stroke-width=\"" << d.axes_style.tick_linewidth << "\">\n";
     // Along the axis lines, in the layout's direction (matches NanoVG).
     const float xa = d.layout.xaxis_y;
     const float ya = d.layout.yaxis_x;
-    for (const auto& t : d.layout.xticks) {
-        if (!d.axes_style.show_xticks) break;
-        float px = d.layout.tr.to_px(t.value);
-        o << "    <line x1=\"" << px << "\" y1=\"" << xa
-          <<        "\" x2=\"" << px << "\" y2=\"" << xa + d.layout.xtick_dir * tick_len << "\"/>\n";
-    }
-    for (const auto& t : d.layout.yticks) {
-        if (!d.axes_style.show_yticks) break;
-        float py = d.layout.tr.to_py(t.value);
-        o << "    <line x1=\"" << ya + d.layout.ytick_dir * tick_len << "\" y1=\"" << py
-          <<        "\" x2=\"" << ya << "\" y2=\"" << py << "\"/>\n";
-    }
-    // Minor marks, only those in the frame (as NanoVG).
     const PlotRect& f = d.layout.frame;
-    const float mlen = d.axes_style.minor_tick_length;
-    for (const double v : d.layout.xminor) {
-        if (!d.axes_style.show_xticks) break;
-        const float px = d.layout.tr.to_px(v);
-        if (px < f.x || px > f.x + f.w) continue;
-        o << "    <line x1=\"" << px << "\" y1=\"" << xa
-          <<        "\" x2=\"" << px << "\" y2=\"" << xa + d.layout.xtick_dir * mlen << "\"/>\n";
+    const auto x_marks = [&] {
+        for (const auto& t : d.layout.xticks) {
+            if (!st.show_xticks) break;
+            float px = d.layout.tr.to_px(t.value);
+            o << "    <line x1=\"" << px << "\" y1=\"" << xa
+              <<        "\" x2=\"" << px << "\" y2=\"" << xa + d.layout.xtick_dir * xk.length << "\"/>\n";
+        }
+    };
+    const auto y_marks = [&] {
+        for (const auto& t : d.layout.yticks) {
+            if (!st.show_yticks) break;
+            float py = d.layout.tr.to_py(t.value);
+            o << "    <line x1=\"" << ya + d.layout.ytick_dir * yk.length << "\" y1=\"" << py
+              <<        "\" x2=\"" << ya << "\" y2=\"" << py << "\"/>\n";
+        }
+    };
+    // Minor marks, only those in the frame (as NanoVG).
+    const auto x_minor = [&] {
+        for (const double v : d.layout.xminor) {
+            if (!st.show_xticks) break;
+            const float px = d.layout.tr.to_px(v);
+            if (px < f.x || px > f.x + f.w) continue;
+            o << "    <line x1=\"" << px << "\" y1=\"" << xa
+              <<        "\" x2=\"" << px << "\" y2=\"" << xa + d.layout.xtick_dir * xk.minor_length << "\"/>\n";
+        }
+    };
+    const auto y_minor = [&] {
+        for (const double v : d.layout.yminor) {
+            if (!st.show_yticks) break;
+            const float py = d.layout.tr.to_py(v);
+            if (py < f.y || py > f.y + f.h) continue;
+            o << "    <line x1=\"" << ya + d.layout.ytick_dir * yk.minor_length << "\" y1=\"" << py
+              <<        "\" x2=\"" << ya << "\" y2=\"" << py << "\"/>\n";
+        }
+    };
+    if (same_marks(xk, yk)) {
+        open_marks(xk);
+        x_marks();
+        y_marks();
+        x_minor();
+        y_minor();
+        o << "  </g>\n";
+    } else {
+        open_marks(xk);
+        x_marks();
+        x_minor();
+        o << "  </g>\n";
+        open_marks(yk);
+        y_marks();
+        y_minor();
+        o << "  </g>\n";
     }
-    for (const double v : d.layout.yminor) {
-        if (!d.axes_style.show_yticks) break;
-        const float py = d.layout.tr.to_py(v);
-        if (py < f.y || py > f.y + f.h) continue;
-        o << "    <line x1=\"" << ya + d.layout.ytick_dir * mlen << "\" y1=\"" << py
-          <<        "\" x2=\"" << ya << "\" y2=\"" << py << "\"/>\n";
-    }
-    o << "  </g>\n";
 
-    o << "  <g font-family=\"" << svg_font_family(d.axes_style) << "\" font-size=\"" << fsz
-      << "\" fill=\"" << rgb(d.axes_style.label_color) << "\">\n";
+    const auto open_labels = [&](const TickLook& k) {
+        o << "  <g font-family=\"" << svg_font_family(st) << "\" font-size=\"" << k.label_fontsize
+          << "\" fill=\"" << rgb(k.label_color) << "\">\n";
+    };
     // Baseline offsets from the font's metrics (a label's own with math),
     // matching NanoVG's top-hung x labels and centred y labels.
-    const std::string& fp = d.axes_style.font_path;
-    for (const auto& t : d.layout.xticks) {
-        if (!d.axes_style.show_xticks || !d.layout.xlabels) break;
-        float px = d.layout.tr.to_px(t.value);
-        o << "    <text x=\"" << px << "\" y=\"" << d.layout.xlabel_top + top_baseline_offset(fp, fsz, t.label)
-          << "\" text-anchor=\"middle\">" << text_body(t.label, fp, fsz) << "</text>\n";
+    const std::string& fp = st.font_path;
+    const auto x_labels = [&] {
+        const float fsz = xk.label_fontsize;
+        for (const auto& t : d.layout.xticks) {
+            if (!st.show_xticks || !d.layout.xlabels) break;
+            float px = d.layout.tr.to_px(t.value);
+            o << "    <text x=\"" << px << "\" y=\"" << d.layout.xlabel_top + top_baseline_offset(fp, fsz, t.label)
+              << "\" text-anchor=\"middle\">" << text_body(t.label, fp, fsz) << "</text>\n";
+        }
+    };
+    const auto y_labels = [&] {
+        const float fsz = yk.label_fontsize;
+        const char* y_anchor = d.layout.ylabel_align == HAlign::Left ? "start" : "end";
+        for (const auto& t : d.layout.yticks) {
+            if (!st.show_yticks || !d.layout.ylabels) break;
+            float py = d.layout.tr.to_py(t.value);
+            o << "    <text x=\"" << d.layout.ylabel_x
+              << "\" y=\"" << py + middle_baseline_offset(fp, fsz, t.label)
+              << "\" text-anchor=\"" << y_anchor << "\">" << text_body(t.label, fp, fsz) << "</text>\n";
+        }
+    };
+    if (same_labels(xk, yk)) {
+        open_labels(xk);
+        x_labels();
+        y_labels();
+        o << "  </g>\n";
+    } else {
+        open_labels(xk);
+        x_labels();
+        o << "  </g>\n";
+        open_labels(yk);
+        y_labels();
+        o << "  </g>\n";
     }
-    const char* y_anchor = d.layout.ylabel_align == HAlign::Left ? "start" : "end";
-    for (const auto& t : d.layout.yticks) {
-        if (!d.axes_style.show_yticks || !d.layout.ylabels) break;
-        float py = d.layout.tr.to_py(t.value);
-        o << "    <text x=\"" << d.layout.ylabel_x
-          << "\" y=\"" << py + middle_baseline_offset(fp, fsz, t.label)
-          << "\" text-anchor=\"" << y_anchor << "\">" << text_body(t.label, fp, fsz) << "</text>\n";
-    }
-    o << "  </g>\n";
 }
 
 // Anchors come from the layout; only the centre-to-baseline conversion is here.
@@ -1306,8 +1372,8 @@ static void emit_box3d(std::ostringstream& o, const SvgAxesData& d, std::size_t 
 
     emit_polys(o, plan.axis_lines, "none", &d.axes_style.spine_color,
                d.axes_style.spine_linewidth, false);
-    emit_polys(o, plan.tick_marks, "none", &d.axes_style.tick_color,
-               d.axes_style.tick_linewidth, false);
+    for (const TickRun& run : tick_runs(plan, d.axes_style))
+        emit_polys(o, run.marks, "none", &run.color, run.linewidth, false);
     emit_box3d_labels(o, plan.tick_labels);
     emit_box3d_labels(o, plan.axis_titles);
 }

@@ -289,6 +289,9 @@ int main() {
     // twin.cpp
     test_twin();
 
+    // tick_style.cpp
+    test_tick_style();
+
     // aspect.cpp
     test_aspect();
 

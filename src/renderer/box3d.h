@@ -35,7 +35,9 @@ struct Box3DPlan {
 
     // Drawn over it (pass 3).
     std::vector<Poly>  axis_lines;
+    // x's, then y's, then z's; each axis' from tick_begin[axis] on.
     std::vector<Poly>  tick_marks;
+    std::size_t        tick_begin[3] = {0, 0, 0};
     std::vector<Label> tick_labels;
     std::vector<Label> axis_titles;
 };
@@ -46,5 +48,15 @@ Box3DPlan plan_box3d(const Projector3D& proj, const RenderSnapshot3D& snap,
                      const std::vector<Tick>& xticks,
                      const std::vector<Tick>& yticks,
                      const std::vector<Tick>& zticks);
+
+// The plan's tick marks as runs of axes that stroke alike (tick_look()), in
+// order: one run holding them all unless an axis has a color or width of its
+// own. Empty runs are left out.
+struct TickRun {
+    std::vector<Box3DPlan::Poly> marks;
+    Color color;
+    float linewidth = 0.0f;
+};
+std::vector<TickRun> tick_runs(const Box3DPlan& plan, const AxesStyle& style);
 
 } // namespace sextant

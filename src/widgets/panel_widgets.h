@@ -13,6 +13,7 @@
 #include <cfloat>
 #include <cmath>
 #include <cstdio>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -93,6 +94,56 @@ namespace sextant {
                                  ImGuiColorEditFlags_NoInputs |
                                  ImGuiColorEditFlags_AlphaBar |
                                  ImGuiColorEditFlags_AlphaPreviewHalf);
+    }
+
+    // An override of a shared value (AxesStyle::xtick_color over tick_color):
+    // shown dimmed at the shared value while unset, set by an edit, cleared
+    // from its right-click menu. Call right after the item; true = cleared.
+    // `follows` names the shared value ("Both").
+    inline bool override_menu(const char* label, bool set, const char* follows) {
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip(set ? "Its own. Right-click to follow %s." : "Follows %s until edited.", follows);
+        // Named after the widget: the last item after a ColorEdit4 is its
+        // group, whose id other swatches share (one popup for all of them).
+        const std::string id = std::string(label) + "##follow";
+        if (!set || !ImGui::BeginPopupContextItem(id.c_str())) return false;
+        const std::string item = std::string("Follow ") + follows;
+        const bool clear = ImGui::MenuItem(item.c_str());
+        ImGui::EndPopup();
+        return clear;
+    }
+
+    inline bool override_color(const char* label, std::optional<Color>& v, const Color& shared,
+                               const char* follows = "Both") {
+        Color c = v.value_or(shared);
+        const bool set = v.has_value();
+        if (!set) ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.4f);
+        bool changed = ImGui::ColorEdit4(label, &c.r,
+                                         ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_AlphaBar |
+                                         ImGuiColorEditFlags_AlphaPreviewHalf | ImGuiColorEditFlags_NoOptions |
+                                         ImGuiColorEditFlags_NoTooltip);
+        if (!set) ImGui::PopStyleVar();
+        if (changed) v = c;
+        if (override_menu(label, set, follows)) {
+            v.reset();
+            changed = true;
+        }
+        return changed;
+    }
+
+    inline bool override_float(const char* label, std::optional<float>& v, float shared, float lo, float hi,
+                               float speed, const char* fmt, const char* follows = "Both") {
+        float f = v.value_or(shared);
+        const bool set = v.has_value();
+        if (!set) ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.4f);
+        bool changed = ImGui::DragFloat(label, &f, speed, lo, hi, fmt, ImGuiSliderFlags_AlwaysClamp);
+        if (!set) ImGui::PopStyleVar();
+        if (changed) v = f;
+        if (override_menu(label, set, follows)) {
+            v.reset();
+            changed = true;
+        }
+        return changed;
     }
 
     // Drag to slide, click to type (io.ConfigDragClickToInputText).

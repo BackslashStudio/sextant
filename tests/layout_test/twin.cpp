@@ -247,10 +247,23 @@ namespace lt {
             host->line(kX1, kY1);
             auto twin = host->twinx();
             twin->line(kX2, kY2);
-            AxesStyle ts;
-            ts.show_xticks = false;
-            ts.background = Color{0.0f, 1.0f, 0.0f, 1.0f};
-            twin->set_axes_style(ts);
+            // The twin's own background field, which only a panel edit reaches
+            // (set_axes_style() on a twin gives the background to its host).
+            {
+                auto& fi = detail::FigureAccess::impl(*fig);
+                AxesStyle ts = snap(*fig).axes[0].twins[0].snap.axes_style;
+                ts.background = Color{0.0f, 1.0f, 0.0f, 1.0f};
+                FigureEdits e;
+                AxesEdit ae;
+                ae.axes_style = ts;
+                e.per_axes.push_back({axes_key(1, kLayerTwinX), ae});
+                fi.apply_edits(e);
+                fi.apply_edits_and_publish();
+                const FigureSnapshot s = snap(*fig);
+                check(s.axes[0].twins[0].snap.axes_style.background.r == 0.0f
+                          && s.axes[0].snap2d()->axes_style.background.r == 1.0f,
+                      "twin render: (a panel edit sets the twin's own background, not the host's)");
+            }
             GridOptions go;
             go.color = Color{0.0f, 0.0f, 1.0f, 1.0f};
             twin->grid(true, go);

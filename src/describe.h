@@ -12,10 +12,11 @@
 // `described<F>` holds, or uses for_each_leaf(), which does that for it.
 //
 // Leaf types: bool, int, float, double, std::size_t, std::string, Color,
-// std::optional<Color>, std::optional<double>, std::optional<bool>, std::vector<double>,
-// std::vector<std::string>, Colormap (named by its name() and from_name(),
-// since registered maps make it open-ended), and the enums below, whose names
-// enum_name() and enum_from_name() give.
+// std::optional<Color>, std::optional<double>, std::optional<float>,
+// std::optional<bool>, std::vector<double>, std::vector<std::string>, Colormap
+// (named by its name() and from_name(), since registered maps make it
+// open-ended), and the enums below, whose names enum_name() and
+// enum_from_name() give.
 //
 // Every field of a struct must be listed: a field added to a public header
 // is an edit here. layout_test checks each list against the struct's layout,
@@ -67,12 +68,17 @@ namespace sextant {
     SEXTANT_DESCRIBE(GridOptions, F(color) F(linestyle) F(linewidth) F(minor) F(minor_color))
     SEXTANT_DESCRIBE(AxesStyle,
                      F(background) F(spine_color) F(spine_linewidth) F(spine_bottom) F(spine_left) F(spine_top)
-                     F(spine_right) F(xaxis_y) F(xaxis_z) F(yaxis_x) F(yaxis_z) F(zaxis_x)
+                     F(spine_right) F(xaxis_color) F(yaxis_color) F(xaxis_y) F(xaxis_z) F(yaxis_x)
+                     F(yaxis_z) F(zaxis_x)
                      F(zaxis_y) F(origin_x) F(origin_y) F(origin_z) F(frame_margin)
                      F(show_xticks) F(show_yticks) F(show_zticks) F(show_xtick_labels)
                      F(show_ytick_labels)
                      F(tick_color) F(tick_length) F(tick_linewidth) F(minor_xticks)
                      F(minor_yticks) F(minor_tick_length) F(label_color) F(label_fontsize)
+                     F(xtick_color) F(ytick_color) F(ztick_color) F(xtick_length) F(ytick_length)
+                     F(ztick_length) F(xtick_linewidth) F(ytick_linewidth) F(ztick_linewidth)
+                     F(minor_xtick_length) F(minor_ytick_length) F(xlabel_color) F(ylabel_color)
+                     F(zlabel_color) F(xlabel_fontsize) F(ylabel_fontsize) F(zlabel_fontsize)
                      F(title_color) F(title_fontsize) F(xtitle_color) F(xtitle_fontsize)
                      F(ytitle_color) F(ytitle_fontsize) F(ztitle_color) F(ztitle_fontsize)
                      F(font_path))

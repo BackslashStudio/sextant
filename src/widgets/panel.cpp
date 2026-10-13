@@ -101,6 +101,98 @@ bool sheet_objects_differ(const DataPanelState::SheetStyles& s, const RenderSnap
     return !same_objects(s.ids, sn, kPlotKinds2D);
 }
 
+// Ticks & labels' look, 2D and 3D: the shared fields under Both, each axis'
+// own beside them (AxesStyle::xtick_color ..., see tick_look()). `axes`: 2 or
+// 3 columns (x, y[, z]); `locked`: an axis column that is another layer's (a
+// twin's shared axis, its host's), or -1; `minor`: a minor length row (2D).
+// True when anything changed.
+bool tick_look_table(AxesStyle& s, int axes, int locked, bool minor, bool is3d) {
+    if (!ImGui::BeginTable("ticklook", 2 + axes, ImGuiTableFlags_SizingFixedFit)) return false;
+    ImGui::TableSetupColumn("##label", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 4.5f);
+    for (int c = 0; c < 1 + axes; ++c) ImGui::TableSetupColumn("##v", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+    static const char* kHead[] = {"Both", "X", "Y", "Z"};
+    ImGui::TableNextRow();
+    ImGui::TableNextColumn();
+    for (int c = 0; c < 1 + axes; ++c) {
+        ImGui::TableNextColumn();
+        ImGui::TextDisabled("%s", kHead[c]);
+        if (c > 0 && c - 1 == locked && ImGui::IsItemHovered())
+            ImGui::SetTooltip("This axis is the host's: see Host.");
+    }
+
+    using S = AxesStyle;
+    struct ColorRow { const char* label; Color S::*shared; std::optional<Color> S::*own[3]; };
+    struct FloatRow {
+        const char* label; float S::*shared; std::optional<float> S::*own[3];
+        float lo, hi, speed; const char* fmt;
+    };
+    const float len_hi = is3d ? 40.0f : 20.0f;
+    const float w_lo = is3d ? 0.1f : 0.5f, w_hi = is3d ? 10.0f : 6.0f, w_speed = is3d ? 0.05f : 0.02f;
+    const ColorRow mark{"Mark", &S::tick_color, {&S::xtick_color, &S::ytick_color, &S::ztick_color}};
+    const FloatRow len{"Length", &S::tick_length, {&S::xtick_length, &S::ytick_length, &S::ztick_length},
+                       0.0f, len_hi, 0.1f, "%.1f px"};
+    const FloatRow width{"Width", &S::tick_linewidth,
+                         {&S::xtick_linewidth, &S::ytick_linewidth, &S::ztick_linewidth},
+                         w_lo, w_hi, w_speed, "%.2f px"};
+    const FloatRow minor_len{"Minor", &S::minor_tick_length, {&S::minor_xtick_length, &S::minor_ytick_length, nullptr},
+                             0.0f, len_hi, 0.1f, "%.1f px"};
+    const ColorRow label{"Label", &S::label_color, {&S::xlabel_color, &S::ylabel_color, &S::zlabel_color}};
+    const FloatRow size{"Size", &S::label_fontsize,
+                        {&S::xlabel_fontsize, &S::ylabel_fontsize, &S::zlabel_fontsize},
+                        1.0f, 96.0f, 0.2f, "%.1f px"};
+
+    bool changed = false;
+    const auto start = [&](const char* l) {
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(l);
+        ImGui::PushID(l);
+    };
+    const auto cell = [&](int a) {
+        ImGui::TableNextColumn();
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        ImGui::PushID(a);
+        ImGui::BeginDisabled(a >= 0 && a == locked);
+    };
+    const auto end_cell = [&] {
+        ImGui::EndDisabled();
+        ImGui::PopID();
+    };
+    const auto color_row = [&](const ColorRow& r) {
+        start(r.label);
+        cell(-1);
+        changed |= color_swatch("##both", s.*r.shared);
+        end_cell();
+        for (int a = 0; a < axes; ++a) {
+            cell(a);
+            changed |= override_color("##own", s.*r.own[a], s.*r.shared);
+            end_cell();
+        }
+        ImGui::PopID();
+    };
+    const auto float_row = [&](const FloatRow& r) {
+        start(r.label);
+        cell(-1);
+        changed |= drag_float("##both", &(s.*r.shared), r.lo, r.hi, r.speed, r.fmt);
+        end_cell();
+        for (int a = 0; a < axes; ++a) {
+            cell(a);
+            if (r.own[a]) changed |= override_float("##own", s.*r.own[a], s.*r.shared, r.lo, r.hi, r.speed, r.fmt);
+            end_cell();
+        }
+        ImGui::PopID();
+    };
+    color_row(mark);
+    float_row(len);
+    float_row(width);
+    if (minor) float_row(minor_len);
+    color_row(label);
+    float_row(size);
+    ImGui::EndTable();
+    return changed;
+}
+
 // Seeding from the selected slot, one owner at a time. Each state
 // pulls when its user next runs: seed_* when the Selection generation moved,
 // the per-frame follows otherwise.
@@ -858,20 +950,8 @@ void draw_cosmetic_3d(CosmeticRefs& st, const RenderSnapshot3D& sn,
             if (ImGui::Checkbox("##showz3d", &sty.show_zticks)) push_style();
             end_field_table();
         }
-        // Mark on one row, label on the next, in one table.
-        if (begin_field_table("tick3d", 3)) {
-            field_row("Mark");
-            if (color_swatch("##tickcol3d", sty.tick_color)) push_style();
-            field_next("Length");
-            if (drag_float("##ticklen3d", &sty.tick_length, 0.0f, 40.0f, 0.1f, "%.1f px")) push_style();
-            field_next("Width");
-            if (drag_float("##tickw3d", &sty.tick_linewidth, 0.1f, 10.0f, 0.05f, "%.2f px")) push_style();
-            field_row("Label");
-            if (color_swatch("##labcol3d", sty.label_color)) push_style();
-            field_next("Size");
-            if (drag_float("##labsz3d", &sty.label_fontsize, 1.0f, 96.0f, 0.2f, "%.1f px")) push_style();
-            end_field_table();
-        }
+        // The look: Both, then each axis' own.
+        if (tick_look_table(sty, 3, -1, false, true)) push_style();
         // Tick tables choose which numbers show (labels are thinned per camera).
         ImGui::TextDisabled("Labels are thinned to fit the edge they sit on.");
 
@@ -1212,6 +1292,8 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
     const RenderSnapshot* cur2d = selected_layer(ctx.selection, *cur);
     const int layer = ctx.selection.layer;
     const bool host = layer == 0;
+    // A twin's shared axis is its host's (Axes::twinx()): 0 = x, 1 = y, -1 none.
+    const int host_axis = layer == kLayerTwinX ? 0 : layer == kLayerTwinY ? 1 : -1;
     // Under a twin, this layer's twinned axis sits on a fixed frame edge.
     bool fixed_x = false, fixed_y = false;
     for (const TwinSnapshot& t : cur->twins) {
@@ -1257,9 +1339,12 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
             { "Y title", "ytitle", st.cosmetic.ytitle_buf, sizeof(st.cosmetic.ytitle_buf), &AxesEdit::ytitle, &TitleStamps::ytitle,
               &sty.ytitle_color, &sty.ytitle_fontsize },
         };
-        if (!host) ImGui::TextDisabled("Title, frame, legend and colorbars: see Host.");
+        if (!host)
+            ImGui::TextDisabled("Title, frame, legend, colorbars and the %s axis: see Host.", host_axis == 0 ? "x" : "y");
         for (const TitleUi& t : titles) {
             if (!host && t.text == &AxesEdit::title) continue;
+            if ((host_axis == 0 && t.text == &AxesEdit::xtitle) || (host_axis == 1 && t.text == &AxesEdit::ytitle))
+                continue;
             ImGui::PushID(t.id);
             if (begin_field_table("text")) {
                 field_row(t.label);
@@ -1302,6 +1387,32 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
             field_row("Margin");
             if (drag_float("##framemargin", &sty.frame_margin, 0.0f, 400.0f, 0.5f, "%.0f px")) push_style();
             end_field_table();
+        }
+        // A twinned cell: the edges its twinned axes lie on, each in its axis'
+        // color (AxesStyle::xaxis_color) -- the host's here, a twin's on its
+        // layer, where the frame is otherwise the host's.
+        {
+            bool twinx = false, twiny = false;
+            for (const TwinSnapshot& t : cur->twins) {
+                twinx = twinx || t.layer == kLayerTwinX;
+                twiny = twiny || t.layer == kLayerTwinY;
+            }
+            const bool x_row = host ? twiny : layer == kLayerTwinY;
+            const bool y_row = host ? twinx : layer == kLayerTwinX;
+            const Color frame = cur->snap2d()->axes_style.spine_color;
+            if (!host && (x_row || y_row)) ImGui::SeparatorText("Axis frame");
+            if ((x_row || y_row) && begin_field_table("axiscol", 2)) {
+                if (x_row) {
+                    field_row("X axis");
+                    if (override_color("##xaxiscol", sty.xaxis_color, frame, "the frame")) push_style();
+                }
+                if (y_row) {
+                    if (x_row) field_next("Y axis");
+                    else field_row("Y axis");
+                    if (override_color("##yaxiscol", sty.yaxis_color, frame, "the frame")) push_style();
+                }
+                end_field_table();
+            }
         }
         // Frame edges, independent of ticks.
         if (host && begin_field_table("spines", 2)) {
@@ -1489,38 +1600,38 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
                 ImGui::TextDisabled("%s shared with %s", x ? "X" : "Y", with.c_str());
         }
         ImGui::SeparatorText("Ticks & labels");
-        // Per axis: marks and labels together (the grid stays).
+        // Per axis: marks and labels together (the grid stays). A twin's
+        // shared axis is its host's, greyed here.
         if (begin_field_table("tickshow", 2)) {
-            field_row("Show X");
+            const auto axis_cell = [&](int axis, const char* label, bool first) {
+                if (first) field_row(label);
+                else field_next(label);
+                ImGui::BeginDisabled(axis == host_axis);
+            };
+            axis_cell(0, "Show X", true);
             if (ImGui::Checkbox("##showx", &sty.show_xticks)) push_style();
-            field_next("Show Y");
+            ImGui::EndDisabled();
+            axis_cell(1, "Show Y", false);
             if (ImGui::Checkbox("##showy", &sty.show_yticks)) push_style();
+            ImGui::EndDisabled();
             // Unlabelled marks between the majors; Auto = on for log/symlog.
-            field_row("Minor X");
+            axis_cell(0, "Minor X", true);
             if (auto_on_off_combo("##minorx", sty.minor_xticks)) push_style();
-            field_next("Minor Y");
+            ImGui::EndDisabled();
+            axis_cell(1, "Minor Y", false);
             if (auto_on_off_combo("##minory", sty.minor_yticks)) push_style();
+            ImGui::EndDisabled();
             // Tick labels only; Auto = hidden on an inner axes of a share group.
-            field_row("Labels X");
+            axis_cell(0, "Labels X", true);
             if (auto_on_off_combo("##labelsx", sty.show_xtick_labels)) push_style();
-            field_next("Labels Y");
+            ImGui::EndDisabled();
+            axis_cell(1, "Labels Y", false);
             if (auto_on_off_combo("##labelsy", sty.show_ytick_labels)) push_style();
+            ImGui::EndDisabled();
             end_field_table();
         }
-        // Mark over Label in one table, so pairs line up.
-        if (begin_field_table("tick", 3)) {
-            field_row("Mark");
-            if (color_swatch("##tickcol", sty.tick_color)) push_style();
-            field_next("Length");
-            if (drag_float("##ticklen", &sty.tick_length, 0.0f, 20.0f, 0.1f, "%.1f px")) push_style();
-            field_next("Width");
-            if (drag_float("##tickw", &sty.tick_linewidth, 0.5f, 6.0f, 0.02f, "%.2f px")) push_style();
-            field_row("Label");
-            if (color_swatch("##labelcol", sty.label_color)) push_style();
-            field_next("Size");
-            if (drag_float("##labelsz", &sty.label_fontsize, 1.0f, 96.0f, 0.2f, "%.1f px")) push_style();
-            end_field_table();
-        }
+        // The look: Both, then each axis' own.
+        if (tick_look_table(sty, 2, host_axis, true, false)) push_style();
 
         // Scale and label format, per axis.
         ImGui::SeparatorText("Scale & format");
@@ -1554,6 +1665,11 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
                  &c.yfmt_bad, &AxesEdit::ytick_format},
             };
             for (ScaleAxis& a : axes) {
+                // A twin's shared axis: its scale and format are the host's.
+                if ((a.id[0] == 'X' ? 0 : 1) == host_axis) {
+                    ImGui::TextDisabled("%s axis: see Host", a.id);
+                    continue;
+                }
                 const bool has_heatmap = a.has_heatmap;
                 ImGui::PushID(a.id);
                 ImGui::TextDisabled("%s axis", a.id);
@@ -1603,12 +1719,17 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
             }
         }
 
-        ImGui::TextDisabled("X ticks");
-        if (draw_tick_table("xticks", st.cosmetic.xticks_scratch))
-            edit_box.update(idx, [&](AxesEdit& e){ e.xticks_override = st.cosmetic.xticks_scratch; });
-        ImGui::TextDisabled("Y ticks");
-        if (draw_tick_table("yticks", st.cosmetic.yticks_scratch))
-            edit_box.update(idx, [&](AxesEdit& e){ e.yticks_override = st.cosmetic.yticks_scratch; });
+        // Tick positions; a twin's shared axis takes the host's.
+        if (host_axis != 0) {
+            ImGui::TextDisabled("X ticks");
+            if (draw_tick_table("xticks", st.cosmetic.xticks_scratch))
+                edit_box.update(idx, [&](AxesEdit& e){ e.xticks_override = st.cosmetic.xticks_scratch; });
+        }
+        if (host_axis != 1) {
+            ImGui::TextDisabled("Y ticks");
+            if (draw_tick_table("yticks", st.cosmetic.yticks_scratch))
+                edit_box.update(idx, [&](AxesEdit& e){ e.yticks_override = st.cosmetic.yticks_scratch; });
+        }
     }
 
     // ==== Legend & colorbar ===============================================

@@ -147,33 +147,38 @@ namespace sextant {
         nvgFill(vg_);
     }
 
-    // Four segments (each edge has its own visibility flag), one stroke.
-    void NvgRenderer::draw_axes_border(const PlotRect& r, const AxesStyle& style) {
-        const bool any = style.spine_bottom || style.spine_left
-                         || style.spine_top || style.spine_right;
-        if (!any) return;
+    // Four segments (each edge has its own visibility flag): one stroke in
+    // spine_color, then one per edge in an axis color of its own.
+    void NvgRenderer::draw_axes_border(const PlotRect& r, const AxesStyle& style, const EdgeColors& edges) {
+        struct Edge { bool on; const std::optional<Color>* own; float x0, y0, x1, y1; };
+        const Edge all[4] = {
+            {style.spine_bottom, &edges.bottom, r.x, r.y + r.h, r.x + r.w, r.y + r.h},
+            {style.spine_top, &edges.top, r.x, r.y, r.x + r.w, r.y},
+            {style.spine_left, &edges.left, r.x, r.y, r.x, r.y + r.h},
+            {style.spine_right, &edges.right, r.x + r.w, r.y, r.x + r.w, r.y + r.h},
+        };
+        const auto stroke = [&](const Color& c) {
+            nvgStrokeColor(vg_, nvgRGBAf(c.r, c.g, c.b, c.a));
+            nvgStrokeWidth(vg_, style.spine_linewidth);
+            nvgStroke(vg_);
+        };
 
+        bool any = false;
         nvgBeginPath(vg_);
-        if (style.spine_bottom) {
-            nvgMoveTo(vg_, r.x, r.y + r.h);
-            nvgLineTo(vg_, r.x + r.w, r.y + r.h);
-        }
-        if (style.spine_top) {
-            nvgMoveTo(vg_, r.x, r.y);
-            nvgLineTo(vg_, r.x + r.w, r.y);
-        }
-        if (style.spine_left) {
-            nvgMoveTo(vg_, r.x, r.y);
-            nvgLineTo(vg_, r.x, r.y + r.h);
-        }
-        if (style.spine_right) {
-            nvgMoveTo(vg_, r.x + r.w, r.y);
-            nvgLineTo(vg_, r.x + r.w, r.y + r.h);
-        }
-        const auto& sc = style.spine_color;
-        nvgStrokeColor(vg_, nvgRGBAf(sc.r, sc.g, sc.b, sc.a));
-        nvgStrokeWidth(vg_, style.spine_linewidth);
-        nvgStroke(vg_);
+        for (const Edge& e : all)
+            if (e.on && !e.own->has_value()) {
+                nvgMoveTo(vg_, e.x0, e.y0);
+                nvgLineTo(vg_, e.x1, e.y1);
+                any = true;
+            }
+        if (any) stroke(style.spine_color);
+        for (const Edge& e : all)
+            if (e.on && e.own->has_value()) {
+                nvgBeginPath(vg_);
+                nvgMoveTo(vg_, e.x0, e.y0);
+                nvgLineTo(vg_, e.x1, e.y1);
+                stroke(**e.own);
+            }
     }
 
     namespace {
@@ -222,7 +227,8 @@ namespace sextant {
 
         // Unscissored: labels and titles sit in the frame's margin.
         stroke_group(vg_, plan.axis_lines, st.spine_color, st.spine_linewidth, false);
-        stroke_group(vg_, plan.tick_marks, st.tick_color, st.tick_linewidth, false);
+        for (const TickRun& run: tick_runs(plan, st))
+            stroke_group(vg_, run.marks, run.color, run.linewidth, false);
 
         if (font_ == -1) return;
         for (const auto* group: {&plan.tick_labels, &plan.axis_titles})
@@ -336,23 +342,24 @@ namespace sextant {
         const auto& xticks = cell.xticks;
         const auto& yticks = cell.yticks;
 
-        const float tick_len = style.tick_length;
-        const float font_size = style.label_fontsize;
-
-        const auto& tc = style.tick_color;
-        nvgStrokeColor(vg_, nvgRGBAf(tc.r, tc.g, tc.b, tc.a));
-        nvgStrokeWidth(vg_, style.tick_linewidth);
-
-        if (font_ != -1) {
-            nvgFontFaceId(vg_, font_for_path(style.font_path));
-            nvgFontSize(vg_, font_size);
-            const auto& tlc = style.label_color;
-            nvgFillColor(vg_, nvgRGBAf(tlc.r, tlc.g, tlc.b, tlc.a));
-        }
+        // Each axis in its own look (tick_look()); the grid lines between
+        // marks restore the stroke after themselves.
+        const TickLook xk = tick_look(style, TickAxis::X);
+        const TickLook yk = tick_look(style, TickAxis::Y);
+        const auto mark_stroke = [&](const TickLook& k) {
+            nvgStrokeColor(vg_, nvgRGBAf(k.color.r, k.color.g, k.color.b, k.color.a));
+            nvgStrokeWidth(vg_, k.linewidth);
+        };
+        const auto label_fill = [&](const TickLook& k) {
+            if (font_ == -1) return;
+            nvgFontSize(vg_, k.label_fontsize);
+            const auto& c = k.label_color;
+            nvgFillColor(vg_, nvgRGBAf(c.r, c.g, c.b, c.a));
+        };
+        if (font_ != -1) nvgFontFaceId(vg_, font_for_path(style.font_path));
 
         // Minor ticks first, so their grid lines go under the major ones.
         if (!cell.xminor.empty() || !cell.yminor.empty()) {
-            const float mlen = style.minor_tick_length;
             const auto& mc = grid_opts.minor_color;
             for (const double v: cell.xminor) {
                 const float px = cell.tr.to_px(v);
@@ -366,9 +373,8 @@ namespace sextant {
                 if (style.show_xticks) {
                     nvgBeginPath(vg_);
                     nvgMoveTo(vg_, px, cell.xaxis_y);
-                    nvgLineTo(vg_, px, cell.xaxis_y + cell.xtick_dir * mlen);
-                    nvgStrokeColor(vg_, nvgRGBAf(tc.r, tc.g, tc.b, tc.a));
-                    nvgStrokeWidth(vg_, style.tick_linewidth);
+                    nvgLineTo(vg_, px, cell.xaxis_y + cell.xtick_dir * xk.minor_length);
+                    mark_stroke(xk);
                     nvgStroke(vg_);
                 }
             }
@@ -383,19 +389,18 @@ namespace sextant {
                 }
                 if (style.show_yticks) {
                     nvgBeginPath(vg_);
-                    nvgMoveTo(vg_, cell.yaxis_x + cell.ytick_dir * mlen, py);
+                    nvgMoveTo(vg_, cell.yaxis_x + cell.ytick_dir * yk.minor_length, py);
                     nvgLineTo(vg_, cell.yaxis_x, py);
-                    nvgStrokeColor(vg_, nvgRGBAf(tc.r, tc.g, tc.b, tc.a));
-                    nvgStrokeWidth(vg_, style.tick_linewidth);
+                    mark_stroke(yk);
                     nvgStroke(vg_);
                 }
             }
-            nvgStrokeColor(vg_, nvgRGBAf(tc.r, tc.g, tc.b, tc.a));
-            nvgStrokeWidth(vg_, style.tick_linewidth);
         }
 
         // X ticks — along the axis line, wherever the layout put it
         const float xa = cell.xaxis_y;
+        mark_stroke(xk);
+        label_fill(xk);
         for (const auto& t: xticks) {
             const float px = cell.tr.to_px(t.value);
             if (px < r.x || px > r.x + r.w) continue;
@@ -404,7 +409,7 @@ namespace sextant {
             if (style.show_xticks) {
                 nvgBeginPath(vg_);
                 nvgMoveTo(vg_, px, xa);
-                nvgLineTo(vg_, px, xa + cell.xtick_dir * tick_len);
+                nvgLineTo(vg_, px, xa + cell.xtick_dir * xk.length);
                 nvgStroke(vg_);
             }
 
@@ -415,19 +420,20 @@ namespace sextant {
                 nvgStrokeColor(vg_, nvgRGBAf(gc.r, gc.g, gc.b, gc.a));
                 nvgStrokeWidth(vg_, grid_opts.linewidth);
                 nvgStroke(vg_);
-                nvgStrokeColor(vg_, nvgRGBAf(tc.r, tc.g, tc.b, tc.a));
-                nvgStrokeWidth(vg_, style.tick_linewidth);
+                mark_stroke(xk);
             }
 
             // Label
             if (font_ != -1 && style.show_xticks && cell.xlabels) {
                 label(px, cell.xlabel_top, NVG_ALIGN_CENTER | NVG_ALIGN_TOP, t.label,
-                      style.font_path, font_size);
+                      style.font_path, xk.label_fontsize);
             }
         }
 
         // Y ticks — along the axis line, wherever the layout put it
         const float ya = cell.yaxis_x;
+        mark_stroke(yk);
+        label_fill(yk);
         for (const auto& t: yticks) {
             const float py = cell.tr.to_py(t.value);
             if (py < r.y || py > r.y + r.h) continue;
@@ -435,7 +441,7 @@ namespace sextant {
             // Tick mark
             if (style.show_yticks) {
                 nvgBeginPath(vg_);
-                nvgMoveTo(vg_, ya + cell.ytick_dir * tick_len, py);
+                nvgMoveTo(vg_, ya + cell.ytick_dir * yk.length, py);
                 nvgLineTo(vg_, ya, py);
                 nvgStroke(vg_);
             }
@@ -447,14 +453,14 @@ namespace sextant {
                 nvgStrokeColor(vg_, nvgRGBAf(gc.r, gc.g, gc.b, gc.a));
                 nvgStrokeWidth(vg_, grid_opts.linewidth);
                 nvgStroke(vg_);
-                nvgStrokeColor(vg_, nvgRGBAf(tc.r, tc.g, tc.b, tc.a));
-                nvgStrokeWidth(vg_, style.tick_linewidth);
+                mark_stroke(yk);
             }
 
             // Label
             if (font_ != -1 && style.show_yticks && cell.ylabels) {
                 const int halign = cell.ylabel_align == HAlign::Left ? NVG_ALIGN_LEFT : NVG_ALIGN_RIGHT;
-                label(cell.ylabel_x, py, halign | NVG_ALIGN_MIDDLE, t.label, style.font_path, font_size);
+                label(cell.ylabel_x, py, halign | NVG_ALIGN_MIDDLE, t.label, style.font_path,
+                      yk.label_fontsize);
             }
         }
 

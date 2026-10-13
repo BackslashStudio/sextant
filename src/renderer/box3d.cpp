@@ -1,6 +1,7 @@
 #include "box3d.h"
 #include "../axis_placement.h"
 #include "../rich_text.h"
+#include "../tick_style.h"
 #include "figure_layout.h"   // kTickLabelGap, kTitleGap
 #include <algorithm>
 #include <cmath>
@@ -179,6 +180,8 @@ namespace sextant {
         const Px3 centre = P(0.0, 0.0, 0.0);
 
         for (const AxisEdge& ax: edges) {
+            plan.tick_begin[ax.axis] = plan.tick_marks.size();
+            const TickLook look = tick_look(st, static_cast<TickAxis>(ax.axis));
             // An axis entirely behind the eye draws nothing.
             Px3 pa, pb;
             if (!proj.project_segment(ax.a, ax.b, pa, pb)) continue;
@@ -219,18 +222,18 @@ namespace sextant {
                 add_poly(plan.tick_marks,
                          {
                              tp, Px3{
-                                 tp.x + dir.x * st.tick_length,
-                                 tp.y + dir.y * st.tick_length, tp.depth, tp.w
+                                 tp.x + dir.x * look.length,
+                                 tp.y + dir.y * look.length, tp.depth, tp.w
                              }
                          });
 
                 Box3DPlan::Label lbl;
                 lbl.text = t.label;
-                lbl.fontsize = st.label_fontsize;
-                lbl.color = st.label_color;
+                lbl.fontsize = look.label_fontsize;
+                lbl.color = look.label_color;
                 lbl.font_path = st.font_path;
                 lbl.tick = tick_index;
-                const float reach = st.tick_length + kTickLabelGap + half_extent_along(lbl, dir);
+                const float reach = look.length + kTickLabelGap + half_extent_along(lbl, dir);
                 lbl.x = tp.x + dir.x * reach;
                 lbl.y = tp.y + dir.y * reach;
                 // Clear the far edge of the labels, not their centres.
@@ -255,7 +258,7 @@ namespace sextant {
                 lbl.font_path = st.font_path;
                 // Clear of this axis's widest label.
                 const float reach = (max_label_reach > 0.0f ? max_label_reach
-                                     : ax.show_ticks        ? st.tick_length + kTickLabelGap
+                                     : ax.show_ticks        ? look.length + kTickLabelGap
                                                             : 0.0f)
                                     + kTitleGap + half_extent_along(lbl, dir);
                 lbl.x = mid.x + dir.x * reach;
@@ -265,5 +268,23 @@ namespace sextant {
         }
 
         return plan;
+    }
+} // namespace sextant
+
+namespace sextant {
+    std::vector<TickRun> tick_runs(const Box3DPlan& plan, const AxesStyle& style) {
+        std::vector<TickRun> runs;
+        TickLook prev{};
+        for (int a = 0; a < 3; ++a) {
+            const std::size_t b = plan.tick_begin[a];
+            const std::size_t e = a < 2 ? plan.tick_begin[a + 1] : plan.tick_marks.size();
+            if (b >= e) continue;
+            const TickLook k = tick_look(style, static_cast<TickAxis>(a));
+            if (runs.empty() || !same_marks(prev, k)) runs.push_back({{}, k.color, k.linewidth});
+            runs.back().marks.insert(runs.back().marks.end(), plan.tick_marks.begin() + static_cast<std::ptrdiff_t>(b),
+                                     plan.tick_marks.begin() + static_cast<std::ptrdiff_t>(e));
+            prev = k;
+        }
+        return runs;
     }
 } // namespace sextant

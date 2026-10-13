@@ -3,6 +3,7 @@
 #include "sextant/axes3d.h"
 #include "axis_scale.h"
 #include "cow_vec.h"
+#include "tick_style.h"
 #include "tick.h"
 #include <algorithm>
 #include <atomic>
@@ -934,6 +935,17 @@ struct FigureAxesSnapshot {
     RenderSnapshot*   snap2d() { return std::get_if<RenderSnapshot>(&snap); }
     RenderSnapshot3D* snap3d() { return std::get_if<RenderSnapshot3D>(&snap); }
 };
+
+// The cell's frame edges in its twinned axes' colors (AxesStyle::xaxis_color);
+// none for an untwinned or 3D cell.
+inline EdgeColors twin_edge_colors(const FigureAxesSnapshot& fa) {
+    const RenderSnapshot* s = fa.snap2d();
+    if (!s || fa.twins.empty()) return {};
+    const AxesStyle* tx = nullptr;
+    const AxesStyle* ty = nullptr;
+    for (const TwinSnapshot& t : fa.twins) (t.layer == kLayerTwinX ? tx : ty) = &t.snap.axes_style;
+    return twin_edge_colors(s->axes_style, tx, ty);
+}
 
 // Monotonic stamp for FigureSnapshot; the render caches' invalidation key
 // (addresses could be recycled).

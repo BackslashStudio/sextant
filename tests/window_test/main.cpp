@@ -2326,9 +2326,108 @@ static void test_layout_aligned() {
     fig->show(true);
 }
 
+// v1.2 steps 36h/36i: per-axis tick and label looks, twinned axes in their
+// series' colors, and a twin's setters reaching its host. Check: cell 1's
+// left axis (marks, labels, title, edge) all blue and the right all orange,
+// one x title ("month", set on the twin), a pale yellow plot area (set on the
+// twin, the cell's); cell 2's bottom edge green, top purple; cell 3's x marks
+// long red over large labels, the y axis small with short minor marks; cell
+// 4's z marks and labels red. The Cosmetic panel's Ticks & labels table
+// (Both | X | Y [| Z]) edits these, an unset axis dimmed; on a twin layer the
+// shared axis' column is greyed and its title row gone.
+static void test_tick_style() {
+    constexpr int N = 12, M = 120;
+    std::vector<double> month(N), rain(N), temp(N), x(M), y(M), d(M);
+    for (int i = 0; i < N; ++i) {
+        month[i] = i + 1;
+        rain[i] = 40.0 + 35.0 * std::sin(0.5 * i) + 10.0 * (i % 3);
+        temp[i] = 12.0 - 10.0 * std::cos(2.0 * 3.14159265 * i / N);
+    }
+    for (int i = 0; i < M; ++i) {
+        x[i] = 0.1 + 9.9 * i / (M - 1);
+        y[i] = std::exp(0.6 * x[i]);
+        d[i] = x[i] * 1.609;
+    }
+    const sextant::Color blue = sextant::Color::Blue, orange = sextant::Color::Orange;
+
+    auto fig = sextant::Figure::create({.width = 1300, .height = 900, .title = "Tick style"});
+    fig->suptitle("Per-axis ticks and labels, twinned axes in their series' colors");
+
+    // matplotlib's twinx look: each y axis in its series' color.
+    auto s1 = fig->add_subplot(2, 2, 1);
+    s1->line(month, rain, {.color = blue, .linewidth = 2.5f}).set_ytitle("rain (mm)");
+    sextant::AxesStyle hs;
+    hs.ytick_color = hs.ylabel_color = hs.yaxis_color = blue;
+    hs.ytitle_color = blue;
+    s1->set_axes_style(hs);
+    s1->set_ytitle("rain (mm)");
+    auto t1 = s1->twinx();
+    t1->line(month, temp, {.color = orange, .linewidth = 2.5f});
+    sextant::AxesStyle ts;
+    ts.ytick_color = ts.ylabel_color = ts.yaxis_color = orange;
+    ts.ytitle_color = orange;
+    ts.background = {1.0f, 0.98f, 0.88f, 1.0f};   // the cell's: reaches the host
+    ts.spine_linewidth = 2.0f;                      // likewise
+    t1->set_axes_style(ts);
+    t1->set_ytitle("temp (C)");
+    t1->set_xtitle("month");                       // the host's x axis
+    t1->set_title("twinx: y axes in their series' colors");
+
+    // twiny: bottom and top edges in their own colors.
+    auto s2 = fig->add_subplot(2, 2, 2);
+    s2->line(x, y).set_xtitle("distance (km)").set_ytitle("height");
+    auto t2 = s2->twiny();
+    t2->line(d, y, {.linestyle = sextant::LineStyle::None}).set_xtitle("distance (miles)");
+    sextant::AxesStyle h2;
+    h2.xaxis_color = h2.xtick_color = h2.xlabel_color = sextant::Color::Green;
+    h2.spine_linewidth = 2.0f;
+    s2->set_axes_style(h2);
+    s2->set_xtitle("distance (km)");
+    sextant::AxesStyle tw2;
+    tw2.xaxis_color = tw2.xtick_color = tw2.xlabel_color = sextant::Color::Purple;
+    tw2.spine_linewidth = 2.0f;
+    t2->set_axes_style(tw2);
+    t2->set_xtitle("distance (miles)");
+    s2->set_title("twiny: bottom green, top purple");
+
+    // One axes, each axis its own look.
+    auto s3 = fig->add_subplot(2, 2, 3);
+    s3->line(x, y).set_yscale(sextant::Scale::Log);
+    sextant::AxesStyle p;
+    p.xtick_color = sextant::Color::Red;
+    p.xtick_length = 10.0f;
+    p.xtick_linewidth = 2.5f;
+    p.xlabel_fontsize = 16.0f;
+    p.ytick_length = 3.0f;
+    p.minor_ytick_length = 1.5f;
+    p.ylabel_fontsize = 9.0f;
+    p.ylabel_color = sextant::Color::Gray;
+    s3->set_axes_style(p);
+    s3->set_title("x: long red marks, big labels; y: small").set_xtitle("x").set_ytitle("exp(0.6 x)");
+
+    // 3D: the z axis alone in red.
+    auto s4 = fig->add_subplot3d(2, 2, 4);
+    std::vector<double> u(20), v(20), hgt(400);
+    for (int i = 0; i < 20; ++i) u[i] = v[i] = -2.0 + 4.0 * i / 19.0;
+    for (int j = 0; j < 20; ++j)
+        for (int i = 0; i < 20; ++i) hgt[j * 20 + i] = std::exp(-(u[i] * u[i] + v[j] * v[j]));
+    s4->surface(sextant::PlaneOrientation::XY, u, v, hgt, {.colormap = true});
+    sextant::AxesStyle z;
+    z.ztick_color = z.zlabel_color = sextant::Color::Red;
+    z.ztick_length = 9.0f;
+    z.ztick_linewidth = 2.0f;
+    z.zlabel_fontsize = 14.0f;
+    s4->set_axes_style(z);
+    s4->set_title("3D: z marks and labels red");
+
+    savefig_and_check_memory(fig, "test_tick_style");
+    fig->show(true);
+}
+
 int main() {
-    test_layout_independent();
-    test_layout_aligned();
+    test_tick_style();
+    // test_layout_independent();
+    // test_layout_aligned();
     // test_aspect();
     // test_twins();
     // test_shared_axes();

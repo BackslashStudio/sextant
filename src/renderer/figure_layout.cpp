@@ -2,6 +2,7 @@
 #include "../axis_limits.h"
 #include "../axis_placement.h"
 #include "../rich_text.h"
+#include "../tick_style.h"
 #include "../ticker.h"
 #include <algorithm>
 #include <cmath>
@@ -115,7 +116,7 @@ namespace sextant {
             p.yminor = minors_for(sty.minor_yticks, snap.yticks_override, p.limits.ymin, p.limits.ymax,
                                   snap.yscale);
             p.max_ylabel_w = widest_label(p.yticks, snap.axes_style.font_path,
-                                          snap.axes_style.label_fontsize);
+                                          tick_look(snap.axes_style, TickAxis::Y).label_fontsize);
 
             const auto& st = snap.axes_style;
             p.xaxis = place_axis(st.xaxis_y, st.origin_y, p.limits.ymin, p.limits.ymax, snap.yscale);
@@ -187,19 +188,20 @@ namespace sextant {
             const auto& st = snap.axes_style;
             const bool sx = st.show_xticks, sy = st.show_yticks;
             const bool xl = sx && prep.xlabels, yl = sy && prep.ylabels;
-            const float xlabel_lh = xl ? tallest_label(prep.xticks, st.font_path, st.label_fontsize) : 0.0f;
-            const float ylabel_lh = yl ? tallest_label(prep.yticks, st.font_path, st.label_fontsize) : 0.0f;
+            const TickLook xk = tick_look(st, TickAxis::X), yk = tick_look(st, TickAxis::Y);
+            const float xlabel_lh = xl ? tallest_label(prep.xticks, st.font_path, xk.label_fontsize) : 0.0f;
+            const float ylabel_lh = yl ? tallest_label(prep.yticks, st.font_path, yk.label_fontsize) : 0.0f;
             const auto grow = [](float& to, float v) { to = std::max(to, v); };
 
             // The tick band goes on the side its labels fall. A hidden axis
             // (AxesStyle::show_xticks/show_yticks) has none, and hidden labels
             // (show_xtick_labels) leave the marks only.
             const float x_band = !sx ? 0.0f
-                                 : xl ? st.tick_length + kTickLabelGap + xlabel_lh
-                                      : st.tick_length;
+                                 : xl ? xk.length + kTickLabelGap + xlabel_lh
+                                      : xk.length;
             const float y_band = !sy ? 0.0f
-                                 : yl ? st.tick_length + kTickLabelGap + prep.max_ylabel_w
-                                      : st.tick_length;
+                                 : yl ? yk.length + kTickLabelGap + prep.max_ylabel_w
+                                      : yk.length;
 
             // On a frame edge the band lies outside it; an interior axis (always
             // labelled on its low side) reaches out only past what lies between
@@ -218,9 +220,9 @@ namespace sextant {
             // (wherever the axis line is); likewise the outermost y labels at the
             // top and bottom edges.
             if (xl && !prep.xticks.empty()) {
-                grow(m.reach_l.fixed, half_label_width(prep.xticks, 0, st.font_path, st.label_fontsize));
+                grow(m.reach_l.fixed, half_label_width(prep.xticks, 0, st.font_path, xk.label_fontsize));
                 grow(m.reach_r.fixed, half_label_width(prep.xticks, prep.xticks.size() - 1,
-                                                       st.font_path, st.label_fontsize));
+                                                       st.font_path, xk.label_fontsize));
             }
             if (yl) {
                 grow(m.reach_t.fixed, ylabel_lh * 0.5f);
@@ -1254,12 +1256,13 @@ namespace sextant {
 
             // x labels keep one top-aligned anchor; y labels flip alignment to
             // face their axis.
-            const float xoff = st.tick_length + kTickLabelGap;
-            const float label_lh = tallest_label(p.xticks, st.font_path, st.label_fontsize);
+            const TickLook xk = tick_look(st, TickAxis::X), yk = tick_look(st, TickAxis::Y);
+            const float xoff = xk.length + kTickLabelGap;
+            const float label_lh = tallest_label(p.xticks, st.font_path, xk.label_fontsize);
             c.xlabel_top = c.xtick_dir > 0.0f
                                ? c.xaxis_y + xoff
                                : c.xaxis_y - xoff - label_lh;
-            c.ylabel_x = c.yaxis_x + c.ytick_dir * xoff;
+            c.ylabel_x = c.yaxis_x + c.ytick_dir * (yk.length + kTickLabelGap);
             c.ylabel_align = c.ytick_dir > 0.0f ? HAlign::Left : HAlign::Right;
 
             // Just outside the cell's furniture (cell_a), hugging the frame (a

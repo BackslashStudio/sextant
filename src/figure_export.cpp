@@ -224,6 +224,7 @@ std::string render_figure_svg(const FigureSnapshot& fsnap,
             fill2d(td, twins[k].snap);
             sd.twins.push_back(std::move(td));
         }
+        sd.edges = twin_edge_colors(fsnap.axes[i]);
 
         fd.axes.push_back(std::move(sd));
     }

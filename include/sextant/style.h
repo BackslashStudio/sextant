@@ -398,6 +398,13 @@ namespace sextant {
         // (as in matplotlib). Ignored in 3D; see Box3DStyle.
         bool spine_bottom = true, spine_left = true, spine_top = true, spine_right = true;
 
+        // 2D, a twinned cell only (Axes::twinx()/twiny()): the frame edge this
+        // axes' twinned axis lies on, drawn in this color instead of the host's
+        // spine_color -- the host's y on the left and the twinx's on the right,
+        // the host's x at the bottom and the twiny's on top (so each axis can
+        // take its series' color). Unset, or with no twin, spine_color.
+        std::optional<Color> xaxis_color, yaxis_color;
+
         // A 2D Axes reads xaxis_y and yaxis_x only; an Axes3D reads all six.
         AxisPosition xaxis_y = AxisPosition::Auto, xaxis_z = AxisPosition::Auto;
         AxisPosition yaxis_x = AxisPosition::Auto, yaxis_z = AxisPosition::Auto;
@@ -439,6 +446,18 @@ namespace sextant {
         float minor_tick_length = 2.5f;
         Color label_color = {0.2f, 0.2f, 0.2f, 1.0f};
         float label_fontsize = 11.0f;
+
+        // Per axis, over the shared tick and label fields above: unset takes
+        // the shared one, so tick_color still styles every axis that has no
+        // color of its own. The z ones are read by an Axes3D only, the minor
+        // ones in 2D only.
+        std::optional<Color> xtick_color, ytick_color, ztick_color;
+        std::optional<float> xtick_length, ytick_length, ztick_length;
+        std::optional<float> xtick_linewidth, ytick_linewidth, ztick_linewidth;
+        std::optional<float> minor_xtick_length, minor_ytick_length;
+        std::optional<Color> xlabel_color, ylabel_color, zlabel_color;
+        std::optional<float> xlabel_fontsize, ylabel_fontsize, zlabel_fontsize;
+
         Color title_color = {0.15f, 0.15f, 0.15f, 1.0f};
         float title_fontsize = 18.0f;
         Color xtitle_color = {0.15f, 0.15f, 0.15f, 1.0f};

@@ -3,6 +3,7 @@
 #include "plot_rect.h"
 #include "../plot_objects.h"
 #include "../contour.h"
+#include "../tick_style.h"
 #include "box3d.h"
 #include "text_plan.h"
 #include <vector>
@@ -29,7 +30,8 @@ public:
     NvgRenderer& operator=(const NvgRenderer&) = delete;
 
     void draw_axes_background(const PlotRect& r, const Color& fill);  // call before data
-    void draw_axes_border(const PlotRect& r, const AxesStyle& style);  // outline only — call after data
+    // Outline only, call after data. `edges`: a twinned cell's axis colors.
+    void draw_axes_border(const PlotRect& r, const AxesStyle& style, const EdgeColors& edges = {});
 
     // A 3D box from plan_box3d(): panes in pass 1 (they are back walls, so no
     // depth test is needed), frame and annotation in pass 3.

@@ -152,6 +152,44 @@ std::shared_ptr<Axes> Axes::Impl::make_twin(bool x, const char* who) {
     return t;
 }
 
+namespace {
+template <class... M>
+void copy_fields(AxesStyle& to, const AxesStyle& from, M... m) {
+    ((to.*m = from.*m), ...);
+}
+
+// One axis' own fields: what draws its marks, labels, title and frame edge.
+void copy_axis_fields(AxesStyle& to, const AxesStyle& from, bool x) {
+    using S = AxesStyle;
+    if (x)
+        copy_fields(to, from, &S::show_xticks, &S::show_xtick_labels, &S::minor_xticks, &S::xtick_color,
+                    &S::xtick_length, &S::xtick_linewidth, &S::minor_xtick_length, &S::xlabel_color,
+                    &S::xlabel_fontsize, &S::xtitle_color, &S::xtitle_fontsize, &S::xaxis_color);
+    else
+        copy_fields(to, from, &S::show_yticks, &S::show_ytick_labels, &S::minor_yticks, &S::ytick_color,
+                    &S::ytick_length, &S::ytick_linewidth, &S::minor_ytick_length, &S::ylabel_color,
+                    &S::ylabel_fontsize, &S::ytitle_color, &S::ytitle_fontsize, &S::yaxis_color);
+}
+} // namespace
+
+// As the twin's other setters: its own axis' fields, and the shared tick and
+// label ones that axis falls back on, stay on it; its shared axis' and the
+// cell's (background, frame, axes title) go to the host; axis positions,
+// origins and the z fields, which a twin can't use, are dropped.
+void Axes::Impl::set_twin_style(const AxesStyle& s) {
+    using S = AxesStyle;
+    const bool own_x = layer == kLayerTwinY;
+    copy_axis_fields(axes_style, s, own_x);
+    copy_fields(axes_style, s, &S::tick_color, &S::tick_length, &S::tick_linewidth, &S::minor_tick_length,
+                &S::label_color, &S::label_fontsize, &S::font_path);
+    AxesStyle& h = host->axes_style;
+    copy_axis_fields(h, s, !own_x);
+    copy_fields(h, s, &S::background, &S::spine_color, &S::spine_linewidth, &S::spine_bottom, &S::spine_left,
+                &S::spine_top, &S::spine_right, &S::frame_margin, &S::title_color, &S::title_fontsize);
+    style_stamps.style = next_snapshot_generation();
+    host->style_stamps.style = next_snapshot_generation();
+}
+
 std::shared_ptr<Axes> Axes::twinx() { return d->make_twin(true, "Axes::twinx"); }
 std::shared_ptr<Axes> Axes::twiny() { return d->make_twin(false, "Axes::twiny"); }
 
@@ -530,13 +568,15 @@ Axes& Axes::set_title(std::string_view text, float fontsize) {
 }
 Axes& Axes::set_xtitle(std::string_view text, float fontsize) {
     warn_math(d->mathtext, "set_xtitle", text);
-    d->xtitle = text; d->title_stamps.xtitle = next_snapshot_generation();
-    d->axes_style.xtitle_fontsize = fontsize; return *this;
+    Impl& a = d->axis_owner(true);
+    a.xtitle = text; a.title_stamps.xtitle = next_snapshot_generation();
+    a.axes_style.xtitle_fontsize = fontsize; return *this;
 }
 Axes& Axes::set_ytitle(std::string_view text, float fontsize) {
     warn_math(d->mathtext, "set_ytitle", text);
-    d->ytitle = text; d->title_stamps.ytitle = next_snapshot_generation();
-    d->axes_style.ytitle_fontsize = fontsize; return *this;
+    Impl& a = d->axis_owner(false);
+    a.ytitle = text; a.title_stamps.ytitle = next_snapshot_generation();
+    a.axes_style.ytitle_fontsize = fontsize; return *this;
 }
 Axes& Axes::set_xlim(double lo, double hi) {
     check_limits_fit(d->xscale, lo, hi, "set_xlim");
@@ -575,6 +615,7 @@ Axes& Axes::grid(bool enable, GridOptions opts) {
     d->style_stamps.grid = next_snapshot_generation(); return *this;
 }
 Axes& Axes::set_axes_style(AxesStyle opts) {
+    if (d->host) { d->set_twin_style(opts); return *this; }
     d->axes_style = opts;
     d->style_stamps.style = next_snapshot_generation(); return *this;
 }
@@ -591,16 +632,18 @@ Axes& Axes::set_colorbar_style(ColorbarOptions opts) {
 
 Axes& Axes::set_xticks(std::span<const double> pos, std::vector<std::string> labels) {
     for (const auto& l : labels) warn_math(d->mathtext, "set_xticks", l);
-    if (pos.empty()) d->xticks_override.reset();
-    else             d->xticks_override = make_tick_override(pos, labels);
-    d->style_stamps.xticks = next_snapshot_generation();
+    Impl& a = d->axis_owner(true);
+    if (pos.empty()) a.xticks_override.reset();
+    else             a.xticks_override = make_tick_override(pos, labels);
+    a.style_stamps.xticks = next_snapshot_generation();
     return *this;
 }
 Axes& Axes::set_yticks(std::span<const double> pos, std::vector<std::string> labels) {
     for (const auto& l : labels) warn_math(d->mathtext, "set_yticks", l);
-    if (pos.empty()) d->yticks_override.reset();
-    else             d->yticks_override = make_tick_override(pos, labels);
-    d->style_stamps.yticks = next_snapshot_generation();
+    Impl& a = d->axis_owner(false);
+    if (pos.empty()) a.yticks_override.reset();
+    else             a.yticks_override = make_tick_override(pos, labels);
+    a.style_stamps.yticks = next_snapshot_generation();
     return *this;
 }
 Axes& Axes::set_xtick_format(std::string_view fmt) {
@@ -608,8 +651,9 @@ Axes& Axes::set_xtick_format(std::string_view fmt) {
         throw std::invalid_argument("set_xtick_format: \"" + std::string(fmt)
                                     + "\" is not one %f/%e/%g conversion and text");
     warn_math(d->mathtext, "set_xtick_format", fmt);
-    d->xtick_format = fmt;
-    d->style_stamps.xticks = next_snapshot_generation();
+    Impl& a = d->axis_owner(true);
+    a.xtick_format = fmt;
+    a.style_stamps.xticks = next_snapshot_generation();
     return *this;
 }
 Axes& Axes::set_ytick_format(std::string_view fmt) {
@@ -617,8 +661,9 @@ Axes& Axes::set_ytick_format(std::string_view fmt) {
         throw std::invalid_argument("set_ytick_format: \"" + std::string(fmt)
                                     + "\" is not one %f/%e/%g conversion and text");
     warn_math(d->mathtext, "set_ytick_format", fmt);
-    d->ytick_format = fmt;
-    d->style_stamps.yticks = next_snapshot_generation();
+    Impl& a = d->axis_owner(false);
+    a.ytick_format = fmt;
+    a.style_stamps.yticks = next_snapshot_generation();
     return *this;
 }
 Axes& Axes::set_color_cycle(std::vector<Color> colors) {
@@ -663,8 +708,8 @@ Axes& Axes::cla() {
 namespace sextant {
 
 std::string Axes::title() const  { return d->cell().title; }
-std::string Axes::xtitle() const { return d->xtitle; }
-std::string Axes::ytitle() const { return d->ytitle; }
+std::string Axes::xtitle() const { return d->axis_owner(true).xtitle; }
+std::string Axes::ytitle() const { return d->axis_owner(false).ytitle; }
 
 // resolve_figure_limits()'s rule, from the live members.
 ResolvedLimits Axes::Impl::resolve_live() const {

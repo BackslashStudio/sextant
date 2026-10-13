@@ -44,6 +44,8 @@ namespace sextant {
         // 2D, a twinned cell (Axes::twinx()): one per twin, its `layout` the
         // cell's twins entry; its legend, colorbar and background are unused.
         std::vector<SvgAxesData> twins;
+        // Its frame edges in the twinned axes' colors (twin_edge_colors()).
+        EdgeColors edges;
 
         // 3D cells only (plot vectors above are then empty): the box, already in
         // pixels via plan_box3d(). The writer never sees a camera.

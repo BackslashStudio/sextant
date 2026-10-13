@@ -67,6 +67,8 @@ namespace lt {
                 return x ? "+" + encode_color(*x) : "-";
             else if constexpr (std::is_same_v<X, std::optional<double>>)
                 return x ? "+" + num(*x, 17) : "-";
+            else if constexpr (std::is_same_v<X, std::optional<float>>)
+                return x ? "+" + num(*x, 9) : "-";
             else if constexpr (std::is_same_v<X, std::optional<bool>>)
                 return x ? (*x ? "+true" : "+false") : "-";
             else if constexpr (std::is_same_v<X, std::vector<double>>) {
@@ -97,6 +99,9 @@ namespace lt {
             } else if constexpr (std::is_same_v<X, std::optional<double>>) {
                 if (s == "-") x.reset();
                 else x = std::strtod(s.c_str() + 1, nullptr);
+            } else if constexpr (std::is_same_v<X, std::optional<float>>) {
+                if (s == "-") x.reset();
+                else x = std::strtof(s.c_str() + 1, nullptr);
             } else if constexpr (std::is_same_v<X, std::optional<bool>>) {
                 if (s == "-") x.reset();
                 else x = s == "+true";
@@ -150,6 +155,7 @@ namespace lt {
             else if constexpr (std::is_same_v<X, std::optional<Color>>)
                 x = Color{f, 0.375f, 0.625f, 0.75f};
             else if constexpr (std::is_same_v<X, std::optional<double>>) x = 1.5 + k;
+            else if constexpr (std::is_same_v<X, std::optional<float>>) x = 2.5f + static_cast<float>(k);
             else if constexpr (std::is_same_v<X, std::optional<bool>>) x = (k % 2) == 0;
             else if constexpr (std::is_same_v<X, std::vector<double>>) {
                 x.push_back(0.5 + k);

@@ -2,6 +2,7 @@
 // sextant_layout_test; see layout_test.h.
 #include "layout_test.h"
 #include "window_link.h"
+#include "widgets/panel_widgets.h"
 
 namespace lt {
     // The Cosmetic panel in a null-backend ImGui frame: a 3D slot must seed the
@@ -371,6 +372,91 @@ namespace lt {
         if (s2.conflicts)
             std::printf("    2D: %d of %d cursor positions reported a conflict, first id %u\n",
                         s2.conflicts, s2.probes, static_cast<unsigned>(s2.first));
+
+        // Every per-axis override set (v1.2 step 36h), so each swatch and drag
+        // submits its "Follow ..." menu, in a cell twinned both ways, so the
+        // axis color rows show too.
+        {
+            const auto set_all = [](AxesStyle& s) {
+                s.xtick_color = s.ytick_color = s.ztick_color = Color::Red;
+                s.xlabel_color = s.ylabel_color = s.zlabel_color = Color::Blue;
+                s.xtick_length = s.ytick_length = s.ztick_length = 6.0f;
+                s.xtick_linewidth = s.ytick_linewidth = s.ztick_linewidth = 2.0f;
+                s.minor_xtick_length = s.minor_ytick_length = 3.0f;
+                s.xlabel_fontsize = s.ylabel_fontsize = s.zlabel_fontsize = 12.0f;
+                s.xaxis_color = Color::Green;
+                s.yaxis_color = Color::Purple;
+            };
+            auto fo = one_line_snapshot({0.0, 1.0, 2.0}, {0.0, 1.0, 4.0});
+            set_all(fo.axes[0].snap2d()->axes_style);
+            fo.axes[0].twins.push_back({kLayerTwinX, *fo.axes[0].snap2d()});
+            fo.axes[0].twins.push_back({kLayerTwinY, *fo.axes[0].snap2d()});
+            const IdConflictScan so = scan_panel_for_id_conflicts(fo, &draw_cosmetic_window, "Cosmetic", sections);
+            check(so.conflicts == 0, "2D panel: with every per-axis override and axis color set");
+            if (so.conflicts)
+                std::printf("    2D overrides: %d of %d cursor positions reported a conflict, first id %u\n",
+                            so.conflicts, so.probes, static_cast<unsigned>(so.first));
+
+            FigureSnapshot f3o = fs3;
+            set_all(f3o.axes[0].snap3d()->axes_style);
+            const IdConflictScan s3o = scan_panel_for_id_conflicts(f3o, &draw_cosmetic_window, "Cosmetic", sections);
+            check(s3o.conflicts == 0, "3D panel: likewise with every override set");
+            if (s3o.conflicts)
+                std::printf("    3D overrides: %d of %d cursor positions reported a conflict, first id %u\n",
+                            s3o.conflicts, s3o.probes, static_cast<unsigned>(s3o.first));
+        }
+
+        // A right-click on a set override opens its own "Follow ..." menu. A
+        // ColorEdit4 leaves no item id behind (it ends in a group), so a menu
+        // keyed on the last item gave every swatch one popup, id 0, holding
+        // every swatch's item at once.
+        {
+            ImGuiContext* ictx = ImGui::CreateContext();
+            ImGui::SetCurrentContext(ictx);
+            ImGuiIO& io = ImGui::GetIO();
+            io.DisplaySize = ImVec2(400.0f, 300.0f);
+            io.DeltaTime = 1.0f / 60.0f;
+            io.IniFilename = nullptr;
+            io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures;
+            io.Fonts->AddFontDefault();
+            std::optional<Color> a = Color::Red, b = Color::Blue;
+            std::optional<float> f = 3.0f;
+            ImVec2 at{};
+            ImGuiID menu_a = 0, menu_b = 0, menu_f = 0;
+            const auto frame = [&] {
+                ImGui::NewFrame();
+                ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+                ImGui::SetNextWindowSize(ImVec2(400.0f, 300.0f));
+                ImGui::Begin("overrides", nullptr, ImGuiWindowFlags_NoDecoration);
+                ImGui::PushID(0);
+                override_color("##own", a, Color::Black);
+                at = ImGui::GetItemRectMin();
+                menu_a = ImGui::GetID("##own##follow");
+                ImGui::PopID();
+                ImGui::PushID(1);
+                override_color("##own", b, Color::Black, "the frame");
+                menu_b = ImGui::GetID("##own##follow");
+                override_float("##len", f, 1.0f, 0.0f, 10.0f, 0.1f, "%.1f");
+                menu_f = ImGui::GetID("##len##follow");
+                ImGui::PopID();
+                ImGui::End();
+                ImGui::Render();
+            };
+            frame();
+            io.AddMousePosEvent(at.x + 3.0f, at.y + 3.0f);
+            frame();
+            io.AddMouseButtonEvent(1, true);
+            frame();
+            io.AddMouseButtonEvent(1, false);
+            frame();
+            const bool own = ImGui::IsPopupOpen(menu_a, 0);
+            const bool others = ImGui::IsPopupOpen(menu_b, 0) || ImGui::IsPopupOpen(menu_f, 0);
+            const int open = ImGui::GetCurrentContext()->OpenPopupStack.Size;
+            ImGui::DestroyContext(ictx);
+            ImGui::SetCurrentContext(nullptr);
+            check(own && !others && open == 1,
+                  "overrides: a right-click opens that swatch's own Follow menu, no other");
+        }
 
         // The Data panel over two planes that each hold a "line 0" (the "P0 "/
         // "P1 " prefixes and "##i" must keep tabs distinct).
