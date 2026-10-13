@@ -5,6 +5,7 @@
 #include "../plot_objects.h"
 #include "../tick.h"
 #include "sextant/style.h"
+#include <algorithm>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -29,8 +30,7 @@ namespace sextant {
         std::string name;
         LegendKind kind = LegendKind::Line;
         LineStyle style = LineStyle::Solid; // Line entries only
-        // Marker entries only: the key's shape.
-        MarkerStyle marker = MarkerStyle::Circle;
+        MarkerStyle marker = MarkerStyle::Circle; // Marker entries only
 
         // Marker entries only; alpha 0 (default) = no edge. scatter_z keys are
         // white with a black edge. Edged Cross/Plus are stroked in `edge`.
@@ -140,22 +140,39 @@ namespace sextant {
     // frame. Limits, ticks and transforms are always resolved from the snapshot.
     enum class DecorSide { None, Left, Right, Top, Bottom };
 
+    // How far one side's axis furniture (ticks and tick labels, every layer's)
+    // reaches past the frame edge: `fixed`, or more when an interior axis'
+    // labels poke out of a frame too short to hold them -- `e - f * len` for a
+    // frame `len` long across that side, `f` the axis line's fraction of it.
+    struct AxisReach {
+        struct Poke {
+            float e = 0.0f, f = 0.0f;
+        };
+        float fixed = 0.0f;
+        std::vector<Poke> pokes;
+
+        float at(float len) const {
+            float r = fixed;
+            for (const Poke& p: pokes) r = std::max(r, p.e - p.f * len);
+            return r;
+        }
+    };
+
+    // A 2D cell nests, outside in (each fitted to what it holds):
+    //   cell   = the title band on top of cell_d;
+    //   cell_d = outside legend and colorbars around cell_o, frame_margin apart;
+    //   cell_o = the axis titles around cell_a (x below, y left; a twinx's y
+    //            right, a twiny's x on top);
+    //   cell_a = the frame united with every axis' AABB (`reach`).
+    // A cell's frame is its own fit unless an axis aligns it with others; see
+    // the reservation solve in figure_layout.cpp.
     struct CellMeasure {
         AxesSlot slot;
         bool is3d = false;
-        PlotInsets axis; // furniture around the frame; zero for 3D
-        // What the cell asks of its column's and row's aligned band: `axis` as if
-        // every axis and tick label were shown, so hiding one in a cell never
-        // moves another cell's frame.
-        PlotInsets band;
-        // Sides that keep to `axis` instead of the band: the side a hidden axis'
-        // ticks or labels would take (AxesStyle::show_xticks, show_xtick_labels
-        // and the y ones), so that frame alone takes the room back. Not on the
-        // sides along a shared axis whose group has another cell in the same
-        // columns (rows): those frames keep one extent.
-        struct OwnSides {
-            bool left = false, right = false, top = false, bottom = false;
-        } own;
+        // cell_a around the frame; nothing for 3D.
+        AxisReach reach_l, reach_r, reach_t, reach_b;
+        // cell_o around cell_a: each side's axis title (gap + line); zero for 3D.
+        PlotInsets titles;
         float title = 0.0f; // band above everything else
         float frame_margin = 0.0f;
         CellDecorations dec;
@@ -165,17 +182,8 @@ namespace sextant {
         float legend_fontsize = 10.0f;
     };
 
-    // Grid-aligned measurements: 2D axis furniture per column (left/right) and row
-    // (top/bottom), and the title band per row. See solve_grid().
-    struct GridMeasure {
-        int rows = 1, cols = 1;
-        std::vector<float> ax_l, ax_r, ax_t, ax_b;
-        std::vector<float> title;
-    };
-
     struct FigureMeasure {
         std::vector<CellMeasure> cells; // index-parallel with FigureSnapshot::axes
-        GridMeasure grid;
         float suptitle_band = 0.0f;
     };
 
@@ -208,8 +216,9 @@ namespace sextant {
     };
 
     // Inverse of compute_figure_layout(): the figure size at which slot
-    // `slot_index`'s frame is `frame_w` x `frame_h`. Closed-form (reservations
-    // don't depend on figure size); only integer rounding keeps it from exact.
+    // `slot_index`'s frame is `frame_w` x `frame_h` (the width solved first, then
+    // the height; each grows monotonically with the figure). Only integer
+    // rounding keeps it from exact.
     LayoutSize figure_size_for_frame(const FigureSnapshot& fsnap, int slot_index,
                                      float frame_w, float frame_h);
 
@@ -277,12 +286,13 @@ namespace sextant {
         std::optional<Box3DLayout> box3d;
         bool is_3d() const { return box3d.has_value(); }
 
-        // Frame + axis furniture + frame_margin: what outside legends and
+        // cell_o + frame_margin (see CellMeasure): what outside legends and
         // colorbars are placed against.
         PlotRect extended{};
 
-        // Cell edge to frame: grid-aligned furniture and title band, plus this
-        // cell's own frame_margin, legend and colorbars.
+        // Cell edge to frame: the cell's own title band, legend, colorbars,
+        // frame_margin, axis titles and furniture, or an aligned group's
+        // largest (the slack then lies at the cell edge).
         PlotInsets reserved{};
 
         // As drawn (offset included); w <= 0 = absent. `legend_slots` parallels
@@ -294,8 +304,8 @@ namespace sextant {
         // One per request, outward from the extended frame; empty = none.
         std::vector<ColorbarBox> colorbars;
 
-        // Title anchors. The axes title is at the cell top; x/y titles at the
-        // outer edge of the grid-aligned furniture, so titles line up.
+        // Title anchors. The axes title atop cell_d; x/y titles at the outer
+        // edge of the cell's furniture (cell_a).
         float title_x = 0.0f, title_y = 0.0f;
         float xtitle_x = 0.0f, xtitle_y = 0.0f;
         float ytitle_x = 0.0f, ytitle_y = 0.0f; // centre of the rotated line

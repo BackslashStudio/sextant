@@ -133,8 +133,9 @@ namespace lt {
         check(t3_noz > 0 && t3_noz < t3_all, "3D: hiding z drops its labels only");
         check(count(svg3d(none3), "<text") == 0, "3D: hiding all three draws no tick labels");
 
-        // In a grid (36g): a hidden axis gives its side back even while other
-        // cells of its column or row still need the band, and stops widening it.
+        // In a grid (36g): a hidden axis gives its side back. Unshared frames are
+        // each their own fit; a sharex column keeps one x span, its widest
+        // member's (the 2D layout retrofit).
         {
             constexpr int W = 900, H = 600;
             auto grid = [](int rows, int cols) {
@@ -149,25 +150,35 @@ namespace lt {
             };
 
             // Two rows: the top cell's y labels are wide, the bottom's narrow.
-            auto column = [&](bool hide_top) {
+            auto column = [&](bool hide_top, bool shared) {
                 FigureSnapshot fs = grid(2, 1);
                 RenderSnapshot& top = *fs.axes[0].snap2d();
                 top.ymin = 0.0; top.ymax = 1.0e6; top.ylim_auto = false;
                 top.axes_style.show_yticks = !hide_top;
+                if (shared) top.xshare = fs.axes[1].snap2d()->xshare = 7;
                 return compute_figure_layout(fs, W, H);
             };
-            const FigureLayout shown2 = column(false), hidden2 = column(true);
-            check(near_px(shown2.cells[0].frame.x, shown2.cells[1].frame.x, 1e-3f),
-                  "grid: with both shown the column's frames line up");
+            const FigureLayout shown2 = column(false, false), hidden2 = column(true, false);
+            check(shown2.cells[0].frame.x > shown2.cells[1].frame.x + 1.0f,
+                  "grid: unshared, the wide labels push only their own frame in");
             check(hidden2.cells[0].frame.x < hidden2.cells[1].frame.x,
                   "grid: the hidden cell's frame takes its left band back");
             const PlotRect& was = shown2.cells[1].frame;
             const PlotRect& now = hidden2.cells[1].frame;
             check(now.x == was.x && now.w == was.w && now.y == was.y && now.h == was.h,
-                  "grid: the other cell of its column does not move (its labels still set the band)");
+                  "grid: the other cell of its column does not move");
             check(hidden2.cells[0].ytitle_x > hidden2.cells[0].cell.x
                       && hidden2.cells[0].ytitle_x < hidden2.cells[0].frame.x,
                   "grid: its y title sits in its own band, beside its frame");
+
+            const FigureLayout shared2 = column(false, true), shared_hidden = column(true, true);
+            check(near_px(shared2.cells[0].frame.x, shared2.cells[1].frame.x, 1e-3f)
+                      && near_px(shared2.cells[0].frame.w, shared2.cells[1].frame.w, 1e-3f)
+                      && near_px(shared2.cells[0].frame.x, shown2.cells[0].frame.x, 1e-3f),
+                  "grid: sharex, the column's frames line up on the widest member's labels");
+            check(near_px(shared_hidden.cells[0].frame.x, shared_hidden.cells[1].frame.x, 1e-3f)
+                      && near_px(shared_hidden.cells[1].frame.x, shown2.cells[1].frame.x, 1e-3f),
+                  "grid: sharex, hiding them lines both up on the other member's");
 
             // Two columns: the left cell hides x.
             FigureSnapshot fs = grid(1, 2);

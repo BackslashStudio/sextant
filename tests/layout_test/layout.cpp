@@ -216,8 +216,10 @@ namespace lt {
               "reversed ticks: an inverted y axis draws its tick labels");
     }
 
-    // Frames line up across the grid: shared left/right edges per column, top/
-    // bottom per row. Different columns may differ in width.
+    // Frames are each their own fit unless an axis aligns them (the 2D layout
+    // retrofit): sharex members starting (ending) on one grid column keep their
+    // left (right) edges together, sharey members on one row their top
+    // (bottom) edges.
     void test_grid_alignment() {
         std::printf("\n[grid alignment]\n");
 
@@ -229,27 +231,53 @@ namespace lt {
         fs.row_gap = 14.0f;
 
         const auto layout = sextant::compute_figure_layout(fs, 1200, 800);
+        const auto same_x = [](const sextant::PlotRect& a, const sextant::PlotRect& b) {
+            return std::fabs(a.x - b.x) < 0.001f && std::fabs(a.w - b.w) < 0.001f;
+        };
+        const auto same_y = [](const sextant::PlotRect& a, const sextant::PlotRect& b) {
+            return std::fabs(a.y - b.y) < 0.001f && std::fabs(a.h - b.h) < 0.001f;
+        };
 
-        bool cols_aligned = true, rows_aligned = true;
-        for (std::size_t i = 0; i < 3; ++i) {
-            // cells i and i+3 are the same column; 0..2 and 3..5 the two rows.
-            const auto& a = layout.cells[i].frame;
-            const auto& b = layout.cells[i + 3].frame;
-            if (std::fabs(a.x - b.x) > 0.001f || std::fabs(a.w - b.w) > 0.001f)
-                cols_aligned = false;
-            for (std::size_t r: {std::size_t{0}, std::size_t{3}}) {
-                const auto& f = layout.cells[r + i].frame;
-                const auto& g = layout.cells[r].frame;
-                if (std::fabs(f.y - g.y) > 0.001f || std::fabs(f.h - g.h) > 0.001f)
-                    rows_aligned = false;
-            }
-        }
+        // Unshared: the long y title narrows cell 4 alone, the title lowers cell
+        // 1 alone; cells with the same furniture still come out alike.
+        check(layout.cells[4].frame.w < layout.cells[1].frame.w - 1.0f
+              && same_x(layout.cells[0].frame, layout.cells[3].frame),
+              "unshared: a column pays only per cell for its labels");
+        check(layout.cells[1].frame.y > layout.cells[0].frame.y + 1.0f
+              && same_y(layout.cells[0].frame, layout.cells[2].frame),
+              "unshared: a row pays only per cell for its titles");
 
-        check(cols_aligned, "frames in a column share their left and right edges");
-        check(rows_aligned, "frames in a row share their top and bottom edges");
-        // Column 1 (with cell 4's long title) reserves more on its left.
-        check(layout.cells[1].frame.w < layout.cells[2].frame.w,
-              "a column pays only for its own cells' labels");
+        // sharex down column 1, sharey along row 0: those edges line up, on the
+        // member that needs most.
+        auto shared = fs;
+        shared.axes[1].snap2d()->xshare = shared.axes[4].snap2d()->xshare = 11;
+        for (std::size_t i: {0, 1, 2}) shared.axes[i].snap2d()->yshare = 12;
+        const auto ls = sextant::compute_figure_layout(shared, 1200, 800);
+        check(same_x(ls.cells[1].frame, ls.cells[4].frame) && same_x(ls.cells[4].frame, layout.cells[4].frame),
+              "sharex: the column's frames share their left and right edges, the widest member's");
+        check(same_y(ls.cells[0].frame, ls.cells[1].frame) && same_y(ls.cells[1].frame, ls.cells[2].frame)
+              && ls.cells[0].frame.y > layout.cells[0].frame.y + 1.0f,
+              "sharey: the row's frames share their top and bottom edges, down to the titled member's");
+        check(same_y(ls.cells[5].frame, layout.cells[5].frame) && same_x(ls.cells[5].frame, layout.cells[5].frame),
+              "share: a cell outside the groups keeps its own fit");
+
+        // Tick labels hide only toward a member the frame is aligned with.
+        check(!ls.cells[1].ylabels && !ls.cells[2].ylabels && ls.cells[0].ylabels && !ls.cells[1].xlabels,
+              "labels: aligned members hide the labels that face each other");
+        auto aspect = shared;
+        aspect.axes[2].snap2d()->aspect.ratio = 1.0;
+        aspect.axes[4].snap2d()->aspect.ratio = 1.0;
+        const auto la = sextant::compute_figure_layout(aspect, 1200, 800);
+        check(la.cells[2].ylabels && !la.cells[1].ylabels && la.cells[1].xlabels,
+              "labels: a member with set_aspect() is out of alignment, so labels facing it or its own stay");
+        auto spans = make_snapshot(2, 2, 2);
+        spans.axes[0].slot = {2, 2, 1, 2};
+        spans.axes[1].slot = {2, 2, 3, 0};
+        spans.axes[0].snap2d()->xshare = spans.axes[1].snap2d()->xshare = 13;
+        const auto lsp = sextant::compute_figure_layout(spans, 1200, 800);
+        check(lsp.cells[0].xlabels && !same_x(lsp.cells[0].frame, lsp.cells[1].frame)
+              && std::fabs(lsp.cells[0].frame.x - lsp.cells[1].frame.x) < 0.001f,
+              "labels: a spanning member aligned on its left edge only keeps its x labels (its ticks don't line up)");
 
         // The gap between cells is insets.right + col_gap + insets.left.
         const float measured = layout.cells[1].frame.x

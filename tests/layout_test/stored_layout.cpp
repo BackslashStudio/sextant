@@ -140,13 +140,13 @@ namespace lt {
         FigureSnapshot renamed = panned;
         renamed.axes[0].snap2d()->lines[0].opts.name = "a much longer series name";
         const FigureMeasure mixed = measure_figure(renamed, &m);
-        check(mixed.cells[0].axis.left == m.cells[0].axis.left
+        check(mixed.cells[0].reach_l.fixed == m.cells[0].reach_l.fixed
               && mixed.cells[0].dec.legend_box_w > m.cells[0].dec.legend_box_w,
               "stored: a measure over a frozen one keeps its furniture and measures its legend");
         FigureSnapshot swapped = renamed;
         swapped.axes[0] = make_snapshot3d(1, 2, 1).axes[0];
         const FigureMeasure over3d = measure_figure(swapped, &m);
-        check(over3d.cells[0].axis.left == 0.0f,
+        check(over3d.cells[0].reach_l.fixed == 0.0f,
               "stored: and a cell that changed kind takes nothing from the frozen one");
     }
 
@@ -182,7 +182,7 @@ namespace lt {
         store.fit(panned, SW + 40, SH);
         const auto m3 = store.load();
         check(m3 != m2, "store: File > Refit layout re-measures at the same size");
-        check(m1->cells.size() == 2 && m1->cells[0].axis.left < m3->cells[0].axis.left,
+        check(m1->cells.size() == 2 && m1->cells[0].reach_l.fixed < m3->cells[0].reach_l.fixed,
               "store: (and an old measure a caller still holds is untouched by it)");
 
         FigureSnapshot edited = panned;

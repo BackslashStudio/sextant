@@ -369,9 +369,12 @@ namespace lt {
               lay.cells[1].box3d->zticks.size() > 1,
               "3D: all three axes get ticks, from the same generate_ticks() 2D uses");
 
-        check(near_px(lay.cells[0].frame.y, lay.cells[1].frame.y, 0.5f) &&
-              near_px(lay.cells[0].frame.h, lay.cells[1].frame.h, 0.5f),
-              "3D: the two cells' frames still line up along their row, so the grid is a grid");
+        // A 3D cell never aligns (it has no shared axis): its frame runs to the
+        // cell's bottom while the 2D one stops above its own x furniture.
+        const auto bottom_of = [](const PlotRect& r) { return r.y + r.h; };
+        check(lay.cells[1].reserved.bottom == 0.0f && lay.cells[0].reserved.bottom > 0.0f
+              && bottom_of(lay.cells[1].frame) > bottom_of(lay.cells[0].frame) + 1.0f,
+              "3D: the two cells' frames are each their own fit along their row");
         check(lay.cells[1].frame.w > lay.cells[0].frame.w,
               "3D: and the 3D cell does not pay for the 2D cell's tick labels");
 

@@ -2198,11 +2198,141 @@ static void test_aspect() {
     fig->show(true);
 }
 
+// The 2D layout retrofit, part 1: no shared axis anywhere, so every frame is
+// its own fit (cell = title over legend/colorbars over axis titles over the
+// frame united with its axes' reach). Check: deleting a title, x title or y
+// title in the Cosmetic panel gives its room back in that cell alone; no
+// frame follows a neighbour's; cell 5's labels, poking out of the narrow
+// frame past the origin, stay inside its cell.
+static void test_layout_independent() {
+    constexpr int N = 200;
+    std::vector<double> x(N), y(N), big(N), z(N);
+    for (int i = 0; i < N; ++i) {
+        x[i] = 10.0 * i / (N - 1);
+        y[i] = std::sin(x[i]);
+        big[i] = 4.0e5 * (1.0 + std::sin(0.7 * x[i]));
+        z[i] = std::cos(0.5 * x[i]);
+    }
+
+    auto fig = sextant::Figure::create({.width = 1400, .height = 950, .title = "Layout: independent"});
+    fig->suptitle("no shared axes: every frame is its own fit");
+
+    fig->add_subplot(3, 3, 1)->line(x, y).set_title("reference: title, x and y titles")
+            .set_xtitle("x").set_ytitle("y");
+    fig->add_subplot(2)->line(x, y).set_ytitle("y only: no title, no x title");
+    fig->add_subplot(3)->line(x, big).set_title("wide y labels")
+            .set_ytitle("a long y title").set_xtitle("x");
+
+    auto s4 = fig->add_subplot(4);
+    s4->line(x, y, {.name = "sin"}).line(x, z, {.name = "cos"})
+            .scatter_z(x, z, y, {.colorbar = true, .name = "z"})
+            .legend({.anchor = sextant::LegendAnchor::OutsideRT})
+            .set_colorbar_style({.anchor = sextant::ColorbarAnchor::Bottom})
+            .set_title("legend right, colorbar below").set_xtitle("x");
+
+    {
+        sextant::AxesStyle st;
+        st.origin_x = 0.0;
+        st.origin_y = 0.0;
+        fig->add_subplot(5)->line(x, y).set_axes_style(st).set_xlim(-0.2, 10.0).set_ylim(-0.04, 1.2)
+                .set_title("origin: labels poke out").set_xtitle("x").set_ytitle("y");
+    }
+    {
+        sextant::AxesStyle st;
+        st.xaxis_y = sextant::AxisPosition::High;
+        st.yaxis_x = sextant::AxisPosition::High;
+        fig->add_subplot(6)->line(x, y).set_axes_style(st)
+                .set_title("High / High").set_xtitle("x").set_ytitle("y");
+    }
+    {
+        sextant::AxesStyle st;
+        st.show_xticks = false;
+        st.show_ytick_labels = false;
+        fig->add_subplot(7)->line(x, y).set_axes_style(st)
+                .set_title("x hidden, y labels hidden").set_xtitle("x").set_ytitle("y");
+    }
+
+    auto s8 = fig->add_subplot(8);
+    s8->line(x, y).set_xtitle("x (host)").set_ytitle("y (host)");
+    s8->twinx()->line(x, big).set_ytitle("big (twinx)");
+    s8->twiny()->line(big, y).set_xtitle("big (twiny)");
+    s8->set_title("twinx + twiny: four axis titles");
+
+    auto s9 = fig->add_subplot(9);
+    s9->line(x, y).set_aspect(4.0).set_title("set_aspect(4), Box").set_xtitle("x").set_ytitle("y");
+
+    savefig_and_check_memory(fig, "test_layout_independent");
+    fig->show(true);
+}
+
+// The 2D layout retrofit, part 2: alignment, only where an axis is shared
+// (twins included), on the same grid line, with no set_aspect(). Check:
+// column 1 (sharex) keeps one x span, set by cell 1's wide labels and cell
+// 4's left legend; row 1 (sharey) keeps one y span, set by cell 3's top
+// colorbar, while each title stays on its own frame; cells 5 and 6 align
+// through their twins' shared y; cell 9 shares y with cell 8 but its aspect
+// takes both out of alignment. Deleting cell 3's colorbar (or cell 1's
+// title) moves its whole row back.
+static void test_layout_aligned() {
+    constexpr int N = 200;
+    std::vector<double> x(N), y(N), big(N), z(N), e(N);
+    for (int i = 0; i < N; ++i) {
+        x[i] = 10.0 * i / (N - 1);
+        y[i] = std::sin(x[i]);
+        big[i] = 4.0e5 * (1.0 + std::sin(0.7 * x[i]));
+        z[i] = std::cos(0.5 * x[i]);
+        e[i] = std::exp(0.5 * x[i]);
+    }
+
+    auto fig = sextant::Figure::create({.width = 1400, .height = 950, .title = "Layout: aligned"});
+    fig->suptitle("aligned only along a shared axis");
+
+    auto s1 = fig->add_subplot(3, 3, 1);
+    s1->line(x, big).set_title("sharex col 1, sharey row 1").set_ytitle("big");
+    auto s4 = fig->add_subplot(4);
+    s4->line(x, y, {.name = "sin"}).legend({.anchor = sextant::LegendAnchor::OutsideLT});
+    s4->sharex(*s1);
+    auto s7 = fig->add_subplot(7);
+    s7->line(x, z).set_xtitle("x, shared down the column");
+    s7->sharex(*s1);
+
+    auto s2 = fig->add_subplot(2);
+    s2->line(x, big).set_title("no title above, aligned anyway");
+    s2->sharey(*s1);
+    auto s3 = fig->add_subplot(3);
+    s3->scatter_z(x, big, z, {.colorbar = true, .name = "z"})
+            .set_colorbar_style({.anchor = sextant::ColorbarAnchor::Top});
+    s3->sharey(*s1);
+
+    auto s5 = fig->add_subplot(5);
+    s5->line(x, y).set_ytitle("y");
+    auto t5 = s5->twinx();
+    t5->line(x, e).set_ytitle("e");
+    s5->set_title("twins share y with cell 6's");
+    auto s6 = fig->add_subplot(6);
+    s6->line(x, z);
+    auto t6 = s6->twinx();
+    t6->line(x, e, {.linestyle = sextant::LineStyle::Dashed}).set_ytitle("e, with a longer twin title");
+    t6->sharey(*t5);
+    s6->set_xtitle("x");
+
+    auto s8 = fig->add_subplot(8);
+    s8->line(x, y).set_title("shares y with cell 9").set_xtitle("x");
+    auto s9 = fig->add_subplot(9);
+    s9->line(x, y).set_aspect(3.0).set_title("set_aspect(3): not aligned");
+    s9->sharey(*s8);
+
+    savefig_and_check_memory(fig, "test_layout_aligned");
+    fig->show(true);
+}
+
 int main() {
-    test_aspect();
-    test_twins();
-    test_shared_axes();
-    test_scales();
+    test_layout_independent();
+    test_layout_aligned();
+    // test_aspect();
+    // test_twins();
+    // test_shared_axes();
+    // test_scales();
     // test_axis_position3d();
     // test_axis_position();
     // test_axes_gallery();

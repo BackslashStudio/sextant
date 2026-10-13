@@ -362,15 +362,20 @@ namespace lt {
         check(moved == 0, "grid: no placement, margin or width on one subplot moves another's frame (" +
                           std::to_string(moved) + " of " + std::to_string(tried) + " did)");
 
-        // Grid alignment still applies: cell 0's long y label widens column 0 for
-        // cell 2 too.
+        // Axis furniture aligns a column only along a shared x: cell 0's big y
+        // title narrows cell 2 too once they share it, and not before.
         FigureSnapshot wide = make_snapshot(2, 2, 4);
         wide.axes[0].snap2d()->ytitle = "a considerably longer y title";
         wide.axes[0].snap2d()->axes_style.ytitle_fontsize = 30.0f;
         const FigureLayout lw = compute_figure_layout(wide, PW, PH);
-        check(near_px(lw.cells[0].frame.x, lw.cells[2].frame.x)
-              && lw.cells[2].frame.x - lw.cells[2].cell.x > lw.cells[3].frame.x - lw.cells[3].cell.x + 1.0f,
-              "grid: axis furniture still aligns a column");
+        check(lw.cells[0].frame.x > lw.cells[2].frame.x + 1.0f
+              && near_px(lw.cells[2].frame.x - lw.cells[2].cell.x, lw.cells[3].frame.x - lw.cells[3].cell.x),
+              "grid: unshared, axis furniture moves its own frame only");
+        wide.axes[0].snap2d()->xshare = wide.axes[2].snap2d()->xshare = 5;
+        const FigureLayout lws = compute_figure_layout(wide, PW, PH);
+        check(near_px(lws.cells[0].frame.x, lws.cells[2].frame.x)
+              && lws.cells[2].frame.x - lws.cells[2].cell.x > lws.cells[3].frame.x - lws.cells[3].cell.x + 1.0f,
+              "grid: sharex, axis furniture aligns the column");
 
         // A 3D cell: bar and legend placed against its frame.
         FigureSnapshot three = make_snapshot3d(1, 1, 1);

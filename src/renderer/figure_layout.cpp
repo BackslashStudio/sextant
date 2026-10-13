@@ -72,7 +72,7 @@ namespace sextant {
             std::vector<double> xminor, yminor;
             float max_ylabel_w = 0.0f;
 
-            // Axis line placement; insets_for() needs it to know which band labels use.
+            // Axis line placement; add_furniture() needs it to know where labels reach.
             AxisPlacement xaxis, yaxis;
 
             // 2D: whether each axis draws its tick labels (AxesStyle::show_xtick_labels,
@@ -170,25 +170,30 @@ namespace sextant {
             return p;
         }
 
-        // One axes' furniture around its frame: ticks, tick labels, x/y titles. The
-        // axes title is a separate band (title_band()).
-        // `as_shown`: as if every axis and tick label were shown (what the cell
-        // asks of its column's and row's band; see CellMeasure::band).
-        PlotInsets insets_for(const RenderSnapshot& snap, const CellPrep& prep, bool as_shown = false) {
+        // Where an interior axis line sits across the frame, as a fraction from
+        // the low edge (bottom for an x axis, left for a y one).
+        float line_fraction(double pos, double lo, double hi, const AxisScale& s) {
+            const double a = s.fwd(lo), b = s.fwd(hi);
+            const double f = (s.fwd(pos) - a) / (b - a);
+            return std::isfinite(f) ? static_cast<float>(std::clamp(f, 0.0, 1.0)) : 0.0f;
+        }
+
+        // One layer's furniture, added into its cell's measure: ticks and tick
+        // labels as reach past the frame (cell_a), the x/y titles beyond them
+        // (cell_o). The axes title is a separate band (title_band()). A 3D cell
+        // has neither: its labels sit inside the frame, in the Box3DStyle::margin
+        // fraction (their position depends on the camera fit).
+        void add_furniture(const RenderSnapshot& snap, const CellPrep& prep, CellMeasure& m) {
             const auto& st = snap.axes_style;
-            const bool sx = as_shown || st.show_xticks;
-            const bool sy = as_shown || st.show_yticks;
-            const bool xl = sx && (as_shown || prep.xlabels);
-            const bool yl = sy && (as_shown || prep.ylabels);
+            const bool sx = st.show_xticks, sy = st.show_yticks;
+            const bool xl = sx && prep.xlabels, yl = sy && prep.ylabels;
             const float xlabel_lh = xl ? tallest_label(prep.xticks, st.font_path, st.label_fontsize) : 0.0f;
             const float ylabel_lh = yl ? tallest_label(prep.yticks, st.font_path, st.label_fontsize) : 0.0f;
+            const auto grow = [](float& to, float v) { to = std::max(to, v); };
 
-            PlotInsets in;
-
-            // The tick band goes on the side its labels fall; an interior axis
-            // reserves nothing. Titles don't move with it.
-            // A hidden axis (AxesStyle::show_xticks/show_yticks) reserves nothing,
-            // and hidden labels (show_xtick_labels) leave the marks only.
+            // The tick band goes on the side its labels fall. A hidden axis
+            // (AxesStyle::show_xticks/show_yticks) has none, and hidden labels
+            // (show_xtick_labels) leave the marks only.
             const float x_band = !sx ? 0.0f
                                  : xl ? st.tick_length + kTickLabelGap + xlabel_lh
                                       : st.tick_length;
@@ -196,38 +201,40 @@ namespace sextant {
                                  : yl ? st.tick_length + kTickLabelGap + prep.max_ylabel_w
                                       : st.tick_length;
 
-            if (!prep.xaxis.interior) (prep.xaxis.high ? in.top : in.bottom) = x_band;
-            if (!prep.yaxis.interior) (prep.yaxis.high ? in.right : in.left) = y_band;
-
-            if (!snap.ytitle.empty())
-                (prep.ytitle_right ? in.right : in.left)
-                    += kTitleGap + title_height(snap.ytitle, st.font_path, st.ytitle_fontsize);
-            if (!snap.xtitle.empty())
-                (prep.xtitle_top ? in.top : in.bottom)
-                    += kTitleGap + title_height(snap.xtitle, st.font_path, st.xtitle_fontsize);
-
-            // End x labels are centred on the frame corners and hang half outside;
-            // reserve for that (wherever the axis line is).
-            if (xl) {
-                in.left = std::max(in.left, half_label_width(prep.xticks, 0, st.font_path, st.label_fontsize));
-                in.right = std::max(in.right, prep.xticks.empty()
-                                                  ? 0.0f
-                                                  : half_label_width(prep.xticks, prep.xticks.size() - 1,
-                                                                     st.font_path, st.label_fontsize));
+            // On a frame edge the band lies outside it; an interior axis (always
+            // labelled on its low side) reaches out only past what lies between
+            // its line and that edge.
+            const ResolvedLimits& l = prep.limits;
+            if (x_band > 0.0f) {
+                if (!prep.xaxis.interior) grow((prep.xaxis.high ? m.reach_t : m.reach_b).fixed, x_band);
+                else m.reach_b.pokes.push_back({x_band, line_fraction(prep.xaxis.pos, l.ymin, l.ymax, snap.yscale)});
+            }
+            if (y_band > 0.0f) {
+                if (!prep.yaxis.interior) grow((prep.yaxis.high ? m.reach_r : m.reach_l).fixed, y_band);
+                else m.reach_l.pokes.push_back({y_band, line_fraction(prep.yaxis.pos, l.xmin, l.xmax, snap.xscale)});
             }
 
-            // Likewise the outermost y labels at the top and bottom edges.
+            // End x labels are centred on the frame corners and hang half outside
+            // (wherever the axis line is); likewise the outermost y labels at the
+            // top and bottom edges.
+            if (xl && !prep.xticks.empty()) {
+                grow(m.reach_l.fixed, half_label_width(prep.xticks, 0, st.font_path, st.label_fontsize));
+                grow(m.reach_r.fixed, half_label_width(prep.xticks, prep.xticks.size() - 1,
+                                                       st.font_path, st.label_fontsize));
+            }
             if (yl) {
-                in.top = std::max(in.top, ylabel_lh * 0.5f);
-                in.bottom = std::max(in.bottom, ylabel_lh * 0.5f);
+                grow(m.reach_t.fixed, ylabel_lh * 0.5f);
+                grow(m.reach_b.fixed, ylabel_lh * 0.5f);
             }
 
-            return in;
+            // Titles don't move with an interior axis: they stay outside cell_a.
+            if (!snap.ytitle.empty())
+                grow(prep.ytitle_right ? m.titles.right : m.titles.left,
+                     kTitleGap + title_height(snap.ytitle, st.font_path, st.ytitle_fontsize));
+            if (!snap.xtitle.empty())
+                grow(prep.xtitle_top ? m.titles.top : m.titles.bottom,
+                     kTitleGap + title_height(snap.xtitle, st.font_path, st.xtitle_fontsize));
         }
-
-        // A 3D cell reserves nothing: labels sit inside the frame, in the
-        // Box3DStyle::margin fraction (their position depends on the camera fit).
-        PlotInsets insets_for(const RenderSnapshot3D&, const CellPrep&, bool = false) { return {}; }
 
         float title_band(const std::string& title, const AxesStyle& st) {
             return title.empty()
@@ -235,12 +242,6 @@ namespace sextant {
                        : title_height(title, st.font_path, st.title_fontsize) + kTitleGap;
         }
 
-        // AxesStyle::show_xtick_labels/show_ytick_labels: unset hides an axis'
-        // labels when they face another member of its share group across the
-        // grid -- x labels at the bottom (top) with a member in a lower (higher)
-        // row under overlapping columns, y labels at the left (right) with one in
-        // a column to the left (right) over overlapping rows. An interior axis
-        // keeps its labels; axes in the same cell don't count.
         // A 2D cell's share group id on one axis for layer k (0 = its own axes,
         // 1 + n its twin n); 0 = none or no such layer.
         unsigned long long layer_share(const FigureAxesSnapshot& fa, std::size_t k, bool x) {
@@ -275,8 +276,59 @@ namespace sextant {
             return false;
         }
 
+        // The grid line a cell's edge lies on: its first (`low`) or last column
+        // (`x`), or row.
+        int edge_line(const AxesSlot& s, bool x, bool low) {
+            return x ? (low ? s.col0() : s.col1()) : (low ? s.row0() : s.row1());
+        }
+
+        // Whether a cell may align with others: 2D without set_aspect() (never
+        // set on a twin).
+        bool may_align(const FigureAxesSnapshot& fa) {
+            const RenderSnapshot* s = fa.snap2d();
+            return s && !(s->aspect.ratio > 0.0);
+        }
+
+        // Frames that keep one edge together, as a group id per cell (a cell
+        // alone is its own group). Two cells join when all of these hold, and
+        // groups join through a common member:
+        //   - they hold one share group on that axis (twins included);
+        //   - that edge lies on the same grid line (left: the first column;
+        //     right: the last; top/bottom likewise by row);
+        //   - neither has set_aspect() (may_align(); 3D never aligns).
+        // Tick-label hiding (resolve_tick_labels()) follows the same groups.
+        std::vector<std::size_t> edge_groups(const FigureSnapshot& fsnap, bool x, bool low) {
+            const auto& cells = fsnap.axes;
+            std::vector<std::size_t> up(cells.size());
+            for (std::size_t i = 0; i < up.size(); ++i) up[i] = i;
+            const auto find = [&](std::size_t i) {
+                while (up[i] != i) i = up[i] = up[up[i]];
+                return i;
+            };
+            for (std::size_t i = 0; i < cells.size(); ++i) {
+                if (!may_align(cells[i])) continue;
+                for (std::size_t j = i + 1; j < cells.size(); ++j) {
+                    if (!may_align(cells[j]) || edge_line(cells[i].slot, x, low) != edge_line(cells[j].slot, x, low)
+                        || !cells_share(fsnap, i, j, x))
+                        continue;
+                    up[find(j)] = find(i);
+                }
+            }
+            for (std::size_t i = 0; i < up.size(); ++i) up[i] = find(i);
+            return up;
+        }
+
+        // AxesStyle::show_xtick_labels/show_ytick_labels: unset hides an axis'
+        // labels when they face another member of its share group across the
+        // grid whose frame is aligned with this one (edge_groups(): an edge on
+        // the same grid line, no set_aspect() on either) -- x labels at the
+        // bottom (top) with a member in a lower (higher) row, y labels at the
+        // left (right) with one in a column to the left (right). An interior
+        // axis keeps its labels; axes in the same cell don't count.
         void resolve_tick_labels(const FigureSnapshot& fsnap, std::vector<CellPrep>& prep) {
             const auto& cells = fsnap.axes;
+            const std::vector<std::size_t> xl = edge_groups(fsnap, true, true), xr = edge_groups(fsnap, true, false);
+            const std::vector<std::size_t> yt = edge_groups(fsnap, false, true), yb = edge_groups(fsnap, false, false);
             for (std::size_t i = 0; i < cells.size(); ++i) {
                 const RenderSnapshot* host = cells[i].snap2d();
                 if (!host) continue;
@@ -290,14 +342,13 @@ namespace sextant {
                         if (!id || pl.interior) return false;
                         for (std::size_t j = 0; j < cells.size(); ++j) {
                             if (j == i || !holds_share(cells[j], id, x)) continue;
+                            const bool aligned = x ? (xl[i] == xl[j] && xr[i] == xr[j])
+                                                   : (yt[i] == yt[j] && yb[i] == yb[j]);
+                            if (!aligned) continue;
                             const AxesSlot& b = cells[j].slot;
-                            if (x) {
-                                const bool cols = b.col0() <= a.col1() && a.col0() <= b.col1();
-                                if (cols && (pl.high ? b.row1() < a.row0() : b.row0() > a.row1())) return true;
-                            } else {
-                                const bool rows = b.row0() <= a.row1() && a.row0() <= b.row1();
-                                if (rows && (pl.high ? b.col0() > a.col1() : b.col1() < a.col0())) return true;
-                            }
+                            if (x ? (pl.high ? b.row1() < a.row0() : b.row0() > a.row1())
+                                  : (pl.high ? b.col0() > a.col1() : b.col1() < a.col0()))
+                                return true;
                         }
                         return false;
                     };
@@ -413,11 +464,6 @@ namespace sextant {
             m.slot = fa.slot;
             m.is3d = fa.snap3d() != nullptr;
             std::visit([&](const auto& s) {
-                m.axis = insets_for(s, prep);
-                // Measured again only when something is hidden (text is the cost).
-                const auto& st = s.axes_style;
-                const bool all_shown = st.show_xticks && st.show_yticks && prep.xlabels && prep.ylabels;
-                m.band = all_shown ? m.axis : insets_for(s, prep, true);
                 m.title = title_band(s.title, s.axes_style);
                 m.frame_margin = std::max(0.0f, s.axes_style.frame_margin);
                 m.dec = compute_cell_decorations(fa);
@@ -426,109 +472,13 @@ namespace sextant {
                 if (!m.dec.legend_entries.empty()) m.legend = legend_side(s.legend_opts.anchor);
                 m.bars = colorbar_side(s.colorbar_opts.anchor);
             }, fa.snap);
-            // A hidden axis gives its side back; an interior one never had a band.
-            const auto own_sides = [](const RenderSnapshot& s, const CellPrep& p, CellMeasure::OwnSides& own,
-                                      CellMeasure::OwnSides& shown) {
-                const AxesStyle& st = s.axes_style;
-                const auto side = [&](const AxisPlacement& pl, bool visible, bool x) {
-                    if (pl.interior) return;
-                    CellMeasure::OwnSides& to = visible ? shown : own;
-                    if (x) (pl.high ? to.top : to.bottom) = true;
-                    else (pl.high ? to.right : to.left) = true;
-                };
-                side(p.xaxis, st.show_xticks && p.xlabels, true);
-                side(p.yaxis, st.show_yticks && p.ylabels, false);
-            };
             if (const RenderSnapshot* s2 = fa.snap2d()) {
-                CellMeasure::OwnSides shown;
-                own_sides(*s2, prep, m.own, shown);
-                // A twinned cell: every layer's furniture, the largest per side,
-                // and a side given back only when no layer shows an axis there.
-                for (std::size_t k = 0; k < fa.twins.size(); ++k) {
-                    const RenderSnapshot& ts = fa.twins[k].snap;
-                    const CellPrep& tp = prep.twins[k];
-                    const PlotInsets a = insets_for(ts, tp);
-                    const PlotInsets b = insets_for(ts, tp, true);
-                    const auto grow = [](PlotInsets& to, const PlotInsets& from) {
-                        to.left = std::max(to.left, from.left);
-                        to.right = std::max(to.right, from.right);
-                        to.top = std::max(to.top, from.top);
-                        to.bottom = std::max(to.bottom, from.bottom);
-                    };
-                    grow(m.axis, a);
-                    grow(m.band, b);
-                    own_sides(ts, tp, m.own, shown);
-                }
-                m.own.left = m.own.left && !shown.left;
-                m.own.right = m.own.right && !shown.right;
-                m.own.top = m.own.top && !shown.top;
-                m.own.bottom = m.own.bottom && !shown.bottom;
+                // A twinned cell: every layer's furniture, the largest per side.
+                add_furniture(*s2, prep, m);
+                for (std::size_t k = 0; k < fa.twins.size(); ++k)
+                    add_furniture(fa.twins[k].snap, prep.twins[k], m);
             }
             return m;
-        }
-
-        // The grid shares one shape, so any slot's rows/cols is the grid's.
-        //
-        // Aligned across the grid: 2D furniture per column (left/right) and row
-        // (top/bottom), and the title band per row. A 3D cell adds none but still takes
-        // its row's and column's. Per-cell options (legend, colorbars, frame_margin)
-        // never affect other cells.
-        GridMeasure solve_grid(const std::vector<CellMeasure>& ms) {
-            GridMeasure g;
-            if (!ms.empty()) {
-                g.rows = std::max(1, ms.front().slot.rows);
-                g.cols = std::max(1, ms.front().slot.cols);
-            }
-            g.ax_l.assign(g.cols, 0.0f);
-            g.ax_r.assign(g.cols, 0.0f);
-            g.ax_t.assign(g.rows, 0.0f);
-            g.ax_b.assign(g.rows, 0.0f);
-            g.title.assign(g.rows, 0.0f);
-
-            for (const CellMeasure& m: ms) {
-                const AxesSlot& s = m.slot;
-                g.title[s.row0()] = std::max(g.title[s.row0()], m.title);
-                if (m.is3d) continue;
-                // As if shown, so hiding an axis never moves another cell.
-                g.ax_l[s.col0()] = std::max(g.ax_l[s.col0()], m.band.left);
-                g.ax_r[s.col1()] = std::max(g.ax_r[s.col1()], m.band.right);
-                g.ax_t[s.row0()] = std::max(g.ax_t[s.row0()], m.band.top);
-                g.ax_b[s.row1()] = std::max(g.ax_b[s.row1()], m.band.bottom);
-            }
-            return g;
-        }
-
-        // A cell's axis furniture per side as reserved: the grid's aligned band, or
-        // its own on a side it keeps (CellMeasure::own). A 3D cell takes the bands
-        // (it adds none) but draws nothing in them; see aligned().
-        PlotInsets band_of(const GridMeasure& g, const CellMeasure& m, const AxesSlot& s) {
-            return {
-                m.own.left ? m.axis.left : g.ax_l[s.col0()],
-                m.own.right ? m.axis.right : g.ax_r[s.col1()],
-                m.own.top ? m.axis.top : g.ax_t[s.row0()],
-                m.own.bottom ? m.axis.bottom : g.ax_b[s.row1()]
-            };
-        }
-
-        // The furniture the extended frame and the x/y titles go around: none in 3D.
-        PlotInsets aligned(const GridMeasure& g, const CellMeasure& m, const AxesSlot& s) {
-            return m.is3d ? PlotInsets{} : band_of(g, m, s);
-        }
-
-        // Whether cell i shares its x (y) axis with another cell over overlapping
-        // columns (rows): then their frames must span the same x (y), so the cell
-        // keeps the grid's band on its left/right (top/bottom) sides.
-        bool shares_extent(const FigureSnapshot& fsnap, std::size_t i, bool x) {
-            if (!cell_shares(fsnap.axes[i], x)) return false;
-            const AxesSlot& a = fsnap.axes[i].slot;
-            for (std::size_t j = 0; j < fsnap.axes.size(); ++j) {
-                if (j == i || !cells_share(fsnap, i, j, x)) continue;
-                const AxesSlot& b = fsnap.axes[j].slot;
-                if (x ? (b.col0() <= a.col1() && a.col0() <= b.col1())
-                      : (b.row0() <= a.row1() && a.row0() <= b.row1()))
-                    return true;
-            }
-            return false;
         }
 
         FigureMeasure measure_with(const FigureSnapshot& fsnap, const std::vector<CellPrep>& prep,
@@ -538,21 +488,18 @@ namespace sextant {
             out.cells.reserve(fsnap.axes.size());
             for (std::size_t i = 0; i < fsnap.axes.size(); ++i) {
                 CellMeasure m = measure(fsnap.axes[i], prep[i]);
-                // A shared axis keeps its frame's extent along it the same as its
-                // group's in the same columns (rows): no side given back there.
-                if (shares_extent(fsnap, i, true)) m.own.left = m.own.right = false;
-                if (shares_extent(fsnap, i, false)) m.own.top = m.own.bottom = false;
                 if (frozen && !m.is3d)
                     for (const CellMeasure& f: frozen->cells)
                         if (f.slot.index == m.slot.index && !f.is3d) {
-                            m.axis = f.axis;
-                            m.band = f.band;
-                            m.own = f.own;
+                            m.reach_l = f.reach_l;
+                            m.reach_r = f.reach_r;
+                            m.reach_t = f.reach_t;
+                            m.reach_b = f.reach_b;
+                            m.titles = f.titles;
                             break;
                         }
                 out.cells.push_back(std::move(m));
             }
-            out.grid = solve_grid(out.cells);
             return out;
         }
 
@@ -580,12 +527,6 @@ namespace sextant {
             return s;
         }
 
-        // The extended frame's width for a frame `frame_w` wide.
-        float extended_width(const GridMeasure& g, const CellMeasure& m, const AxesSlot& s, float frame_w) {
-            const PlotInsets a = aligned(g, m, s);
-            return frame_w + a.left + a.right + 2.0f * m.frame_margin;
-        }
-
         LegendRows legend_rows_for(const CellMeasure& m, float extended_w) {
             if (m.dec.legend_entries.empty()) return {};
             if (m.legend == DecorSide::Top || m.legend == DecorSide::Bottom)
@@ -604,74 +545,138 @@ namespace sextant {
             return out;
         }
 
-        // A cell's left/right space between edge and frame (size-independent).
-        void reserve_horizontal(const GridMeasure& g, const CellMeasure& m, const AxesSlot& s, PlotInsets& res) {
-            const PlotInsets b = band_of(g, m, s);
-            res.left = b.left + m.frame_margin;
-            res.right = b.right + m.frame_margin;
-            if (m.legend == DecorSide::Left) res.left += m.dec.legend_block;
-            if (m.legend == DecorSide::Right) res.right += m.dec.legend_block;
-            if (m.bars == DecorSide::Left) res.left += m.dec.colorbar_block;
-            if (m.bars == DecorSide::Right) res.right += m.dec.colorbar_block;
+        // ---------------------------------------------------------------------------
+        // The reservation solve
+        // ---------------------------------------------------------------------------
+        // What lies outside cell_a on each side that doesn't depend on the frame:
+        // the axis title, frame_margin, an outside legend and colorbars (and on
+        // top, the title band). Top and bottom take the legend's rows, which wrap
+        // to the frame's width.
+        float outer_left(const CellMeasure& m) {
+            return m.titles.left + m.frame_margin + (m.legend == DecorSide::Left ? m.dec.legend_block : 0.0f)
+                   + (m.bars == DecorSide::Left ? m.dec.colorbar_block : 0.0f);
         }
 
-        // Top/bottom space, given the frame width (a row-wrapped legend depends on it).
-        void reserve_vertical(const GridMeasure& g, const CellMeasure& m, const AxesSlot& s, float frame_w,
-                              PlotInsets& res, LegendRows& rows) {
-            rows = legend_rows_for(m, extended_width(g, m, s, frame_w));
-            const PlotInsets b = band_of(g, m, s);
-            res.top = g.title[s.row0()] + b.top + m.frame_margin;
-            res.bottom = b.bottom + m.frame_margin;
-            if (m.legend == DecorSide::Top) res.top += m.legend_margin + rows.h;
-            if (m.legend == DecorSide::Bottom) res.bottom += m.legend_margin + rows.h;
-            if (m.bars == DecorSide::Top) res.top += m.dec.colorbar_block;
-            if (m.bars == DecorSide::Bottom) res.bottom += m.dec.colorbar_block;
+        float outer_right(const CellMeasure& m) {
+            return m.titles.right + m.frame_margin + (m.legend == DecorSide::Right ? m.dec.legend_block : 0.0f)
+                   + (m.bars == DecorSide::Right ? m.dec.colorbar_block : 0.0f);
         }
 
-        // Frames along a shared axis keep their edges together (v1.2 step 36b-1b):
-        // members of cell i's x share group whose cells start (end) on the same
-        // grid column line reserve the same on the left (right) -- the largest
-        // of them -- so an Outside legend or a colorbar on one narrows them all
-        // alike and their ticks line up. Size-independent, like
-        // reserve_horizontal(); identical to it for an unshared cell.
-        PlotInsets shared_horizontal(const FigureSnapshot& fsnap, const std::vector<CellMeasure>& ms,
-                                     const GridMeasure& g, std::size_t i) {
-            PlotInsets res;
-            reserve_horizontal(g, ms[i], ms[i].slot, res);
-            if (!cell_shares(fsnap.axes[i], true)) return res;
-            const AxesSlot& a = ms[i].slot;
-            for (std::size_t j = 0; j < ms.size(); ++j) {
-                if (j == i || !cells_share(fsnap, i, j, true)) continue;
-                const AxesSlot& b = ms[j].slot;
-                if (b.col0() != a.col0() && b.col1() != a.col1()) continue;
-                PlotInsets r;
-                reserve_horizontal(g, ms[j], b, r);
-                if (b.col0() == a.col0()) res.left = std::max(res.left, r.left);
-                if (b.col1() == a.col1()) res.right = std::max(res.right, r.right);
+        float top_decor(const CellMeasure& m, const LegendRows& rows) {
+            return (m.legend == DecorSide::Top ? m.legend_margin + rows.h : 0.0f)
+                   + (m.bars == DecorSide::Top ? m.dec.colorbar_block : 0.0f);
+        }
+
+        float bottom_decor(const CellMeasure& m, const LegendRows& rows) {
+            return (m.legend == DecorSide::Bottom ? m.legend_margin + rows.h : 0.0f)
+                   + (m.bars == DecorSide::Bottom ? m.dec.colorbar_block : 0.0f);
+        }
+
+        float outer_top(const CellMeasure& m, const LegendRows& rows) {
+            return m.title + top_decor(m, rows) + m.frame_margin + m.titles.top;
+        }
+
+        float outer_bottom(const CellMeasure& m, const LegendRows& rows) {
+            return bottom_decor(m, rows) + m.frame_margin + m.titles.bottom;
+        }
+
+        // The longest frame that fits `avail` with the reaches `a` and `b` beside
+        // it. Each reach shrinks no faster than the frame grows, so the frame
+        // plus both is monotonic in the frame: bisect it when a label pokes.
+        float fit_len(float avail, const AxisReach& a, const AxisReach& b) {
+            if (a.pokes.empty() && b.pokes.empty()) return std::max(kMinFrameSize, avail - a.fixed - b.fixed);
+            const auto fits = [&](float len) { return len + a.at(len) + b.at(len) <= avail; };
+            float lo = kMinFrameSize, hi = std::max(kMinFrameSize, avail);
+            if (!fits(lo)) return kMinFrameSize;
+            if (fits(hi)) return hi;
+            for (int k = 0; k < 48 && hi - lo > 1e-4f; ++k) {
+                const float mid = 0.5f * (lo + hi);
+                (fits(mid) ? lo : hi) = mid;
             }
-            return res;
+            return lo;
         }
 
-        // The same for top/bottom along a shared y axis, given every cell's frame
-        // width (a wrapped Outside top/bottom legend depends on it). `rows` is
-        // cell i's own legend layout.
-        template <class FrameW>
-        void shared_vertical(const FigureSnapshot& fsnap, const std::vector<CellMeasure>& ms,
-                             const GridMeasure& g, std::size_t i, FrameW frame_w_of,
-                             PlotInsets& res, LegendRows& rows) {
-            reserve_vertical(g, ms[i], ms[i].slot, frame_w_of(i), res, rows);
-            if (!cell_shares(fsnap.axes[i], false)) return;
-            const AxesSlot& a = ms[i].slot;
-            for (std::size_t j = 0; j < ms.size(); ++j) {
-                if (j == i || !cells_share(fsnap, i, j, false)) continue;
-                const AxesSlot& b = ms[j].slot;
-                if (b.row0() != a.row0() && b.row1() != a.row1()) continue;
-                PlotInsets r;
-                LegendRows unused;
-                reserve_vertical(g, ms[j], b, frame_w_of(j), r, unused);
-                if (b.row0() == a.row0()) res.top = std::max(res.top, r.top);
-                if (b.row1() == a.row1()) res.bottom = std::max(res.bottom, r.bottom);
+        // One direction's frames. `len[i]` comes in as each cell's own fit in
+        // `span[i]` (the cell's extent); every cell then reserves its group's
+        // largest need before (`lo`) and after (`hi`) its frame. A poking label
+        // needs more as its frame shrinks, so this repeats until no frame moves
+        // (at once when nothing pokes). A cell alone keeps its own fit.
+        template <class NeedLo, class NeedHi>
+        void align_1d(const std::vector<std::size_t>& lo, const std::vector<std::size_t>& hi,
+                      const std::vector<float>& span, NeedLo need_lo, NeedHi need_hi,
+                      std::vector<float>& len, std::vector<float>& res_lo, std::vector<float>& res_hi) {
+            const std::size_t n = len.size();
+            std::vector<float> glo(n), ghi(n);
+            for (int pass = 0; pass < 16; ++pass) {
+                std::fill(glo.begin(), glo.end(), 0.0f);
+                std::fill(ghi.begin(), ghi.end(), 0.0f);
+                for (std::size_t i = 0; i < n; ++i) {
+                    glo[lo[i]] = std::max(glo[lo[i]], need_lo(i, len[i]));
+                    ghi[hi[i]] = std::max(ghi[hi[i]], need_hi(i, len[i]));
+                }
+                bool moved = false;
+                for (std::size_t i = 0; i < n; ++i) {
+                    res_lo[i] = glo[lo[i]];
+                    res_hi[i] = ghi[hi[i]];
+                    const float l = std::max(kMinFrameSize, span[i] - res_lo[i] - res_hi[i]);
+                    moved = moved || std::fabs(l - len[i]) > 1e-3f;
+                    len[i] = l;
+                }
+                if (!moved) break;
             }
+        }
+
+        // Every cell's reservation and frame size at the given tracks.
+        struct CellFit {
+            PlotInsets res;   // cell edge to frame (CellLayout::reserved)
+            float frame_w = 0.0f, frame_h = 0.0f;
+            LegendRows rows;  // the legend's, wrapped to the extended frame
+        };
+
+        std::vector<CellFit> fit_cells(const FigureSnapshot& fsnap, const FigureMeasure& measure,
+                                       const GridTracks& t) {
+            const std::vector<CellMeasure>& ms = measure.cells;
+            const std::size_t n = ms.size();
+            std::vector<CellFit> out(n);
+            std::vector<float> cw(n), ch(n), fw(n), fh(n);
+            std::vector<float> rl(n), rr(n), rt(n), rb(n);
+            for (std::size_t i = 0; i < n; ++i) {
+                const AxesSlot& s = ms[i].slot;
+                cw[i] = t.col_x[s.col1()] + t.col_w[s.col1()] - t.col_x[s.col0()];
+                ch[i] = t.row_y[s.row1()] + t.row_h[s.row1()] - t.row_y[s.row0()];
+            }
+
+            // Widths first: they don't depend on the heights.
+            for (std::size_t i = 0; i < n; ++i)
+                fw[i] = fit_len(cw[i] - outer_left(ms[i]) - outer_right(ms[i]), ms[i].reach_l, ms[i].reach_r);
+            align_1d(edge_groups(fsnap, true, true), edge_groups(fsnap, true, false), cw,
+                     [&](std::size_t i, float len) { return outer_left(ms[i]) + ms[i].reach_l.at(len); },
+                     [&](std::size_t i, float len) { return outer_right(ms[i]) + ms[i].reach_r.at(len); },
+                     fw, rl, rr);
+
+            // Then heights: an Outside top/bottom legend wraps its rows to the
+            // extended frame, known now that the width is.
+            for (std::size_t i = 0; i < n; ++i) {
+                const CellMeasure& m = ms[i];
+                const float ext_w = fw[i] + m.reach_l.at(fw[i]) + m.reach_r.at(fw[i]) + m.titles.left
+                                    + m.titles.right + 2.0f * m.frame_margin;
+                out[i].rows = legend_rows_for(m, ext_w);
+                fh[i] = fit_len(ch[i] - outer_top(m, out[i].rows) - outer_bottom(m, out[i].rows),
+                                m.reach_t, m.reach_b);
+            }
+            align_1d(edge_groups(fsnap, false, true), edge_groups(fsnap, false, false), ch,
+                     [&](std::size_t i, float len) { return outer_top(ms[i], out[i].rows) + ms[i].reach_t.at(len); },
+                     [&](std::size_t i, float len) {
+                         return outer_bottom(ms[i], out[i].rows) + ms[i].reach_b.at(len);
+                     },
+                     fh, rt, rb);
+
+            for (std::size_t i = 0; i < n; ++i) {
+                out[i].res = {rl[i], rr[i], rt[i], rb[i]};
+                out[i].frame_w = fw[i];
+                out[i].frame_h = fh[i];
+            }
+            return out;
         }
     } // namespace
 
@@ -930,6 +935,33 @@ namespace sextant {
         return true;
     }
 
+    // grid_tracks() at a fractional figure size (the inverse solves between pixels).
+    static GridTracks tracks_at(const FigureSnapshot& fsnap, float suptitle_band, float fig_w, float fig_h) {
+        int rows = 1, cols = 1;
+        if (!fsnap.axes.empty()) {
+            rows = std::max(1, fsnap.axes.front().slot.rows);
+            cols = std::max(1, fsnap.axes.front().slot.cols);
+        }
+        const auto& m = fsnap.margins;
+        GridTracks t;
+        tracks_1d(fig_w, m.left, m.right, fsnap.col_gap, grid_weights(fsnap.col_ratios, cols), t.col_x, t.col_w);
+        tracks_1d(fig_h, suptitle_band + m.top, m.bottom, fsnap.row_gap, grid_weights(fsnap.row_ratios, rows),
+                  t.row_y, t.row_h);
+        return t;
+    }
+
+    // The smallest `x` at which `len(x)` reaches `want`, `len` non-decreasing.
+    template <class Len>
+    static float solve_size(float want, Len len) {
+        float lo = 0.0f, hi = 256.0f;
+        for (int k = 0; k < 40 && len(hi) < want; ++k) hi *= 2.0f;
+        for (int k = 0; k < 64 && hi - lo > 1e-4f; ++k) {
+            const float mid = 0.5f * (lo + hi);
+            (len(mid) < want ? lo : hi) = mid;
+        }
+        return hi;
+    }
+
     LayoutSize figure_size_for_frame(const FigureSnapshot& fsnap, int slot_index,
                                      float frame_w, float frame_h) {
         if (fsnap.axes.empty()) return {};
@@ -942,61 +974,25 @@ namespace sextant {
         if (!measure_fits(measure, fsnap))
             return figure_size_for_frame(fsnap, slot_index, frame_w, frame_h);
 
-        const std::vector<CellMeasure>& ms = measure.cells;
         std::size_t si = 0;
-        for (std::size_t i = 0; i < ms.size(); ++i)
-            if (ms[i].slot.index == slot_index) {
+        for (std::size_t i = 0; i < measure.cells.size(); ++i)
+            if (measure.cells[i].slot.index == slot_index) {
                 si = i;
                 break;
             }
-        const AxesSlot& s = ms[si].slot;
 
-        const GridMeasure& g = measure.grid;
+        // Every frame grows with the figure (a group member's too), so each
+        // side is a monotonic search: the width first, since the heights depend
+        // on it (a wrapped legend) and not the other way round.
         const float band = measure.suptitle_band;
-        const auto& m = fsnap.margins;
-
-        // Grid cells the slot covers each way (a span includes inner gaps);
-        // clamped for gaps wider than the span.
-        const int span_c = s.col1() - s.col0() + 1;
-        const int span_r = s.row1() - s.row0() + 1;
-
-        // The slot's reservation at the requested frame width: its widths first
-        // (shared ones with its group's, see shared_horizontal()).
-        const float fw_req = std::max(kMinFrameSize, frame_w);
-        PlotInsets res = shared_horizontal(fsnap, ms, g, si);
-        LegendRows rows;
-
-        // A span's tracks share its length by weight; the figure is one weight
-        // unit times all the weights.
-        const std::vector<float> wc = grid_weights(fsnap.col_ratios, g.cols);
-        const std::vector<float> wr = grid_weights(fsnap.row_ratios, g.rows);
-
-        const float span_w = fw_req + res.left + res.right;
-        const float unit_w = std::max(0.0f, (span_w - static_cast<float>(span_c - 1) * fsnap.col_gap)
-                                            / weight_sum(wc, s.col0(), s.col1()));
-        const float fig_w = unit_w * weight_sum(wc, 0, g.cols - 1) + m.left + m.right
-                            + static_cast<float>(g.cols - 1) * fsnap.col_gap;
-
-        // Then its heights, which along a shared y axis need the other members'
-        // frame widths: known now that the width is.
-        const auto frame_w_of = [&](std::size_t j) {
-            if (j == si) return fw_req;
-            const AxesSlot& b = ms[j].slot;
-            const PlotInsets h = shared_horizontal(fsnap, ms, g, j);
-            const float cw = unit_w * weight_sum(wc, b.col0(), b.col1())
-                             + static_cast<float>(b.col1() - b.col0()) * fsnap.col_gap;
-            return std::max(kMinFrameSize, cw - h.left - h.right);
+        const auto fit_at = [&](float w, float h) {
+            return fit_cells(fsnap, measure, tracks_at(fsnap, band, w, h))[si];
         };
-        shared_vertical(fsnap, ms, g, si, frame_w_of, res, rows);
-
-        const float span_h = std::max(kMinFrameSize, frame_h) + res.top + res.bottom;
-        const float unit_h = std::max(0.0f, (span_h - static_cast<float>(span_r - 1) * fsnap.row_gap)
-                                            / weight_sum(wr, s.row0(), s.row1()));
-        return {
-            fig_w,
-            unit_h * weight_sum(wr, 0, g.rows - 1) + band + m.top + m.bottom
-            + static_cast<float>(g.rows - 1) * fsnap.row_gap
-        };
+        const float w = solve_size(std::max(kMinFrameSize, frame_w),
+                                   [&](float x) { return fit_at(x, 1.0f).frame_w; });
+        const float h = solve_size(std::max(kMinFrameSize, frame_h),
+                                   [&](float y) { return fit_at(w, y).frame_h; });
+        return {w, h};
     }
 
     std::vector<float> grid_weights(const std::vector<float>& ratios, int n) {
@@ -1010,18 +1006,7 @@ namespace sextant {
     }
 
     GridTracks grid_tracks(const FigureSnapshot& fsnap, float suptitle_band, int fig_w, int fig_h) {
-        int rows = 1, cols = 1;
-        if (!fsnap.axes.empty()) {
-            rows = std::max(1, fsnap.axes.front().slot.rows);
-            cols = std::max(1, fsnap.axes.front().slot.cols);
-        }
-        const auto& m = fsnap.margins;
-        GridTracks t;
-        tracks_1d(static_cast<float>(fig_w), m.left, m.right, fsnap.col_gap,
-                  grid_weights(fsnap.col_ratios, cols), t.col_x, t.col_w);
-        tracks_1d(static_cast<float>(fig_h), suptitle_band + m.top, m.bottom, fsnap.row_gap,
-                  grid_weights(fsnap.row_ratios, rows), t.row_y, t.row_h);
-        return t;
+        return tracks_at(fsnap, suptitle_band, static_cast<float>(fig_w), static_cast<float>(fig_h));
     }
 
     float middle_baseline_offset(const std::string& font_path, float fontsize) {
@@ -1237,8 +1222,8 @@ namespace sextant {
         }
 
         // One 2D axes' part of a cell's layout, its frame already placed: transform,
-        // ticks, axis lines and label and title anchors. `al`: the cell's aligned
-        // furniture (aligned()); fw/fh the figure size.
+        // ticks, axis lines and label and title anchors. `al`: the cell's own
+        // furniture (reach + axis titles, cell_o); fw/fh the figure size.
         void layout_axes(CellLayout& c, const RenderSnapshot& s2, const CellPrep& p, const PlotInsets& al,
                          float fw, float fh) {
             const AxesStyle& st = s2.axes_style;
@@ -1277,8 +1262,8 @@ namespace sextant {
             c.ylabel_x = c.yaxis_x + c.ytick_dir * xoff;
             c.ylabel_align = c.ytick_dir > 0.0f ? HAlign::Left : HAlign::Right;
 
-            // At the outer edge of the grid-aligned furniture, so titles line up
-            // (a twin's on its own axis' side).
+            // Just outside the cell's furniture (cell_a), hugging the frame (a
+            // twin's on its own axis' side).
             const float frame_cx = c.frame.x + c.frame.w * 0.5f;
             const float xtitle_lh = title_height(s2.xtitle, st.font_path, st.xtitle_fontsize);
             c.xtitle_x = frame_cx;
@@ -1300,64 +1285,49 @@ namespace sextant {
             const float fw = static_cast<float>(fig_w), fh = static_cast<float>(fig_h);
 
             const std::vector<CellMeasure>& ms = measure.cells;
-            const GridMeasure& g = measure.grid;
             const GridTracks t = grid_tracks(fsnap, out.suptitle_band, fig_w, fig_h);
 
             // A cell is the whole subplot, so gaps are between subplots. A span
             // runs from its first cell to its last, including inner gaps. Track
-            // sizes are weighted shares.
-            const auto cell_w = [&](const AxesSlot& s) {
-                return t.col_x[s.col1()] + t.col_w[s.col1()] - t.col_x[s.col0()];
-            };
-
-            // Widths first, for every cell (size-independent; a shared axis' members
-            // reserve alike), then heights (a wrapped legend depends on the frame
-            // width, a member's on its own).
-            std::vector<PlotInsets> hres(fsnap.axes.size());
-            std::vector<float> frame_ws(fsnap.axes.size());
-            for (std::size_t i = 0; i < fsnap.axes.size(); ++i) {
-                hres[i] = shared_horizontal(fsnap, ms, g, i);
-                frame_ws[i] = std::max(kMinFrameSize, cell_w(ms[i].slot) - hres[i].left - hres[i].right);
-            }
+            // sizes are weighted shares. Every frame is sized at once (aligned
+            // ones depend on each other).
+            const std::vector<CellFit> fits = fit_cells(fsnap, measure, t);
 
             out.cells.reserve(fsnap.axes.size());
             for (std::size_t i = 0; i < fsnap.axes.size(); ++i) {
                 const auto& fa = fsnap.axes[i];
                 const CellMeasure& me = ms[i];
                 const AxesSlot& s = fa.slot;
+                const CellFit& fit = fits[i];
+                const LegendRows& rows = fit.rows;
 
                 const float cx = t.col_x[s.col0()];
                 const float cy = t.row_y[s.row0()];
-                const float cw = cell_w(s);
+                const float cw = t.col_x[s.col1()] + t.col_w[s.col1()] - cx;
                 const float ch = t.row_y[s.row1()] + t.row_h[s.row1()] - cy;
 
                 CellLayout c;
                 c.slot = s;
                 c.cell = {cx, cy, cw, ch};
-
-                LegendRows rows;
-                c.reserved = hres[i];
-                const float frame_w = frame_ws[i];
-                shared_vertical(fsnap, ms, g, i, [&](std::size_t j) { return frame_ws[j]; },
-                                c.reserved, rows);
-                c.frame = {
-                    cx + c.reserved.left, cy + c.reserved.top, frame_w,
-                    std::max(kMinFrameSize, ch - c.reserved.top - c.reserved.bottom)
-                };
+                c.reserved = fit.res;
+                c.frame = {cx + c.reserved.left, cy + c.reserved.top, fit.frame_w, fit.frame_h};
                 // Axes::set_aspect(): Box shrinks the frame before anything is
                 // placed around it, so all of it follows; Datalim widens the
                 // limits below instead.
                 const RenderSnapshot* own2d = fa.snap2d();
-                const float frame_top = c.frame.y;
                 if (own2d && own2d->aspect.ratio > 0.0 && own2d->aspect.adjustable == Adjustable::Box)
                     c.frame = aspect_frame(c.frame, *own2d, prep[i].limits);
 
-                const PlotInsets al = aligned(g, me, s);
-                const float ax_l = al.left, ax_r = al.right, ax_t = al.top, ax_b = al.bottom;
+                // cell_o around the frame, the cell's own: everything else hugs
+                // it, so an aligned group's slack lies at the cell edge.
+                const PlotInsets al = {
+                    me.reach_l.at(c.frame.w) + me.titles.left, me.reach_r.at(c.frame.w) + me.titles.right,
+                    me.reach_t.at(c.frame.h) + me.titles.top, me.reach_b.at(c.frame.h) + me.titles.bottom
+                };
                 const float fm = me.frame_margin;
                 c.extended = {
-                    c.frame.x - ax_l - fm, c.frame.y - ax_t - fm,
-                    c.frame.w + ax_l + ax_r + 2.0f * fm, c.frame.h + ax_t + ax_b + 2.0f * fm
+                    c.frame.x - al.left - fm, c.frame.y - al.top - fm,
+                    c.frame.w + al.left + al.right + 2.0f * fm, c.frame.h + al.top + al.bottom + 2.0f * fm
                 };
 
                 const AxesStyle& st = std::visit(
@@ -1367,13 +1337,13 @@ namespace sextant {
                 const ColorbarOptions& cbo = std::visit(
                     [](const auto& sn) -> const ColorbarOptions& { return sn.colorbar_opts; }, fa.snap);
 
-                // The axes title: top of the cell, centred on the frame (as in 2D).
+                // The axes title: atop cell_d (beyond a top legend and colorbars),
+                // centred on the frame (as in 2D).
                 const float frame_cx = c.frame.x + c.frame.w * 0.5f;
                 c.title_x = frame_cx;
                 const std::string& title = std::visit(
                     [](const auto& sn) -> const std::string& { return sn.title; }, fa.snap);
-                // (Down with a Box-shortened frame.)
-                c.title_y = cy + (c.frame.y - frame_top)
+                c.title_y = c.extended.y - top_decor(me, rows) - me.title
                             + title_height(title, st.font_path, st.title_fontsize) * 0.5f;
 
                 // Legend first, then the bars outboard of it.
