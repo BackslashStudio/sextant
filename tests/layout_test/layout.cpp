@@ -538,9 +538,16 @@ namespace lt {
 
         // Release bounds catch a regression like pick_default_font()
         // re-scanning ~130 families per measurement. A debug build only
-        // reports: nobody pays its cost, and its bound failed on noise.
+        // reports: nobody pays its cost, and its bound failed on noise. The
+        // Windows runner's speed varies run to run (best-of-10 for 12 axes read
+        // 110 to 220 us, where Linux and macOS stay under 75), so it gets twice
+        // the room; the font re-scan cost many times that.
 #ifdef NDEBUG
+#ifdef _WIN32
+        const double one_limit = 40.0, grid_limit = 400.0;
+#else
         const double one_limit = 20.0, grid_limit = 200.0;
+#endif
         check(us_one < one_limit, "single-axes layout costs under " +
                                   std::to_string(one_limit) + " us/frame (" +
                                   std::to_string(us_one) + ")");
