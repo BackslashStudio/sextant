@@ -300,10 +300,11 @@ static void emit_error_bars(std::ostringstream& o, const SvgAxesData& d, ObjectR
             break;
         }
         case PlotKind::Bar: {
-            // Error bars hang off the tip (heights), not the baseline.
+            // Error bars hang off the tip, not the base.
             const auto& bp = d.bars[r.index];
-            emit_error_bars_for(o, d, bp.centers, bp.heights, bp.err,
-                                bp.opts.errorbar, bp.opts.edgecolor);
+            if (bp.err.empty()) break;
+            const XYColumns a = bar_anchors(bp);
+            emit_error_bars_for(o, d, a.x, a.y, bp.err, bp.opts.errorbar, bp.opts.edgecolor);
             break;
         }
         case PlotKind::Scatter: {
@@ -477,20 +478,31 @@ static void emit_heatmap(std::ostringstream& o, const SvgAxesData& d,
 
 static void emit_bars(std::ostringstream& o, const SvgAxesData& d,
                       std::span<const std::size_t> which) {
-    const float py0 = d.layout.tr.to_py(0.0);
+    const auto& tr = d.layout.tr;
     for (const std::size_t k : which) {
         const auto& bp = d.bars[k];
         const float half = static_cast<float>(bp.bar_width * 0.5);
         const std::string fill  = rgb(*bp.opts.color);
         const std::string edge  = rgb(bp.opts.edgecolor);
         for (std::size_t i = 0; i < bp.centers.size(); ++i) {
-            const float xl = d.layout.tr.to_px(bp.centers[i] - half);
-            const float xr = d.layout.tr.to_px(bp.centers[i] + half);
-            const float yt = d.layout.tr.to_py(bp.heights[i]);
-            const float ytop  = std::min(py0, yt);
-            const float ybot  = std::max(py0, yt);
-            const float bh    = ybot - ytop;
-            const float bw    = xr - xl;
+            // Standing: x from the category edges, y from base to tip. Lying: x
+            // from base to tip, y from the category edges.
+            float xl, bw, ytop, bh;
+            if (!bp.horizontal()) {
+                xl = tr.to_px(bp.centers[i] - half);
+                bw = tr.to_px(bp.centers[i] + half) - xl;
+                const float yb = tr.to_py(bp.base_at(i)), yt = tr.to_py(bp.tip_at(i));
+                ytop = std::min(yb, yt);
+                bh = std::max(yb, yt) - ytop;
+            } else {
+                const float xb = tr.to_px(bp.base_at(i)), xt = tr.to_px(bp.tip_at(i));
+                xl = std::min(xb, xt);
+                bw = std::max(xb, xt) - xl;
+                const float y0 = tr.to_py(bp.centers[i] - half);
+                const float y1 = tr.to_py(bp.centers[i] + half);
+                ytop = std::min(y0, y1);
+                bh = std::max(y0, y1) - ytop;
+            }
             o << "    <rect x=\"" << xl << "\" y=\"" << ytop
               << "\" width=\"" << bw << "\" height=\"" << bh
               << "\" fill=\"" << fill << "\" fill-opacity=\"" << bp.opts.alpha << "\"";

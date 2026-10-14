@@ -58,9 +58,22 @@ std::string fmt_point_err(double x, double y, const ErrorBarData& err, std::size
     return fmt_err_pair("x", x, "y", y, err, i);
 }
 
-// No fast path needed: without error data this prints plain "x=%.4g".
-std::string fmt_bar_err(double x, double h, const ErrorBarData& err, std::size_t i) {
-    return fmt_err_pair("x", x, "height", h, err, i);
+// No fast path needed: without error data this prints plain "x=%.4g". A lying
+// bar reads "y=.., width=.." (its value errors are the x ones); a set base adds
+// "bottom=.." ("left=..").
+std::string fmt_bar(const BarPlot& bp, std::size_t i) {
+    const ErrorBarData& err = bp.err;
+    std::string s = bp.horizontal()
+        ? fmt_value("y", bp.centers[i], err.has_y_box(), err.y_box(i), err.has_y_cap(), err.y_cap(i))
+          + ", "
+          + fmt_value("width", bp.heights[i], err.has_x_box(), err.x_box(i), err.has_x_cap(), err.x_cap(i))
+        : fmt_err_pair("x", bp.centers[i], "height", bp.heights[i], err, i);
+    if (!bp.bottom.empty()) {
+        char buf[48];
+        std::snprintf(buf, sizeof(buf), ", %s=%.4g", bp.horizontal() ? "left" : "bottom", bp.base_at(i));
+        s += buf;
+    }
+    return s;
 }
 
 std::string fmt_z(double x, double y, double z) {
@@ -266,9 +279,23 @@ std::optional<PickHit> find_pick(const RenderSnapshot& snap, const HintProjector
                 sweep(PlotKind::ScatterZ, o, 2, rank, snap.scatter_z[o].x, snap.scatter_z[o].y,
                       &snap.scatter_z[o]);
                 break;
-            case PlotKind::Bar:
-                sweep(PlotKind::Bar, o, 3, rank, snap.bars[o].centers, snap.bars[o].heights, no_hiding);
+            case PlotKind::Bar: {
+                // At the tip. The grid holds (center, tip) in either orientation,
+                // since an orientation edit leaves the data generation alone; a
+                // lying bar swaps the box and the point instead.
+                const BarPlot& bp = snap.bars[o];
+                const CowVec<double> tips = bar_tips(bp);
+                const bool lying = bp.horizontal();
+                const PointGrid& g = index ? index->grid(PlotKind::Bar, o, bp.centers, tips) : kScan;
+                g.for_each_in(bp.centers, tips, lying ? y_lo : x_lo, lying ? y_hi : x_hi,
+                              lying ? x_lo : y_lo, lying ? x_hi : y_hi,
+                              [&](std::size_t i) {
+                                  const HintProjector::Pt p = lying ? tr.at(tips[i], bp.centers[i])
+                                                                    : tr.at(bp.centers[i], tips[i]);
+                                  if (p.in_front) consider(p.x, p.y, 3, o, i, rank);
+                              });
                 break;
+            }
             default: break;
         }
     }
@@ -394,8 +421,7 @@ std::string format_pick(const RenderSnapshot& snap, const PickHit& hit) {
         }
         case PickKind::Bar: {
             const auto& bp = snap.bars[hit.object];
-            return append_label(fmt_bar_err(bp.centers[i], bp.heights[i], bp.err, i),
-                                bp.opts.hint_labels, i);
+            return append_label(fmt_bar(bp, i), bp.opts.hint_labels, i);
         }
         case PickKind::Heatmap: {
             const auto& hp = snap.heatmaps[hit.object];

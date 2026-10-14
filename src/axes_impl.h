@@ -177,6 +177,8 @@ struct Axes::Impl {
                           ScatterZOptions opts, const char* who);
     void ingest_bar(std::span<const double> x, std::span<const double> height,
                     const ErrorBar& err, BarOptions opts, const char* who);
+    void push_bars(std::vector<double> centers, std::vector<double> heights, double width,
+                   ErrorBarData err, BarOptions opts, const char* who);
     void ingest_heatmap(std::span<const double> data, int rows, int cols,
                         Range xrange, Range yrange, HeatmapOptions opts,
                         const char* who);
@@ -192,8 +194,9 @@ struct Axes::Impl {
     void set_scatter_z_data(std::size_t i, std::span<const double> x, std::span<const double> y,
                             std::span<const double> z, const std::vector<double>* sizes,
                             const char* who);
+    // `bottom`: the new bases (BarData), or null to keep them as `sizes` above.
     void set_bar_data(std::size_t i, std::span<const double> x, std::span<const double> height,
-                      const char* who);
+                      const std::vector<double>* bottom, const char* who);
     void set_heatmap_data(std::size_t i, std::span<const double> data, int rows, int cols,
                           Range xrange, Range yrange, const char* who);
 

@@ -59,7 +59,7 @@ namespace sextant {
                      F(vmin) F(vmax) F(colorbar) F(name)
                      F(show_legend) F(errorbar) F(hint_labels))
     SEXTANT_DESCRIBE(BarOptions,
-                     F(color) F(width) F(alpha) F(name) F(show_legend) F(edgecolor) F(linewidth)
+                     F(color) F(orientation) F(bottom) F(width) F(alpha) F(name) F(show_legend) F(edgecolor) F(linewidth)
                      F(errorbar) F(hint_labels))
     SEXTANT_DESCRIBE(HistOptions, F(density) F(cumulative))
     SEXTANT_DESCRIBE(HeatmapOptions,
@@ -206,6 +206,8 @@ namespace sextant {
     SEXTANT_ENUM_NAMES(DrawStyle,
                        {"default", DrawStyle::Default}, {"steps_pre", DrawStyle::StepsPre},
                        {"steps_mid", DrawStyle::StepsMid}, {"steps_post", DrawStyle::StepsPost})
+    SEXTANT_ENUM_NAMES(Orientation,
+                       {"vertical", Orientation::Vertical}, {"horizontal", Orientation::Horizontal})
     SEXTANT_ENUM_NAMES(MarkerStyle,
                        {"none", MarkerStyle::None}, {"circle", MarkerStyle::Circle},
                        {"square", MarkerStyle::Square}, {"triangle", MarkerStyle::Triangle},

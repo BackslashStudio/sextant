@@ -164,12 +164,12 @@ namespace sextant {
         return *this;
     }
     Plane2D& Plane2D::set_bar_data(std::size_t i, const BarData& data) {
-        d->sheet.set_bar_data(i, data.x, data.height, "Plane2D::set_bar_data");
+        d->sheet.set_bar_data(i, data.x, data.height, &data.bottom, "Plane2D::set_bar_data");
         return *this;
     }
     Plane2D& Plane2D::set_bar_data(std::size_t i, std::span<const double> x,
                                    std::span<const double> height) {
-        d->sheet.set_bar_data(i, x, height, "Plane2D::set_bar_data");
+        d->sheet.set_bar_data(i, x, height, nullptr, "Plane2D::set_bar_data");
         return *this;
     }
     Plane2D& Plane2D::set_heatmap_data(std::size_t i, const HeatmapData& data) {

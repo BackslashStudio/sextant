@@ -44,6 +44,10 @@ namespace sextant {
     // then runs flat to b.
     enum class DrawStyle { Default, StepsPre, StepsMid, StepsPost };
 
+    // The direction an object runs: a bar stands (Vertical) or lies along x
+    // (Horizontal, matplotlib's barh).
+    enum class Orientation { Vertical, Horizontal };
+
     // `size` is the marker's outer diameter. Triangle points up; Star has five
     // points; Pentagon and Hexagon stand on a corner pointing up. Cross and Plus
     // are filled bars; ThinCross, ThinPlus, VLine and HLine are line markers
@@ -309,6 +313,19 @@ namespace sextant {
 
     struct BarOptions {
         std::optional<Color> color; // see LineOptions::color
+
+        // Horizontal reads bar(x, height) as positions along y and lengths along
+        // x (matplotlib's barh(y, width)); `width` is then each bar's thickness
+        // along y, and the value errors are the ErrorBar's x_* fields.
+        Orientation orientation = Orientation::Vertical;
+
+        // Where each bar starts (its left edge when horizontal): empty = 0, one
+        // value = every bar, else one per bar (any other length throws
+        // std::invalid_argument). A bar runs from its bottom to bottom + height,
+        // which is where error bars hang. Kept as the object's data: read back
+        // and replaced through BarData::bottom, not through these options.
+        std::vector<double> bottom;
+
         float width = 0.8f;
         float alpha = 1.0f;
         std::string name;
@@ -720,6 +737,11 @@ namespace sextant {
     // Also what hist() made: bin centers and (possibly normalised) counts.
     struct BarData {
         std::vector<double> x, height;
+        // Each bar's base (BarOptions::bottom), one per bar; empty = 0. A single
+        // value given to bar() comes back repeated per bar. set_bar_data(i,
+        // BarData) takes it as given (empty clears it, one value is every bar);
+        // the span overload keeps it while the bar count is unchanged.
+        std::vector<double> bottom;
     };
 
     // Row-major rows x cols, as passed. Values are stored in single precision,

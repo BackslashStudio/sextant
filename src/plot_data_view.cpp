@@ -73,8 +73,12 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot& snap) 
         t.data_stamp = snap.bars[i].data_stamp;
         t.id = snap.bars[i].id;
         t.label = pick_label(bp.opts.name, "bar", static_cast<int>(i));
+        // Named for the orientation, as barh(y, width, left) for a lying bar.
+        const bool lying = bp.horizontal();
         t.columns.push_back({"center", bp.centers.data(), bp.centers.size()});
-        t.columns.push_back({"height", bp.heights.data(), bp.heights.size()});
+        t.columns.push_back({lying ? "width" : "height", bp.heights.data(), bp.heights.size()});
+        if (!bp.bottom.empty())
+            t.columns.push_back({lying ? "left" : "bottom", bp.bottom.data(), bp.bottom.size()});
         t.bar_width = &bp.bar_width;
         out.push_back(std::move(t));
     }

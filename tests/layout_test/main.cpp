@@ -304,6 +304,10 @@ int main() {
     test_line_steps();
     test_line_steps_rendered();
 
+    // bar_orient.cpp
+    test_bar_orientation();
+    test_bar_orientation_rendered();
+
     // text.cpp
     test_text();
 

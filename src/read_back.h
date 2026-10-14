@@ -29,7 +29,7 @@ namespace sextant::read_back {
         return v[i];
     }
 
-    // For set_*_data(): error bars, hint_labels and marker sizes stay while the
+    // For set_*_data(): error bars, hint_labels, marker sizes and bar bases stay while the
     // point count (a grid's shape) is unchanged and are dropped otherwise, as
     // they would no longer line up. Then takes a fresh data_stamp.
     template <typename P>
@@ -38,6 +38,7 @@ namespace sextant::read_back {
             if constexpr (requires { p.err; }) p.err = {};
             p.opts.hint_labels.clear();
             if constexpr (requires { p.sizes; }) p.sizes = std::vector<double>{};
+            if constexpr (requires { p.bottom; }) p.bottom = std::vector<double>{};
         }
         p.data_stamp = next_snapshot_generation();
     }
@@ -51,6 +52,17 @@ namespace sextant::read_back {
                                         + std::to_string(n) + " points)");
     }
 
+    // Bar bases for `n` bars (BarOptions::bottom): empty, one value for every
+    // bar, or one per bar; returned one per bar (or empty).
+    inline std::vector<double> take_bottom(std::vector<double> bottom, std::size_t n, const char* who) {
+        if (bottom.size() == 1 && n != 1) return std::vector<double>(n, bottom[0]);
+        if (!bottom.empty() && bottom.size() != n)
+            throw std::invalid_argument(std::string(who) + ": bottom must be empty, one value or one per bar (got "
+                                        + std::to_string(bottom.size()) + " for "
+                                        + std::to_string(n) + " bars)");
+        return bottom;
+    }
+
     inline LineData     to_data(const LinePlot& p)     { return { p.x.get(), p.y.get() }; }
     inline ScatterData  to_data(const ScatterPlot& p)  {
         return { p.x.get(), p.y.get(), p.sizes.get() };
@@ -58,7 +70,9 @@ namespace sextant::read_back {
     inline ScatterZData to_data(const ScatterZPlot& p) {
         return { p.x.get(), p.y.get(), p.z.get(), p.sizes.get() };
     }
-    inline BarData      to_data(const BarPlot& p)      { return { p.centers.get(), p.heights.get() }; }
+    inline BarData      to_data(const BarPlot& p)      {
+        return { p.centers.get(), p.heights.get(), p.bottom.get() };
+    }
 
     inline HeatmapData to_data(const HeatmapPlot& p) {
         return { std::vector<double>(p.data.begin(), p.data.end()),

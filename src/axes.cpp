@@ -374,16 +374,28 @@ void Axes::Impl::ingest_bar(std::span<const double> x, std::span<const double> h
     if (x.size() != height.size())
         throw std::invalid_argument(std::string(who) + ": x and height must have the same length");
     ErrorBarData err = take_error_bars(eb, x.size(), who);
+    const double width = bar_width_for(x, opts);
+    push_bars(std::vector<double>(x.begin(), x.end()),
+              std::vector<double>(height.begin(), height.end()),
+              width, std::move(err), std::move(opts), who);
+}
+
+// bar() and hist(): the bases are taken out of the options and kept as data.
+void Axes::Impl::push_bars(std::vector<double> centers, std::vector<double> heights, double width,
+                           ErrorBarData err, BarOptions opts, const char* who) {
+    std::vector<double> bottom = read_back::take_bottom(std::move(opts.bottom), centers.size(), who);
+    opts.bottom.clear();
     warn_math(mathtext, who, opts.name);
     cycle->resolve(opts.color);
     bars.push_back({
-        std::vector<double>(x.begin(), x.end()),
-        std::vector<double>(height.begin(), height.end()),
-        bar_width_for(x, opts),
+        std::move(centers),
+        std::move(heights),
+        width,
         std::move(err),
         std::move(opts),
         next_snapshot_generation(),
         next_object_id(),
+        std::move(bottom),
     });
 }
 
@@ -472,20 +484,10 @@ Axes& Axes::hist(std::span<const double> data, int bins,
     for (int i = 0; i < bins; ++i)
         centers[static_cast<std::size_t>(i)] = lo + (i + 0.5) * bin_w;
 
-    // bar_opts passes through; `width` is relative to the bin width. No error
-    // bars for histograms.
-    warn_math(d->mathtext, "hist", bar_opts.name);
-    d->cycle->resolve(bar_opts.color);
-
-    d->bars.push_back({
-        std::move(centers),
-        std::move(counts),
-        bin_w * static_cast<double>(bar_opts.width),
-        ErrorBarData{},
-        std::move(bar_opts),
-        next_snapshot_generation(),
-        next_object_id(),
-    });
+    // bar_opts passes through (orientation and bottom included); `width` is
+    // relative to the bin width. No error bars for histograms.
+    const double width = bin_w * static_cast<double>(bar_opts.width);
+    d->push_bars(std::move(centers), std::move(counts), width, ErrorBarData{}, std::move(bar_opts), "hist");
     return *this;
 }
 
@@ -843,15 +845,18 @@ void Axes::Impl::set_scatter_z_data(std::size_t i, std::span<const double> x, st
 }
 
 void Axes::Impl::set_bar_data(std::size_t i, std::span<const double> x, std::span<const double> height,
-                              const char* who) {
+                              const std::vector<double>* bottom, const char* who) {
     BarPlot& p = read_back::at(bars, i, who);
     if (x.size() != height.size())
         throw std::invalid_argument(std::string(who) + ": x and height must have the same length");
+    std::vector<double> bases;
+    if (bottom) bases = read_back::take_bottom(*bottom, x.size(), who);
     // The width stays (the panel may have set it) unless the bars moved.
     if (!read_back::same(p.centers.get(), x)) p.bar_width = bar_width_for(x, p.opts);
     read_back::keep_aligned(p, x.size() == p.centers.size());
     p.centers = read_back::own(x);
     p.heights = read_back::own(height);
+    if (bottom) p.bottom = std::move(bases);
 }
 
 void Axes::Impl::set_heatmap_data(std::size_t i, std::span<const double> data, int rows, int cols,
@@ -892,11 +897,11 @@ Axes& Axes::set_scatter_z_data(std::size_t i, std::span<const double> x, std::sp
     return *this;
 }
 Axes& Axes::set_bar_data(std::size_t i, const BarData& data) {
-    d->set_bar_data(i, data.x, data.height, "set_bar_data");
+    d->set_bar_data(i, data.x, data.height, &data.bottom, "set_bar_data");
     return *this;
 }
 Axes& Axes::set_bar_data(std::size_t i, std::span<const double> x, std::span<const double> height) {
-    d->set_bar_data(i, x, height, "set_bar_data");
+    d->set_bar_data(i, x, height, nullptr, "set_bar_data");
     return *this;
 }
 Axes& Axes::set_heatmap_data(std::size_t i, const HeatmapData& data) {

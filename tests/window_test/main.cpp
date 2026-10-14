@@ -2676,8 +2676,97 @@ static void test_line_steps() {
     fig->show(true);
 }
 
+// Horizontal bars and bar bases (BarOptions::orientation, BarOptions::bottom):
+// stacked, a waterfall, lying bars with error bars, a horizontal hist, log x,
+// and a plane. The Data panel's Orientation combo flips any of them.
+static void test_bar_orientation() {
+    using sextant::Orientation;
+    auto fig = sextant::Figure::create({.width = 1500, .height = 900, .title = "Bar orientation"});
+    fig->suptitle("Horizontal bars and bottom (BarOptions::orientation, BarOptions::bottom)");
+
+    const std::vector<double> cat{1, 2, 3, 4, 5};
+
+    // Three series stacked: each one's bottom is the sum below it.
+    auto a1 = fig->add_subplot(2, 3, 1);
+    {
+        const std::vector<double> s1{3, 4, 2, 5, 3}, s2{2, 1, 3, 2, 2}, s3{1, 2, 1, 1, 3};
+        std::vector<double> b2(s1), b3(s1);
+        for (std::size_t i = 0; i < b3.size(); ++i) b3[i] += s2[i];
+        a1->bar(cat, s1, {.name = "first"});
+        a1->bar(cat, s2, {.bottom = b2, .name = "second"});
+        a1->bar(cat, s3, {.bottom = b3, .name = "third"});
+        a1->legend();
+        a1->set_title("stacked: bottom = the series below");
+    }
+
+    // A waterfall: each step starts where the last ended; negative steps hang down.
+    auto a2 = fig->add_subplot(2, 3, 2);
+    {
+        const std::vector<double> step{5, 3, -2, 4, -3, -1};
+        std::vector<double> x(step.size()), base(step.size());
+        double run = 0.0;
+        for (std::size_t i = 0; i < step.size(); ++i) {
+            x[i] = static_cast<double>(i);
+            base[i] = run;
+            run += step[i];
+        }
+        a2->bar(x, step, {.bottom = base, .width = 0.6f, .name = "steps", .linewidth = 1.0f});
+        a2->set_title("waterfall: negative heights run down from their base");
+    }
+
+    // Lying bars from a common left edge, with x errors at the tip and labels.
+    auto a3 = fig->add_subplot(2, 3, 3);
+    {
+        const std::vector<double> w{4.0, 6.5, 3.0, 7.5, 5.0};
+        const std::vector<double> e{0.5, 0.8, 0.4, 1.0, 0.6};
+        a3->bar(cat, w, {.x_cap_lo = e, .x_cap_hi = e},
+                {.color = sextant::Color{0.2f, 0.6f, 0.4f, 1.0f}, .orientation = Orientation::Horizontal,
+                 .bottom = {1.0}, .width = 0.6f, .name = "left = 1",
+                 .hint_labels = {"alpha", "beta", "gamma", "delta", "epsilon"}});
+        a3->set_title("horizontal, left = 1, x errors at the tip (hover: y, width, left)");
+    }
+
+    // A horizontal histogram through hist()'s bar_opts.
+    auto a4 = fig->add_subplot(2, 3, 4);
+    {
+        std::vector<double> data;
+        for (int i = 0; i < 2000; ++i) {
+            double s = 0.0;
+            for (int k = 0; k < 6; ++k) s += static_cast<double>((i * 7919 + k * 104729) % 1000) / 1000.0;
+            data.push_back(s - 3.0);
+        }
+        a4->hist(data, 24, {.orientation = Orientation::Horizontal, .width = 0.9f, .name = "counts"});
+        a4->set_title("hist(orientation = Horizontal)");
+    }
+
+    // Log x: a base of 0 has no place, a set base does.
+    auto a5 = fig->add_subplot(2, 3, 5);
+    {
+        a5->bar(cat, std::vector<double>{9, 90, 900, 40, 4},
+                {.orientation = Orientation::Horizontal, .bottom = {1.0}, .name = "left = 1"});
+        a5->set_xscale(sextant::Scale::Log);
+        a5->set_title("log x: bars from 1 to 10, 100, 1000 ...");
+    }
+
+    // A plane: lying, stacked bars drawn into it.
+    auto a6 = fig->add_subplot3d(2, 3, 6);
+    {
+        auto pl = a6->plane(sextant::PlaneOrientation::XY, 0.0);
+        const std::vector<double> u{2, 3, 1, 4, 2}, v{1, 1, 2, 1, 2};
+        pl->bar(cat, u, {.color = sextant::Color::Red, .orientation = Orientation::Horizontal, .name = "u"});
+        pl->bar(cat, v, {.color = sextant::Color::Blue, .orientation = Orientation::Horizontal, .bottom = u,
+                         .name = "v on u"});
+        a6->set_xlim(0, 7).set_ylim(0, 6).set_zlim(0, 1);
+        a6->set_title("plane: stacked, horizontal");
+    }
+
+    savefig_and_check_memory(fig, "test_bar_orientation");
+    fig->show(true);
+}
+
 int main() {
-    test_line_steps();
+    test_bar_orientation();
+    // test_line_steps();
     // test_marker_sizes();
     // test_marker_shapes();
     // test_tick_style();

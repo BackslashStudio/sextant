@@ -4,6 +4,7 @@
 #include "error_bar_shape.h"
 #include "marker_shape.h"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
 
@@ -304,19 +305,33 @@ namespace sextant {
                     const double half = bp.bar_width * 0.5;
                     const std::size_t n = std::min(bp.centers.size(), bp.heights.size());
                     const Color c = with_alpha(*bp.opts.color, bp.opts.alpha);
+                    // Bar i's corners (u0, v0, u1, v1): category edges by base and
+                    // tip, swapped when it lies along u.
+                    auto corners = [&](std::size_t i) {
+                        const double c0 = bp.centers[i] - half, c1 = bp.centers[i] + half;
+                        const double v0 = bp.base_at(i), v1 = bp.tip_at(i);
+                        return bp.horizontal() ? std::array{v0, c0, v1, c1}
+                                               : std::array{c0, v0, c1, v1};
+                    };
                     b.open(Kind::Tri);
-                    for (std::size_t i = 0; i < n; ++i)
-                        b.rect(bp.centers[i] - half, 0.0, bp.centers[i] + half, bp.heights[i], c);
+                    for (std::size_t i = 0; i < n; ++i) {
+                        const auto [u0, v0, u1, v1] = corners(i);
+                        b.rect(u0, v0, u1, v1, c);
+                    }
                     b.close();
                     if (bp.opts.linewidth > 0.0f) {
                         b.open(Kind::Seg);
-                        for (std::size_t i = 0; i < n; ++i)
-                            b.rect_outline(bp.centers[i] - half, 0.0, bp.centers[i] + half,
-                                           bp.heights[i], bp.opts.edgecolor, bp.opts.linewidth);
+                        for (std::size_t i = 0; i < n; ++i) {
+                            const auto [u0, v0, u1, v1] = corners(i);
+                            b.rect_outline(u0, v0, u1, v1, bp.opts.edgecolor, bp.opts.linewidth);
+                        }
                         b.close();
                     }
-                    // Error bars hang off the tip (heights), not the baseline.
-                    errs(bp.centers, bp.heights, bp.err, bp.opts.errorbar, bp.opts.edgecolor);
+                    // Error bars hang off the tip, not the base.
+                    if (!bp.err.empty()) {
+                        const XYColumns a = bar_anchors(bp);
+                        errs(a.x, a.y, bp.err, bp.opts.errorbar, bp.opts.edgecolor);
+                    }
                     break;
                 }
 

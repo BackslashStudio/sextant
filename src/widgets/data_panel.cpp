@@ -896,6 +896,8 @@ namespace sextant {
                        const OpSink& sink, Push&& push) {
             name_and_key(st, o, push);
             if (begin_field_table("bar")) {
+                field_row("Orientation");
+                if (orientation_combo("##borient", o.orientation)) push();
                 field_row("Color");
                 if (color_swatch("##bcol", *o.color)) push();
                 field_row("Alpha");

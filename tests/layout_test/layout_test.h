@@ -608,6 +608,10 @@ namespace lt {
     void test_line_steps();
     void test_line_steps_rendered();
 
+    // bar_orient.cpp
+    void test_bar_orientation();
+    void test_bar_orientation_rendered();
+
     // text.cpp
     void test_text();
 

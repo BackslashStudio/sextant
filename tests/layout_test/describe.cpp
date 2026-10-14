@@ -252,7 +252,7 @@ namespace lt {
 #define ENUM(E) check_enum<E>(#E);
         ENUM(LineStyle) ENUM(MarkerStyle) ENUM(CapStyle) ENUM(AxisPosition)
         ENUM(LegendAnchor) ENUM(ColorbarAnchor) ENUM(HAlign) ENUM(PanelTheme) ENUM(Projection)
-        ENUM(PlaneOrientation) ENUM(VAlign) ENUM(Coords) ENUM(ArrowHead) ENUM(DrawStyle)
+        ENUM(PlaneOrientation) ENUM(VAlign) ENUM(Coords) ENUM(ArrowHead) ENUM(DrawStyle) ENUM(Orientation)
 #undef ENUM
 
         // Nesting flattens to dotted paths; a const struct walks too.

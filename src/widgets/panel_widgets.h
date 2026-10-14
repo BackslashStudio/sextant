@@ -276,6 +276,16 @@ namespace sextant {
         return false;
     }
 
+    inline bool orientation_combo(const char* label, Orientation& o) {
+        static const char* kNames[] = {"Vertical", "Horizontal"};
+        int cur = static_cast<int>(o);
+        if (ImGui::Combo(label, &cur, kNames, IM_ARRAYSIZE(kNames))) {
+            o = static_cast<Orientation>(cur);
+            return true;
+        }
+        return false;
+    }
+
     // Names in MarkerStyle's order (also the shader's uMarker order).
     inline bool marker_combo(const char* label, MarkerStyle& m) {
         static const char* kNames[] = {

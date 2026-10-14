@@ -278,6 +278,7 @@ private:
         unsigned long long fill_generation = 0;
         unsigned long long edge_generation = 0;
         double             bar_width = -1.0;
+        bool               horizontal = false; // BarOptions::orientation, an option edit
         double             anchor_x = 0.0, anchor_y = 0.0;
         double             span_x = 0.0, span_y = 0.0;
         bool               data_space = true;
@@ -302,6 +303,7 @@ private:
         float              boxwidth  = -1.0f;
         float              box_alpha = -1.0f;
         float              pixel_ratio = 0.0f;
+        bool               horizontal = false; // a bar's orientation (anchors move)
     };
     std::unordered_map<CacheKey, ErrCache, CacheKeyHash> line_err_cache_;
     std::unordered_map<CacheKey, ErrCache, CacheKeyHash> bar_err_cache_;

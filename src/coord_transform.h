@@ -172,7 +172,7 @@ namespace sextant {
             };
 
             // Error bars widen the auto limits so the outermost bars aren't clipped.
-            // For bars, `ys` is the heights (the tip).
+            // For bars, the anchors are the tips (bar_anchors()).
             auto grow_err = [&](const CowVec<double>& xs, const CowVec<double>& ys,
                                 const ErrorBarData& err) {
                 const std::size_t n = std::min(xs.size(), ys.size());
@@ -207,18 +207,28 @@ namespace sextant {
                 add_points(sp.x, sp.y);
                 grow_err(sp.x, sp.y, sp.err);
             }
-            for (const auto& bp: all.bars) {
+            // A bar spans its thickness along the category axis (`fc`) and base to
+            // tip along the value axis (`fv`).
+            auto add_bars = [&](const BarPlot& bp, auto fc, double& clo, double& chi,
+                                auto fv, double& vlo, double& vhi) {
                 for (std::size_t i = 0; i < bp.centers.size(); ++i) {
                     const double half = bp.bar_width * 0.5;
-                    add(fx(bp.centers[i] - half), xlo, xhi);
-                    add(fx(bp.centers[i] + half), xlo, xhi);
-                    // Y spans 0 to height (negative heights go below 0); on a log
-                    // axis the baseline has no place and counts for nothing.
-                    add(fy(0.0), ylo, yhi);
-                    add(fy(bp.heights[i]), ylo, yhi);
+                    add(fc(bp.centers[i] - half), clo, chi);
+                    add(fc(bp.centers[i] + half), clo, chi);
+                    // Base to tip (a negative height runs below the base); on a log
+                    // axis a base of 0 has no place and counts for nothing.
+                    add(fv(bp.base_at(i)), vlo, vhi);
+                    add(fv(bp.tip_at(i)), vlo, vhi);
                 }
-                // Error bars hang off the tip (heights), not the baseline.
-                grow_err(bp.centers, bp.heights, bp.err);
+            };
+            for (const auto& bp: all.bars) {
+                if (bp.horizontal()) add_bars(bp, fy, ylo, yhi, fx, xlo, xhi);
+                else add_bars(bp, fx, xlo, xhi, fy, ylo, yhi);
+                // Error bars hang off the tip, not the base.
+                if (!bp.err.empty()) {
+                    const XYColumns a = bar_anchors(bp);
+                    grow_err(a.x, a.y, bp.err);
+                }
             }
             AutoBounds b;
             b.x.loose = {xlo, xhi};
@@ -244,7 +254,7 @@ namespace sextant {
         double yhi = -std::numeric_limits<double>::max();
 
         // Error bars widen the auto limits so the outermost bars aren't clipped.
-        // For bars, `ys` is the heights (the tip).
+        // For bars, the anchors are the tips (bar_anchors()).
         auto grow_err = [&](const CowVec<double>& xs, const CowVec<double>& ys,
                             const ErrorBarData& err) {
             const std::size_t n = std::min(xs.size(), ys.size());
@@ -296,16 +306,26 @@ namespace sextant {
             grow_err(sp.x, sp.y, sp.err);
         }
         for (const auto& bp: all.bars) {
+            // Thickness along the category axis, base to tip along the value axis.
+            const bool lying = bp.horizontal();
+            double& clo = lying ? ylo : xlo;
+            double& chi = lying ? yhi : xhi;
+            double& vlo = lying ? xlo : ylo;
+            double& vhi = lying ? xhi : yhi;
             for (std::size_t i = 0; i < bp.centers.size(); ++i) {
                 const double half = bp.bar_width * 0.5;
-                xlo = std::min(xlo, bp.centers[i] - half);
-                xhi = std::max(xhi, bp.centers[i] + half);
-                // Y spans 0 to height (negative heights go below 0)
-                ylo = std::min(ylo, std::min(0.0, bp.heights[i]));
-                yhi = std::max(yhi, std::max(0.0, bp.heights[i]));
+                clo = std::min(clo, bp.centers[i] - half);
+                chi = std::max(chi, bp.centers[i] + half);
+                // Base to tip (a negative height runs below the base)
+                const double base = bp.base_at(i), tip = base + bp.heights[i];
+                vlo = std::min(vlo, std::min(base, tip));
+                vhi = std::max(vhi, std::max(base, tip));
             }
-            // Error bars hang off the tip (heights), not the baseline.
-            grow_err(bp.centers, bp.heights, bp.err);
+            // Error bars hang off the tip, not the base.
+            if (!bp.err.empty()) {
+                const XYColumns a = bar_anchors(bp);
+                grow_err(a.x, a.y, bp.err);
+            }
         }
         AutoBounds b;
         b.x.loose = {xlo, xhi};

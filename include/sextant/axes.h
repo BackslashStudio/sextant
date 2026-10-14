@@ -52,6 +52,8 @@ namespace sextant {
 
         // BarOptions::width is a fraction of the bin width; the default argument
         // sets it to 1.0 (bins touch). Passing your own BarOptions restores 0.8.
+        // BarOptions::orientation Horizontal lays the bins along y, and
+        // BarOptions::bottom takes one value or one per bin.
         Axes& hist(std::span<const double> data, int bins = 10,
                    BarOptions bar_opts = {.width = 1.0f},
                    HistOptions hist_opts = {});
@@ -276,7 +278,7 @@ namespace sextant {
                                  std::span<const double> z);
 
         // The bar width is kept unless x changes; then it is re-derived from
-        // the spacing, as bar() does.
+        // the spacing, as bar() does. The bases follow BarData::bottom.
         Axes& set_bar_data(std::size_t i, const BarData& data);
 
         Axes& set_bar_data(std::size_t i, std::span<const double> x, std::span<const double> height);

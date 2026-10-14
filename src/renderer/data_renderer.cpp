@@ -2318,8 +2318,6 @@ void main() {
         glUniform2fv(line_u_.resolution, 1, res);
         glBindVertexArray(line_vao_);
 
-        const float py0 = tr.to_py(0.0); // pixel y of the zero baseline
-
         // Re-point the VAO attribute at the bound buffer (a VAO remembers the
         // buffer from specification time).
         auto point_attrib_at = [](unsigned int vbo) {
@@ -2336,12 +2334,25 @@ void main() {
             const double half = bp.bar_width * 0.5;
             const std::size_t n = bp.centers.size();
 
+            // Along the category axis (x standing, y lying) and the value axis:
+            // scale space, and pixels.
+            const bool lying = bp.horizontal();
+            auto sc = [&](double v) { return lying ? tr.sy(v) : tr.sx(v); };
+            auto sv = [&](double v) { return lying ? tr.sx(v) : tr.sy(v); };
+            auto pc = [&](double v) { return lying ? tr.to_py(v) : tr.to_px(v); };
+            auto pv = [&](double v) { return lying ? tr.to_px(v) : tr.to_py(v); };
+            // A rect from category edges c0, c1 and value ends v0 (base), v1 (tip).
+            struct Rect { float xl, xr, yb, yt; };
+            auto rect = [&](float c0, float c1, float v0, float v1) {
+                return lying ? Rect{v0, v1, c0, c1} : Rect{c0, c1, v0, v1};
+            };
+
             const CacheKey key{axes_index_, plane_index_, static_cast<int>(bi)};
             BarCache& e = bar_cache_[key];
 
             // Read before the fill branch overwrites e.bar_width, so a width edit
-            // rebuilds the outline.
-            const bool width_same = (e.bar_width == bp.bar_width);
+            // (or an orientation one) rebuilds the outline.
+            const bool width_same = e.bar_width == bp.bar_width && e.horizontal == lying;
 
             // --- filled rectangles (2 triangles = 6 verts each), in data space ---
             const bool precise = float_resolves_view(e.span_x, tr.sxspan(), tr.pw)
@@ -2356,37 +2367,44 @@ void main() {
                                          ? precise
                                          : (!precise && same_view(e.fill_tr, tr)));
             if (!fill_ok) {
-                // Extent includes the zero baseline. In scale space, as uploaded.
-                double xlo = tr.sx(bp.centers[0] - half), xhi = tr.sx(bp.centers[0] + half);
-                double ylo = tr.sy(0.0), yhi = ylo;
+                // Extent includes the bases (0 without `bottom`). In scale space, as
+                // uploaded.
+                double clo = sc(bp.centers[0] - half), chi = sc(bp.centers[0] + half);
+                double vlo = sv(bp.base_at(0)), vhi = vlo;
                 for (std::size_t i = 0; i < n; ++i) {
-                    xlo = std::min(xlo, tr.sx(bp.centers[i] - half));
-                    xhi = std::max(xhi, tr.sx(bp.centers[i] + half));
-                    ylo = std::min(ylo, tr.sy(bp.heights[i]));
-                    yhi = std::max(yhi, tr.sy(bp.heights[i]));
+                    clo = std::min(clo, sc(bp.centers[i] - half));
+                    chi = std::max(chi, sc(bp.centers[i] + half));
+                    if (!bp.bottom.empty()) {
+                        vlo = std::min(vlo, sv(bp.base_at(i)));
+                        vhi = std::max(vhi, sv(bp.base_at(i)));
+                    }
+                    vlo = std::min(vlo, sv(bp.tip_at(i)));
+                    vhi = std::max(vhi, sv(bp.tip_at(i)));
                 }
-                e.anchor_x = 0.5 * (xlo + xhi);
-                e.span_x = xhi - xlo;
-                e.anchor_y = 0.5 * (ylo + yhi);
-                e.span_y = yhi - ylo;
+                const double anchor_c = 0.5 * (clo + chi), anchor_v = 0.5 * (vlo + vhi);
+                e.anchor_x = lying ? anchor_v : anchor_c;
+                e.span_x = lying ? vhi - vlo : chi - clo;
+                e.anchor_y = lying ? anchor_c : anchor_v;
+                e.span_y = lying ? chi - clo : vhi - vlo;
                 e.data_space = float_resolves_view(e.span_x, tr.sxspan(), tr.pw)
                                && float_resolves_view(e.span_y, tr.syspan(), tr.ph);
 
                 scratch.clear();
                 scratch.reserve(n * 12);
                 for (std::size_t i = 0; i < n; ++i) {
-                    float xl, xr, yt, yb;
+                    Rect r;
                     if (e.data_space) {
-                        xl = static_cast<float>(tr.sx(bp.centers[i] - half) - e.anchor_x);
-                        xr = static_cast<float>(tr.sx(bp.centers[i] + half) - e.anchor_x);
-                        yt = static_cast<float>(tr.sy(bp.heights[i]) - e.anchor_y);
-                        yb = static_cast<float>(tr.sy(0.0) - e.anchor_y);
+                        const double ac = lying ? e.anchor_y : e.anchor_x;
+                        const double av = lying ? e.anchor_x : e.anchor_y;
+                        r = rect(static_cast<float>(sc(bp.centers[i] - half) - ac),
+                                 static_cast<float>(sc(bp.centers[i] + half) - ac),
+                                 static_cast<float>(sv(bp.base_at(i)) - av),
+                                 static_cast<float>(sv(bp.tip_at(i)) - av));
                     } else {
-                        xl = tr.to_px(bp.centers[i] - half);
-                        xr = tr.to_px(bp.centers[i] + half);
-                        yt = tr.to_py(bp.heights[i]);
-                        yb = py0;
+                        r = rect(pc(bp.centers[i] - half), pc(bp.centers[i] + half),
+                                 pv(bp.base_at(i)), pv(bp.tip_at(i)));
                     }
+                    const auto [xl, xr, yb, yt] = r;
                     scratch.insert(scratch.end(), {
                                        xl, yb, xr, yb, xr, yt,
                                        xl, yb, xr, yt, xl, yt,
@@ -2400,6 +2418,7 @@ void main() {
                 e.fill_verts = static_cast<int>(n * 6);
                 e.fill_generation = data_generation_;
                 e.bar_width = bp.bar_width;
+                e.horizontal = lying;
                 e.fill_tr = tr;
             }
 
@@ -2429,10 +2448,9 @@ void main() {
                     scratch.clear();
                     scratch.reserve(n * 48);
                     for (std::size_t i = 0; i < n; ++i) {
-                        const float xl = tr.to_px(bp.centers[i] - half);
-                        const float xr = tr.to_px(bp.centers[i] + half);
-                        const float yt = tr.to_py(bp.heights[i]);
-                        const float yb = py0;
+                        const auto [xl, xr, yb, yt] = rect(pc(bp.centers[i] - half),
+                                                           pc(bp.centers[i] + half),
+                                                           pv(bp.base_at(i)), pv(bp.tip_at(i)));
                         build_rect_outline(xl, yb, xr, yt, bp.opts.linewidth, scratch);
                     }
                     if (!scratch.empty()) {
@@ -2536,10 +2554,10 @@ void main() {
         std::vector<float> fill_scratch, stroke_scratch;
 
         // One plot object: rebuild pixel geometry when inputs change, then draw
-        // both halves.
-        auto emit = [&](auto& cache, const auto& plot, int index,
-                        const CowVec<double>& xs, const CowVec<double>& ys,
-                        const Color& fallback) {
+        // both halves. `anchors()` gives the points the bars hang off, as x and y
+        // columns; `horizontal` is a bar's orientation (false for the rest).
+        auto emit = [&](auto& cache, const auto& plot, int index, auto anchors,
+                        bool horizontal, const Color& fallback) {
             const ErrorBarOptions& style = plot.opts.errorbar;
             if (style.linewidth <= 0.0f) return;
 
@@ -2553,10 +2571,12 @@ void main() {
                             && e.boxwidth == style.boxwidth
                             && e.box_alpha == style.box_alpha
                             && e.pixel_ratio == pixel_ratio_
+                            && e.horizontal == horizontal
                             && same_view(e.tr, tr);
             if (!ok) {
                 fill_scratch.clear();
                 stroke_scratch.clear();
+                const auto [xs, ys] = anchors();
                 build_error_bars(xs, ys, plot.err, style, tr,
                                  fill_scratch, stroke_scratch);
 
@@ -2581,6 +2601,7 @@ void main() {
                 e.boxwidth = style.boxwidth;
                 e.box_alpha = style.box_alpha;
                 e.pixel_ratio = pixel_ratio_;
+                e.horizontal = horizontal;
             }
 
             const Color c = style.color.value_or(fallback);
@@ -2603,24 +2624,27 @@ void main() {
         switch (ref.kind) {
             case PlotKind::Line: {
                 const auto& p = snap.lines[ref.index];
-                emit(line_err_cache_, p, i, p.x, p.y, *p.opts.color);
+                emit(line_err_cache_, p, i, [&] { return XYColumns{p.x, p.y}; }, false, *p.opts.color);
                 break;
             }
             case PlotKind::Bar: {
-                // Error bars hang off the tip (heights), not the baseline.
+                // Error bars hang off the tip, not the base.
                 const auto& p = snap.bars[ref.index];
-                emit(bar_err_cache_, p, i, p.centers, p.heights, p.opts.edgecolor);
+                emit(bar_err_cache_, p, i, [&] { return bar_anchors(p); }, p.horizontal(),
+                     p.opts.edgecolor);
                 break;
             }
             case PlotKind::Scatter: {
                 const auto& p = snap.scatters[ref.index];
-                emit(scatter_err_cache_, p, i, p.x, p.y, *p.opts.color);
+                emit(scatter_err_cache_, p, i, [&] { return XYColumns{p.x, p.y}; }, false,
+                     *p.opts.color);
                 break;
             }
             case PlotKind::ScatterZ: {
                 // scatter_z has no single color, so black.
                 const auto& p = snap.scatter_z[ref.index];
-                emit(scatterz_err_cache_, p, i, p.x, p.y, Color::Black);
+                emit(scatterz_err_cache_, p, i, [&] { return XYColumns{p.x, p.y}; }, false,
+                     Color::Black);
                 break;
             }
             default: break;

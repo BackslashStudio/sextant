@@ -156,7 +156,35 @@ struct BarPlot {
     BarOptions     opts{.color = Color::Blue};
     unsigned long long data_stamp = 0;
     ObjectId id = 0;
+    // Each bar's base (BarOptions::bottom, taken at the call and spread to one
+    // per bar); empty = 0 for all. See base_at().
+    CowVec<double> bottom;
+
+    bool horizontal() const { return opts.orientation == Orientation::Horizontal; }
+    double base_at(std::size_t i) const { return i < bottom.size() ? bottom[i] : 0.0; }
+    double tip_at(std::size_t i) const { return base_at(i) + heights[i]; }
 };
+
+// The bars' tips (base + height), as a column: `heights` itself without bases.
+inline CowVec<double> bar_tips(const BarPlot& p) {
+    if (p.bottom.empty()) return p.heights;
+    std::vector<double> t(p.heights.size());
+    for (std::size_t i = 0; i < t.size(); ++i) t[i] = p.tip_at(i);
+    return t;
+}
+
+// Two columns of point coordinates (shared, not copied).
+struct XYColumns {
+    CowVec<double> x, y;
+};
+
+// Where a bar's error bars hang and its hover point sits: its tip, at (center,
+// tip) standing or (tip, center) lying.
+inline XYColumns bar_anchors(const BarPlot& p) {
+    CowVec<double> tips = bar_tips(p);
+    if (p.horizontal()) return {std::move(tips), p.centers};
+    return {p.centers, std::move(tips)};
+}
 
 // Row-major rows x cols values, mapped through vmin/vmax and the colormap. The
 // grid spans xrange x yrange uniformly (ranges are outer edges); use the

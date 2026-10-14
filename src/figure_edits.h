@@ -16,7 +16,8 @@
 namespace sextant {
 
 // One scalar edited in the Data panel, addressed by (plane, kind, index,
-// column, element). Column: 0 = x/centers, 1 = y/heights, 2 = z; unused for
+// column, element). Column: 0 = x/centers, 1 = y/heights, then the kind's
+// next columns in its table's order (z, size, a bar's bottom); unused for
 // Heatmap, whose `element` is row*cols + col. `plane_index` -1 = the axes itself.
 struct PlotCellEdit {
     PlotKind    kind;
@@ -55,7 +56,7 @@ struct PlotRowEdit {
         std::vector<double> cols;                   // the kind's required columns, in order
         std::optional<std::string> label;           // its hint label
         std::array<std::optional<double>, 8> err;   // see edits_detail::err_columns()
-        std::optional<double> size;                 // its marker size (a scatter with `sizes`)
+        std::optional<double> size;                 // its marker size or bar base (`sizes`, `bottom`)
     };
     std::optional<Restore> restore;
 };
@@ -579,7 +580,8 @@ std::optional<PlotDataOp> apply_plot_data_op(T& t, const PlotCellEdit& e) {
         case PlotKind::Bar:
             if (auto* bp = op_target(t.bars, e))
                 return cell_undo(e, t.bars, *bp,
-                                 put_cell(e.column == 0 ? bp->centers : bp->heights,
+                                 put_cell(e.column == 0 ? bp->centers
+                                          : e.column == 1 ? bp->heights : bp->bottom,
                                           e.element, e.value));
             return std::nullopt;
         case PlotKind::ScatterZ: {
@@ -693,7 +695,7 @@ inline std::array<CowVec<double>*, 8> err_columns(ErrorBarData& e) {
 
 // One point in or out of object `p` of `v`: its required columns `cols` (the
 // first gives the point count) and the optional index-aligned ones
-// (hint_labels, error bars, marker sizes), which move only where they reach
+// (hint_labels, error bars, marker sizes, bar bases), which move only where they reach
 // the row; empty ones are left alone. A new point copies its predecessor,
 // except for a blank label, unless `e` restores a removed one.
 template <class Vec, class P, class... Cols>
@@ -706,10 +708,12 @@ std::optional<PlotDataOp> row_op(const PlotRowEdit& e, const Vec& v, P& p, Cols&
     inv.restore.reset();
     auto& labels = p.opts.hint_labels;
     const auto err = err_columns(p.err);
-    // A scatter's per-point sizes, or a stand-in empty column for other kinds.
+    // A scatter's per-point sizes or a bar's bases, or a stand-in empty column
+    // for other kinds.
     CowVec<double> no_sizes;
     CowVec<double>* sizes = &no_sizes;
     if constexpr (requires { p.sizes; }) sizes = &p.sizes;
+    else if constexpr (requires { p.bottom; }) sizes = &p.bottom;
     if (insert && e.restore) {
         const PlotRowEdit::Restore& r = *e.restore;
         std::size_t i = 0;
@@ -723,8 +727,8 @@ std::optional<PlotDataOp> row_op(const PlotRowEdit& e, const Vec& v, P& p, Cols&
         if (!labels.empty()) row_insert(labels, e.row, false);
         for (CowVec<double>* c : err)
             if (!c->empty()) row_insert(*c, e.row, true);
-        // A new point takes its neighbour's size (at row 0 the next one's, never
-        // 0, which would hide it).
+        // A new point takes its neighbour's size or base (at row 0 the next
+        // one's; a size of 0 would hide it).
         if (!sizes->empty() && e.row <= sizes->size())
             row_insert_value(*sizes, e.row, (*sizes)[e.row > 0 ? e.row - 1 : 0]);
     } else {
