@@ -323,10 +323,13 @@ namespace sextant {
         if (!std::isfinite(opts.vmin) || !std::isfinite(opts.vmax))
             throw std::invalid_argument("Axes3D::scatter3d: vmin and vmax must be finite");
         ErrorBar3DData eb = take_error_bars3d(err, x.size(), "Axes3D::scatter3d");
+        read_back::check_sizes(opts.sizes, x.size(), "Axes3D::scatter3d");
         warn_math(d->mathtext, "Axes3D::scatter3d", opts.name);
         d->cycle->resolve(opts.color, colors.empty());
 
         Scatter3DPlot s;
+        s.sizes = std::move(opts.sizes);
+        opts.sizes.clear();
         s.err = std::move(eb);
         s.opts = std::move(opts);
         s.x = std::vector<double>(x.begin(), x.end());
@@ -778,7 +781,10 @@ namespace sextant {
         return set_scatter3d_data(i, x, y, z, {});
     }
     Axes3D& Axes3D::set_scatter3d_data(std::size_t i, const Scatter3DData& v) {
-        return set_scatter3d_data(i, v.x, v.y, v.z, v.colors);
+        read_back::check_sizes(v.sizes, v.x.size(), "Axes3D::set_scatter3d_data");
+        set_scatter3d_data(i, v.x, v.y, v.z, v.colors);
+        d->scatter3d[i].sizes = v.sizes;
+        return *this;
     }
 
     Axes3D& Axes3D::set_line3d_data(std::size_t i, std::span<const double> x,

@@ -141,6 +141,9 @@ struct ScatterPlot {
     ScatterOptions opts{.color = Color::Blue};
     unsigned long long data_stamp = 0;
     ObjectId id = 0;
+    // Per-point diameters (ScatterOptions::sizes, taken at the call); empty =
+    // opts.size for all. See marker_size_at().
+    CowVec<double> sizes;
 };
 
 // bar_width is in data units, already resolved (spacing x width fraction for
@@ -192,7 +195,25 @@ struct ScatterZPlot {
     ScatterZOptions opts;
     unsigned long long data_stamp = 0;
     ObjectId id = 0;
+    CowVec<double>  sizes;   // as ScatterPlot::sizes
 };
+
+// A marker's pixel diameter: its own from `sizes` when the series has them,
+// else the series' `size`. A per-point size that is NaN or <= 0 hides that
+// point (not drawn, not hovered): 0 is returned, which the GPU draws as nothing.
+template <class P>
+float marker_size_at(const P& p, std::size_t i) {
+    if (p.sizes.empty()) return p.opts.size;
+    const float s = i < p.sizes.size() ? static_cast<float>(p.sizes[i]) : 0.0f;
+    return s > 0.0f ? s : 0.0f;
+}
+
+// True when point i is hidden by its own size (see marker_size_at()). A series
+// without `sizes` hides nothing, whatever its `size`.
+template <class P>
+bool marker_hidden(const P& p, std::size_t i) {
+    return !p.sizes.empty() && !(i < p.sizes.size() && static_cast<float>(p.sizes[i]) > 0.0f);
+}
 
 // Box axis index (into x, y, z) of each grid direction, for every consumer to
 // agree on.
@@ -337,6 +358,7 @@ struct Scatter3DPlot {
     Scatter3DOptions opts{.color = Color::Blue};
     unsigned long long data_stamp = 0;
     ObjectId id = 0;
+    CowVec<double> sizes;    // as ScatterPlot::sizes
 
     std::size_t count() const { return x.size(); }
     bool colormapped() const { return !colors.empty(); }

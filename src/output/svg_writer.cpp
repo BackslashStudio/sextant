@@ -369,17 +369,18 @@ static void emit_scatter(std::ostringstream& o, const SvgAxesData& d,
         const auto& sp = d.scatters[k];
         if (sp.x.empty()) continue;
         const std::string fill = rgb(*sp.opts.color);
-        const float r = sp.opts.size * 0.5f;
         // Unset edgecolor = the fill's color; its alpha is the color's own times
         // edge_alpha (not the fill's `alpha`), as on the GPU.
         const bool edged = sp.opts.edge_linewidth > 0.0f;
         const Color ec = sp.opts.edgecolor ? *sp.opts.edgecolor : *sp.opts.color;
         const std::string stroke = edged ? rgb(ec) : std::string();
         const float stroke_alpha = std::clamp(ec.a * sp.opts.edge_alpha, 0.0f, 1.0f);
-        for (std::size_t i = 0; i < sp.x.size(); ++i)
+        for (std::size_t i = 0; i < sp.x.size(); ++i) {
+            if (marker_hidden(sp, i)) continue;
             emit_scatter_marker(o, d.layout.tr.to_px(sp.x[i]), d.layout.tr.to_py(sp.y[i]),
-                                r, fill, sp.opts.alpha, sp.opts.marker, stroke, stroke_alpha,
-                                sp.opts.edge_linewidth, true);
+                                marker_size_at(sp, i) * 0.5f, fill, sp.opts.alpha, sp.opts.marker,
+                                stroke, stroke_alpha, sp.opts.edge_linewidth, true);
+        }
     }
 }
 
@@ -392,8 +393,9 @@ static void emit_scatter_z(std::ostringstream& o, const SvgAxesData& d,
         if (sp.x.empty()) continue;
         const uint8_t* lut   = colormaps::get(sp.opts.cmap);
         const float    vmin  = sp.opts.vmin, vrange = sp.opts.vmax - sp.opts.vmin;
-        const float    r     = sp.opts.size * 0.5f;
         for (std::size_t i = 0; i < sp.x.size(); ++i) {
+            if (marker_hidden(sp, i)) continue;
+            const float r = marker_size_at(sp, i) * 0.5f;
             const double t = (vrange != 0.0f) ? (sp.z[i] - vmin) / vrange : 0.0;
             const uint8_t* c = &lut[colormaps::index(t, sp.opts.cmap.is_cyclic()) * 4];
             char buf[32];

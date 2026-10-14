@@ -60,6 +60,8 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot& snap) 
         t.label = pick_label(sp.opts.name, "scatter", static_cast<int>(i));
         t.columns.push_back({"x", sp.x.data(), sp.x.size()});
         t.columns.push_back({"y", sp.y.data(), sp.y.size()});
+        if (!sp.sizes.empty())
+            t.columns.push_back({"size", sp.sizes.data(), sp.sizes.size()});
         out.push_back(std::move(t));
     }
 
@@ -99,6 +101,8 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot& snap) 
         t.columns.push_back({"x", sp.x.data(), sp.x.size()});
         t.columns.push_back({"y", sp.y.data(), sp.y.size()});
         t.columns.push_back({"z", sp.z.data(), sp.z.size()});
+        if (!sp.sizes.empty())
+            t.columns.push_back({"size", sp.sizes.data(), sp.sizes.size()});
         out.push_back(std::move(t));
     }
 
@@ -159,6 +163,8 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot3D& snap
         t.columns.push_back({"z", sp.z.data(), sp.z.size()});
         if (sp.colormapped())
             t.columns.push_back({"c", sp.colors.data(), sp.colors.size()});
+        if (!sp.sizes.empty())
+            t.columns.push_back({"size", sp.sizes.data(), sp.sizes.size(), 4});
         out.push_back(std::move(t));
     }
 

@@ -2512,8 +2512,97 @@ static void test_marker_shapes() {
     fig->show(true);
 }
 
+// Step 36c-2: per-point marker sizes -- a bubble chart, hidden points, a
+// plane and a 3D cloud; the Data panel's size column.
+static void test_marker_sizes() {
+    auto fig = sextant::Figure::create({.width = 1300, .height = 900, .title = "Marker sizes"});
+    fig->suptitle("Per-point marker sizes (ScatterOptions::sizes)");
+
+    // A bubble chart: size and color both carry a value.
+    auto a1 = fig->add_subplot(2, 2, 1);
+    {
+        constexpr int N = 40;
+        std::vector<double> x(N), y(N), z(N);
+        sextant::ScatterZOptions o;
+        for (int i = 0; i < N; ++i) {
+            x[i] = 1.0 + 8.0 * std::fmod(0.618034 * i, 1.0);
+            y[i] = 1.0 + 8.0 * std::fmod(0.414214 * i * i, 1.0);
+            z[i] = std::sin(0.3 * i) * 0.5 + 0.5;
+            o.sizes.push_back(8.0 + 50.0 * z[i]);
+        }
+        o.alpha = 0.6f;
+        o.edgecolor = sextant::Color::Black;
+        o.edge_linewidth = 1.0f;
+        o.colorbar = true;
+        o.name = "value";
+        a1->scatter_z(x, y, z, o).set_xlim(0, 10).set_ylim(0, 10);
+        a1->set_title("bubble chart: size and color from one value");
+    }
+
+    // Growing sizes along a line, with NaN / 0 / negative points hidden (gaps).
+    auto a2 = fig->add_subplot(2, 2, 2);
+    {
+        std::vector<double> x, y;
+        sextant::ScatterOptions o;
+        o.marker = sextant::MarkerStyle::Square;
+        o.name = "squares";
+        for (int i = 0; i < 12; ++i) {
+            x.push_back(i);
+            y.push_back(0.5 * i);
+            o.sizes.push_back(i == 3 ? std::nan("") : i == 6 ? 0.0 : i == 9 ? -5.0 : 4.0 + 3.0 * i);
+        }
+        a2->scatter(x, y, o);
+        sextant::ScatterOptions s;
+        s.marker = sextant::MarkerStyle::Star;
+        s.sizes = {10, 20, 30, 40, 30, 20, 10};
+        s.name = "stars";
+        a2->scatter(std::vector<double>{1, 2, 3, 4, 5, 6, 7}, std::vector<double>{5, 5.5, 6, 6.5, 6, 5.5, 5}, s);
+        a2->legend().set_title("sizes per point; rows 3, 6, 9 hidden (NaN, 0, -5)");
+    }
+
+    // A plane: sizes drawn into the plane (they foreshorten with it).
+    auto a3 = fig->add_subplot3d(2, 2, 3);
+    {
+        auto pl = a3->plane(sextant::PlaneOrientation::XY, 0.0);
+        std::vector<double> x, y;
+        sextant::ScatterOptions o;
+        o.color = sextant::Color::Red;
+        for (int i = 0; i < 5; ++i)
+            for (int j = 0; j < 5; ++j) {
+                x.push_back(i * 2.0 + 1.0);
+                y.push_back(j * 2.0 + 1.0);
+                o.sizes.push_back(6.0 + 3.0 * (i + j));
+            }
+        pl->scatter(x, y, o);
+        a3->set_xlim(0, 10).set_ylim(0, 10).set_zlim(0, 1);
+        a3->set_title("plane: sizes 6..30 across the grid");
+    }
+
+    // A 3D cloud: billboards at their own sizes.
+    auto a4 = fig->add_subplot3d(2, 2, 4);
+    {
+        std::vector<double> x, y, z;
+        sextant::Scatter3DOptions o;
+        o.edgecolor = sextant::Color::Black;
+        o.edge_linewidth = 1.0f;
+        o.name = "cloud";
+        for (int i = 0; i < 60; ++i) {
+            const double t = 0.35 * i;
+            x.push_back(std::cos(t) * (1.0 + 0.05 * i));
+            y.push_back(std::sin(t) * (1.0 + 0.05 * i));
+            z.push_back(0.1 * i);
+            o.sizes.push_back(5.0 + 0.6 * i);
+        }
+        a4->scatter3d(x, y, z, o).legend().set_title("3D: sizes 5..40 up the helix");
+    }
+
+    savefig_and_check_memory(fig, "test_marker_sizes");
+    fig->show(true);
+}
+
 int main() {
-    test_marker_shapes();
+    test_marker_sizes();
+    // test_marker_shapes();
     // test_tick_style();
     // test_layout_independent();
     // test_layout_aligned();

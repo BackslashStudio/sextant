@@ -29,21 +29,35 @@ namespace sextant::read_back {
         return v[i];
     }
 
-    // For set_*_data(): error bars and hint_labels stay while the point count
-    // (a grid's shape) is unchanged and are dropped otherwise, as they would no
-    // longer line up. Then takes a fresh data_stamp.
+    // For set_*_data(): error bars, hint_labels and marker sizes stay while the
+    // point count (a grid's shape) is unchanged and are dropped otherwise, as
+    // they would no longer line up. Then takes a fresh data_stamp.
     template <typename P>
     void keep_aligned(P& p, bool same_shape) {
         if (!same_shape) {
             if constexpr (requires { p.err; }) p.err = {};
             p.opts.hint_labels.clear();
+            if constexpr (requires { p.sizes; }) p.sizes = std::vector<double>{};
         }
         p.data_stamp = next_snapshot_generation();
     }
 
+    // Per-point marker sizes for `n` points (ScatterOptions::sizes): empty, or
+    // exactly one per point. Values are not checked: NaN or <= 0 hides a point.
+    inline void check_sizes(const std::vector<double>& sizes, std::size_t n, const char* who) {
+        if (!sizes.empty() && sizes.size() != n)
+            throw std::invalid_argument(std::string(who) + ": sizes must be empty or one per point (got "
+                                        + std::to_string(sizes.size()) + " for "
+                                        + std::to_string(n) + " points)");
+    }
+
     inline LineData     to_data(const LinePlot& p)     { return { p.x.get(), p.y.get() }; }
-    inline ScatterData  to_data(const ScatterPlot& p)  { return { p.x.get(), p.y.get() }; }
-    inline ScatterZData to_data(const ScatterZPlot& p) { return { p.x.get(), p.y.get(), p.z.get() }; }
+    inline ScatterData  to_data(const ScatterPlot& p)  {
+        return { p.x.get(), p.y.get(), p.sizes.get() };
+    }
+    inline ScatterZData to_data(const ScatterZPlot& p) {
+        return { p.x.get(), p.y.get(), p.z.get(), p.sizes.get() };
+    }
     inline BarData      to_data(const BarPlot& p)      { return { p.centers.get(), p.heights.get() }; }
 
     inline HeatmapData to_data(const HeatmapPlot& p) {
@@ -64,7 +78,7 @@ namespace sextant::read_back {
     }
 
     inline Scatter3DData to_data(const Scatter3DPlot& p) {
-        return { p.x.get(), p.y.get(), p.z.get(), p.colors.get() };
+        return { p.x.get(), p.y.get(), p.z.get(), p.colors.get(), p.sizes.get() };
     }
 
     inline Line3DData to_data(const Line3DPlot& p) {

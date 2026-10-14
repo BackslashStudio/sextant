@@ -185,10 +185,13 @@ struct Axes::Impl {
     // when it was plotted. `who` names the caller.
     void set_line_data(std::size_t i, std::span<const double> x, std::span<const double> y,
                        const char* who);
+    // `sizes`: the new per-point sizes (a *_Data overload), or null to keep the
+    // current ones while the point count is unchanged (a span overload).
     void set_scatter_data(std::size_t i, std::span<const double> x, std::span<const double> y,
-                          const char* who);
+                          const std::vector<double>* sizes, const char* who);
     void set_scatter_z_data(std::size_t i, std::span<const double> x, std::span<const double> y,
-                            std::span<const double> z, const char* who);
+                            std::span<const double> z, const std::vector<double>* sizes,
+                            const char* who);
     void set_bar_data(std::size_t i, std::span<const double> x, std::span<const double> height,
                       const char* who);
     void set_heatmap_data(std::size_t i, std::span<const double> data, int rows, int cols,

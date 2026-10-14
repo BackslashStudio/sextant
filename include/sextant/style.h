@@ -230,6 +230,12 @@ namespace sextant {
     struct ScatterOptions {
         std::optional<Color> color; // see LineOptions::color
         float size = 20.0f;
+        // Per-point diameters in pixels (a bubble chart): empty = `size` for every
+        // point, else one per point (any other length throws
+        // std::invalid_argument). A point whose size is NaN or <= 0 is neither
+        // drawn nor hovered. Kept as the object's data: read back and replaced
+        // through ScatterData::sizes, not through these options.
+        std::vector<double> sizes;
         MarkerStyle marker = MarkerStyle::Circle;
         std::string name;
         bool show_legend = true; // see LineOptions::show_legend
@@ -261,6 +267,7 @@ namespace sextant {
     struct ScatterZOptions {
         Colormap cmap = Colormap::Viridis;
         float size = 20.0f;
+        std::vector<double> sizes; // see ScatterOptions::sizes
         MarkerStyle marker = MarkerStyle::Circle;
         float alpha = 0.8f;
 
@@ -686,10 +693,15 @@ namespace sextant {
 
     struct ScatterData {
         std::vector<double> x, y;
+        // Per-point diameters (ScatterOptions::sizes); empty = the uniform `size`.
+        // set_scatter_data(i, ScatterData) takes them as given (empty clears
+        // them); the span overload keeps them while the point count is unchanged.
+        std::vector<double> sizes;
     };
 
     struct ScatterZData {
         std::vector<double> x, y, z;
+        std::vector<double> sizes; // see ScatterData::sizes
     };
 
     // Also what hist() made: bin centers and (possibly normalised) counts.

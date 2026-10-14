@@ -146,21 +146,21 @@ namespace sextant {
         return *this;
     }
     Plane2D& Plane2D::set_scatter_data(std::size_t i, const ScatterData& data) {
-        d->sheet.set_scatter_data(i, data.x, data.y, "Plane2D::set_scatter_data");
+        d->sheet.set_scatter_data(i, data.x, data.y, &data.sizes, "Plane2D::set_scatter_data");
         return *this;
     }
     Plane2D& Plane2D::set_scatter_data(std::size_t i, std::span<const double> x,
                                        std::span<const double> y) {
-        d->sheet.set_scatter_data(i, x, y, "Plane2D::set_scatter_data");
+        d->sheet.set_scatter_data(i, x, y, nullptr, "Plane2D::set_scatter_data");
         return *this;
     }
     Plane2D& Plane2D::set_scatter_z_data(std::size_t i, const ScatterZData& data) {
-        d->sheet.set_scatter_z_data(i, data.x, data.y, data.z, "Plane2D::set_scatter_z_data");
+        d->sheet.set_scatter_z_data(i, data.x, data.y, data.z, &data.sizes, "Plane2D::set_scatter_z_data");
         return *this;
     }
     Plane2D& Plane2D::set_scatter_z_data(std::size_t i, std::span<const double> x,
                                          std::span<const double> y, std::span<const double> z) {
-        d->sheet.set_scatter_z_data(i, x, y, z, "Plane2D::set_scatter_z_data");
+        d->sheet.set_scatter_z_data(i, x, y, z, nullptr, "Plane2D::set_scatter_z_data");
         return *this;
     }
     Plane2D& Plane2D::set_bar_data(std::size_t i, const BarData& data) {

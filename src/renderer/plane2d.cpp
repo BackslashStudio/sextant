@@ -352,7 +352,8 @@ namespace sextant {
                     const float ew = std::max(0.0f, sp.opts.edge_linewidth);
                     b.open(Kind::Marker);
                     for (std::size_t i = 0; i < n; ++i)
-                        b.marker(sp.x[i], sp.y[i], c, sp.opts.size, sp.opts.marker, ec, ew);
+                        if (!marker_hidden(sp, i))
+                            b.marker(sp.x[i], sp.y[i], c, marker_size_at(sp, i), sp.opts.marker, ec, ew);
                     b.close();
                     break;
                 }
@@ -367,13 +368,14 @@ namespace sextant {
                     const float ew = std::max(0.0f, sp.opts.edge_linewidth);
                     b.open(Kind::Marker);
                     for (std::size_t i = 0; i < n; ++i) {
+                        if (marker_hidden(sp, i)) continue;
                         const Color face = cell_color(lut, sp.opts.cmap.is_cyclic(),
                                                       static_cast<float>(sp.z[i]), vmin, vrange);
                         Color ec = sp.opts.edgecolor ? *sp.opts.edgecolor : face;
                         ec.a = std::clamp((sp.opts.edgecolor ? ec.a : 1.0f) * sp.opts.edge_alpha,
                                           0.0f, 1.0f);
-                        b.marker(sp.x[i], sp.y[i], with_alpha(face, sp.opts.alpha), sp.opts.size,
-                                 sp.opts.marker, ec, ew);
+                        b.marker(sp.x[i], sp.y[i], with_alpha(face, sp.opts.alpha),
+                                 marker_size_at(sp, i), sp.opts.marker, ec, ew);
                     }
                     b.close();
                     break;

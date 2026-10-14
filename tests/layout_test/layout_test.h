@@ -602,6 +602,7 @@ namespace lt {
     // edge_markers.cpp
     void test_edge_markers();
     void test_marker_shapes();
+    void test_marker_sizes();
 
     // text.cpp
     void test_text();

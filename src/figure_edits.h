@@ -55,6 +55,7 @@ struct PlotRowEdit {
         std::vector<double> cols;                   // the kind's required columns, in order
         std::optional<std::string> label;           // its hint label
         std::array<std::optional<double>, 8> err;   // see edits_detail::err_columns()
+        std::optional<double> size;                 // its marker size (a scatter with `sizes`)
     };
     std::optional<Restore> restore;
 };
@@ -572,7 +573,8 @@ std::optional<PlotDataOp> apply_plot_data_op(T& t, const PlotCellEdit& e) {
         case PlotKind::Scatter:
             if (auto* sp = op_target(t.scatters, e))
                 return cell_undo(e, t.scatters, *sp,
-                                 put_cell(e.column == 0 ? sp->x : sp->y, e.element, e.value));
+                                 put_cell(e.column == 0 ? sp->x : e.column == 1 ? sp->y : sp->sizes,
+                                          e.element, e.value));
             return std::nullopt;
         case PlotKind::Bar:
             if (auto* bp = op_target(t.bars, e))
@@ -584,7 +586,9 @@ std::optional<PlotDataOp> apply_plot_data_op(T& t, const PlotCellEdit& e) {
             auto* sp = op_target(t.scatter_z, e);
             if (!sp) return std::nullopt;
             return cell_undo(e, t.scatter_z, *sp,
-                             put_cell(e.column == 0 ? sp->x : (e.column == 1 ? sp->y : sp->z),
+                             put_cell(e.column == 0 ? sp->x
+                                      : e.column == 1 ? sp->y
+                                      : e.column == 2 ? sp->z : sp->sizes,
                                       e.element, e.value));
         }
         case PlotKind::Heatmap: {
@@ -689,9 +693,9 @@ inline std::array<CowVec<double>*, 8> err_columns(ErrorBarData& e) {
 
 // One point in or out of object `p` of `v`: its required columns `cols` (the
 // first gives the point count) and the optional index-aligned ones
-// (hint_labels, error bars), which move only where they reach the row; empty
-// ones are left alone. A new point copies its predecessor, except for a blank
-// label, unless `e` restores a removed one.
+// (hint_labels, error bars, marker sizes), which move only where they reach
+// the row; empty ones are left alone. A new point copies its predecessor,
+// except for a blank label, unless `e` restores a removed one.
 template <class Vec, class P, class... Cols>
 std::optional<PlotDataOp> row_op(const PlotRowEdit& e, const Vec& v, P& p, Cols&... cols) {
     const std::size_t n = std::get<0>(std::tie(cols...)).size();
@@ -702,6 +706,10 @@ std::optional<PlotDataOp> row_op(const PlotRowEdit& e, const Vec& v, P& p, Cols&
     inv.restore.reset();
     auto& labels = p.opts.hint_labels;
     const auto err = err_columns(p.err);
+    // A scatter's per-point sizes, or a stand-in empty column for other kinds.
+    CowVec<double> no_sizes;
+    CowVec<double>* sizes = &no_sizes;
+    if constexpr (requires { p.sizes; }) sizes = &p.sizes;
     if (insert && e.restore) {
         const PlotRowEdit::Restore& r = *e.restore;
         std::size_t i = 0;
@@ -709,20 +717,27 @@ std::optional<PlotDataOp> row_op(const PlotRowEdit& e, const Vec& v, P& p, Cols&
         if (r.label) row_insert_value(labels, e.row, *r.label);
         for (std::size_t k = 0; k < err.size(); ++k)
             if (r.err[k]) row_insert_value(*err[k], e.row, *r.err[k]);
+        if (r.size) row_insert_value(*sizes, e.row, *r.size);
     } else if (insert) {
         (row_insert(cols, e.row, true), ...);
         if (!labels.empty()) row_insert(labels, e.row, false);
         for (CowVec<double>* c : err)
             if (!c->empty()) row_insert(*c, e.row, true);
+        // A new point takes its neighbour's size (at row 0 the next one's, never
+        // 0, which would hide it).
+        if (!sizes->empty() && e.row <= sizes->size())
+            row_insert_value(*sizes, e.row, (*sizes)[e.row > 0 ? e.row - 1 : 0]);
     } else {
         PlotRowEdit::Restore r;
         (r.cols.push_back(cols[e.row]), ...);
         r.label = value_at(labels, e.row);
         for (std::size_t k = 0; k < err.size(); ++k) r.err[k] = value_at(*err[k], e.row);
+        r.size = value_at(*sizes, e.row);
         inv.restore = std::move(r);
         (row_remove(cols, e.row), ...);
         row_remove(labels, e.row);
         for (CowVec<double>* c : err) row_remove(*c, e.row);
+        row_remove(*sizes, e.row);
     }
     inv.op = insert ? PlotRowEdit::Op::Remove : PlotRowEdit::Op::Insert;
     return inv;
@@ -964,6 +979,9 @@ std::optional<PlotDataOp> apply_axes3d_data_op(T& t, const PlotCellEdit& e) {
             case 1: return &p.y;
             case 2: return &p.z;
             case 3: return &p.colors;
+            case 4:
+                if constexpr (requires { p.sizes; }) return &p.sizes;   // a cloud's sizes
+                else return nullptr;
             default: return nullptr;
         }
     };

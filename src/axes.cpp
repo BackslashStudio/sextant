@@ -330,9 +330,12 @@ void Axes::Impl::ingest_scatter(std::span<const double> x, std::span<const doubl
                                 const ErrorBar& eb, ScatterOptions opts, const char* who) {
     if (x.size() != y.size())
         throw std::invalid_argument(std::string(who) + ": x and y must have the same length");
+    read_back::check_sizes(opts.sizes, x.size(), who);
     ErrorBarData err = take_error_bars(eb, x.size(), who);
     warn_math(mathtext, who, opts.name);
     cycle->resolve(opts.color);
+    std::vector<double> sizes = std::move(opts.sizes);
+    opts.sizes.clear();
     scatters.push_back({
         std::vector<double>(x.begin(), x.end()),
         std::vector<double>(y.begin(), y.end()),
@@ -340,6 +343,7 @@ void Axes::Impl::ingest_scatter(std::span<const double> x, std::span<const doubl
         std::move(opts),
         next_snapshot_generation(),
         next_object_id(),
+        std::move(sizes),
     });
 }
 
@@ -350,6 +354,9 @@ void Axes::Impl::ingest_scatter_z(std::span<const double> x, std::span<const dou
         throw std::invalid_argument(std::string(who) + ": x, y, and z must have the same length");
     ErrorBarData err = take_error_bars(eb, x.size(), who);
     warn_math(mathtext, who, opts.name);
+    read_back::check_sizes(opts.sizes, x.size(), who);
+    std::vector<double> sizes = std::move(opts.sizes);
+    opts.sizes.clear();
     scatter_z.push_back({
         std::vector<double>(x.begin(), x.end()),
         std::vector<double>(y.begin(), y.end()),
@@ -358,6 +365,7 @@ void Axes::Impl::ingest_scatter_z(std::span<const double> x, std::span<const dou
         std::move(opts),
         next_snapshot_generation(),
         next_object_id(),
+        std::move(sizes),
     });
 }
 
@@ -809,24 +817,29 @@ void Axes::Impl::set_line_data(std::size_t i, std::span<const double> x, std::sp
 }
 
 void Axes::Impl::set_scatter_data(std::size_t i, std::span<const double> x, std::span<const double> y,
-                                  const char* who) {
+                                  const std::vector<double>* sizes, const char* who) {
     ScatterPlot& p = read_back::at(scatters, i, who);
     if (x.size() != y.size())
         throw std::invalid_argument(std::string(who) + ": x and y must have the same length");
+    if (sizes) read_back::check_sizes(*sizes, x.size(), who);
     read_back::keep_aligned(p, x.size() == p.x.size());
     p.x = read_back::own(x);
     p.y = read_back::own(y);
+    if (sizes) p.sizes = *sizes;
 }
 
 void Axes::Impl::set_scatter_z_data(std::size_t i, std::span<const double> x, std::span<const double> y,
-                                    std::span<const double> z, const char* who) {
+                                    std::span<const double> z, const std::vector<double>* sizes,
+                                    const char* who) {
     ScatterZPlot& p = read_back::at(scatter_z, i, who);
     if (x.size() != y.size() || x.size() != z.size())
         throw std::invalid_argument(std::string(who) + ": x, y, and z must have the same length");
+    if (sizes) read_back::check_sizes(*sizes, x.size(), who);
     read_back::keep_aligned(p, x.size() == p.x.size());
     p.x = read_back::own(x);
     p.y = read_back::own(y);
     p.z = read_back::own(z);
+    if (sizes) p.sizes = *sizes;
 }
 
 void Axes::Impl::set_bar_data(std::size_t i, std::span<const double> x, std::span<const double> height,
@@ -862,20 +875,20 @@ Axes& Axes::set_line_data(std::size_t i, std::span<const double> x, std::span<co
     return *this;
 }
 Axes& Axes::set_scatter_data(std::size_t i, const ScatterData& data) {
-    d->set_scatter_data(i, data.x, data.y, "set_scatter_data");
+    d->set_scatter_data(i, data.x, data.y, &data.sizes, "set_scatter_data");
     return *this;
 }
 Axes& Axes::set_scatter_data(std::size_t i, std::span<const double> x, std::span<const double> y) {
-    d->set_scatter_data(i, x, y, "set_scatter_data");
+    d->set_scatter_data(i, x, y, nullptr, "set_scatter_data");
     return *this;
 }
 Axes& Axes::set_scatter_z_data(std::size_t i, const ScatterZData& data) {
-    d->set_scatter_z_data(i, data.x, data.y, data.z, "set_scatter_z_data");
+    d->set_scatter_z_data(i, data.x, data.y, data.z, &data.sizes, "set_scatter_z_data");
     return *this;
 }
 Axes& Axes::set_scatter_z_data(std::size_t i, std::span<const double> x, std::span<const double> y,
                                std::span<const double> z) {
-    d->set_scatter_z_data(i, x, y, z, "set_scatter_z_data");
+    d->set_scatter_z_data(i, x, y, z, nullptr, "set_scatter_z_data");
     return *this;
 }
 Axes& Axes::set_bar_data(std::size_t i, const BarData& data) {

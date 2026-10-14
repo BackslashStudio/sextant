@@ -13,6 +13,10 @@ struct DataColumn {
     const char*  name;
     const double* values;
     std::size_t  count;
+    // The column a PlotCellEdit names; -1 = its position in the table. Set where
+    // an optional column comes before it (a cloud's sizes are column 4 with or
+    // without colors).
+    int          edit_column = -1;
 };
 
 // One plot object as a table: `columns` (vector mode), `heatmap` (matrix) or a

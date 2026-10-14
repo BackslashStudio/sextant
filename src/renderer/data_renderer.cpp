@@ -2111,7 +2111,7 @@ void main() {
                         inst.push_back(tr.to_px(sp.x[i]));
                         inst.push_back(tr.to_py(sp.y[i]));
                     }
-                    inst.push_back(sp.opts.size);
+                    inst.push_back(marker_size_at(sp, i));   // 0 hides a point
                 }
 
                 if (e.vbo == 0) glGenBuffers(1, &e.vbo);
@@ -2231,7 +2231,7 @@ void main() {
                         inst.push_back(tr.to_px(sp.x[i]));
                         inst.push_back(tr.to_py(sp.y[i]));
                     }
-                    inst.push_back(sp.opts.size);
+                    inst.push_back(marker_size_at(sp, i));   // 0 hides a point
                     inst.push_back(static_cast<float>(c[0]) / 255.0f);
                     inst.push_back(static_cast<float>(c[1]) / 255.0f);
                     inst.push_back(static_cast<float>(c[2]) / 255.0f);
@@ -4303,7 +4303,7 @@ void main() {
                     verts.push_back(static_cast<float>(s.x[i] - anchor.x));
                     verts.push_back(static_cast<float>(s.y[i] - anchor.y));
                     verts.push_back(static_cast<float>(s.z[i] - anchor.z));
-                    verts.push_back(s.opts.size);
+                    verts.push_back(marker_size_at(s, i));   // 0 hides a point
                     verts.push_back(col.r);
                     verts.push_back(col.g);
                     verts.push_back(col.b);

@@ -237,31 +237,37 @@ std::optional<PickHit> find_pick(const RenderSnapshot& snap, const HintProjector
     // Without an index, use a shared const pass-through grid.
     static const PointGrid kScan{};
 
+    // `hidden`: a scatter whose point i its own size hides (null = none).
     auto sweep = [&](PlotKind kind, std::size_t o, int kind_id, std::size_t rank,
-                     const CowVec<double>& xs, const CowVec<double>& ys) {
+                     const CowVec<double>& xs, const CowVec<double>& ys,
+                     const auto* hidden) {
         const PointGrid& g = index ? index->grid(kind, o, xs, ys) : kScan;
         g.for_each_in(xs, ys, x_lo, x_hi, y_lo, y_hi,
                       [&](std::size_t i) {
+                          if (hidden && marker_hidden(*hidden, i)) return;
                           // Behind a perspective eye: not a candidate.
                           const HintProjector::Pt p = tr.at(xs[i], ys[i]);
                           if (p.in_front) consider(p.x, p.y, kind_id, o, i, rank);
                       });
     };
+    const ScatterPlot* const no_hiding = nullptr;
 
     for (std::size_t rank = 0; rank < order.size(); ++rank) {
         const std::size_t o = order[rank].index;
         switch (order[rank].kind) {
             case PlotKind::Line:
-                sweep(PlotKind::Line, o, 0, rank, snap.lines[o].x, snap.lines[o].y);
+                sweep(PlotKind::Line, o, 0, rank, snap.lines[o].x, snap.lines[o].y, no_hiding);
                 break;
             case PlotKind::Scatter:
-                sweep(PlotKind::Scatter, o, 1, rank, snap.scatters[o].x, snap.scatters[o].y);
+                sweep(PlotKind::Scatter, o, 1, rank, snap.scatters[o].x, snap.scatters[o].y,
+                      &snap.scatters[o]);
                 break;
             case PlotKind::ScatterZ:
-                sweep(PlotKind::ScatterZ, o, 2, rank, snap.scatter_z[o].x, snap.scatter_z[o].y);
+                sweep(PlotKind::ScatterZ, o, 2, rank, snap.scatter_z[o].x, snap.scatter_z[o].y,
+                      &snap.scatter_z[o]);
                 break;
             case PlotKind::Bar:
-                sweep(PlotKind::Bar, o, 3, rank, snap.bars[o].centers, snap.bars[o].heights);
+                sweep(PlotKind::Bar, o, 3, rank, snap.bars[o].centers, snap.bars[o].heights, no_hiding);
                 break;
             default: break;
         }
@@ -465,13 +471,15 @@ std::optional<PickHit> find_pick3d(const RenderSnapshot3D& snap, const Projector
 
     // Every cloud marker, tested in screen space (markers have no surface) at
     // the point's depth, so occlusion matches the picture. Radius: the
-    // marker's half size, at least kHintHitRadiusPx.
+    // marker's own half size (per point with `sizes`), at least kHintHitRadiusPx;
+    // a point hidden by its size is not hit.
     for (std::size_t o = 0; o < snap.scatter3d.size(); ++o) {
         const Scatter3DPlot& s = snap.scatter3d[o];
         if (s.opts.marker == MarkerStyle::None) continue;
-        const float r = std::max(s.opts.size * 0.5f, kHintHitRadiusPx);
         const Transform3D& tf = proj.transform();
         for (std::size_t i = 0; i < s.count(); ++i) {
+            if (marker_hidden(s, i)) continue;
+            const float r = std::max(marker_size_at(s, i) * 0.5f, kHintHitRadiusPx);
             const Vec3 b = tf.to_box(s.x[i], s.y[i], s.z[i]);
             if (!proj.in_front(b)) continue;
             const Px3 q = proj.project_box(b);

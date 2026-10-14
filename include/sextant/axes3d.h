@@ -269,6 +269,9 @@ namespace sextant {
 
         // Marker diameter in pixels, constant regardless of depth.
         float size = 20.0f;
+        // Per-point diameters; see ScatterOptions::sizes (read back through
+        // Scatter3DData::sizes).
+        std::vector<double> sizes;
         MarkerStyle marker = MarkerStyle::Circle;
 
         // Below 1 markers are translucent (the expensive path). Defaults to 1,
@@ -390,6 +393,8 @@ namespace sextant {
         std::vector<double> x, y, z;
         // Empty for a flat series.
         std::vector<double> colors;
+        // Per-point diameters; see ScatterData::sizes.
+        std::vector<double> sizes;
     };
 
     struct Line3DData {

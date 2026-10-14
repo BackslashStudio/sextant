@@ -78,6 +78,7 @@ namespace sextant {
             double vmin = 0.0, vmax = 1.0;
             scatter3d_value_range(s, vmin, vmax);
             for (std::size_t i = 0; i < s.count(); ++i) {
+                if (marker_hidden(s, i)) continue;
                 const Vec3 b = tf.to_box(s.x[i], s.y[i], s.z[i]);
                 // Drop points behind a perspective eye.
                 if (!proj.in_front(b)) continue;
@@ -85,7 +86,7 @@ namespace sextant {
                 Scatter3DMarker m;
                 m.cx = q.x;
                 m.cy = q.y;
-                m.radius = std::max(0.0f, s.opts.size * 0.5f);
+                m.radius = std::max(0.0f, marker_size_at(s, i) * 0.5f);
                 m.marker = s.opts.marker;
                 m.color = scatter3d_depth_shade(scatter3d_point_color(s, i, vmin, vmax),
                                                 s.opts.depthshade,

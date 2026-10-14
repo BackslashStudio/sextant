@@ -183,7 +183,7 @@ namespace sextant {
                         double nv;
                         if (edit_cell(col.values[r], fmt, "%.17g", &nv, shade))
                             push_op(PlotCellEdit{
-                                t.kind, t.plot_index, c,
+                                t.kind, t.plot_index, col.edit_column >= 0 ? col.edit_column : c,
                                 static_cast<std::size_t>(r), nv
                             });
                         ImGui::PopID();
@@ -853,7 +853,8 @@ namespace sextant {
                 field_row("Marker");
                 if (marker_combo("##smark", o.marker)) push();
                 field_row("Size");
-                if (drag_float("##ssize", &o.size, 1.0f, 100.0f, 0.2f, "%.1f px")) push();
+                if (!p.sizes.empty()) ImGui::TextDisabled("per point (the size column)");
+                else if (drag_float("##ssize", &o.size, 1.0f, 100.0f, 0.2f, "%.1f px")) push();
                 field_row("Color");
                 if (color_swatch("##scol", *o.color)) push();
                 field_row("Alpha");
@@ -872,7 +873,8 @@ namespace sextant {
                 field_row("Marker");
                 if (marker_combo("##zmark", o.marker)) push();
                 field_row("Size");
-                if (drag_float("##zsize", &o.size, 1.0f, 100.0f, 0.2f, "%.1f px")) push();
+                if (!p.sizes.empty()) ImGui::TextDisabled("per point (the size column)");
+                else if (drag_float("##zsize", &o.size, 1.0f, 100.0f, 0.2f, "%.1f px")) push();
                 field_row("Colormap");
                 if (colormap_combo("##zcmap", o.cmap)) push();
                 field_row("vmin");
@@ -1211,7 +1213,8 @@ namespace sextant {
                 field_row("Marker");
                 if (marker_combo("##cmark", o.marker)) push_cloud();
                 field_row("Size");
-                if (drag_float("##csize", &o.size, 1.0f, 100.0f, 0.2f, "%.1f px")) push_cloud();
+                if (p && !p->sizes.empty()) ImGui::TextDisabled("per point (the size column)");
+                else if (drag_float("##csize", &o.size, 1.0f, 100.0f, 0.2f, "%.1f px")) push_cloud();
                 field_row("Color");
                 if (color_swatch("##ccol", *o.color)) push_cloud();
                 field_row("Alpha");
