@@ -82,6 +82,17 @@ namespace lt {
             return k;
         }
 
+        // How much pure blue the image holds, in pixels: each pixel counts by how
+        // far its blue exceeds its red and green (white, grey and black count 0).
+        double blue_coverage(const RgbaImage& img) {
+            double s = 0.0;
+            for (std::size_t i = 0; i + 3 < img.pixels.size(); i += 4) {
+                const int c = img.pixels[i + 2] - std::max(img.pixels[i], img.pixels[i + 1]);
+                if (c > 0) s += c / 255.0;
+            }
+            return s;
+        }
+
         const std::vector<double> kX{5.0}, kY{5.0}, kZ{0.5};
 
         // One marker in the middle of a 400x300 figure with no frame clutter
@@ -226,10 +237,13 @@ namespace lt {
         }
 
         // Line markers: the stroke's thickness stays put as the marker grows, so
-        // the ink grows with the length alone.
+        // the ink grows with the length alone. Measured as summed coverage: a
+        // 1.5 px stroke's edge rows are partly covered, and a pixel count over a
+        // threshold keeps one row or two depending on the rasterizer (llvmpipe
+        // kept 1 row at 20 px and 2 at 60, reading 6x).
         for (const MarkerStyle m: kLines) {
-            const std::size_t small = ink(one(base(m, 20.0f))->render_rgba(), 0, 0, 255, 60).n;
-            const std::size_t big = ink(one(base(m, 60.0f))->render_rgba(), 0, 0, 255, 60).n;
+            const double small = blue_coverage(one(base(m, 20.0f))->render_rgba());
+            const double big = blue_coverage(one(base(m, 60.0f))->render_rgba());
             check(small > 10 && big > small * 2.2 && big < small * 3.8,
                   name_of(m) + ": 3x the size is ~3x the ink (" + std::to_string(small) + " -> " +
                       std::to_string(big) + "), not 9x");
