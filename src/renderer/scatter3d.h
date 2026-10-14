@@ -18,9 +18,11 @@ inline float scatter3d_edge_alpha(const Scatter3DOptions& o, bool colormapped) {
     return std::clamp(base * o.edge_alpha, 0.0f, 1.0f);
 }
 
-// An outline below full alpha forces the composited path as well.
+// An outline below full alpha forces the composited path as well (a line
+// marker has none: its stroke is the fill).
 inline bool scatter3d_edge_translucent(const Scatter3DOptions& o, bool colormapped) {
-    return o.edge_linewidth > 0.0f && scatter3d_edge_alpha(o, colormapped) < 1.0f;
+    return !is_line_marker(o.marker) && o.edge_linewidth > 0.0f
+           && scatter3d_edge_alpha(o, colormapped) < 1.0f;
 }
 
 // True when the cloud must be composited (alpha < 1); `colors` has no alpha.

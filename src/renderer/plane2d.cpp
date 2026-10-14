@@ -1,6 +1,7 @@
 #include "plane2d.h"
 #include "../colormaps.h"
 #include "error_bar_shape.h"
+#include "marker_shape.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -589,10 +590,13 @@ namespace sextant {
                             const double ru = std::hypot(qu.x - q.x, qu.y - q.y);
                             const double rv = std::hypot(qv.x - q.x, qv.y - q.y);
                             const float size_px = static_cast<float>(ru + rv);
-                            // The outline foreshortens with the marker.
+                            // The outline foreshortens with the marker, and so does
+                            // a line marker's stroke (its default width included).
                             const float k = m.size_px > 0.0f ? size_px / m.size_px : 0.0f;
+                            const float ew = is_line_marker(m.marker) ? line_marker_width(m.edge_px)
+                                                                      : m.edge_px;
                             item.marks.push_back({q.x, q.y, size_px, m.color, m.marker,
-                                                  m.edge, m.edge_px * k});
+                                                  m.edge, ew * k});
                         }
                         break;
                 }

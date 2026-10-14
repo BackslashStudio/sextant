@@ -2424,8 +2424,97 @@ static void test_tick_style() {
     fig->show(true);
 }
 
+// Step 36c-1: every marker shape, filled / outlined / hollow; the line markers
+// at their default and wider strokes; legend keys; scatter_z, 3D and a plane.
+static void test_marker_shapes() {
+    using sextant::MarkerStyle;
+    const MarkerStyle all[] = {
+        MarkerStyle::Circle, MarkerStyle::Square, MarkerStyle::Triangle, MarkerStyle::TriangleDown,
+        MarkerStyle::TriangleLeft, MarkerStyle::TriangleRight, MarkerStyle::Diamond, MarkerStyle::Star,
+        MarkerStyle::Pentagon, MarkerStyle::Hexagon, MarkerStyle::Cross, MarkerStyle::Plus,
+        MarkerStyle::ThinCross, MarkerStyle::ThinPlus, MarkerStyle::VLine, MarkerStyle::HLine
+    };
+    const char* names[] = {"o", "s", "^", "v", "<", ">", "D", "*", "p", "h", "X", "P", "x", "+", "|", "_"};
+    constexpr int K = 16;
+
+    auto fig = sextant::Figure::create({.width = 1300, .height = 900, .title = "Marker shapes"});
+    fig->suptitle("Marker shapes: filled, outlined, hollow; line markers stroked");
+
+    // Rows: filled, orange outline 3 px, hollow (line markers: 3 px stroke).
+    auto a1 = fig->add_subplot(2, 2, 1);
+    for (int i = 0; i < K; ++i) {
+        const bool line = i >= 12;
+        const std::vector<double> x{i + 1.0}, y0{3.0}, y1{2.0}, y2{1.0};
+        a1->scatter(x, y0, {.color = sextant::Color::Blue, .size = 28.0f, .marker = all[i], .alpha = 1.0f});
+        a1->scatter(x, y1, {.color = sextant::Color::Blue, .size = 28.0f, .marker = all[i], .alpha = 1.0f,
+                            .edgecolor = sextant::Color::Orange, .edge_linewidth = 3.0f});
+        a1->scatter(x, y2, {.color = sextant::Color::Blue, .size = 28.0f, .marker = all[i],
+                            .alpha = line ? 1.0f : 0.0f, .edge_linewidth = 3.0f});
+        a1->text(names[i], sextant::Pos(i + 1.0), sextant::Pos(3.7), {.ha = sextant::HAlign::Center});
+    }
+    a1->set_xlim(0, K + 1).set_ylim(0.3, 4.2);
+    a1->set_title("filled / orange outline (line markers ignore it) / hollow, 3 px");
+
+    // One series per shape, keyed: the legend keys match the picture.
+    auto a2 = fig->add_subplot(2, 2, 2);
+    for (int i = 0; i < K; ++i) {
+        std::vector<double> x(8), y(8);
+        for (int j = 0; j < 8; ++j) {
+            x[j] = j;
+            y[j] = i + 0.3 * std::sin(0.9 * j + i);
+        }
+        a2->scatter(x, y, {.size = 14.0f, .marker = all[i], .name = names[i], .alpha = 1.0f});
+    }
+    a2->legend({.anchor = sextant::LegendAnchor::OutsideRT}).set_title("legend keys (color cycle)");
+
+    // scatter_z: per-point colors; line markers take each point's color too.
+    auto a3 = fig->add_subplot(2, 2, 3);
+    constexpr int N = 60;
+    std::vector<double> x(N), y(N), z(N);
+    for (int i = 0; i < N; ++i) {
+        x[i] = std::cos(0.21 * i) * (1.0 + 0.02 * i);
+        y[i] = std::sin(0.21 * i) * (1.0 + 0.02 * i);
+        z[i] = i / (N - 1.0);
+    }
+    a3->scatter_z(x, y, z, {.size = 22.0f, .marker = MarkerStyle::Star, .alpha = 1.0f,
+                            .edgecolor = sextant::Color::Black, .edge_linewidth = 1.0f,
+                            .colorbar = true, .name = "star"});
+    std::vector<double> x2(N), y2(N);
+    for (int i = 0; i < N; ++i) {
+        x2[i] = 0.5 * x[i];
+        y2[i] = 0.5 * y[i];
+    }
+    a3->scatter_z(x2, y2, z, {.cmap = sextant::Colormap::Plasma, .size = 16.0f,
+                              .marker = MarkerStyle::ThinCross, .alpha = 1.0f, .edge_linewidth = 2.0f,
+                              .name = "x, 2 px"});
+    a3->set_aspect(1.0).legend().set_title("scatter_z: Star outlined, ThinCross 2 px");
+
+    // 3D cloud and a plane: the shapes on billboards and drawn into a plane.
+    auto a4 = fig->add_subplot3d(2, 2, 4);
+    std::vector<double> cx, cy, cz;
+    for (int i = 0; i < 6; ++i)
+        for (int j = 0; j < 6; ++j) {
+            cx.push_back(i);
+            cy.push_back(j);
+            cz.push_back(1.0 + 0.3 * std::sin(i + j));
+        }
+    a4->scatter3d(cx, cy, cz, {.color = sextant::Color::Green, .size = 18.0f, .marker = MarkerStyle::Hexagon,
+                               .edgecolor = sextant::Color::Black, .edge_linewidth = 1.5f, .name = "hexagon"});
+    auto pl = a4->plane(sextant::PlaneOrientation::XY, 0.0);
+    for (int i = 0; i < 6; ++i) {
+        const std::vector<double> px{0.5 + i}, py{2.5};
+        pl->scatter(px, py, {.color = sextant::Color::Red, .size = 26.0f, .marker = all[3 + i * 2],
+                            .alpha = 1.0f, .edge_linewidth = i % 2 ? 0.0f : 3.0f});
+    }
+    a4->legend().set_title("3D: hexagons; plane at z=0 (v < D p X x)");
+
+    savefig_and_check_memory(fig, "test_marker_shapes");
+    fig->show(true);
+}
+
 int main() {
-    test_tick_style();
+    test_marker_shapes();
+    // test_tick_style();
     // test_layout_independent();
     // test_layout_aligned();
     // test_aspect();

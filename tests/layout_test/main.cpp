@@ -297,6 +297,7 @@ int main() {
 
     // edge_markers.cpp
     test_edge_markers();
+    test_marker_shapes();
 
     // text.cpp
     test_text();

@@ -205,7 +205,12 @@ namespace sextant {
                        {"none", MarkerStyle::None}, {"circle", MarkerStyle::Circle},
                        {"square", MarkerStyle::Square}, {"triangle", MarkerStyle::Triangle},
                        {"cross", MarkerStyle::Cross}, {"plus", MarkerStyle::Plus},
-                       {"diamond", MarkerStyle::Diamond})
+                       {"diamond", MarkerStyle::Diamond}, {"triangle_down", MarkerStyle::TriangleDown},
+                       {"triangle_left", MarkerStyle::TriangleLeft},
+                       {"triangle_right", MarkerStyle::TriangleRight}, {"star", MarkerStyle::Star},
+                       {"pentagon", MarkerStyle::Pentagon}, {"hexagon", MarkerStyle::Hexagon},
+                       {"thin_cross", MarkerStyle::ThinCross}, {"thin_plus", MarkerStyle::ThinPlus},
+                       {"vline", MarkerStyle::VLine}, {"hline", MarkerStyle::HLine})
     SEXTANT_ENUM_NAMES(CapStyle, {"flat", CapStyle::Flat}, {"arrow", CapStyle::Arrow})
     SEXTANT_ENUM_NAMES(Scale, {"linear", Scale::Linear}, {"log", Scale::Log}, {"symlog", Scale::Symlog})
     SEXTANT_ENUM_NAMES(AxisPosition,

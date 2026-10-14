@@ -36,7 +36,16 @@ namespace sextant {
     // `None` draws no stroke, and drops a data series from the legend.
     enum class LineStyle { Solid, Dashed, Dotted, DashDot, None };
 
-    enum class MarkerStyle { None, Circle, Square, Triangle, Cross, Plus, Diamond };
+    // `size` is the marker's outer diameter. Triangle points up; Star has five
+    // points; Pentagon and Hexagon stand on a corner pointing up. Cross and Plus
+    // are filled bars; ThinCross, ThinPlus, VLine and HLine are line markers
+    // (matplotlib's "x", "+", "|", "_"): strokes `edge_linewidth` thick (0 =
+    // 1.5 px) in the fill's color and alpha, with no outline of their own.
+    enum class MarkerStyle {
+        None, Circle, Square, Triangle, Cross, Plus, Diamond,
+        TriangleDown, TriangleLeft, TriangleRight, Star, Pentagon, Hexagon,
+        ThinCross, ThinPlus, VLine, HLine
+    };
 
     class Colormap;
 
@@ -233,8 +242,9 @@ namespace sextant {
         // outer diameter. Width in pixels; 0 (the default) draws none. Unset
         // `edgecolor` outlines in the fill's color (each point's own, for
         // scatter_z); its alpha is the color's own times `edge_alpha`, independent
-        // of `alpha`. Every marker is a filled shape (Cross and Plus too), so the
-        // outline follows its boundary.
+        // of `alpha`. Every filled marker (Cross and Plus too) is outlined along
+        // its boundary. A line marker (ThinCross, ThinPlus, VLine, HLine) has no
+        // outline: `edge_linewidth` is its stroke width instead.
         std::optional<Color> edgecolor;
         float edge_alpha = 1.0f;
         float edge_linewidth = 0.0f;

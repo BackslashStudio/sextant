@@ -151,19 +151,70 @@ void main() {
     // quad is [-1,1]^2, so the outline band is `edge_px / half_size` wide), pasted
     // into every scatter fragment shader by the MARKER_SDF token. `m` is the
     // MarkerStyle enum: 0=None 1=Circle 2=Square 3=Triangle 4=Cross 5=Plus
-    // 6=Diamond. Cross and Plus are two crossing bars (half-width 0.3 along the
-    // axes, 0.3/sqrt(2) across the diagonals) clipped by the unit circle.
+    // 6=Diamond 7=TriangleDown 8=TriangleLeft 9=TriangleRight 10=Star
+    // 11=Pentagon 12=Hexagon 13=ThinCross 14=ThinPlus 15=VLine 16=HLine. Cross
+    // and Plus are two crossing bars (half-width 0.3 along the axes, 0.3/sqrt(2)
+    // across the diagonals) clipped by the unit circle. The line markers (13 and
+    // up, marker_is_line()) are bars `hw` half-wide (marker_line_hw(), from the
+    // edge width) and take no outline band. Pentagon, Hexagon and Star are exact
+    // distances (Inigo Quilez's); y grows down, so a shape's top is at -y.
     static constexpr char k_marker_sdf[] = R"(
-float marker_sd(int m, vec2 p) {
+bool marker_is_line(int m) { return m >= 13; }
+float marker_line_hw(float edgeW, float halfSize) {
+    return 0.5 * (edgeW > 0.0 ? edgeW : 1.5) / max(halfSize, 1e-3);
+}
+float marker_tri(vec2 p) {
+    return max((2.0 * abs(p.x) - p.y - 1.0) * 0.4472136, p.y - 1.0);
+}
+float marker_pentagon(vec2 p) {
+    const vec3 k = vec3(0.809016994, 0.587785252, 0.726542528);
+    const float r = 0.809016994;
+    p.x = abs(p.x);
+    p -= 2.0 * min(dot(vec2(-k.x, k.y), p), 0.0) * vec2(-k.x, k.y);
+    p -= 2.0 * min(dot(vec2(k.x, k.y), p), 0.0) * vec2(k.x, k.y);
+    p -= vec2(clamp(p.x, -r * k.z, r * k.z), r);
+    return length(p) * sign(p.y);
+}
+float marker_hexagon(vec2 p) {
+    const vec3 k = vec3(-0.866025404, 0.5, 0.577350269);
+    const float r = 0.866025404;
+    p = abs(p.yx);
+    p -= 2.0 * min(dot(k.xy, p), 0.0) * k.xy;
+    p -= vec2(clamp(p.x, -k.z * r, k.z * r), r);
+    return length(p) * sign(p.y);
+}
+float marker_star(vec2 p) {
+    const vec2 k1 = vec2(0.809016994375, -0.587785252292);
+    const vec2 k2 = vec2(-k1.x, k1.y);
+    const float rf = 0.381966;
+    p = vec2(abs(p.x), -p.y);
+    p -= 2.0 * max(dot(k1, p), 0.0) * k1;
+    p -= 2.0 * max(dot(k2, p), 0.0) * k2;
+    p.x = abs(p.x);
+    p.y -= 1.0;
+    vec2 ba = rf * vec2(-k1.y, k1.x) - vec2(0.0, 1.0);
+    float h = clamp(dot(p, ba) / dot(ba, ba), 0.0, 1.0);
+    return length(p - ba * h) * sign(p.y * ba.x - p.x * ba.y);
+}
+float marker_sd(int m, vec2 p, float hw) {
     if (m == 0) return 1e9;
     if (m == 1) return length(p) - 1.0;
     if (m == 2) return max(abs(p.x), abs(p.y)) - 1.0;
-    if (m == 3) return max((2.0 * abs(p.x) - p.y - 1.0) * 0.4472136, p.y - 1.0);
+    if (m == 3) return marker_tri(p);
     if (m == 6) return (abs(p.x) + abs(p.y) - 1.0) * 0.70710678;
-    vec2 q = (m == 4) ? vec2(p.x + p.y, p.x - p.y) * 0.70710678 : p;
-    float t = (m == 4) ? 0.2121320 : 0.3;
+    if (m == 7) return marker_tri(vec2(p.x, -p.y));
+    if (m == 8) return marker_tri(p.yx);
+    if (m == 9) return marker_tri(vec2(p.y, -p.x));
+    if (m == 10) return marker_star(p);
+    if (m == 11) return marker_pentagon(p);
+    if (m == 12) return marker_hexagon(p);
+    if (m == 15) return max(abs(p.x) - hw, abs(p.y) - 1.0);
+    if (m == 16) return max(abs(p.y) - hw, abs(p.x) - 1.0);
+    bool line = marker_is_line(m);
+    vec2 q = (m == 4 || m == 13) ? vec2(p.x + p.y, p.x - p.y) * 0.70710678 : p;
+    float t = line ? hw : (m == 4) ? 0.2121320 : 0.3;
     float d = min(max(abs(q.y) - t, abs(q.x) - 1.0), max(abs(q.x) - t, abs(q.y) - 1.0));
-    return max(d, length(p) - 1.0);
+    return line ? d : max(d, length(p) - 1.0);
 }
 )";
 
@@ -205,9 +256,10 @@ uniform int  uMarker;
 out vec4 FragColor;
 MARKER_SDF
 void main() {
-    float d = marker_sd(uMarker, vUV);
+    float d = marker_sd(uMarker, vUV, marker_line_hw(uEdgeW, vHalf));
     if (d > 0.0) discard;
-    vec4 c = (uEdgeW > 0.0 && d > -uEdgeW / max(vHalf, 1e-3)) ? uEdge : uColor;
+    bool edge = uEdgeW > 0.0 && !marker_is_line(uMarker) && d > -uEdgeW / max(vHalf, 1e-3);
+    vec4 c = edge ? uEdge : uColor;
     if (c.a <= 0.0) discard;
     FragColor = c;
 }
@@ -252,10 +304,10 @@ uniform int  uMarker;
 out vec4 FragColor;
 MARKER_SDF
 void main() {
-    float d = marker_sd(uMarker, vUV);
+    float d = marker_sd(uMarker, vUV, marker_line_hw(uEdgeW, vHalf));
     if (d > 0.0) discard;
     vec4 c = vColor;
-    if (uEdgeW > 0.0 && d > -uEdgeW / max(vHalf, 1e-3))
+    if (uEdgeW > 0.0 && !marker_is_line(uMarker) && d > -uEdgeW / max(vHalf, 1e-3))
         c = vec4(uEdgeFace != 0 ? vColor.rgb : uEdge.rgb, uEdge.a);
     if (c.a <= 0.0) discard;
     FragColor = c;
@@ -307,7 +359,7 @@ uniform vec4 uEdge;
 uniform float uEdgeW;
 uniform int  uEdgeFace;
 vec4 marker_color(float d) {
-    if (uEdgeW > 0.0 && d > -uEdgeW / max(vHalf, 1e-3))
+    if (uEdgeW > 0.0 && !marker_is_line(uMarker) && d > -uEdgeW / max(vHalf, 1e-3))
         return vec4(uEdgeFace != 0 ? vColor.rgb : uEdge.rgb * vShade, uEdge.a);
     return vColor;
 }
@@ -324,7 +376,7 @@ out vec4 FragColor;
 MARKER_SDF
 MARKER_COLOR
 void main() {
-    float d = marker_sd(uMarker, vUV);
+    float d = marker_sd(uMarker, vUV, marker_line_hw(uEdgeW, vHalf));
     if (d > 0.0) discard;
     vec4 c = marker_color(d);
     if (c.a <= 0.0) discard;
@@ -346,7 +398,7 @@ PEEL
 MARKER_SDF
 MARKER_COLOR
 void main() {
-    float d = marker_sd(uMarker, vUV);
+    float d = marker_sd(uMarker, vUV, marker_line_hw(uEdgeW, vHalf));
     if (d > 0.0) discard;
     vec4 c = marker_color(d);
     if (c.a <= 0.0) discard;

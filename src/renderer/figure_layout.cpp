@@ -4,6 +4,7 @@
 #include "../rich_text.h"
 #include "../tick_style.h"
 #include "../ticker.h"
+#include "marker_shape.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -725,6 +726,14 @@ namespace sextant {
         return c;
     }
 
+    // A line marker's key is its stroke alone, in `ink` (the fill's color, or
+    // black for a colormapped series, whose fill key is white), with no outline.
+    static void line_marker_key(LegendEntry& e, Color ink) {
+        if (!is_line_marker(e.marker)) return;
+        e.color = ink;
+        e.edge = {0.0f, 0.0f, 0.0f, 0.0f};
+    }
+
     // One 2D object's key, if it has one.
     static void add_legend_entry(std::vector<LegendEntry>& entries, const RenderSnapshot& snap,
                                  const ObjectRef& r) {
@@ -741,24 +750,28 @@ namespace sextant {
                 }
                 case PlotKind::Scatter: {
                     const auto& sp = snap.scatters[r.index];
-                    if (keyed(sp.opts))
+                    if (keyed(sp.opts)) {
                         entries.push_back({
                             marker_key_fill(*sp.opts.color, sp.opts.alpha), sp.opts.name,
                             LegendKind::Marker, LineStyle::Solid, sp.opts.marker,
                             marker_key_edge(*sp.opts.color, sp.opts.edgecolor, sp.opts.edge_alpha,
                                             sp.opts.edge_linewidth)
                         });
+                        line_marker_key(entries.back(), entries.back().color);
+                    }
                     break;
                 }
                 case PlotKind::ScatterZ: {
                     // Keyed white with a black edge: the key names the shape, the
                     // colorbar explains the colors.
                     const auto& zp = snap.scatter_z[r.index];
-                    if (keyed(zp.opts))
+                    if (keyed(zp.opts)) {
                         entries.push_back({
                             Color::White, zp.opts.name, LegendKind::Marker,
                             LineStyle::Solid, zp.opts.marker, Color::Black
                         });
+                        line_marker_key(entries.back(), Color::Black);
+                    }
                     break;
                 }
                 case PlotKind::Bar: {
@@ -838,7 +851,7 @@ namespace sextant {
                     // colormapped. Kept in the legend either way (it has no other
                     // shape to recognize).
                     const auto& sc = snap.scatter3d[r.index];
-                    if (keyed(sc.opts) && sc.opts.marker != MarkerStyle::None)
+                    if (keyed(sc.opts) && sc.opts.marker != MarkerStyle::None) {
                         entries.push_back({
                             sc.colormapped() ? Color::White
                                              : marker_key_fill(*sc.opts.color, sc.opts.alpha),
@@ -849,6 +862,9 @@ namespace sextant {
                                 : marker_key_edge(*sc.opts.color, sc.opts.edgecolor,
                                                   sc.opts.edge_alpha, sc.opts.edge_linewidth)
                         });
+                        line_marker_key(entries.back(),
+                                        sc.colormapped() ? Color::Black : entries.back().color);
+                    }
                     break;
                 }
                 case PlotKind::Line3D: {

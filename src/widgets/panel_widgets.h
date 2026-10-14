@@ -270,7 +270,9 @@ namespace sextant {
     inline bool marker_combo(const char* label, MarkerStyle& m) {
         static const char* kNames[] = {
             "None", "Circle", "Square", "Triangle",
-            "Cross", "Plus", "Diamond"
+            "Cross", "Plus", "Diamond", "Triangle down", "Triangle left",
+            "Triangle right", "Star", "Pentagon", "Hexagon", "Thin cross (x)",
+            "Thin plus (+)", "Vertical line (|)", "Horizontal line (_)"
         };
         int cur = static_cast<int>(m);
         if (ImGui::Combo(label, &cur, kNames, IM_ARRAYSIZE(kNames))) {

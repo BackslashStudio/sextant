@@ -6,6 +6,7 @@
 #include "../edit_box.h"
 #include "../figure_edits.h"
 #include "../plot_data_view.h"
+#include "../renderer/marker_shape.h"
 #include <imgui.h>
 #include <imgui_internal.h>  // GetActiveID/GetInputTextState — not stable public API
 #include <algorithm>
@@ -807,10 +808,21 @@ namespace sextant {
 
         // A marker's outline: width, its own colour or the fill's, and its alpha
         // (alpha 0 on the fill, above, makes the marker hollow). `fallback` is what an
-        // unset colour resolves to when the box is ticked.
+        // unset colour resolves to when the box is ticked. A line marker has no
+        // outline: the width is its stroke's instead.
         template<class Push>
-        void marker_outline(std::optional<Color>& edgecolor, float& edge_alpha, float& edge_linewidth,
-                            Color fallback, Push&& push) {
+        void marker_outline(MarkerStyle marker, std::optional<Color>& edgecolor, float& edge_alpha,
+                            float& edge_linewidth, Color fallback, Push&& push) {
+            if (is_line_marker(marker)) {
+                ImGui::SeparatorText("Stroke");
+                if (begin_field_table("outline")) {
+                    field_row("Width");
+                    if (drag_float("##moutw", &edge_linewidth, 0.0f, 20.0f, 0.05f,
+                                   edge_linewidth > 0.0f ? "%.2f px" : "default (1.5 px)")) push();
+                    end_field_table();
+                }
+                return;
+            }
             ImGui::SeparatorText("Outline");
             if (begin_field_table("outline")) {
                 field_row("Width");
@@ -848,7 +860,7 @@ namespace sextant {
                 if (drag_float("##salpha", &o.alpha, 0.0f, 1.0f, 0.005f, "%.2f")) push();
                 end_field_table();
             }
-            marker_outline(o.edgecolor, o.edge_alpha, o.edge_linewidth, *o.color, push);
+            marker_outline(o.marker, o.edgecolor, o.edge_alpha, o.edge_linewidth, *o.color, push);
             if (!p.err.empty()) errorbar_style(o.errorbar, *o.color, has_cap(p.err), has_box(p.err), push);
         }
 
@@ -871,7 +883,7 @@ namespace sextant {
                 if (drag_float("##zalpha", &o.alpha, 0.0f, 1.0f, 0.005f, "%.2f")) push();
                 end_field_table();
             }
-            marker_outline(o.edgecolor, o.edge_alpha, o.edge_linewidth, Color::Black, push);
+            marker_outline(o.marker, o.edgecolor, o.edge_alpha, o.edge_linewidth, Color::Black, push);
             if (!p.err.empty()) errorbar_style(o.errorbar, Color::Black, has_cap(p.err), has_box(p.err), push);
         }
 
@@ -1208,7 +1220,7 @@ namespace sextant {
                 if (drag_float("##cshade", &o.depthshade, 0.0f, 1.0f, 0.005f, "%.2f")) push_cloud();
                 end_field_table();
             }
-            marker_outline(o.edgecolor, o.edge_alpha, o.edge_linewidth, *o.color, push_cloud);
+            marker_outline(o.marker, o.edgecolor, o.edge_alpha, o.edge_linewidth, *o.color, push_cloud);
             // vmin/vmax only with `colors`, both or neither (empty = data range).
             if (begin_field_table("cloudv")) {
                 field_row("Colormap");

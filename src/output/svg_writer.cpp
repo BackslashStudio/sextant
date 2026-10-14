@@ -322,7 +322,9 @@ static void emit_error_bars(std::ostringstream& o, const SvgAxesData& d, ObjectR
 // natural element (<circle>, <rect>, ...). Empty `stroke` = no outline. A data
 // marker's outline (`inside`) fills the band of `stroke_w` just within its
 // boundary, as on the GPU, so the shape is drawn inset by half the width; a
-// legend key's is a 1 px line centred on the boundary.
+// legend key's is a 1 px line centred on the boundary. A line marker is its
+// stroke alone: the fill's color, `stroke_w` thick for a data marker (see
+// line_marker_width()), no outline.
 static void emit_scatter_marker(std::ostringstream& o,
                                 float cx, float cy, float r,
                                 const std::string& fill, float alpha,
@@ -331,10 +333,12 @@ static void emit_scatter_marker(std::ostringstream& o,
                                 float stroke_alpha = 1.0f, float stroke_w = 1.0f,
                                 bool inside = false)
 {
-    const MarkerShape s = marker_shape(marker, cx, cy, r,
-                                       !stroke.empty() && inside ? stroke_w * 0.5f : 0.0f);
+    const bool line = is_line_marker(marker);
+    const MarkerShape s = line
+        ? marker_shape(marker, cx, cy, r, 0.0f, inside ? line_marker_width(stroke_w) : kLineMarkerWidth)
+        : marker_shape(marker, cx, cy, r, !stroke.empty() && inside ? stroke_w * 0.5f : 0.0f);
     std::ostringstream eo;
-    if (!stroke.empty())
+    if (!stroke.empty() && !line)
         eo << " stroke=\"" << stroke << "\" stroke-opacity=\"" << stroke_alpha
            << "\" stroke-width=\"" << stroke_w << "\"";
     const std::string edge = eo.str();
