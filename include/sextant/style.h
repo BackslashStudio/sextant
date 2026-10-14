@@ -36,6 +36,14 @@ namespace sextant {
     // `None` draws no stroke, and drops a data series from the legend.
     enum class LineStyle { Solid, Dashed, Dotted, DashDot, None };
 
+    // How a 2D line runs between its points (matplotlib's drawstyle): Default
+    // draws straight segments; the steps hold each value flat. Between points a
+    // and b, StepsPre rises at a's x to b's y, then runs flat to b; StepsPost
+    // runs flat at a's y to b's x, then rises; StepsMid runs flat to the
+    // midpoint of the two x values (in data units, also on a log axis), rises,
+    // then runs flat to b.
+    enum class DrawStyle { Default, StepsPre, StepsMid, StepsPost };
+
     // `size` is the marker's outer diameter. Triangle points up; Star has five
     // points; Pentagon and Hexagon stand on a corner pointing up. Cross and Plus
     // are filled bars; ThinCross, ThinPlus, VLine and HLine are line markers
@@ -218,6 +226,11 @@ namespace sextant {
         // pattern continues across it. On a Plane2D only the width carries over,
         // since planes stroke solid.
         bool loop = false;
+
+        // Step drawing (see DrawStyle). Only the stroke changes: limits, hover,
+        // error bars and the legend key stay on the points. A segment with a
+        // NaN end draws none of its steps; `loop` steps the closing segment too.
+        DrawStyle drawstyle = DrawStyle::Default;
 
         // Style of the error bars passed as an ErrorBar.
         ErrorBarOptions errorbar;

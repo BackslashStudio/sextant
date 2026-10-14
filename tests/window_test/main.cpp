@@ -2600,8 +2600,85 @@ static void test_marker_sizes() {
     fig->show(true);
 }
 
+// Step drawstyles (LineOptions::drawstyle): the four modes over the same points,
+// a log axis with NaN gaps and error bars, a looped staircase, and a plane.
+static void test_line_steps() {
+    using sextant::DrawStyle;
+    auto fig = sextant::Figure::create({.width = 1300, .height = 900, .title = "Line steps"});
+    fig->suptitle("Step drawstyle (LineOptions::drawstyle)");
+
+    const std::vector<double> x{0, 1, 2, 3, 4, 5, 6, 7};
+    const std::vector<double> y{1, 3, 2, 4, 3.5, 1.5, 2.5, 2};
+
+    // The four modes, offset; markers on the points show where each one rises.
+    auto a1 = fig->add_subplot(2, 2, 1);
+    {
+        const struct {
+            DrawStyle ds;
+            const char* name;
+        } modes[] = {{DrawStyle::Default, "default"}, {DrawStyle::StepsPre, "steps_pre"},
+                     {DrawStyle::StepsMid, "steps_mid"}, {DrawStyle::StepsPost, "steps_post"}};
+        double off = 0.0;
+        for (const auto& m: modes) {
+            std::vector<double> yy(y);
+            for (double& v: yy) v += off;
+            sextant::LineOptions o;
+            o.linewidth = 2.0f;
+            o.drawstyle = m.ds;
+            o.name = m.name;
+            a1->line(x, yy, o);
+            a1->scatter(x, yy, {.color = sextant::Color::Black, .size = 6.0f, .show_legend = false});
+            off += 4.5;
+        }
+        a1->set_title("the four modes over the same points (black dots)");
+    }
+
+    // A log x axis: mid rises at the data-space mean (right of the visual
+    // middle). A NaN breaks the run; error bars stay on the points; dashed.
+    auto a2 = fig->add_subplot(2, 2, 2);
+    {
+        const std::vector<double> lx{1, 3, 10, 30, 100, 300, 1000};
+        const std::vector<double> ly{2, 4, 3, std::nan(""), 5, 3.5, 4.5};
+        const std::vector<double> e{0.3, 0.4, 0.3, 0.0, 0.5, 0.3, 0.4};
+        a2->line(lx, ly, {.y_cap_lo = e, .y_cap_hi = e},
+                 {.linewidth = 2.0f, .name = "steps_mid, log x", .drawstyle = DrawStyle::StepsMid});
+        std::vector<double> ly2(ly);
+        for (double& v: ly2) v -= 1.5;
+        a2->line(lx, ly2, {.linewidth = 2.0f, .linestyle = sextant::LineStyle::Dashed,
+                           .name = "steps_post, dashed", .drawstyle = DrawStyle::StepsPost});
+        a2->set_xscale(sextant::Scale::Log);
+        a2->set_title("log x: NaN at 30 breaks both; error bars on the points");
+    }
+
+    // A looped staircase: the closing pair steps too.
+    auto a3 = fig->add_subplot(2, 2, 3);
+    {
+        const std::vector<double> sx{0, 2, 4, 6, 4, 2};
+        const std::vector<double> sy{0, 2, 4, 2, 6, 4};
+        a3->line(sx, sy, {.linewidth = 3.0f, .name = "steps_pre, loop", .loop = true,
+                          .drawstyle = DrawStyle::StepsPre});
+        a3->line(sx, sy, {.linewidth = 1.0f, .linestyle = sextant::LineStyle::Dotted,
+                          .name = "the points (straight, loop)", .loop = true});
+        a3->set_title("loop: the closing segment (2,4) -> (0,0) is stepped");
+    }
+
+    // A plane: the same expansion, drawn into the plane.
+    auto a4 = fig->add_subplot3d(2, 2, 4);
+    {
+        auto pl = a4->plane(sextant::PlaneOrientation::XY, 0.0);
+        pl->line(x, y, {.color = sextant::Color::Red, .linewidth = 2.5f, .name = "plane steps_mid",
+                        .drawstyle = DrawStyle::StepsMid});
+        a4->set_xlim(0, 7).set_ylim(0, 5).set_zlim(0, 1);
+        a4->set_title("plane: steps_mid");
+    }
+
+    savefig_and_check_memory(fig, "test_line_steps");
+    fig->show(true);
+}
+
 int main() {
-    test_marker_sizes();
+    test_line_steps();
+    // test_marker_sizes();
     // test_marker_shapes();
     // test_tick_style();
     // test_layout_independent();

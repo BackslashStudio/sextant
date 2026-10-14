@@ -216,10 +216,12 @@ private:
     // the first and last point so each instance reads prev/p0/p1/next.
     struct LineCache {
         unsigned int       vbo        = 0;
-        int                segments   = 0;   // instance count = segment_count()
+        int                segments   = 0;   // instance count = the stroked path's segments
         unsigned long long data_generation = 0;
-        // `loop` changes the pad points, so it is part of the key.
+        // `loop` changes the pad points and `drawstyle` the vertices, so both are
+        // part of the key.
         bool               loop       = false;
+        DrawStyle          drawstyle  = DrawStyle::Default;
         double             anchor_x = 0.0, anchor_y = 0.0;
         double             span_x = 0.0, span_y = 0.0;
         bool               data_space = true;

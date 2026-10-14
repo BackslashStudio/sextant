@@ -800,6 +800,8 @@ namespace sextant {
                 if (drag_float("##lwidth", &o.linewidth, 0.1f, 20.0f, 0.05f, "%.2f px")) push();
                 field_row("Style");
                 if (linestyle_combo("##lstyle", o.linestyle)) push();
+                field_row("Draw style");
+                if (drawstyle_combo("##ldraw", o.drawstyle)) push();
                 end_field_table();
             }
             if (on_plane) ImGui::TextDisabled("SVG export draws a plane's lines solid (the window dashes them).");

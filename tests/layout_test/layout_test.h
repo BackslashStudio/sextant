@@ -604,6 +604,10 @@ namespace lt {
     void test_marker_shapes();
     void test_marker_sizes();
 
+    // line_steps.cpp
+    void test_line_steps();
+    void test_line_steps_rendered();
+
     // text.cpp
     void test_text();
 

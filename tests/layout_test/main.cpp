@@ -300,6 +300,10 @@ int main() {
     test_marker_shapes();
     test_marker_sizes();
 
+    // line_steps.cpp
+    test_line_steps();
+    test_line_steps_rendered();
+
     // text.cpp
     test_text();
 

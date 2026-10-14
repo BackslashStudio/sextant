@@ -2,6 +2,7 @@
 #include "../colormaps.h"
 #include "../font_discovery.h"
 #include "../line_dash.h"
+#include "../line_steps.h"
 #include "../rich_text.h"
 #include "../tick_style.h"
 #include "../contour.h"
@@ -218,8 +219,10 @@ static void emit_lines(std::ostringstream& o, const SvgAxesData& d,
           << "\" stroke-width=\"" << lp.opts.linewidth << "\""
           << dash_attr(lp.opts.linestyle)
           << " points=\"";
-        for (std::size_t i = 0; i < lp.x.size(); ++i)
-            o << d.layout.tr.to_px(lp.x[i]) << "," << d.layout.tr.to_py(lp.y[i]) << " ";
+        StrokePath sp;
+        sp.build(lp.x.data(), lp.y.data(), lp.x.size(), lp.opts.drawstyle, lp.opts.loop);
+        for (std::size_t i = 0; i < sp.n; ++i)
+            o << d.layout.tr.to_px(sp.x[i]) << "," << d.layout.tr.to_py(sp.y[i]) << " ";
         o << "\"/>\n";
     }
 }

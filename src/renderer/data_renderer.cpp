@@ -9,6 +9,7 @@
 #include "error_bar3d.h"
 #include "plane2d.h"
 #include "../line_dash.h"
+#include "../line_steps.h"
 #include "error_bar_shape.h"
 #include <glad/glad.h>
 #include <vector>
@@ -1870,6 +1871,7 @@ void main() {
         glBindVertexArray(lineseg_vao_);
 
         std::vector<float> pts, dists;
+        StrokePath path;
         for (const std::size_t li : which) {
             const auto& lp = lines[li];
             if (lp.x.size() < 2) continue;
@@ -1878,6 +1880,16 @@ void main() {
 
             const CacheKey key{axes_index_, plane_index_, static_cast<int>(li)};
             LineCache& e = line_cache_[key];
+
+            // The stroked vertices (the steps, if any); built on first use below.
+            bool have_path = false;
+            auto stroke_path = [&]() -> const StrokePath& {
+                if (!have_path)
+                    path.build(lp.x.data(), lp.y.data(), lp.x.size(), lp.opts.drawstyle,
+                               lp.opts.loop);
+                have_path = true;
+                return path;
+            };
 
             // The buffer holds only points; view and width are uniforms. Rebuilt on
             // data change or when leaving the float-precision regime.
@@ -1889,16 +1901,18 @@ void main() {
                                 && e.data_generation == data_generation_
                                 && same_scales(e.tr, tr)
                                 && e.loop == lp.opts.loop
+                                && e.drawstyle == lp.opts.drawstyle
                                 && (e.data_space
                                         ? precise
                                         : (!precise && same_view(e.tr, tr)));
             if (!usable) {
-                double xlo = tr.sx(lp.x[0]), xhi = xlo, ylo = tr.sy(lp.y[0]), yhi = ylo;
-                for (std::size_t i = 1; i < lp.x.size(); ++i) {
-                    xlo = std::min(xlo, tr.sx(lp.x[i]));
-                    xhi = std::max(xhi, tr.sx(lp.x[i]));
-                    ylo = std::min(ylo, tr.sy(lp.y[i]));
-                    yhi = std::max(yhi, tr.sy(lp.y[i]));
+                const StrokePath& sp = stroke_path();
+                double xlo = tr.sx(sp.x[0]), xhi = xlo, ylo = tr.sy(sp.y[0]), yhi = ylo;
+                for (std::size_t i = 1; i < sp.n; ++i) {
+                    xlo = std::min(xlo, tr.sx(sp.x[i]));
+                    xhi = std::max(xhi, tr.sx(sp.x[i]));
+                    ylo = std::min(ylo, tr.sy(sp.y[i]));
+                    yhi = std::max(yhi, tr.sy(sp.y[i]));
                 }
                 e.anchor_x = 0.5 * (xlo + xhi);
                 e.span_x = xhi - xlo;
@@ -1910,16 +1924,16 @@ void main() {
                 // Padded so instance i reads points [i, i+3]. An open path repeats
                 // its ends (butt caps); a looped path pads with the real neighbours
                 // across the seam (mitered).
-                const std::size_t n = lp.x.size();
+                const std::size_t n = sp.n;
                 pts.clear();
                 pts.reserve((n + 3) * 2);
                 auto emit = [&](std::size_t i) {
                     if (e.data_space) {
-                        pts.push_back(static_cast<float>(tr.sx(lp.x[i]) - e.anchor_x));
-                        pts.push_back(static_cast<float>(tr.sy(lp.y[i]) - e.anchor_y));
+                        pts.push_back(static_cast<float>(tr.sx(sp.x[i]) - e.anchor_x));
+                        pts.push_back(static_cast<float>(tr.sy(sp.y[i]) - e.anchor_y));
                     } else {
-                        pts.push_back(tr.to_px(lp.x[i]));
-                        pts.push_back(tr.to_py(lp.y[i]));
+                        pts.push_back(tr.to_px(sp.x[i]));
+                        pts.push_back(tr.to_py(sp.y[i]));
                     }
                 };
                 emit(lp.opts.loop ? n - 1 : 0);
@@ -1935,8 +1949,9 @@ void main() {
                              static_cast<GLsizeiptr>(pts.size() * sizeof(float)),
                              pts.data(), GL_DYNAMIC_DRAW);
 
-                e.segments = static_cast<int>(lp.segment_count());
+                e.segments = static_cast<int>(sp.segment_count());
                 e.loop = lp.opts.loop;
+                e.drawstyle = lp.opts.drawstyle;
                 e.data_generation = data_generation_;
                 e.tr = tr;
                 e.dist_valid = false; // arc lengths follow the points
@@ -1990,7 +2005,8 @@ void main() {
                 if (!reusable) {
                     // Accumulated in double from the same float positions the
                     // shader sees, so prefixes agree at joins.
-                    const std::size_t n = lp.x.size();
+                    const StrokePath& sp = stroke_path();
+                    const std::size_t n = sp.n;
                     dists.clear();
                     dists.reserve(n);
                     double acc = 0.0;
@@ -1998,11 +2014,11 @@ void main() {
                     for (std::size_t i = 0; i < n; ++i) {
                         float fx, fy;
                         if (e.data_space) {
-                            fx = static_cast<float>(tr.sx(lp.x[i]) - e.anchor_x);
-                            fy = static_cast<float>(tr.sy(lp.y[i]) - e.anchor_y);
+                            fx = static_cast<float>(tr.sx(sp.x[i]) - e.anchor_x);
+                            fy = static_cast<float>(tr.sy(sp.y[i]) - e.anchor_y);
                         } else {
-                            fx = tr.to_px(lp.x[i]);
-                            fy = tr.to_py(lp.y[i]);
+                            fx = tr.to_px(sp.x[i]);
+                            fy = tr.to_py(sp.y[i]);
                         }
                         const float px = m.scale[0] * fx + m.offset[0];
                         const float py = m.scale[1] * fy + m.offset[1];

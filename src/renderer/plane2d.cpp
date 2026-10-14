@@ -1,5 +1,6 @@
 #include "plane2d.h"
 #include "../colormaps.h"
+#include "../line_steps.h"
 #include "error_bar_shape.h"
 #include "marker_shape.h"
 #include <algorithm>
@@ -325,15 +326,15 @@ namespace sextant {
                     const auto& lp = s.lines[r.index];
                     if (lp.opts.linestyle != LineStyle::None && lp.opts.linewidth > 0.0f) {
                         const Color c = with_alpha(*lp.opts.color, lp.opts.alpha);
-                        // segment_count()/segment_ends() decide closure; the length
-                        // guard drops segments past a shorter y vector.
+                        // The stroked path (steps, if any) over the points both
+                        // vectors have; `loop` adds the closing segment.
                         const std::size_t n = std::min(lp.x.size(), lp.y.size());
+                        StrokePath sp;
+                        sp.build(lp.x.data(), lp.y.data(), n, lp.opts.drawstyle, lp.opts.loop);
                         b.open(Kind::Seg);
-                        for (std::size_t k = 0; k < lp.segment_count(); ++k) {
-                            std::size_t i, j;
-                            lp.segment_ends(k, i, j);
-                            if (i >= n || j >= n) continue;
-                            b.seg_uv(lp.x[i], lp.y[i], lp.x[j], lp.y[j], c, lp.opts.linewidth);
+                        for (std::size_t k = 0; k < sp.segment_count(); ++k) {
+                            const std::size_t j = k + 1 == sp.n ? 0 : k + 1;
+                            b.seg_uv(sp.x[k], sp.y[k], sp.x[j], sp.y[j], c, lp.opts.linewidth);
                         }
                         b.close();
                     }

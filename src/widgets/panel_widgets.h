@@ -266,6 +266,16 @@ namespace sextant {
         return false;
     }
 
+    inline bool drawstyle_combo(const char* label, DrawStyle& s) {
+        static const char* kNames[] = {"Straight", "Steps (pre)", "Steps (mid)", "Steps (post)"};
+        int cur = static_cast<int>(s);
+        if (ImGui::Combo(label, &cur, kNames, IM_ARRAYSIZE(kNames))) {
+            s = static_cast<DrawStyle>(cur);
+            return true;
+        }
+        return false;
+    }
+
     // Names in MarkerStyle's order (also the shader's uMarker order).
     inline bool marker_combo(const char* label, MarkerStyle& m) {
         static const char* kNames[] = {

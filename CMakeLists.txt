@@ -808,6 +808,7 @@ if(SEXTANT_BUILD_TESTS)
             tests/layout_test/edge_markers.cpp
             tests/layout_test/marker_shapes.cpp
             tests/layout_test/marker_sizes.cpp
+            tests/layout_test/line_steps.cpp
             tests/layout_test/rich_text.cpp
             tests/layout_test/text.cpp
             tests/layout_test/window_wait.cpp

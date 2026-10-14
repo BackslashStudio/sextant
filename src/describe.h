@@ -48,7 +48,7 @@ namespace sextant {
     SEXTANT_DESCRIBE(ErrorBarOptions,
                      F(color) F(linewidth) F(capsize) F(capstyle) F(boxwidth) F(box_alpha))
     SEXTANT_DESCRIBE(LineOptions,
-                     F(color) F(linewidth) F(linestyle) F(name) F(show_legend) F(alpha) F(loop)
+                     F(color) F(linewidth) F(linestyle) F(name) F(show_legend) F(alpha) F(loop) F(drawstyle)
                      F(errorbar) F(hint_labels))
     SEXTANT_DESCRIBE(ScatterOptions,
                      F(color) F(size) F(sizes) F(marker) F(name) F(show_legend) F(alpha)
@@ -203,6 +203,9 @@ namespace sextant {
                        {"solid", LineStyle::Solid}, {"dashed", LineStyle::Dashed},
                        {"dotted", LineStyle::Dotted}, {"dashdot", LineStyle::DashDot},
                        {"none", LineStyle::None})
+    SEXTANT_ENUM_NAMES(DrawStyle,
+                       {"default", DrawStyle::Default}, {"steps_pre", DrawStyle::StepsPre},
+                       {"steps_mid", DrawStyle::StepsMid}, {"steps_post", DrawStyle::StepsPost})
     SEXTANT_ENUM_NAMES(MarkerStyle,
                        {"none", MarkerStyle::None}, {"circle", MarkerStyle::Circle},
                        {"square", MarkerStyle::Square}, {"triangle", MarkerStyle::Triangle},
