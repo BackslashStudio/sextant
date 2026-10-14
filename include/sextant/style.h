@@ -45,7 +45,9 @@ namespace sextant {
     enum class DrawStyle { Default, StepsPre, StepsMid, StepsPost };
 
     // The direction an object runs: a bar stands (Vertical) or lies along x
-    // (Horizontal, matplotlib's barh).
+    // (Horizontal, matplotlib's barh); a reference line or span runs across the
+    // frame along x (Horizontal, matplotlib's axhline/axhspan) or along y
+    // (Vertical, axvline/axvspan).
     enum class Orientation { Vertical, Horizontal };
 
     // `size` is the marker's outer diameter. Triangle points up; Star has five
@@ -344,6 +346,46 @@ namespace sextant {
     struct HistOptions {
         bool density = false;
         bool cumulative = false;
+    };
+
+    // A reference line across the frame (Axes::axline()).
+    struct AxLineOptions {
+        // Horizontal: a line at y = value, running along x (matplotlib's
+        // axhline); Vertical: at x = value (axvline).
+        Orientation orientation = Orientation::Horizontal;
+        std::optional<Color> color; // see LineOptions::color
+        float linewidth = 1.5f;
+        LineStyle linestyle = LineStyle::Solid; // None draws nothing and keys nothing
+        float alpha = 1.0f;
+
+        // Where the line starts and ends along the frame, as fractions of it
+        // (0 = left or bottom edge, 1 = right or top edge), whatever the limits:
+        // matplotlib's xmin/xmax.
+        double from = 0.0, to = 1.0;
+
+        std::string name;
+        bool show_legend = true; // see LineOptions::show_legend
+    };
+
+    // A band across the frame between two values (Axes::axspan()).
+    struct AxSpanOptions {
+        // Horizontal: a band over y in [lo, hi], running along x (matplotlib's
+        // axhspan); Vertical: over x (axvspan).
+        Orientation orientation = Orientation::Horizontal;
+        // Unset = Color::Blue; a span takes no color from the color cycle.
+        std::optional<Color> color;
+        float alpha = 0.25f;
+
+        // The band's outline, `linewidth` pixels wide (0, the default, draws
+        // none) in `edgecolor` (unset = `color`) at that color's own alpha.
+        std::optional<Color> edgecolor;
+        float linewidth = 0.0f;
+
+        // See AxLineOptions::from.
+        double from = 0.0, to = 1.0;
+
+        std::string name;
+        bool show_legend = true; // see LineOptions::show_legend
     };
 
     // An axis span in data coordinates. For a heatmap, `lo`/`hi` are the outer
@@ -750,6 +792,16 @@ namespace sextant {
         std::vector<double> data;
         int rows = 0, cols = 0;
         Range xrange, yrange;
+    };
+
+    // Axes::axline(): where the line is, on the axis its orientation names.
+    struct AxLineData {
+        double value = 0.0;
+    };
+
+    // Axes::axspan(): the band's ends, lo <= hi as axspan() stored them.
+    struct AxSpanData {
+        double lo = 0.0, hi = 1.0;
     };
 
     // Axes::text() and annotate(): the string and where it is. `arrow` is set

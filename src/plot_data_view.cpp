@@ -110,6 +110,34 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot& snap) 
         out.push_back(std::move(t));
     }
 
+    // Reference lines and spans: one fixed row, named for the axis they sit on.
+    for (std::size_t i = 0; i < snap.axlines.size(); ++i) {
+        const auto& ap = snap.axlines[i];
+        PlotDataTable t;
+        t.kind = PlotKind::AxLine;
+        t.plot_index = static_cast<int>(i);
+        t.data_stamp = ap.data_stamp;
+        t.id = ap.id;
+        t.label = pick_label(ap.opts.name, "axline", static_cast<int>(i));
+        t.columns.push_back({ap.on_x() ? "x" : "y", &ap.value, 1});
+        t.rows_fixed = true;
+        out.push_back(std::move(t));
+    }
+
+    for (std::size_t i = 0; i < snap.axspans.size(); ++i) {
+        const auto& sp = snap.axspans[i];
+        PlotDataTable t;
+        t.kind = PlotKind::AxSpan;
+        t.plot_index = static_cast<int>(i);
+        t.data_stamp = sp.data_stamp;
+        t.id = sp.id;
+        t.label = pick_label(sp.opts.name, "axspan", static_cast<int>(i));
+        t.columns.push_back({sp.on_x() ? "xmin" : "ymin", &sp.lo, 1});
+        t.columns.push_back({sp.on_x() ? "xmax" : "ymax", &sp.hi, 1});
+        t.rows_fixed = true;
+        out.push_back(std::move(t));
+    }
+
     push_text_tables(out, snap.texts);
     return out;
 }

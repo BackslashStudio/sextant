@@ -314,6 +314,8 @@ namespace sextant {
             std::vector<HeatmapOptions> heatmaps;
             std::vector<ScatterZOptions> scatter_z;
             std::vector<TextStyle> texts;
+            std::vector<AxLineOptions> axlines;
+            std::vector<AxSpanOptions> axspans;
             std::vector<ObjectId> ids;   // seeded from, kind by kind
         };
 

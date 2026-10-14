@@ -542,6 +542,32 @@ Axes& Axes::imshow(std::span<const double> data, int rows, int cols,
     return heatmap(data, rows, cols, xr, yr, std::move(opts));
 }
 
+void Axes::Impl::ingest_axline(double value, AxLineOptions opts, const char* who) {
+    read_back::check_reference({value, opts.from, opts.to}, who);
+    warn_math(mathtext, who, opts.name);
+    cycle->resolve(opts.color);
+    axlines.push_back({ value, std::move(opts), next_snapshot_generation(), next_object_id() });
+}
+
+// The cycle is not taken (matplotlib's axhspan is the patch default, C0).
+void Axes::Impl::ingest_axspan(double lo, double hi, AxSpanOptions opts, const char* who) {
+    read_back::check_reference({lo, hi, opts.from, opts.to}, who);
+    warn_math(mathtext, who, opts.name);
+    if (!opts.color) opts.color = Color::Blue;
+    if (lo > hi) std::swap(lo, hi);
+    axspans.push_back({ lo, hi, std::move(opts), next_snapshot_generation(), next_object_id() });
+}
+
+Axes& Axes::axline(double value, AxLineOptions opts) {
+    d->ingest_axline(value, std::move(opts), "axline");
+    return *this;
+}
+
+Axes& Axes::axspan(double lo, double hi, AxSpanOptions opts) {
+    d->ingest_axspan(lo, hi, std::move(opts), "axspan");
+    return *this;
+}
+
 void Axes::Impl::ingest_text(TextContent c, TextStyle style, const char* who) {
     read_back::check_text(c, who);
     warn_math(mathtext && style.text.parse_math, who, c.text);
@@ -781,6 +807,33 @@ std::size_t Axes::text_count() const      { return d->texts.size(); }
 
 TextData Axes::text_data(std::size_t i) const {
     return read_back::to_data(read_back::at(d->texts, i, "text_data"));
+}
+
+std::size_t Axes::axline_count() const    { return d->axlines.size(); }
+std::size_t Axes::axspan_count() const    { return d->axspans.size(); }
+
+AxLineData Axes::axline_data(std::size_t i) const {
+    return read_back::to_data(read_back::at(d->axlines, i, "axline_data"));
+}
+AxSpanData Axes::axspan_data(std::size_t i) const {
+    return read_back::to_data(read_back::at(d->axspans, i, "axspan_data"));
+}
+
+Axes& Axes::set_axline_data(std::size_t i, const AxLineData& data) {
+    AxLinePlot& p = read_back::at(d->axlines, i, "set_axline_data");
+    read_back::check_reference({data.value}, "set_axline_data");
+    p.value = data.value;
+    p.data_stamp = next_snapshot_generation();
+    return *this;
+}
+
+Axes& Axes::set_axspan_data(std::size_t i, const AxSpanData& data) {
+    AxSpanPlot& p = read_back::at(d->axspans, i, "set_axspan_data");
+    read_back::check_reference({data.lo, data.hi}, "set_axspan_data");
+    p.lo = std::min(data.lo, data.hi);
+    p.hi = std::max(data.lo, data.hi);
+    p.data_stamp = next_snapshot_generation();
+    return *this;
 }
 
 // The content is replaced whole; the style stays.

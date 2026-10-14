@@ -62,6 +62,12 @@ namespace sextant {
                      F(color) F(orientation) F(bottom) F(width) F(alpha) F(name) F(show_legend) F(edgecolor) F(linewidth)
                      F(errorbar) F(hint_labels))
     SEXTANT_DESCRIBE(HistOptions, F(density) F(cumulative))
+    SEXTANT_DESCRIBE(AxLineOptions,
+                     F(orientation) F(color) F(linewidth) F(linestyle) F(alpha) F(from) F(to) F(name)
+                     F(show_legend))
+    SEXTANT_DESCRIBE(AxSpanOptions,
+                     F(orientation) F(color) F(alpha) F(edgecolor) F(linewidth) F(from) F(to) F(name)
+                     F(show_legend))
     SEXTANT_DESCRIBE(HeatmapOptions,
                      F(cmap) F(vmin) F(vmax) F(colorbar) F(name) F(origin) F(contours)
                      F(contour_color) F(contour_linewidth) F(contour_labels) F(contour_fontsize)

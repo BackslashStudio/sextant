@@ -10,6 +10,7 @@
 #include "plane2d.h"
 #include "../line_dash.h"
 #include "../line_steps.h"
+#include "../reference_lines.h"
 #include "error_bar_shape.h"
 #include <glad/glad.h>
 #include <vector>
@@ -1733,6 +1734,7 @@ void main() {
         if (line_program_) glDeleteProgram(line_program_);
 
         if (lineseg_corner_vbo_) glDeleteBuffers(1, &lineseg_corner_vbo_);
+        if (ref_vbo_) glDeleteBuffers(1, &ref_vbo_);
         if (lineseg_vao_) glDeleteVertexArrays(1, &lineseg_vao_);
         if (lineseg_program_) glDeleteProgram(lineseg_program_);
 
@@ -2526,8 +2528,103 @@ void main() {
                 draw_error_bars(snap, r, tr, pr);
                 draw_scatter_z(snap.scatter_z, one, tr, pr);
                 break;
+            case PlotKind::AxLine:
+                draw_axline(snap.axlines[r.index], tr, pr);
+                break;
+            case PlotKind::AxSpan:
+                draw_axspan(snap.axspans[r.index], tr, pr);
+                break;
             default: break;
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // draw_axline / draw_axspan
+    // -------------------------------------------------------------------------
+    void DataRenderer::draw_axline(const AxLinePlot& p, const CoordTransform& tr, const PlotRect& pr) {
+        if (p.opts.linestyle == LineStyle::None || !(p.opts.linewidth > 0.0f)) return;
+        const std::optional<RefSegment> g = axline_segment(p, tr);
+        if (!g) return;
+
+        begin_pass(pr, tr.win_h);
+        glUseProgram(lineseg_program_);
+        const float res[2] = {tr.win_w, tr.win_h};
+        glUniform2fv(lineseg_u_.resolution, 1, res);
+        glBindVertexArray(lineseg_vao_);
+
+        // One segment, padded with its own ends (butt caps), in pixels.
+        const float pts[8] = {g->x0, g->y0, g->x0, g->y0, g->x1, g->y1, g->x1, g->y1};
+        if (ref_vbo_ == 0) glGenBuffers(1, &ref_vbo_);
+        glBindBuffer(GL_ARRAY_BUFFER, ref_vbo_);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(pts), pts, GL_STREAM_DRAW);
+        for (int a = 1; a <= 4; ++a) {
+            glEnableVertexAttribArray(static_cast<unsigned>(a));
+            glVertexAttribPointer(static_cast<unsigned>(a), 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float),
+                                  reinterpret_cast<void *>((a - 1) * 2 * sizeof(float)));
+            glVertexAttribDivisor(static_cast<unsigned>(a), 1);
+        }
+        glUniform2fv(lineseg_u_.scale, 1, k_identity_scale);
+        glUniform2fv(lineseg_u_.offset, 1, k_identity_offset);
+        glUniform1f(lineseg_u_.half_width, p.opts.linewidth * 0.5f);
+
+        // The dash runs from the `from` end: arc length 0 there (a constant).
+        glDisableVertexAttribArray(5);
+        glVertexAttrib1f(5, 0.0f);
+        const DashPattern dash = dash_pattern(p.opts.linestyle);
+        if (dash.dashed()) {
+            glUniform4fv(lineseg_u_.dash, 1, dash.seg);
+            glUniform1f(lineseg_u_.dash_period, dash.period);
+            glUniform1f(lineseg_u_.dist_scale, 1.0f);
+        } else {
+            glUniform1f(lineseg_u_.dash_period, 0.0f);
+        }
+
+        const Color& c = *p.opts.color;
+        glUniform4f(lineseg_u_.color, c.r, c.g, c.b, c.a * p.opts.alpha);
+        glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, 1);
+
+        glBindVertexArray(0);
+        glUseProgram(0);
+        end_pass();
+    }
+
+    void DataRenderer::draw_axspan(const AxSpanPlot& p, const CoordTransform& tr, const PlotRect& pr) {
+        const std::optional<RefRect> r = axspan_rect(p, tr, axspan_reach(p));
+        if (!r) return;
+
+        begin_pass(pr, tr.win_h);
+        glUseProgram(line_program_);
+        const float res[2] = {tr.win_w, tr.win_h};
+        glUniform2fv(line_u_.resolution, 1, res);
+        glUniform2fv(line_u_.scale, 1, k_identity_scale);
+        glUniform2fv(line_u_.offset, 1, k_identity_offset);
+        glBindVertexArray(line_vao_);
+
+        // Re-point the VAO attribute at line_vbo_ (see draw_bars).
+        auto draw = [&](const std::vector<float>& v, const Color& c, float a) {
+            if (v.empty() || a <= 0.0f) return;
+            glBindBuffer(GL_ARRAY_BUFFER, line_vbo_);
+            glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(v.size() * sizeof(float)), v.data(),
+                         GL_STREAM_DRAW);
+            glEnableVertexAttribArray(0);
+            glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), nullptr);
+            glUniform4f(line_u_.color, c.r, c.g, c.b, a);
+            glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(v.size() / 2));
+        };
+        std::vector<float> v;
+        push_px_rect(r->x0, r->y0, r->x1, r->y1, v);
+        const Color& c = *p.opts.color;
+        draw(v, c, c.a * p.opts.alpha);
+        if (p.opts.linewidth > 0.0f) {
+            v.clear();
+            build_rect_outline(r->x0, r->y0, r->x1, r->y1, p.opts.linewidth, v);
+            const Color ec = axspan_edge(p);
+            draw(v, ec, ec.a);
+        }
+
+        glBindVertexArray(0);
+        glUseProgram(0);
+        end_pass();
     }
 
     // -------------------------------------------------------------------------

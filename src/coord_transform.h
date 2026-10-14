@@ -230,6 +230,17 @@ namespace sextant {
                     grow_err(a.x, a.y, bp.err);
                 }
             }
+            // A reference line or span counts on its own axis only.
+            if (all.axlines)
+                for (const auto& lp: *all.axlines) {
+                    if (lp.on_x()) add(fx(lp.value), xlo, xhi);
+                    else add(fy(lp.value), ylo, yhi);
+                }
+            if (all.axspans)
+                for (const auto& sp: *all.axspans) {
+                    if (sp.on_x()) { add(fx(sp.lo), xlo, xhi); add(fx(sp.hi), xlo, xhi); }
+                    else { add(fy(sp.lo), ylo, yhi); add(fy(sp.hi), ylo, yhi); }
+                }
             AutoBounds b;
             b.x.loose = {xlo, xhi};
             b.y.loose = {ylo, yhi};
@@ -327,6 +338,21 @@ namespace sextant {
                 grow_err(a.x, a.y, bp.err);
             }
         }
+        // A reference line or span counts on its own axis only.
+        if (all.axlines)
+            for (const auto& lp: *all.axlines) {
+                double& lo = lp.on_x() ? xlo : ylo;
+                double& hi = lp.on_x() ? xhi : yhi;
+                lo = std::min(lo, lp.value);
+                hi = std::max(hi, lp.value);
+            }
+        if (all.axspans)
+            for (const auto& sp: *all.axspans) {
+                double& lo = sp.on_x() ? xlo : ylo;
+                double& hi = sp.on_x() ? xhi : yhi;
+                lo = std::min(lo, std::min(sp.lo, sp.hi));
+                hi = std::max(hi, std::max(sp.lo, sp.hi));
+            }
         AutoBounds b;
         b.x.loose = {xlo, xhi};
         b.y.loose = {ylo, yhi};

@@ -781,6 +781,25 @@ namespace sextant {
                                            LineStyle::Solid});
                     break;
                 }
+                case PlotKind::AxLine: {
+                    // As a line's key; LineStyle::None draws nothing, so no key.
+                    const auto& ap = snap.axlines[r.index];
+                    if (keyed(ap.opts) && ap.opts.linestyle != LineStyle::None)
+                        entries.push_back({*ap.opts.color, ap.opts.name, LegendKind::Line,
+                                           ap.opts.linestyle});
+                    break;
+                }
+                case PlotKind::AxSpan: {
+                    // A patch as a bar's, at the span's own opacity (a band drawn
+                    // at 0.25 is keyed at 0.25, as matplotlib's patch keys are).
+                    const auto& sp = snap.axspans[r.index];
+                    if (keyed(sp.opts)) {
+                        Color c = *sp.opts.color;
+                        c.a *= sp.opts.alpha;
+                        entries.push_back({c, sp.opts.name, LegendKind::Bar, LineStyle::Solid});
+                    }
+                    break;
+                }
                 default: break; // heatmaps: explained by their colorbar
             }
         }

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <initializer_list>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -97,6 +98,17 @@ namespace sextant::read_back {
 
     inline Line3DData to_data(const Line3DPlot& p) {
         return { p.x.get(), p.y.get(), p.z.get(), p.colors.get() };
+    }
+
+    inline AxLineData to_data(const AxLinePlot& p) { return { p.value }; }
+    inline AxSpanData to_data(const AxSpanPlot& p) { return { p.lo, p.hi }; }
+
+    // A reference line's or span's numbers (value or ends, `from`, `to`) must
+    // be finite.
+    inline void check_reference(std::initializer_list<double> vs, const char* who) {
+        for (double v : vs)
+            if (!std::isfinite(v))
+                throw std::invalid_argument(std::string(who) + ": values, from and to must be finite");
     }
 
     // A text, as Axes and Axes3D read it.

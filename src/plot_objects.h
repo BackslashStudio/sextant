@@ -22,9 +22,10 @@ namespace sextant {
 // Names a plot object's per-kind vector; objects are addressed as (kind, index).
 // The first five are 2D (also held by planes); then the native 3D kinds,
 // always addressed at the axes (plane -1). Text is held by both 2D and 3D
-// axes (never by a plane). Append new kinds to keep values stable.
+// axes (never by a plane); AxLine and AxSpan by 2D axes only (a plane's sheet
+// holds none). Append new kinds to keep values stable.
 enum class PlotKind { Line, Scatter, Bar, Heatmap, ScatterZ, Bar3D, Surface, Scatter3D, Line3D,
-                      SurfaceTri, Text };
+                      SurfaceTri, Text, AxLine, AxSpan };
 
 // A plot object's (or a plane's) identity: kept by set_*_data(), unchanged by
 // removing or reordering its siblings, never reused in a process. Edits carry
@@ -485,12 +486,37 @@ struct TextPlot {
     ObjectId id = 0;
 };
 
+// Axes::axline(): `value` on the axis the orientation names (y for Horizontal).
+struct AxLinePlot {
+    double        value = 0.0;
+    AxLineOptions opts{.color = Color::Blue};
+    unsigned long long data_stamp = 0;
+    ObjectId id = 0;
+
+    // Whether `value` is an x value (a Vertical line).
+    bool on_x() const { return opts.orientation == Orientation::Vertical; }
+};
+
+// Axes::axspan(): lo..hi on the axis the orientation names, as AxLinePlot.
+struct AxSpanPlot {
+    double        lo = 0.0, hi = 1.0;
+    AxSpanOptions opts{.color = Color::Blue};
+    unsigned long long data_stamp = 0;
+    ObjectId id = 0;
+
+    bool on_x() const { return opts.orientation == Orientation::Vertical; }
+};
+
+// The reference kinds are optional so a view built over the first five alone
+// (tests, a plane's sheet) still reads as before.
 struct AllPlotData {
     const std::vector<LinePlot>&     lines;
     const std::vector<ScatterPlot>&  scatters;
     const std::vector<BarPlot>&      bars;
     const std::vector<HeatmapPlot>&  heatmaps;
     const std::vector<ScatterZPlot>& scatter_z;
+    const std::vector<AxLinePlot>*   axlines = nullptr;
+    const std::vector<AxSpanPlot>*   axspans = nullptr;
 };
 
 // Caller-side stamps of an axes' titles: each set_*title() takes a fresh
@@ -569,6 +595,9 @@ struct RenderSnapshot {
     std::vector<ScatterZPlot> scatter_z;
     // A plane's sheet holds none (planes have no text API).
     std::vector<TextPlot>     texts;
+    // Nor reference lines and spans (Axes::axline()/axspan()).
+    std::vector<AxLinePlot>   axlines;
+    std::vector<AxSpanPlot>   axspans;
 
     // Font sizes live in axes_style.
     std::string title, xtitle, ytitle;
@@ -599,7 +628,7 @@ struct RenderSnapshot {
     // Explicit ticks; absent = generate_ticks().
     std::optional<std::vector<Tick>> xticks_override, yticks_override;
 
-    AllPlotData all() const { return { lines, scatters, bars, heatmaps, scatter_z }; }
+    AllPlotData all() const { return { lines, scatters, bars, heatmaps, scatter_z, &axlines, &axspans }; }
 };
 
 // What a share group holds in common, copied from one member to another;
@@ -694,7 +723,8 @@ struct ObjectRef {
 };
 
 inline constexpr PlotKind kPlotKinds2D[] = { PlotKind::Line, PlotKind::Scatter, PlotKind::Bar,
-                                             PlotKind::Heatmap, PlotKind::ScatterZ, PlotKind::Text };
+                                             PlotKind::Heatmap, PlotKind::ScatterZ, PlotKind::Text,
+                                             PlotKind::AxLine, PlotKind::AxSpan };
 inline constexpr PlotKind kPlotKinds3D[] = { PlotKind::Bar3D, PlotKind::Surface,
                                              PlotKind::Scatter3D, PlotKind::Line3D,
                                              PlotKind::SurfaceTri, PlotKind::Text };
@@ -712,6 +742,8 @@ R with_kind(S& s, PlotKind kind, F&& f, R none) {
         case PlotKind::Heatmap:  return f(s.heatmaps);
         case PlotKind::ScatterZ: return f(s.scatter_z);
         case PlotKind::Text:     return f(s.texts);
+        case PlotKind::AxLine:   return f(s.axlines);
+        case PlotKind::AxSpan:   return f(s.axspans);
         default:                 return none;
     }
 }
@@ -775,7 +807,7 @@ std::optional<ObjectRef> find_object_in(const S& s, const PlotKind (&kinds)[N], 
 // A plot object taken out by remove_object(), for putting back:
 // where it was among its kind, and the whole object, its id included.
 using PlotObject2D = std::variant<LinePlot, ScatterPlot, BarPlot, HeatmapPlot, ScatterZPlot,
-                                  TextPlot>;
+                                  TextPlot, AxLinePlot, AxSpanPlot>;
 using PlotObject3D = std::variant<Bar3DPlot, SurfacePlot, Scatter3DPlot, Line3DPlot,
                                   SurfaceTriPlot, TextPlot>;
 template <class Object>
@@ -877,6 +909,10 @@ std::vector<ObjectRef> call_order(const S& s) {
     objects_detail::add_order_keys(keys, PlotKind::Line, s.lines);
     objects_detail::add_order_keys(keys, PlotKind::Scatter, s.scatters);
     objects_detail::add_order_keys(keys, PlotKind::ScatterZ, s.scatter_z);
+    if constexpr (requires { s.axlines; s.axspans; }) {
+        objects_detail::add_order_keys(keys, PlotKind::AxLine, s.axlines);
+        objects_detail::add_order_keys(keys, PlotKind::AxSpan, s.axspans);
+    }
     return objects_detail::sorted_refs(keys);
 }
 
@@ -904,6 +940,10 @@ std::vector<LayerRef> layered_call_order(std::span<const S* const> layers) {
         add(PlotKind::Line, s.lines);
         add(PlotKind::Scatter, s.scatters);
         add(PlotKind::ScatterZ, s.scatter_z);
+        if constexpr (requires { s.axlines; s.axspans; }) {
+            add(PlotKind::AxLine, s.axlines);
+            add(PlotKind::AxSpan, s.axspans);
+        }
     }
     std::stable_sort(keys.begin(), keys.end(), [](const Key& a, const Key& b) { return a.id < b.id; });
     std::vector<LayerRef> out;

@@ -29,6 +29,8 @@ namespace sextant {
         std::vector<BarPlot> bars;
         std::vector<ScatterZPlot> scatter_z;
         std::vector<HeatmapPlot> heatmaps;
+        std::vector<AxLinePlot> axlines;
+        std::vector<AxSpanPlot> axspans;
         // Font sizes come from axes_style.
         std::string title, xtitle, ytitle;
         bool grid_enabled = false;

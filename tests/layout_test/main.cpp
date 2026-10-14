@@ -308,6 +308,10 @@ int main() {
     test_bar_orientation();
     test_bar_orientation_rendered();
 
+    // reference_lines.cpp
+    test_reference_lines();
+    test_reference_lines_rendered();
+
     // text.cpp
     test_text();
 

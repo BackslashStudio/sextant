@@ -70,6 +70,27 @@ namespace sextant {
                      HeatmapOptions opts = {});
 
         // ----------------------------------------------------------------
+        // Reference lines and spans
+        // ----------------------------------------------------------------
+        // A line across the frame at `value`: at y = value by default
+        // (matplotlib's axhline), at x = value with AxLineOptions::orientation
+        // Vertical (axvline). It runs over the frame between the options' `from`
+        // and `to` fractions whatever the limits, and stays in place through pan
+        // and zoom along it. Automatic limits take `value` as a point on its axis
+        // (on a log axis only a value > 0), the other axis nothing; on a log axis
+        // a value <= 0 is never drawn. Drawn with the other plot objects in call
+        // order; not hovered or picked. Throws std::invalid_argument for a
+        // non-finite value, `from` or `to`.
+        Axes& axline(double value, AxLineOptions opts = {});
+
+        // A band across the frame from `lo` to `hi`: over y by default
+        // (matplotlib's axhspan), over x with Vertical (axvspan); `lo > hi` is
+        // stored swapped. Limits take both ends as axline() takes its value; on a
+        // log axis an end <= 0 reaches past the frame's low edge. Otherwise as
+        // axline().
+        Axes& axspan(double lo, double hi, AxSpanOptions opts = {});
+
+        // ----------------------------------------------------------------
         // Text
         // ----------------------------------------------------------------
         // `s` at (x, y): each a data value or Pos::fraction() of the plot frame.
@@ -192,8 +213,8 @@ namespace sextant {
         Axes& set_ytick_format(std::string_view fmt);
 
         // The colors an unset `color` takes in turn, one per call that draws in a
-        // flat color: line(), scatter(), bar(), hist() (scatter_z() and heatmap()
-        // take none). Restarts from the first color; empty restores the default,
+        // flat color: line(), scatter(), bar(), hist(), axline() (scatter_z(),
+        // heatmap() and axspan() take none). Restarts from the first color; empty restores the default,
         // matplotlib's tab10, which starts with Color::Blue. Objects already
         // plotted keep theirs.
         Axes& set_color_cycle(std::vector<Color> colors);
@@ -247,6 +268,12 @@ namespace sextant {
         std::size_t heatmap_count() const;
         HeatmapData heatmap_data(std::size_t i) const;
 
+        std::size_t axline_count() const;
+        AxLineData axline_data(std::size_t i) const;
+
+        std::size_t axspan_count() const;
+        AxSpanData axspan_data(std::size_t i) const;
+
         // text() and annotate() alike.
         std::size_t text_count() const;
         TextData text_data(std::size_t i) const;
@@ -288,6 +315,12 @@ namespace sextant {
         // As heatmap() takes it: row-major rows x cols over xrange x yrange.
         Axes& set_heatmap_data(std::size_t i, std::span<const double> data, int rows, int cols,
                                Range xrange, Range yrange);
+
+        // Move a reference line or span (validated as axline()/axspan(); a span's
+        // ends are stored swapped when lo > hi).
+        Axes& set_axline_data(std::size_t i, const AxLineData& data);
+
+        Axes& set_axspan_data(std::size_t i, const AxSpanData& data);
 
         // A text's string and position, and whether it has an arrow and to
         // where (setting `arrow` on a text() gives it default ArrowOptions).

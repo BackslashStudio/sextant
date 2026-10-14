@@ -110,7 +110,7 @@ namespace sextant {
             std::size_t rows = 0;
             for (const auto& c: t.columns) rows = std::max(rows, c.count);
 
-            ImGui::Text("%zu points", rows);
+            ImGui::Text("%zu %s", rows, rows == 1 ? "point" : "points");
 
             // Structural edits are applied after EndTable() (mid-table changes would
             // shift the clipper's rows). At most one per frame.
@@ -916,6 +916,68 @@ namespace sextant {
             if (!p.err.empty()) errorbar_style(o.errorbar, o.edgecolor, has_cap(p.err), has_box(p.err), push);
         }
 
+        // Where a reference line or span runs along the frame, as fractions of it.
+        template<class Push>
+        void frame_fractions(double& from, double& to, Push&& push) {
+            field_row("From");
+            if (drag_double("##rfrom", &from, 0.005f, "%.3f")) push();
+            field_row("To");
+            if (drag_double("##rto", &to, 0.005f, "%.3f")) push();
+        }
+
+        template<class Push>
+        void axline_style(DataPanelState& st, AxLineOptions& o, Push&& push) {
+            name_and_key(st, o, push);
+            if (begin_field_table("axline")) {
+                field_row("Orientation");
+                if (orientation_combo("##aorient", o.orientation)) push();
+                field_row("Color");
+                if (color_swatch("##acol", *o.color)) push();
+                field_row("Alpha");
+                if (drag_float("##aalpha", &o.alpha, 0.0f, 1.0f, 0.005f, "%.2f")) push();
+                field_row("Width");
+                if (drag_float("##awidth", &o.linewidth, 0.1f, 20.0f, 0.05f, "%.2f px")) push();
+                field_row("Style");
+                if (linestyle_combo("##astyle", o.linestyle)) push();
+                frame_fractions(o.from, o.to, push);
+                end_field_table();
+            }
+            ImGui::TextDisabled("From and to are fractions of the frame (0 = left/bottom).");
+        }
+
+        template<class Push>
+        void axspan_style(DataPanelState& st, AxSpanOptions& o, Push&& push) {
+            name_and_key(st, o, push);
+            if (begin_field_table("axspan")) {
+                field_row("Orientation");
+                if (orientation_combo("##sorient", o.orientation)) push();
+                field_row("Color");
+                if (color_swatch("##spcol", *o.color)) push();
+                field_row("Alpha");
+                if (drag_float("##spalpha", &o.alpha, 0.0f, 1.0f, 0.005f, "%.2f")) push();
+                frame_fractions(o.from, o.to, push);
+                end_field_table();
+            }
+            ImGui::TextDisabled("From and to are fractions of the frame (0 = left/bottom).");
+            ImGui::SeparatorText("Outline");
+            if (begin_field_table("spanedge")) {
+                field_row("Width");
+                if (drag_float("##spew", &o.linewidth, 0.0f, 10.0f, 0.05f, "%.2f px")) push();
+                end_field_table();
+            }
+            if (o.linewidth <= 0.0f) return;
+            bool own = o.edgecolor.has_value();
+            if (ImGui::Checkbox("Own colour##spown", &own)) {
+                o.edgecolor = own ? std::optional<Color>(*o.color) : std::nullopt;
+                push();
+            }
+            if (o.edgecolor && begin_field_table("spanedge2")) {
+                field_row("Color");
+                if (color_swatch("##specol", *o.edgecolor)) push();
+                end_field_table();
+            }
+        }
+
         // Contour levels, kept sorted and unique as the heatmap's ingest leaves
         // them. Each commits on Enter or focus loss (edit_cell()).
         template<class Push>
@@ -1029,6 +1091,8 @@ namespace sextant {
                 case PlotKind::Bar:      if (!both(ss->bars, sheet.bars)) return; break;
                 case PlotKind::Heatmap:  if (!both(ss->heatmaps, sheet.heatmaps)) return; break;
                 case PlotKind::ScatterZ: if (!both(ss->scatter_z, sheet.scatter_z)) return; break;
+                case PlotKind::AxLine:   if (!both(ss->axlines, sheet.axlines)) return; break;
+                case PlotKind::AxSpan:   if (!both(ss->axspans, sheet.axspans)) return; break;
                 default: return; // the 3D kinds have blocks of their own
             }
             if (!section("Appearance", true)) return;
@@ -1051,6 +1115,12 @@ namespace sextant {
                     break;
                 case PlotKind::ScatterZ:
                     scatter_z_style(st, ss->scatter_z[i], sheet.scatter_z[i], push_of(ss->scatter_z[i]));
+                    break;
+                case PlotKind::AxLine:
+                    axline_style(st, ss->axlines[i], push_of(ss->axlines[i]));
+                    break;
+                case PlotKind::AxSpan:
+                    axspan_style(st, ss->axspans[i], push_of(ss->axspans[i]));
                     break;
                 default: break;
             }

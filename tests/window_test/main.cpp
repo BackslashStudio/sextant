@@ -2764,8 +2764,105 @@ static void test_bar_orientation() {
     fig->show(true);
 }
 
+// Step 36c-5: Axes::axline()/axspan(), both orientations, frame fractions,
+// dashes, outlines, legend keys, call order, twins, log and live movement.
+static void test_reference_lines() {
+    using sextant::Orientation;
+    auto fig = sextant::Figure::create({.width = 1500, .height = 900, .title = "Reference lines and spans"});
+    fig->suptitle("Reference lines and spans (Axes::axline, Axes::axspan)");
+
+    std::vector<double> x(200), y(200);
+    for (std::size_t i = 0; i < x.size(); ++i) {
+        x[i] = static_cast<double>(i) * 0.05;
+        y[i] = std::sin(x[i]) * 2.0 + 0.3 * std::sin(7.0 * x[i]);
+    }
+
+    // The basics: a threshold, a mean, a band of tolerance, a shaded interval.
+    auto a1 = fig->add_subplot(2, 3, 1);
+    {
+        a1->axspan(-1.0, 1.0, {.name = "tolerance"});
+        a1->line(x, y, {.name = "signal"});
+        a1->axline(1.5, {.color = sextant::Color::Red, .linestyle = sextant::LineStyle::Dashed, .name = "threshold"});
+        a1->axline(0.0, {.color = sextant::Color::Black, .linewidth = 1.0f});
+        a1->axspan(3.0, 5.0, {.orientation = Orientation::Vertical, .color = sextant::Color::Gray, .alpha = 0.3f,
+                              .name = "window"});
+        a1->axline(7.5, {.orientation = Orientation::Vertical, .linestyle = sextant::LineStyle::DashDot,
+                         .name = "event"});
+        a1->legend();
+        a1->set_title("h/v lines and spans; limits take the values (pan: they stay across)");
+    }
+
+    // Frame fractions: lines and spans covering part of the frame.
+    auto a2 = fig->add_subplot(2, 3, 2);
+    {
+        a2->scatter(x, y, {.size = 6.0f});
+        a2->axline(1.0, {.color = sextant::Color::Red, .linewidth = 3.0f, .from = 0.0, .to = 0.5, .name = "left half"});
+        a2->axline(-1.0, {.color = sextant::Color::Blue, .linewidth = 3.0f, .from = 0.5, .to = 1.0,
+                          .name = "right half"});
+        a2->axspan(4.0, 6.0, {.orientation = Orientation::Vertical, .color = sextant::Color{0.2f, 0.7f, 0.3f, 1.0f},
+                              .alpha = 0.4f, .edgecolor = sextant::Color{0.1f, 0.4f, 0.1f, 1.0f}, .linewidth = 1.5f,
+                              .from = 0.25, .to = 0.75, .name = "outlined, middle half"});
+        a2->legend();
+        a2->set_title("from/to fractions of the frame; an outlined span");
+    }
+
+    // Call order: an opaque span drawn after the line covers it, a line after it crosses it.
+    auto a3 = fig->add_subplot(2, 3, 3);
+    {
+        a3->line(x, y, {.linewidth = 3.0f, .name = "line first"});
+        a3->axspan(2.0, 4.0, {.orientation = Orientation::Vertical, .color = sextant::Color{1.0f, 0.8f, 0.3f, 1.0f},
+                              .alpha = 1.0f, .name = "opaque span second"});
+        a3->axline(0.5, {.color = sextant::Color::Red, .linewidth = 2.0f, .name = "line third"});
+        a3->legend();
+        a3->set_title("call order: the span hides the line under it");
+    }
+
+    // A twin: each line on its own y axis; a vertical one on the shared x.
+    auto a4 = fig->add_subplot(2, 3, 4);
+    {
+        a4->line(x, y, {.name = "left y"});
+        a4->axline(1.0, {.linestyle = sextant::LineStyle::Dashed, .name = "y = 1 (left)"});
+        auto tw = a4->twinx();
+        std::vector<double> big(y);
+        for (double& v : big) v *= 100.0;
+        tw->line(x, big, {.name = "right y"});
+        tw->axline(-150.0, {.linestyle = sextant::LineStyle::Dashed, .name = "y = -150 (right)"});
+        tw->axline(9.0, {.orientation = Orientation::Vertical, .color = sextant::Color::Black, .name = "x = 9"});
+        a4->legend();
+        a4->set_title("twinx: each on its own y; x shared");
+    }
+
+    // Log y: a line at 0 is not drawn, a span from 0 reaches below the frame.
+    auto a5 = fig->add_subplot(2, 3, 5);
+    {
+        std::vector<double> e(x.size());
+        for (std::size_t i = 0; i < x.size(); ++i) e[i] = std::exp(x[i]);
+        a5->line(x, e, {.name = "exp(x)"});
+        a5->axline(100.0, {.color = sextant::Color::Red, .name = "y = 100"});
+        a5->axline(0.0, {.name = "y = 0 (not drawn)"});
+        a5->axspan(0.0, 10.0, {.name = "0 .. 10"});
+        a5->set_yscale(sextant::Scale::Log);
+        a5->legend();
+        a5->set_title("log y: 0 has no place; a span from 0 runs off the bottom");
+    }
+
+    // Edit in the Data panel: value/ends in the table, orientation, from/to, style.
+    auto a6 = fig->add_subplot(2, 3, 6);
+    {
+        a6->scatter(x, y, {.size = 5.0f});
+        a6->axline(0.0, {.name = "edit me (Data panel)"});
+        a6->axspan(1.0, 2.0, {.name = "edit me too"});
+        a6->legend();
+        a6->set_title("Data panel: value, ends, orientation, from/to");
+    }
+
+    savefig_and_check_memory(fig, "test_reference_lines");
+    fig->show(true);
+}
+
 int main() {
-    test_bar_orientation();
+    test_reference_lines();
+    // test_bar_orientation();
     // test_line_steps();
     // test_marker_sizes();
     // test_marker_shapes();

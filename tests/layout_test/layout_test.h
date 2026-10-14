@@ -612,6 +612,10 @@ namespace lt {
     void test_bar_orientation();
     void test_bar_orientation_rendered();
 
+    // reference_lines.cpp
+    void test_reference_lines();
+    void test_reference_lines_rendered();
+
     // text.cpp
     void test_text();
 

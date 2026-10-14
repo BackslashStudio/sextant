@@ -21,16 +21,23 @@ void fill_id(ObjectId& id, const Holder& h, PlotKind kind, int index) {
     if (id == 0) id = object_id_at(h, kind, index);
 }
 
-// PlotStyleEdit's alternatives are in PlotKind's 2D order, then a text's.
+// PlotStyleEdit's alternatives are in PlotKind's 2D order, then a text's, a
+// reference line's and a span's.
 inline PlotKind style_kind(const PlotStyleEdit& p) {
     using Opts = decltype(PlotStyleEdit::opts);
     static_assert(static_cast<int>(PlotKind::Heatmap) == 3
                   && std::is_same_v<std::variant_alternative_t<3, Opts>, HeatmapOptions>
                   && static_cast<int>(PlotKind::ScatterZ) == 4
                   && std::is_same_v<std::variant_alternative_t<4, Opts>, ScatterZOptions>
-                  && std::is_same_v<std::variant_alternative_t<5, Opts>, TextStyle>);
-    if (p.opts.index() == 5) return PlotKind::Text;
-    return static_cast<PlotKind>(p.opts.index());
+                  && std::is_same_v<std::variant_alternative_t<5, Opts>, TextStyle>
+                  && std::is_same_v<std::variant_alternative_t<6, Opts>, AxLineOptions>
+                  && std::is_same_v<std::variant_alternative_t<7, Opts>, AxSpanOptions>);
+    switch (p.opts.index()) {
+        case 5: return PlotKind::Text;
+        case 6: return PlotKind::AxLine;
+        case 7: return PlotKind::AxSpan;
+        default: return static_cast<PlotKind>(p.opts.index());
+    }
 }
 
 } // namespace stamp_detail

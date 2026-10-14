@@ -24,6 +24,8 @@ struct Axes::Impl {
     std::vector<HeatmapPlot>  heatmaps;
     std::vector<ScatterZPlot> scatter_z;
     std::vector<TextPlot>     texts;
+    std::vector<AxLinePlot>   axlines;
+    std::vector<AxSpanPlot>   axspans;
 
     // The figure's FigureOptions::mathtext, set when the figure makes this
     // axes; only warn_math() reads it (drawing reads the snapshot's).
@@ -146,6 +148,7 @@ struct Axes::Impl {
         s.lines = lines; s.scatters = scatters; s.bars = bars; s.heatmaps = heatmaps;
         s.scatter_z = scatter_z;
         s.texts = texts;
+        s.axlines = axlines; s.axspans = axspans;
         s.title = title; s.xtitle = xtitle; s.ytitle = ytitle;
         s.title_stamps = title_stamps;
         s.grid_enabled   = grid_enabled;   s.grid_opts   = grid_opts;
@@ -203,6 +206,10 @@ struct Axes::Impl {
     // Text (Axes only; a plane has none). Throw on a non-finite number.
     void ingest_text(TextContent c, TextStyle style, const char* who);
     void set_text_data(std::size_t i, TextContent c, const char* who);
+
+    // Reference lines and spans (Axes only). Throw on a non-finite number.
+    void ingest_axline(double value, AxLineOptions opts, const char* who);
+    void ingest_axspan(double lo, double hi, AxSpanOptions opts, const char* who);
 };
 
 } // namespace sextant

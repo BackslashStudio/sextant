@@ -3,6 +3,7 @@
 #include "../font_discovery.h"
 #include "../line_dash.h"
 #include "../line_steps.h"
+#include "../reference_lines.h"
 #include "../rich_text.h"
 #include "../tick_style.h"
 #include "../contour.h"
@@ -513,6 +514,33 @@ static void emit_bars(std::ostringstream& o, const SvgAxesData& d,
     }
 }
 
+// A reference line as a <line>, a span as a <rect> (its outline the rect's
+// stroke), from reference_lines.h's geometry, as the raster path.
+static void emit_axline(std::ostringstream& o, const SvgAxesData& d, const AxLinePlot& p) {
+    if (p.opts.linestyle == LineStyle::None || !(p.opts.linewidth > 0.0f)) return;
+    const std::optional<RefSegment> g = axline_segment(p, d.layout.tr);
+    if (!g) return;
+    const Color& c = *p.opts.color;
+    o << "    <line x1=\"" << g->x0 << "\" y1=\"" << g->y0 << "\" x2=\"" << g->x1 << "\" y2=\"" << g->y1
+      << "\" stroke=\"" << rgb(c) << "\" stroke-opacity=\"" << c.a * p.opts.alpha
+      << "\" stroke-width=\"" << p.opts.linewidth << "\"" << dash_attr(p.opts.linestyle) << "/>\n";
+}
+
+static void emit_axspan(std::ostringstream& o, const SvgAxesData& d, const AxSpanPlot& p) {
+    const std::optional<RefRect> r = axspan_rect(p, d.layout.tr, axspan_reach(p));
+    if (!r) return;
+    const Color& c = *p.opts.color;
+    o << "    <rect x=\"" << r->x0 << "\" y=\"" << r->y0 << "\" width=\"" << r->x1 - r->x0
+      << "\" height=\"" << r->y1 - r->y0 << "\" fill=\"" << rgb(c) << "\" fill-opacity=\""
+      << c.a * p.opts.alpha << "\"";
+    if (p.opts.linewidth > 0.0f) {
+        const Color ec = axspan_edge(p);
+        o << " stroke=\"" << rgb(ec) << "\" stroke-opacity=\"" << ec.a << "\" stroke-width=\""
+          << p.opts.linewidth << "\"";
+    }
+    o << "/>\n";
+}
+
 // The plot objects in call order, each with its error bars, as
 // DataRenderer::draw_plots().
 static void emit_object(std::ostringstream& o, const SvgAxesData& d, const ObjectRef& r) {
@@ -536,6 +564,12 @@ static void emit_object(std::ostringstream& o, const SvgAxesData& d, const Objec
         case PlotKind::ScatterZ:
             emit_error_bars(o, d, r);
             emit_scatter_z(o, d, one);
+            break;
+        case PlotKind::AxLine:
+            emit_axline(o, d, d.axlines[r.index]);
+            break;
+        case PlotKind::AxSpan:
+            emit_axspan(o, d, d.axspans[r.index]);
             break;
         default: break;
     }
@@ -918,8 +952,11 @@ static void emit_legend(std::ostringstream& o, const SvgAxesData& d, std::size_t
             emit_scatter_marker(o, (sx0 + sx1) * 0.5f, cy, 4.5f, fill, e.color.a, e.marker,
                                 e.edge.a > 0.0f ? rgb(e.edge) : std::string(), e.edge.a);
         } else {
+            // A translucent patch (a span's key) at its opacity, as the raster's.
             o << "    <rect x=\"" << sx0 << "\" y=\"" << cy - 5.f
-              << "\" width=\"" << kLegendSwatchW << "\" height=\"10\" fill=\"" << fill << "\"/>\n";
+              << "\" width=\"" << kLegendSwatchW << "\" height=\"10\" fill=\"" << fill << "\"";
+            if (e.color.a < 1.0f) o << " fill-opacity=\"" << e.color.a << "\"";
+            o << "/>\n";
         }
 
         o << "    <text x=\"" << sx1 + kLegendGap

@@ -92,6 +92,10 @@ void sync_sheet(DataPanelState::SheetStyles& dst, const RenderSnapshot& sn) {
     copy(dst.scatter_z, sn.scatter_z);
     dst.texts.clear();
     for (const auto& t : sn.texts) dst.texts.push_back(t.opts);
+    dst.axlines.clear();
+    for (const auto& a : sn.axlines) dst.axlines.push_back(a.opts);
+    dst.axspans.clear();
+    for (const auto& a : sn.axspans) dst.axspans.push_back(a.opts);
     dst.ids = object_ids(sn, kPlotKinds2D);
 }
 

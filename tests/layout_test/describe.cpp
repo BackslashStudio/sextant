@@ -240,7 +240,8 @@ namespace lt {
 #define STRUCT(T) check_struct<T>(#T);
         STRUCT(Vec3) STRUCT(BoxAspect)
         STRUCT(ErrorBarOptions) STRUCT(LineOptions) STRUCT(ScatterOptions) STRUCT(ScatterZOptions)
-        STRUCT(BarOptions) STRUCT(HistOptions) STRUCT(HeatmapOptions) STRUCT(GridOptions)
+        STRUCT(BarOptions) STRUCT(HistOptions) STRUCT(AxLineOptions) STRUCT(AxSpanOptions)
+        STRUCT(HeatmapOptions) STRUCT(GridOptions)
         STRUCT(AxesStyle) STRUCT(LegendOptions) STRUCT(ColorbarOptions) STRUCT(SuptitleOptions)
         STRUCT(FigureMargins) STRUCT(TextOptions) STRUCT(ArrowOptions)
         STRUCT(FigureOptions) STRUCT(SvgExportOptions) STRUCT(PngExportOptions)

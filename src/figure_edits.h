@@ -68,7 +68,8 @@ struct PlotStyleEdit {
     int plot_index  = 0;
     int plane_index = -1;
     std::variant<LineOptions, ScatterOptions, BarOptions,
-                 HeatmapOptions, ScatterZOptions, TextStyle> opts;
+                 HeatmapOptions, ScatterZOptions, TextStyle,
+                 AxLineOptions, AxSpanOptions> opts;
     ObjectId id = 0, plane_id = 0;   // see PlotCellEdit
 };
 
@@ -616,6 +617,23 @@ std::optional<PlotDataOp> apply_plot_data_op(T& t, const PlotCellEdit& e) {
         case PlotKind::Text:
             // One row; see TextDataEdit.
             return std::nullopt;
+        case PlotKind::AxLine: {
+            // One row, one column: the value.
+            auto* lp = op_target(t.axlines, e);
+            if (!lp || e.column != 0 || e.element != 0) return std::nullopt;
+            const double old = lp->value;
+            lp->value = e.value;
+            return cell_undo(e, t.axlines, *lp, old);
+        }
+        case PlotKind::AxSpan: {
+            // One row: lo (column 0) and hi (1), taken as given (drawing orders them).
+            auto* sp = op_target(t.axspans, e);
+            if (!sp || e.column < 0 || e.column > 1 || e.element != 0) return std::nullopt;
+            double& at = e.column == 0 ? sp->lo : sp->hi;
+            const double old = at;
+            at = e.value;
+            return cell_undo(e, t.axspans, *sp, old);
+        }
     }
     return std::nullopt;
 }
@@ -782,6 +800,10 @@ std::optional<PlotDataOp> apply_plot_data_op(T& t, const PlotRowEdit& e) {
             return std::nullopt;
         case PlotKind::Text:
             // One row; see TextDataEdit.
+            return std::nullopt;
+        case PlotKind::AxLine:
+        case PlotKind::AxSpan:
+            // One fixed row; see the PlotCellEdit applier.
             return std::nullopt;
     }
     return std::nullopt;
@@ -1117,9 +1139,12 @@ std::optional<ReplacedOpts<Opts>> assign_plot_opts(Vec& v, int idx, ObjectId id,
     auto* p = edits_detail::find_object(v, idx, id);
     if (!p) return std::nullopt;
     if constexpr (!requires { p->opts.hint_labels; }) {
-        // A text: nothing in its style is data.
+        // A text, a reference line or span: nothing in its style is data. An
+        // unset `color` keeps the object's, as below.
         ReplacedOpts<Opts> r{ static_cast<int>(p - v.data()), p->id, std::move(p->opts) };
         p->opts = o;
+        if constexpr (requires { p->opts.color.has_value(); })
+            if (!p->opts.color) p->opts.color = r.old.color;
         return r;
     } else {
         auto labels = std::move(p->opts.hint_labels);
@@ -1145,6 +1170,8 @@ auto& styled_vector(T& t) {
     else if constexpr (std::is_same_v<O, BarOptions>)     return t.bars;
     else if constexpr (std::is_same_v<O, HeatmapOptions>) return t.heatmaps;
     else if constexpr (std::is_same_v<O, TextStyle>)      return t.texts;
+    else if constexpr (std::is_same_v<O, AxLineOptions>)  return t.axlines;
+    else if constexpr (std::is_same_v<O, AxSpanOptions>)  return t.axspans;
     else                                                  return t.scatter_z;
 }
 

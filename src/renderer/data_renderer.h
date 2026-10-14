@@ -181,6 +181,10 @@ private:
     // One object's error bars, any of the four kinds that have them.
     void draw_error_bars(const RenderSnapshot& snap, ObjectRef ref,
                          const CoordTransform& tr, const PlotRect& pr);
+    // A reference line (the segment program, dashes included) or span (the
+    // flat program), from reference_lines.h's pixel geometry; nothing cached.
+    void draw_axline(const AxLinePlot& p, const CoordTransform& tr, const PlotRect& pr);
+    void draw_axspan(const AxSpanPlot& p, const CoordTransform& tr, const PlotRect& pr);
 
     float pixel_ratio_ = 1.0f;
 
@@ -599,6 +603,7 @@ private:
     unsigned int lineseg_program_   = 0;
     unsigned int lineseg_vao_       = 0;
     unsigned int lineseg_corner_vbo_ = 0;   // static 4-vertex unit quad
+    unsigned int ref_vbo_ = 0;              // a reference line's padded ends, per draw
 
     // Scatter instanced program
     unsigned int scatter_program_ = 0;
