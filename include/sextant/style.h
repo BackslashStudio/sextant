@@ -390,7 +390,7 @@ namespace sextant {
         bool show_legend = true; // see LineOptions::show_legend
     };
 
-    // The area between two curves (Axes::fill_between()).
+    // The area between two curves (Axes::fill()).
     struct FillOptions {
         // Horizontal: the band runs along x, between y1(x) and y2(x)
         // (matplotlib's fill_between); Vertical: along y, between x1(y) and
@@ -867,7 +867,7 @@ namespace sextant {
         double lo = 0.0, hi = 1.0;
     };
 
-    // Axes::fill_between(): `x` is the run coordinate (y when the fill is
+    // Axes::fill(): `x` is the run coordinate (y when the fill is
     // Vertical), `y1` and `y2` the curves, one value each per point (a scalar
     // y2 comes back repeated). `exclude` as FillOptions::exclude;
     // set_fill_data(i, FillData) takes it as given (empty clears it), the span

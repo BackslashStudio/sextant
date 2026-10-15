@@ -1,5 +1,5 @@
 #pragma once
-// Axes::fill_between() as regions, shared by the GL path, the SVG writer, plane
+// Axes::fill() as regions, shared by the GL path, the SVG writer, plane
 // geometry, the limits and the tests, so every output fills the same area.
 //
 // A region is a run: a maximal range of points neither excluded nor holding a

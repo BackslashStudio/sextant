@@ -88,14 +88,14 @@ namespace sextant {
 
     Plane2D& Plane2D::fill(std::span<const double> x, std::span<const double> y1,
                                    std::span<const double> y2, FillOptions opts) {
-        d->sheet.ingest_fill(x, y1, y2, std::move(opts), "Plane2D::fill_between");
+        d->sheet.ingest_fill(x, y1, y2, std::move(opts), "Plane2D::fill");
         return *this;
     }
 
     Plane2D& Plane2D::fill(std::span<const double> x, std::span<const double> y1,
                                    double y2, FillOptions opts) {
         const std::vector<double> base(x.size(), y2);
-        d->sheet.ingest_fill(x, y1, base, std::move(opts), "Plane2D::fill_between");
+        d->sheet.ingest_fill(x, y1, base, std::move(opts), "Plane2D::fill");
         return *this;
     }
 

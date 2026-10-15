@@ -471,7 +471,7 @@ namespace sextant {
         Plane2D& imshow(std::span<const double> data, int rows, int cols,
                         HeatmapOptions opts = {});
 
-        // The area between two curves, as Axes::fill_between().
+        // The area between two curves, as Axes::fill().
         Plane2D& fill(std::span<const double> x, std::span<const double> y1,
                               std::span<const double> y2, FillOptions opts = {});
 

@@ -249,7 +249,7 @@ namespace sextant {
         Axes& set_ytick_format(std::string_view fmt);
 
         // The colors an unset `color` takes in turn, one per call that draws in a
-        // flat color: line(), scatter(), bar(), hist(), fill_between(), axline()
+        // flat color: line(), scatter(), bar(), hist(), fill(), axline()
         // (scatter_z(), heatmap() and axspan() take none). Restarts from the first
         // color; empty restores the default,
         // matplotlib's tab10, which starts with Color::Blue. Objects already
@@ -356,7 +356,7 @@ namespace sextant {
         Axes& set_heatmap_data(std::size_t i, std::span<const double> data, int rows, int cols,
                                Range xrange, Range yrange);
 
-        // A fill's points, validated as fill_between(). The exclude mask
+        // A fill's points, validated as fill(). The exclude mask
         // follows FillData::exclude.
         Axes& set_fill_data(std::size_t i, const FillData& data);
 

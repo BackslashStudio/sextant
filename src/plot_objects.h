@@ -508,7 +508,7 @@ struct AxSpanPlot {
     bool on_x() const { return opts.orientation == Orientation::Vertical; }
 };
 
-// Axes::fill_between(): the area between y1 and y2 along x, one value of each
+// Axes::fill(): the area between y1 and y2 along x, one value of each
 // per point. `x` is the run coordinate, on the y axis when the fill is
 // Vertical (and y1/y2 then on x). fill_geometry.h turns it into regions.
 struct FillPlot {
@@ -617,7 +617,7 @@ struct RenderSnapshot {
     // Nor reference lines and spans (Axes::axline()/axspan()).
     std::vector<AxLinePlot>   axlines;
     std::vector<AxSpanPlot>   axspans;
-    // Axes::fill_between(), on axes and planes alike.
+    // Axes::fill(), on axes and planes alike.
     std::vector<FillPlot>     fills;
 
     // Font sizes live in axes_style.

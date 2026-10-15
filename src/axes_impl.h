@@ -205,7 +205,7 @@ struct Axes::Impl {
     void set_heatmap_data(std::size_t i, std::span<const double> data, int rows, int cols,
                           Range xrange, Range yrange, const char* who);
 
-    // fill_between() for Axes and Plane2D: x, y1 and y2 one value each per
+    // fill() for Axes and Plane2D: x, y1 and y2 one value each per
     // point. set_fill_data(): `exclude` the new mask (FillData), or null to
     // keep it while the point count is unchanged.
     void ingest_fill(std::span<const double> x, std::span<const double> y1,

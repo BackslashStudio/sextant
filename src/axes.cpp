@@ -580,14 +580,14 @@ void Axes::Impl::ingest_fill(std::span<const double> x, std::span<const double> 
 
 Axes& Axes::fill(std::span<const double> x, std::span<const double> y1,
                          std::span<const double> y2, FillOptions opts) {
-    d->ingest_fill(x, y1, y2, std::move(opts), "fill_between");
+    d->ingest_fill(x, y1, y2, std::move(opts), "fill");
     return *this;
 }
 
 Axes& Axes::fill(std::span<const double> x, std::span<const double> y1, double y2,
                          FillOptions opts) {
     const std::vector<double> base(x.size(), y2);
-    d->ingest_fill(x, y1, base, std::move(opts), "fill_between");
+    d->ingest_fill(x, y1, base, std::move(opts), "fill");
     return *this;
 }
 
