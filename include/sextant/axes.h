@@ -84,12 +84,12 @@ namespace sextant {
         // low edge. Automatic limits take every point of every region on both
         // curves. Drawn with the other plot objects in call order; not hovered
         // or picked.
-        Axes& fill_between(std::span<const double> x, std::span<const double> y1,
+        Axes& fill(std::span<const double> x, std::span<const double> y1,
                            std::span<const double> y2, FillOptions opts = {});
 
         // The same down to (or across to) one value: 0 by default, the area
         // under a curve.
-        Axes& fill_between(std::span<const double> x, std::span<const double> y1,
+        Axes& fill(std::span<const double> x, std::span<const double> y1,
                            double y2 = 0.0, FillOptions opts = {});
 
         // Stacked areas (matplotlib's stackplot): layer k fills from the top of

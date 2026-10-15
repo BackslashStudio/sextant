@@ -2883,8 +2883,8 @@ static void test_fill_between() {
     {
         V base(x.size());
         for (std::size_t i = 0; i < x.size(); ++i) base[i] = 0.5 + 0.4 * std::cos(x[i]);
-        a1->fill_between(x, base, 0.0, {.color = sextant::Color::Gray, .alpha = 0.4f, .name = "area to 0"});
-        a1->fill_between(x, lo, hi, {.alpha = 0.3f, .name = "band"});
+        a1->fill(x, base, 0.0, {.color = sextant::Color::Gray, .alpha = 0.4f, .name = "area to 0"});
+        a1->fill(x, lo, hi, {.alpha = 0.3f, .name = "band"});
         a1->line(x, y, {.name = "signal"});
         a1->legend();
         a1->set_title("area to 0; a band under its line (edit in the Data panel)");
@@ -2912,9 +2912,9 @@ static void test_fill_between() {
             ex_b.push_back(below[i]);
             ex_a.push_back(above[i]);
         }
-        a2->fill_between(xs, s1, s2, {.color = sextant::Color{0.2f, 0.7f, 0.3f, 1.0f}, .alpha = 0.6f,
+        a2->fill(xs, s1, s2, {.color = sextant::Color{0.2f, 0.7f, 0.3f, 1.0f}, .alpha = 0.6f,
                                       .exclude = ex_b, .interpolate = true, .name = "y1 > y2, interpolate"});
-        a2->fill_between(xs, s1, s2, {.color = sextant::Color::Red, .alpha = 0.6f, .exclude = ex_a,
+        a2->fill(xs, s1, s2, {.color = sextant::Color::Red, .alpha = 0.6f, .exclude = ex_a,
                                       .name = "y1 < y2, no interpolate"});
         a2->line(xs, s1, {.color = sextant::Color::Black, .linewidth = 1.0f});
         a2->line(xs, s2, {.color = sextant::Color::Black, .linewidth = 1.0f, .linestyle = sextant::LineStyle::Dashed});
@@ -2933,7 +2933,7 @@ static void test_fill_between() {
         for (int k = 0; k < 3; ++k) {
             V shifted(sy);
             for (double& v : shifted) v += 6.0 * k;
-            a3->fill_between(sx, shifted, 6.0 * k, {.alpha = 0.4f, .drawstyle = styles[k], .name = names[k]});
+            a3->fill(sx, shifted, 6.0 * k, {.alpha = 0.4f, .drawstyle = styles[k], .name = names[k]});
             a3->line(sx, shifted, {.color = sextant::Color::Black, .linewidth = 1.0f, .drawstyle = styles[k]});
             a3->scatter(sx, shifted, {.color = sextant::Color::Black, .size = 5.0f});
         }
@@ -2950,7 +2950,7 @@ static void test_fill_between() {
             t1[i] = 10.0 + 6.0 * std::exp(-depth[i] / 8.0);
             t2[i] = t1[i] - 2.0 - 0.5 * std::sin(depth[i]);
         }
-        a4->fill_between(depth, t2, t1, {.orientation = Orientation::Vertical, .alpha = 0.35f,
+        a4->fill(depth, t2, t1, {.orientation = Orientation::Vertical, .alpha = 0.35f,
                                          .edgecolor = sextant::Color::Black, .linewidth = 1.5f,
                                          .linestyle = sextant::LineStyle::Dashed, .name = "range at depth"});
         a4->line(t1, depth, {.name = "max"});
@@ -2966,7 +2966,7 @@ static void test_fill_between() {
         for (std::size_t i = 0; i < x.size(); ++i) e[i] = std::exp(x[i]);
         V gappy(e);
         for (std::size_t i = 60; i < 80; ++i) gappy[i] = std::nan("");
-        a5->fill_between(x, gappy, 0.0, {.alpha = 0.4f, .name = "exp(x) to 0, NaN gap"});
+        a5->fill(x, gappy, 0.0, {.alpha = 0.4f, .name = "exp(x) to 0, NaN gap"});
         a5->line(x, e, {.name = "exp(x)"});
         a5->set_yscale(sextant::Scale::Log);
         a5->legend();
@@ -2977,12 +2977,12 @@ static void test_fill_between() {
     auto a6 = fig->add_subplot3d(2, 3, 6);
     {
         auto floor = a6->plane(sextant::PlaneOrientation::XY, 0.0);
-        floor->fill_between(x, lo, hi, {.alpha = 0.5f, .name = "band on XY"});
+        floor->fill(x, lo, hi, {.alpha = 0.5f, .name = "band on XY"});
         floor->line(x, y, {.name = "signal on XY"});
         auto wall = a6->plane(sextant::PlaneOrientation::ZX, 3.0);
         V zs(x.size());
         for (std::size_t i = 0; i < x.size(); ++i) zs[i] = 1.0 + std::sin(x[i]) * 0.8;
-        wall->fill_between(x, zs, 0.0, {.orientation = Orientation::Vertical,
+        wall->fill(x, zs, 0.0, {.orientation = Orientation::Vertical,
                                         .color = sextant::Color{0.9f, 0.5f, 0.1f, 1.0f}, .alpha = 0.6f,
                                         .linewidth = 1.0f, .name = "area on ZX"});
         a6->legend();
@@ -3061,8 +3061,8 @@ static void test_stack() {
 }
 
 int main() {
-    test_stack();
-    // test_fill_between();
+    // test_stack();
+    test_fill_between();
     // test_reference_lines();
     // test_bar_orientation();
     // test_line_steps();

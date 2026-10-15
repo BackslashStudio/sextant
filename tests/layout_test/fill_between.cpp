@@ -146,9 +146,9 @@ namespace lt {
         auto fig = Figure::create();
         auto ax = fig->add_subplot(1, 1, 1);
         const V x{0.0, 1.0, 2.0}, y1{1.0, 2.0, 3.0}, y2{0.5, 0.5, 0.5};
-        ax->fill_between(x, y1, y2);
-        ax->fill_between(x, y1);
-        ax->fill_between(x, y1, 4.0, {.exclude = {false, true, false}});
+        ax->fill(x, y1, y2);
+        ax->fill(x, y1);
+        ax->fill(x, y1, 4.0, {.exclude = {false, true, false}});
         check(ax->fill_count() == 3 && ax->fill_data(0).y2 == y2 && ax->fill_data(1).y2 == V(3, 0.0) &&
                   ax->fill_data(2).y2 == V(3, 4.0) && ax->fill_data(0).x == x && ax->fill_data(0).y1 == y1,
               "call: stores x, y1 and y2, a scalar y2 (0 by default) repeated per point");
@@ -156,12 +156,12 @@ namespace lt {
                   ax->fill_data(2).exclude == std::vector<bool>{false, true, false},
               "call: the exclude mask is kept as data and read back");
 
-        check(throws_invalid([&] { ax->fill_between(x, V{1.0, 2.0}, y2); }) &&
-                  throws_invalid([&] { ax->fill_between(x, y1, V{1.0}); }) &&
-                  throws_invalid([&] { ax->fill_between(x, y1, 0.0, {.exclude = {true}}); }) &&
+        check(throws_invalid([&] { ax->fill(x, V{1.0, 2.0}, y2); }) &&
+                  throws_invalid([&] { ax->fill(x, y1, V{1.0}); }) &&
+                  throws_invalid([&] { ax->fill(x, y1, 0.0, {.exclude = {true}}); }) &&
                   ax->fill_count() == 3,
               "call: unequal lengths or a mask of another length throw, and nothing is added");
-        check(ax->fill_between(V{}, V{}, V{}).fill_count() == 4 && ax->fill_data(3).x.empty(),
+        check(ax->fill(V{}, V{}, V{}).fill_count() == 4 && ax->fill_data(3).x.empty(),
               "call: an empty fill is allowed (it fills nothing)");
 
         // set_fill_data: the struct takes the mask as given; the span overload
@@ -185,7 +185,7 @@ namespace lt {
         {
             auto cyc = Figure::create();
             auto c1 = cyc->add_subplot(1, 1, 1);
-            c1->fill_between(x, y1).line(x, y1);
+            c1->fill(x, y1).line(x, y1);
             const FigureSnapshot cs = detail::FigureAccess::impl(*cyc).build_figure_snapshot();
             const RenderSnapshot& c = *cs.axes[0].snap2d();
             const Color& f = *c.fills[0].opts.color;
@@ -214,7 +214,7 @@ namespace lt {
             auto f3 = Figure::create();
             auto a3 = f3->add_subplot3d(1, 1, 1);
             auto pl = a3->plane(PlaneOrientation::XY, 0.5);
-            pl->fill_between(V{0.0, 10.0}, V{2.0, 3.0}, 1.0, {.exclude = {false, false}});
+            pl->fill(V{0.0, 10.0}, V{2.0, 3.0}, 1.0, {.exclude = {false, false}});
             check(pl->fill_count() == 1 && pl->fill_data(0).y2 == V({1.0, 1.0}) && pl->fill_data(0).exclude.size() == 2,
                   "plane: fill_between() and its read-back");
             pl->set_fill_data(0, V{0.0, 20.0}, V{2.0, 3.0}, V{1.0, 1.0});
@@ -322,7 +322,7 @@ namespace lt {
         {
             auto f = Figure::create();
             auto a = f->add_subplot(1, 1, 1);
-            a->fill_between(V{0.0, 1.0}, V{10.0, 100.0});
+            a->fill(V{0.0, 1.0}, V{10.0, 100.0});
             a->set_yscale(Scale::Log);
             check(same_range(a->ylim(), {std::pow(10.0, 0.95), std::pow(10.0, 2.05)}, 1e-6),
                   "limits: on log y, y2 = 0 counts for nothing (" + range_str(a->ylim()) + ")");
@@ -333,7 +333,7 @@ namespace lt {
             auto host = tf->add_subplot(1, 1, 1);
             host->line(V{0, 1}, V{0, 1});
             auto twin = host->twinx();
-            twin->fill_between(V{0, 30}, V{0, 70});
+            twin->fill(V{0, 30}, V{0, 70});
             check(twin->ylim().hi > 70.0 && host->ylim().hi < 2.0 && host->xlim().hi > 30.0,
                   "limits: a twin's fill widens its own y and the shared x");
         }
@@ -421,7 +421,7 @@ namespace lt {
         {
             auto fig = Figure::create();
             auto ax = fig->add_subplot(1, 1, 1);
-            ax->fill_between(V{0, 1}, V{1, 2});
+            ax->fill(V{0, 1}, V{1, 2});
             auto& fi = detail::FigureAccess::impl(*fig);
             AxesEdit ae;
             ae.plot_ops.push_back(PlotCellEdit{PlotKind::Fill, 0, 1, 1, 7.0});
@@ -531,7 +531,7 @@ namespace lt {
             ax->stack(x, std::span(ys).first(2), {.colors = {kRed, kGreen}});
             auto ref = Figure::create();
             auto rx = ref->add_subplot(1, 1, 1);
-            for (int k = 0; k < 3; ++k) rx->fill_between(x, ys[0]);
+            for (int k = 0; k < 3; ++k) rx->fill(x, ys[0]);
             const FigureSnapshot fs = detail::FigureAccess::impl(*fig).build_figure_snapshot();
             const FigureSnapshot rs = detail::FigureAccess::impl(*ref).build_figure_snapshot();
             const RenderSnapshot& s = *fs.axes[0].snap2d();

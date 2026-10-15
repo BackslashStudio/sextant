@@ -472,10 +472,10 @@ namespace sextant {
                         HeatmapOptions opts = {});
 
         // The area between two curves, as Axes::fill_between().
-        Plane2D& fill_between(std::span<const double> x, std::span<const double> y1,
+        Plane2D& fill(std::span<const double> x, std::span<const double> y1,
                               std::span<const double> y2, FillOptions opts = {});
 
-        Plane2D& fill_between(std::span<const double> x, std::span<const double> y1,
+        Plane2D& fill(std::span<const double> x, std::span<const double> y1,
                               double y2 = 0.0, FillOptions opts = {});
 
         // Stacked areas, as Axes::stack().
