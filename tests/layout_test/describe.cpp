@@ -75,6 +75,10 @@ namespace lt {
                 std::string s = std::to_string(x.size());
                 for (double d : x) s += kSep + num(d, 17);
                 return s;
+            } else if constexpr (std::is_same_v<X, std::vector<bool>>) {
+                std::string s = std::to_string(x.size());
+                for (bool b : x) s += kSep + std::string(b ? "1" : "0");
+                return s;
             } else if constexpr (std::is_same_v<X, std::vector<std::string>>) {
                 std::string s = std::to_string(x.size());
                 for (const auto& e : x) s += kSep + e;
@@ -108,6 +112,9 @@ namespace lt {
             } else if constexpr (std::is_same_v<X, std::vector<double>>) {
                 x.clear();
                 for (const auto& e : split(s)) x.push_back(std::strtod(e.c_str(), nullptr));
+            } else if constexpr (std::is_same_v<X, std::vector<bool>>) {
+                x.clear();
+                for (const auto& e : split(s)) x.push_back(e == "1");
             } else if constexpr (std::is_same_v<X, std::vector<std::string>>) {
                 x = split(s);
             } else static_assert(kAlwaysFalse<X>, "describe.h: a leaf type the list does not name");
@@ -160,6 +167,10 @@ namespace lt {
             else if constexpr (std::is_same_v<X, std::vector<double>>) {
                 x.push_back(0.5 + k);
                 x.push_back(-1.0 / 3.0);
+            } else if constexpr (std::is_same_v<X, std::vector<bool>>) {
+                x.push_back((k % 2) == 0);
+                x.push_back(true);
+                x.push_back(false);
             } else if constexpr (std::is_same_v<X, std::vector<std::string>>) {
                 x.push_back("h" + std::to_string(k));
                 x.push_back("");
@@ -241,6 +252,7 @@ namespace lt {
         STRUCT(Vec3) STRUCT(BoxAspect)
         STRUCT(ErrorBarOptions) STRUCT(LineOptions) STRUCT(ScatterOptions) STRUCT(ScatterZOptions)
         STRUCT(BarOptions) STRUCT(HistOptions) STRUCT(AxLineOptions) STRUCT(AxSpanOptions)
+        STRUCT(FillOptions)
         STRUCT(HeatmapOptions) STRUCT(GridOptions)
         STRUCT(AxesStyle) STRUCT(LegendOptions) STRUCT(ColorbarOptions) STRUCT(SuptitleOptions)
         STRUCT(FigureMargins) STRUCT(TextOptions) STRUCT(ArrowOptions)

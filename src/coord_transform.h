@@ -1,5 +1,6 @@
 #pragma once
 #include "axis_scale.h"
+#include "fill_geometry.h"
 #include "plot_objects.h"
 #include "renderer/plot_rect.h"
 #include "tick.h"
@@ -43,6 +44,15 @@ namespace sextant {
         float to_py(double y) const {
             if (ys.linear()) return py + ph - static_cast<float>((y - ymin) / (ymax - ymin)) * ph;
             return py + ph - static_cast<float>((sy(y) - symin()) / syspan()) * ph;
+        }
+
+        // A value already in scale space (sx()/sy()) to pixels: to_px()/to_py()
+        // without the scale, the same arithmetic.
+        float scale_to_px(double s) const {
+            return px + static_cast<float>((s - sxmin()) / sxspan()) * pw;
+        }
+        float scale_to_py(double s) const {
+            return py + ph - static_cast<float>((s - symin()) / syspan()) * ph;
         }
 
         // Inverse of to_px/to_py — screen pixel back to data space (pan/zoom).
@@ -158,9 +168,11 @@ namespace sextant {
     namespace bounds_detail {
         // auto_bounds() with each value passed through fx/fy first (scale
         // space); a NaN they return widens nothing. Scaled axes only; the
-        // all-linear case keeps its own loop (auto_bounds(all)).
+        // all-linear case keeps its own loop (auto_bounds(all)). Fills take the
+        // scales themselves (`xs`, `ys`: what fx and fy apply strictly).
         template <class FX, class FY>
-        AutoBounds auto_bounds_in(const AllPlotData& all, FX fx, FY fy) {
+        AutoBounds auto_bounds_in(const AllPlotData& all, FX fx, FY fy,
+                                  const AxisScale& xs, const AxisScale& ys) {
             double xlo = std::numeric_limits<double>::max();
             double xhi = -std::numeric_limits<double>::max();
             double ylo = std::numeric_limits<double>::max();
@@ -240,6 +252,15 @@ namespace sextant {
                 for (const auto& sp: *all.axspans) {
                     if (sp.on_x()) { add(fx(sp.lo), xlo, xhi); add(fx(sp.hi), xlo, xhi); }
                     else { add(fy(sp.lo), ylo, yhi); add(fy(sp.hi), ylo, yhi); }
+                }
+            // A fill: its runs' points on both curves (fill_limit_points()).
+            if (all.fills)
+                for (const auto& fp: *all.fills) {
+                    const bool v = fp.vertical();
+                    fill_limit_points(fp, v ? ys : xs, v ? xs : ys, [&](double r, double c) {
+                        add(r, v ? ylo : xlo, v ? yhi : xhi);
+                        add(c, v ? xlo : ylo, v ? xhi : yhi);
+                    });
                 }
             AutoBounds b;
             b.x.loose = {xlo, xhi};
@@ -353,6 +374,19 @@ namespace sextant {
                 lo = std::min(lo, std::min(sp.lo, sp.hi));
                 hi = std::max(hi, std::max(sp.lo, sp.hi));
             }
+        if (all.fills)
+            for (const auto& fp: *all.fills) {
+                double& rlo = fp.vertical() ? ylo : xlo;
+                double& rhi = fp.vertical() ? yhi : xhi;
+                double& vlo = fp.vertical() ? xlo : ylo;
+                double& vhi = fp.vertical() ? xhi : yhi;
+                fill_limit_points(fp, AxisScale{}, AxisScale{}, [&](double r, double c) {
+                    rlo = std::min(rlo, r);
+                    rhi = std::max(rhi, r);
+                    vlo = std::min(vlo, c);
+                    vhi = std::max(vhi, c);
+                });
+            }
         AutoBounds b;
         b.x.loose = {xlo, xhi};
         b.y.loose = {ylo, yhi};
@@ -371,7 +405,7 @@ namespace sextant {
     inline AutoBounds auto_bounds(const AllPlotData& all, const AxisScale& xs, const AxisScale& ys) {
         if (xs.linear() && ys.linear()) return auto_bounds(all);
         return bounds_detail::auto_bounds_in(all, [&xs](double v) { return xs.fwd_strict(v); },
-                                      [&ys](double v) { return ys.fwd_strict(v); });
+                                      [&ys](double v) { return ys.fwd_strict(v); }, xs, ys);
     }
 
     // Padded automatic bounds: auto_bounds() through pad_axis().

@@ -811,6 +811,7 @@ if(SEXTANT_BUILD_TESTS)
             tests/layout_test/line_steps.cpp
             tests/layout_test/bar_orient.cpp
             tests/layout_test/reference_lines.cpp
+            tests/layout_test/fill_between.cpp
             tests/layout_test/rich_text.cpp
             tests/layout_test/text.cpp
             tests/layout_test/window_wait.cpp

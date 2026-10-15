@@ -86,6 +86,25 @@ namespace sextant {
         return heatmap(data, rows, cols, xr, yr, std::move(opts));
     }
 
+    Plane2D& Plane2D::fill_between(std::span<const double> x, std::span<const double> y1,
+                                   std::span<const double> y2, FillOptions opts) {
+        d->sheet.ingest_fill(x, y1, y2, std::move(opts), "Plane2D::fill_between");
+        return *this;
+    }
+
+    Plane2D& Plane2D::fill_between(std::span<const double> x, std::span<const double> y1,
+                                   double y2, FillOptions opts) {
+        const std::vector<double> base(x.size(), y2);
+        d->sheet.ingest_fill(x, y1, base, std::move(opts), "Plane2D::fill_between");
+        return *this;
+    }
+
+    Plane2D& Plane2D::stack(std::span<const double> x, std::span<const std::vector<double>> ys,
+                            StackOptions opts) {
+        d->sheet.ingest_stack(x, ys, opts, "Plane2D::stack");
+        return *this;
+    }
+
     Plane2D& Plane2D::set_offset(double offset) {
         if (!std::isfinite(offset))
             throw std::invalid_argument("Plane2D::set_offset: offset must be finite");
@@ -119,6 +138,7 @@ namespace sextant {
     std::size_t Plane2D::scatter_z_count() const { return d->sheet.scatter_z.size(); }
     std::size_t Plane2D::bar_count() const       { return d->sheet.bars.size(); }
     std::size_t Plane2D::heatmap_count() const   { return d->sheet.heatmaps.size(); }
+    std::size_t Plane2D::fill_count() const      { return d->sheet.fills.size(); }
 
     LineData Plane2D::line_data(std::size_t i) const {
         return read_back::to_data(read_back::at(d->sheet.lines, i, "Plane2D::line_data"));
@@ -134,6 +154,9 @@ namespace sextant {
     }
     HeatmapData Plane2D::heatmap_data(std::size_t i) const {
         return read_back::to_data(read_back::at(d->sheet.heatmaps, i, "Plane2D::heatmap_data"));
+    }
+    FillData Plane2D::fill_data(std::size_t i) const {
+        return read_back::to_data(read_back::at(d->sheet.fills, i, "Plane2D::fill_data"));
     }
 
     Plane2D& Plane2D::set_line_data(std::size_t i, const LineData& data) {
@@ -170,6 +193,15 @@ namespace sextant {
     Plane2D& Plane2D::set_bar_data(std::size_t i, std::span<const double> x,
                                    std::span<const double> height) {
         d->sheet.set_bar_data(i, x, height, nullptr, "Plane2D::set_bar_data");
+        return *this;
+    }
+    Plane2D& Plane2D::set_fill_data(std::size_t i, const FillData& data) {
+        d->sheet.set_fill_data(i, data.x, data.y1, data.y2, &data.exclude, "Plane2D::set_fill_data");
+        return *this;
+    }
+    Plane2D& Plane2D::set_fill_data(std::size_t i, std::span<const double> x,
+                                    std::span<const double> y1, std::span<const double> y2) {
+        d->sheet.set_fill_data(i, x, y1, y2, nullptr, "Plane2D::set_fill_data");
         return *this;
     }
     Plane2D& Plane2D::set_heatmap_data(std::size_t i, const HeatmapData& data) {

@@ -23,9 +23,10 @@ namespace sextant {
 // The first five are 2D (also held by planes); then the native 3D kinds,
 // always addressed at the axes (plane -1). Text is held by both 2D and 3D
 // axes (never by a plane); AxLine and AxSpan by 2D axes only (a plane's sheet
-// holds none). Append new kinds to keep values stable.
+// holds none); Fill by 2D axes and planes. Append new kinds to keep values
+// stable.
 enum class PlotKind { Line, Scatter, Bar, Heatmap, ScatterZ, Bar3D, Surface, Scatter3D, Line3D,
-                      SurfaceTri, Text, AxLine, AxSpan };
+                      SurfaceTri, Text, AxLine, AxSpan, Fill };
 
 // A plot object's (or a plane's) identity: kept by set_*_data(), unchanged by
 // removing or reordering its siblings, never reused in a process. Edits carry
@@ -507,8 +508,25 @@ struct AxSpanPlot {
     bool on_x() const { return opts.orientation == Orientation::Vertical; }
 };
 
-// The reference kinds are optional so a view built over the first five alone
-// (tests, a plane's sheet) still reads as before.
+// Axes::fill_between(): the area between y1 and y2 along x, one value of each
+// per point. `x` is the run coordinate, on the y axis when the fill is
+// Vertical (and y1/y2 then on x). fill_geometry.h turns it into regions.
+struct FillPlot {
+    CowVec<double> x, y1, y2;
+    FillOptions    opts{.color = Color::Blue};
+    unsigned long long data_stamp = 0;
+    ObjectId id = 0;
+    // FillOptions::exclude, taken at the call: one per point, nonzero = left
+    // out (a column of numbers, so the Data panel edits it as the others);
+    // empty = none.
+    CowVec<double> exclude;
+
+    bool vertical() const { return opts.orientation == Orientation::Vertical; }
+    bool excluded(std::size_t i) const { return i < exclude.size() && exclude[i] != 0.0; }
+};
+
+// The reference kinds and fills are optional so a view built over the first
+// five alone (tests) still reads as before.
 struct AllPlotData {
     const std::vector<LinePlot>&     lines;
     const std::vector<ScatterPlot>&  scatters;
@@ -517,6 +535,7 @@ struct AllPlotData {
     const std::vector<ScatterZPlot>& scatter_z;
     const std::vector<AxLinePlot>*   axlines = nullptr;
     const std::vector<AxSpanPlot>*   axspans = nullptr;
+    const std::vector<FillPlot>*     fills = nullptr;
 };
 
 // Caller-side stamps of an axes' titles: each set_*title() takes a fresh
@@ -598,6 +617,8 @@ struct RenderSnapshot {
     // Nor reference lines and spans (Axes::axline()/axspan()).
     std::vector<AxLinePlot>   axlines;
     std::vector<AxSpanPlot>   axspans;
+    // Axes::fill_between(), on axes and planes alike.
+    std::vector<FillPlot>     fills;
 
     // Font sizes live in axes_style.
     std::string title, xtitle, ytitle;
@@ -628,7 +649,9 @@ struct RenderSnapshot {
     // Explicit ticks; absent = generate_ticks().
     std::optional<std::vector<Tick>> xticks_override, yticks_override;
 
-    AllPlotData all() const { return { lines, scatters, bars, heatmaps, scatter_z, &axlines, &axspans }; }
+    AllPlotData all() const {
+        return { lines, scatters, bars, heatmaps, scatter_z, &axlines, &axspans, &fills };
+    }
 };
 
 // What a share group holds in common, copied from one member to another;
@@ -724,7 +747,7 @@ struct ObjectRef {
 
 inline constexpr PlotKind kPlotKinds2D[] = { PlotKind::Line, PlotKind::Scatter, PlotKind::Bar,
                                              PlotKind::Heatmap, PlotKind::ScatterZ, PlotKind::Text,
-                                             PlotKind::AxLine, PlotKind::AxSpan };
+                                             PlotKind::AxLine, PlotKind::AxSpan, PlotKind::Fill };
 inline constexpr PlotKind kPlotKinds3D[] = { PlotKind::Bar3D, PlotKind::Surface,
                                              PlotKind::Scatter3D, PlotKind::Line3D,
                                              PlotKind::SurfaceTri, PlotKind::Text };
@@ -744,6 +767,7 @@ R with_kind(S& s, PlotKind kind, F&& f, R none) {
         case PlotKind::Text:     return f(s.texts);
         case PlotKind::AxLine:   return f(s.axlines);
         case PlotKind::AxSpan:   return f(s.axspans);
+        case PlotKind::Fill:     return f(s.fills);
         default:                 return none;
     }
 }
@@ -807,7 +831,7 @@ std::optional<ObjectRef> find_object_in(const S& s, const PlotKind (&kinds)[N], 
 // A plot object taken out by remove_object(), for putting back:
 // where it was among its kind, and the whole object, its id included.
 using PlotObject2D = std::variant<LinePlot, ScatterPlot, BarPlot, HeatmapPlot, ScatterZPlot,
-                                  TextPlot, AxLinePlot, AxSpanPlot>;
+                                  TextPlot, AxLinePlot, AxSpanPlot, FillPlot>;
 using PlotObject3D = std::variant<Bar3DPlot, SurfacePlot, Scatter3DPlot, Line3DPlot,
                                   SurfaceTriPlot, TextPlot>;
 template <class Object>
@@ -913,6 +937,8 @@ std::vector<ObjectRef> call_order(const S& s) {
         objects_detail::add_order_keys(keys, PlotKind::AxLine, s.axlines);
         objects_detail::add_order_keys(keys, PlotKind::AxSpan, s.axspans);
     }
+    if constexpr (requires { s.fills; })
+        objects_detail::add_order_keys(keys, PlotKind::Fill, s.fills);
     return objects_detail::sorted_refs(keys);
 }
 
@@ -944,6 +970,7 @@ std::vector<LayerRef> layered_call_order(std::span<const S* const> layers) {
             add(PlotKind::AxLine, s.axlines);
             add(PlotKind::AxSpan, s.axspans);
         }
+        if constexpr (requires { s.fills; }) add(PlotKind::Fill, s.fills);
     }
     std::stable_sort(keys.begin(), keys.end(), [](const Key& a, const Key& b) { return a.id < b.id; });
     std::vector<LayerRef> out;

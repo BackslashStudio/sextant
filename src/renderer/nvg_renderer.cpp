@@ -691,6 +691,12 @@ namespace sextant {
                     nvgBeginPath(vg_);
                     nvgRect(vg_, sx0, cy - 5.0f, kLegendSwatchW, 10.0f);
                     nvgFill(vg_);
+                    // A fill's outline (alpha 0 = none), 1 px as a marker key's.
+                    if (e.edge.a > 0.0f) {
+                        nvgStrokeColor(vg_, nvgRGBAf(e.edge.r, e.edge.g, e.edge.b, e.edge.a));
+                        nvgStrokeWidth(vg_, 1.0f);
+                        nvgStroke(vg_);
+                    }
                     break;
             }
 

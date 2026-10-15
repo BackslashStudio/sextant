@@ -10,6 +10,7 @@
 #include "plane2d.h"
 #include "../line_dash.h"
 #include "../line_steps.h"
+#include "../fill_geometry.h"
 #include "../reference_lines.h"
 #include "error_bar_shape.h"
 #include <glad/glad.h>
@@ -19,6 +20,7 @@
 #include <cstdint>
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
@@ -1735,6 +1737,8 @@ void main() {
 
         if (lineseg_corner_vbo_) glDeleteBuffers(1, &lineseg_corner_vbo_);
         if (ref_vbo_) glDeleteBuffers(1, &ref_vbo_);
+        if (fill_edge_vbo_) glDeleteBuffers(1, &fill_edge_vbo_);
+        if (fill_dist_vbo_) glDeleteBuffers(1, &fill_dist_vbo_);
         if (lineseg_vao_) glDeleteVertexArrays(1, &lineseg_vao_);
         if (lineseg_program_) glDeleteProgram(lineseg_program_);
 
@@ -1847,6 +1851,7 @@ void main() {
             if (e.fill_vbo) glDeleteBuffers(1, &e.fill_vbo);
             if (e.edge_vbo) glDeleteBuffers(1, &e.edge_vbo);
         }
+        for (auto& [k, e]: fill_cache_) if (e.vbo) glDeleteBuffers(1, &e.vbo);
         for (auto* m: {
                  &line_err_cache_, &bar_err_cache_,
                  &scatter_err_cache_, &scatterz_err_cache_
@@ -2534,6 +2539,9 @@ void main() {
             case PlotKind::AxSpan:
                 draw_axspan(snap.axspans[r.index], tr, pr);
                 break;
+            case PlotKind::Fill:
+                draw_fill(snap.fills[r.index], static_cast<int>(r.index), tr, pr);
+                break;
             default: break;
         }
     }
@@ -2620,6 +2628,200 @@ void main() {
             build_rect_outline(r->x0, r->y0, r->x1, r->y1, p.opts.linewidth, v);
             const Color ec = axspan_edge(p);
             draw(v, ec, ec.a);
+        }
+
+        glBindVertexArray(0);
+        glUseProgram(0);
+        end_pass();
+    }
+
+    // -------------------------------------------------------------------------
+    // draw_fill
+    // -------------------------------------------------------------------------
+    void DataRenderer::draw_fill(const FillPlot& p, int index, const CoordTransform& tr,
+                                 const PlotRect& pr) {
+        const bool vert = p.vertical();
+        // The regions in scale space (built at most once per draw).
+        std::vector<FillRun> runs;
+        bool have_runs = false;
+        auto regions = [&]() -> const std::vector<FillRun>& {
+            if (!have_runs) runs = fill_runs(p, vert ? tr.ys : tr.xs, vert ? tr.xs : tr.ys);
+            have_runs = true;
+            return runs;
+        };
+        // A region point (run, curve) in scale space as (x, y).
+        auto xy = [vert](double r, double v) { return vert ? std::array{v, r} : std::array{r, v}; };
+
+        const CacheKey key{axes_index_, plane_index_, index};
+        FillCache& e = fill_cache_[key];
+        const bool precise = float_resolves_view(e.span_x, tr.sxspan(), tr.pw)
+                             && float_resolves_view(e.span_y, tr.syspan(), tr.ph);
+        const bool ok = e.generation != 0
+                        && e.generation == data_generation_
+                        && same_scales(e.tr, tr)
+                        && e.orientation == p.opts.orientation
+                        && e.drawstyle == p.opts.drawstyle
+                        && e.interpolate == p.opts.interpolate
+                        && (e.data_space ? precise : (!precise && same_view(e.tr, tr)));
+        if (!ok) {
+            const std::vector<FillRun>& rs = regions();
+            double xlo = std::numeric_limits<double>::max(), xhi = -xlo, ylo = xlo, yhi = -xlo;
+            for (const FillRun& run : rs)
+                for (std::size_t k = 0; k < run.size(); ++k)
+                    for (double v : {run.a[k], run.b[k]}) {
+                        const auto [x, y] = xy(run.r[k], v);
+                        xlo = std::min(xlo, x);
+                        xhi = std::max(xhi, x);
+                        ylo = std::min(ylo, y);
+                        yhi = std::max(yhi, y);
+                    }
+            if (xlo > xhi) xlo = xhi = ylo = yhi = 0.0;
+            e.anchor_x = 0.5 * (xlo + xhi);
+            e.span_x = xhi - xlo;
+            e.anchor_y = 0.5 * (ylo + yhi);
+            e.span_y = yhi - ylo;
+            e.data_space = float_resolves_view(e.span_x, tr.sxspan(), tr.pw)
+                           && float_resolves_view(e.span_y, tr.syspan(), tr.ph);
+
+            std::vector<float> verts;
+            auto put = [&](double r, double v) {
+                const auto [x, y] = xy(r, v);
+                if (e.data_space) {
+                    verts.push_back(static_cast<float>(x - e.anchor_x));
+                    verts.push_back(static_cast<float>(y - e.anchor_y));
+                } else {
+                    verts.push_back(tr.scale_to_px(x));
+                    verts.push_back(tr.scale_to_py(y));
+                }
+            };
+            for (const FillRun& run : rs)
+                fill_triangles(run, [&](double r0, double v0, double r1, double v1, double r2, double v2) {
+                    put(r0, v0);
+                    put(r1, v1);
+                    put(r2, v2);
+                });
+            if (!verts.empty()) {
+                if (e.vbo == 0) glGenBuffers(1, &e.vbo);
+                glBindBuffer(GL_ARRAY_BUFFER, e.vbo);
+                glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(verts.size() * sizeof(float)),
+                             verts.data(), GL_DYNAMIC_DRAW);
+            }
+            e.verts = static_cast<int>(verts.size() / 2);
+            e.generation = data_generation_;
+            e.orientation = p.opts.orientation;
+            e.drawstyle = p.opts.drawstyle;
+            e.interpolate = p.opts.interpolate;
+            e.tr = tr;
+        }
+
+        const Color& c = *p.opts.color;
+        if (e.verts > 0 && e.vbo != 0) {
+            begin_pass(pr, tr.win_h);
+            glUseProgram(line_program_);
+            const float res[2] = {tr.win_w, tr.win_h};
+            glUniform2fv(line_u_.resolution, 1, res);
+            glBindVertexArray(line_vao_);
+            // Re-point the VAO attribute at the bound buffer (see draw_bars).
+            glBindBuffer(GL_ARRAY_BUFFER, e.vbo);
+            glEnableVertexAttribArray(0);
+            glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), nullptr);
+            const DataToPixel m = e.data_space
+                                      ? data_to_pixel(tr, e.anchor_x, e.anchor_y)
+                                      : DataToPixel{{1.0f, 1.0f}, {0.0f, 0.0f}};
+            glUniform2fv(line_u_.scale, 1, m.scale);
+            glUniform2fv(line_u_.offset, 1, m.offset);
+            glUniform4f(line_u_.color, c.r, c.g, c.b, c.a * p.opts.alpha);
+            glDrawArrays(GL_TRIANGLES, 0, e.verts);
+            glBindVertexArray(0);
+            glUseProgram(0);
+            end_pass();
+        }
+
+        // --- outline: each region's closed ring in pixels, rebuilt per frame ---
+        if (!(p.opts.linewidth > 0.0f) || p.opts.linestyle == LineStyle::None) return;
+        const std::vector<FillRun>& rs = regions();
+        if (rs.empty()) return;
+
+        begin_pass(pr, tr.win_h);
+        glUseProgram(lineseg_program_);
+        const float res[2] = {tr.win_w, tr.win_h};
+        glUniform2fv(lineseg_u_.resolution, 1, res);
+        glBindVertexArray(lineseg_vao_);
+        glUniform2fv(lineseg_u_.scale, 1, k_identity_scale);
+        glUniform2fv(lineseg_u_.offset, 1, k_identity_offset);
+        glUniform1f(lineseg_u_.half_width, p.opts.linewidth * 0.5f);
+        const DashPattern dash = dash_pattern(p.opts.linestyle);
+        if (dash.dashed()) {
+            glUniform4fv(lineseg_u_.dash, 1, dash.seg);
+            glUniform1f(lineseg_u_.dash_period, dash.period);
+            glUniform1f(lineseg_u_.dist_scale, 1.0f);
+        } else {
+            glUniform1f(lineseg_u_.dash_period, 0.0f);
+        }
+        const Color ec = fill_edge(p);
+        glUniform4f(lineseg_u_.color, ec.r, ec.g, ec.b, ec.a);
+
+        std::vector<float> ring, pts, dists;
+        for (const FillRun& run : rs) {
+            // The ring in pixels, a point equal to the one before it dropped (a
+            // zero-length segment has no direction to join).
+            ring.clear();
+            fill_outline(run, [&](double r, double v) {
+                const auto [x, y] = xy(r, v);
+                const float px = tr.scale_to_px(x), py = tr.scale_to_py(y);
+                if (ring.size() >= 2 && ring[ring.size() - 2] == px && ring.back() == py) return;
+                ring.push_back(px);
+                ring.push_back(py);
+            });
+            while (ring.size() >= 4 && ring[0] == ring[ring.size() - 2] && ring[1] == ring.back()) {
+                ring.pop_back();
+                ring.pop_back();
+            }
+            const std::size_t m = ring.size() / 2;
+            if (m < 2) continue;
+            // Padded so instance i reads points [i, i+3], across the seam (a
+            // looped line's layout): segment i runs from point i to i+1.
+            pts.clear();
+            auto emit = [&](std::size_t i) {
+                pts.push_back(ring[2 * (i % m)]);
+                pts.push_back(ring[2 * (i % m) + 1]);
+            };
+            emit(m - 1);
+            for (std::size_t i = 0; i < m; ++i) emit(i);
+            emit(0);
+            emit(1);
+            if (fill_edge_vbo_ == 0) glGenBuffers(1, &fill_edge_vbo_);
+            glBindBuffer(GL_ARRAY_BUFFER, fill_edge_vbo_);
+            glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(pts.size() * sizeof(float)), pts.data(),
+                         GL_STREAM_DRAW);
+            for (int a = 1; a <= 4; ++a) {
+                glEnableVertexAttribArray(static_cast<unsigned>(a));
+                glVertexAttribPointer(static_cast<unsigned>(a), 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float),
+                                      reinterpret_cast<void *>((a - 1) * 2 * sizeof(float)));
+                glVertexAttribDivisor(static_cast<unsigned>(a), 1);
+            }
+            if (dash.dashed()) {
+                // Arc length at each segment's start, from the ring's first point.
+                dists.clear();
+                double acc = 0.0;
+                for (std::size_t i = 0; i < m; ++i) {
+                    dists.push_back(static_cast<float>(acc));
+                    const std::size_t j = (i + 1) % m;
+                    const double dx = ring[2 * j] - ring[2 * i], dy = ring[2 * j + 1] - ring[2 * i + 1];
+                    acc += std::sqrt(dx * dx + dy * dy);
+                }
+                if (fill_dist_vbo_ == 0) glGenBuffers(1, &fill_dist_vbo_);
+                glBindBuffer(GL_ARRAY_BUFFER, fill_dist_vbo_);
+                glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(dists.size() * sizeof(float)),
+                             dists.data(), GL_STREAM_DRAW);
+                glEnableVertexAttribArray(5);
+                glVertexAttribPointer(5, 1, GL_FLOAT, GL_FALSE, sizeof(float), nullptr);
+                glVertexAttribDivisor(5, 1);
+            } else {
+                glDisableVertexAttribArray(5);
+                glVertexAttrib1f(5, 0.0f);
+            }
+            glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, static_cast<GLsizei>(m));
         }
 
         glBindVertexArray(0);

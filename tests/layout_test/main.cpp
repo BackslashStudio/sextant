@@ -311,6 +311,9 @@ int main() {
     // reference_lines.cpp
     test_reference_lines();
     test_reference_lines_rendered();
+    // fill_between.cpp
+    test_fill_between();
+    test_fill_between_rendered();
 
     // text.cpp
     test_text();

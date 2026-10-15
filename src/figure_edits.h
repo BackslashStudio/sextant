@@ -69,7 +69,7 @@ struct PlotStyleEdit {
     int plane_index = -1;
     std::variant<LineOptions, ScatterOptions, BarOptions,
                  HeatmapOptions, ScatterZOptions, TextStyle,
-                 AxLineOptions, AxSpanOptions> opts;
+                 AxLineOptions, AxSpanOptions, FillOptions> opts;
     ObjectId id = 0, plane_id = 0;   // see PlotCellEdit
 };
 
@@ -634,6 +634,15 @@ std::optional<PlotDataOp> apply_plot_data_op(T& t, const PlotCellEdit& e) {
             at = e.value;
             return cell_undo(e, t.axspans, *sp, old);
         }
+        case PlotKind::Fill:
+            // x, y1, y2, then the exclude column when there is one.
+            if (auto* fp = op_target(t.fills, e))
+                return cell_undo(e, t.fills, *fp,
+                                 put_cell(e.column == 0 ? fp->x
+                                          : e.column == 1 ? fp->y1
+                                          : e.column == 2 ? fp->y2 : fp->exclude,
+                                          e.element, e.value));
+            return std::nullopt;
     }
     return std::nullopt;
 }
@@ -713,7 +722,7 @@ inline std::array<CowVec<double>*, 8> err_columns(ErrorBarData& e) {
 
 // One point in or out of object `p` of `v`: its required columns `cols` (the
 // first gives the point count) and the optional index-aligned ones
-// (hint_labels, error bars, marker sizes, bar bases), which move only where they reach
+// (hint_labels, error bars, marker sizes, bar bases, a fill's mask), which move only where they reach
 // the row; empty ones are left alone. A new point copies its predecessor,
 // except for a blank label, unless `e` restores a removed one.
 template <class Vec, class P, class... Cols>
@@ -724,14 +733,22 @@ std::optional<PlotDataOp> row_op(const PlotRowEdit& e, const Vec& v, P& p, Cols&
 
     PlotRowEdit inv = retarget(e, v, p);
     inv.restore.reset();
-    auto& labels = p.opts.hint_labels;
-    const auto err = err_columns(p.err);
-    // A scatter's per-point sizes or a bar's bases, or a stand-in empty column
-    // for other kinds.
+    // A fill has neither labels nor error bars: empty stand-ins.
+    std::vector<std::string> no_labels;
+    ErrorBarData no_err;
+    std::vector<std::string>* label_col = &no_labels;
+    ErrorBarData* err_data = &no_err;
+    if constexpr (requires { p.opts.hint_labels; }) label_col = &p.opts.hint_labels;
+    if constexpr (requires { p.err; }) err_data = &p.err;
+    auto& labels = *label_col;
+    const auto err = err_columns(*err_data);
+    // A scatter's per-point sizes, a bar's bases or a fill's mask, or a
+    // stand-in empty column for other kinds.
     CowVec<double> no_sizes;
     CowVec<double>* sizes = &no_sizes;
     if constexpr (requires { p.sizes; }) sizes = &p.sizes;
     else if constexpr (requires { p.bottom; }) sizes = &p.bottom;
+    else if constexpr (requires { p.exclude; }) sizes = &p.exclude;
     if (insert && e.restore) {
         const PlotRowEdit::Restore& r = *e.restore;
         std::size_t i = 0;
@@ -787,6 +804,10 @@ std::optional<PlotDataOp> apply_plot_data_op(T& t, const PlotRowEdit& e) {
         case PlotKind::ScatterZ:
             if (auto* sp = op_target(t.scatter_z, e))
                 return row_op(e, t.scatter_z, *sp, sp->x, sp->y, sp->z);
+            return std::nullopt;
+        case PlotKind::Fill:
+            if (auto* fp = op_target(t.fills, e))
+                return row_op(e, t.fills, *fp, fp->x, fp->y1, fp->y2);
             return std::nullopt;
         case PlotKind::Heatmap:
         case PlotKind::Bar3D:
@@ -1139,8 +1160,9 @@ std::optional<ReplacedOpts<Opts>> assign_plot_opts(Vec& v, int idx, ObjectId id,
     auto* p = edits_detail::find_object(v, idx, id);
     if (!p) return std::nullopt;
     if constexpr (!requires { p->opts.hint_labels; }) {
-        // A text, a reference line or span: nothing in its style is data. An
-        // unset `color` keeps the object's, as below.
+        // A text, a reference line or span, a fill: nothing in its style is
+        // data (a fill's mask moved out at the call). An unset `color` keeps
+        // the object's, as below.
         ReplacedOpts<Opts> r{ static_cast<int>(p - v.data()), p->id, std::move(p->opts) };
         p->opts = o;
         if constexpr (requires { p->opts.color.has_value(); })
@@ -1172,6 +1194,7 @@ auto& styled_vector(T& t) {
     else if constexpr (std::is_same_v<O, TextStyle>)      return t.texts;
     else if constexpr (std::is_same_v<O, AxLineOptions>)  return t.axlines;
     else if constexpr (std::is_same_v<O, AxSpanOptions>)  return t.axspans;
+    else if constexpr (std::is_same_v<O, FillOptions>)    return t.fills;
     else                                                  return t.scatter_z;
 }
 

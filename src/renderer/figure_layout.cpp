@@ -1,6 +1,7 @@
 #include "figure_layout.h"
 #include "../axis_limits.h"
 #include "../axis_placement.h"
+#include "../fill_geometry.h"
 #include "../rich_text.h"
 #include "../tick_style.h"
 #include "../ticker.h"
@@ -797,6 +798,20 @@ namespace sextant {
                         Color c = *sp.opts.color;
                         c.a *= sp.opts.alpha;
                         entries.push_back({c, sp.opts.name, LegendKind::Bar, LineStyle::Solid});
+                    }
+                    break;
+                }
+                case PlotKind::Fill: {
+                    // A patch at the fill's opacity, as a span's; outlined when
+                    // the fill is.
+                    const auto& fp = snap.fills[r.index];
+                    if (keyed(fp.opts)) {
+                        Color c = *fp.opts.color;
+                        c.a *= fp.opts.alpha;
+                        LegendEntry e{c, fp.opts.name, LegendKind::Bar, LineStyle::Solid};
+                        if (fp.opts.linewidth > 0.0f && fp.opts.linestyle != LineStyle::None)
+                            e.edge = fill_edge(fp);
+                        entries.push_back(std::move(e));
                     }
                     break;
                 }

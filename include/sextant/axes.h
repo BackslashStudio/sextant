@@ -70,6 +70,42 @@ namespace sextant {
                      HeatmapOptions opts = {});
 
         // ----------------------------------------------------------------
+        // Filled areas
+        // ----------------------------------------------------------------
+        // The area between y1(x) and y2(x) (matplotlib's fill_between); with
+        // FillOptions::orientation Vertical, between x1(y) and x2(y), the spans
+        // then read as y, x1, x2 (fill_betweenx). One value each per point, any
+        // other lengths throw std::invalid_argument; fewer than two points fill
+        // nothing. Each run of points neither excluded (FillOptions::exclude)
+        // nor holding a NaN is one region, its curves straight between the points
+        // (or stepped, FillOptions::drawstyle); where they cross the region
+        // pinches to the crossing. On a log axis a point at or below 0 along the
+        // run breaks it, while a curve at or below 0 reaches past the frame's
+        // low edge. Automatic limits take every point of every region on both
+        // curves. Drawn with the other plot objects in call order; not hovered
+        // or picked.
+        Axes& fill_between(std::span<const double> x, std::span<const double> y1,
+                           std::span<const double> y2, FillOptions opts = {});
+
+        // The same down to (or across to) one value: 0 by default, the area
+        // under a curve.
+        Axes& fill_between(std::span<const double> x, std::span<const double> y1,
+                           double y2 = 0.0, FillOptions opts = {});
+
+        // Stacked areas (matplotlib's stackplot): layer k fills from the top of
+        // the layers below it (the baseline, StackOptions::baseline, for the
+        // first) up by ys[k], one value per point of `x` (any other length
+        // throws std::invalid_argument, before anything is added). The curves
+        // are computed here, once, and each layer is added as an ordinary fill,
+        // in order: read back and edited as any other, and editing one does not
+        // restack the rest. A NaN carries up the stack: with Zero it leaves that
+        // point out of its layer and every layer above; the other baselines take
+        // every layer's value, so the point leaves every layer (WeightedWiggle,
+        // as matplotlib's, every later point as well).
+        Axes& stack(std::span<const double> x, std::span<const std::vector<double>> ys,
+                    StackOptions opts = {});
+
+        // ----------------------------------------------------------------
         // Reference lines and spans
         // ----------------------------------------------------------------
         // A line across the frame at `value`: at y = value by default
@@ -213,8 +249,9 @@ namespace sextant {
         Axes& set_ytick_format(std::string_view fmt);
 
         // The colors an unset `color` takes in turn, one per call that draws in a
-        // flat color: line(), scatter(), bar(), hist(), axline() (scatter_z(),
-        // heatmap() and axspan() take none). Restarts from the first color; empty restores the default,
+        // flat color: line(), scatter(), bar(), hist(), fill_between(), axline()
+        // (scatter_z(), heatmap() and axspan() take none). Restarts from the first
+        // color; empty restores the default,
         // matplotlib's tab10, which starts with Color::Blue. Objects already
         // plotted keep theirs.
         Axes& set_color_cycle(std::vector<Color> colors);
@@ -268,6 +305,9 @@ namespace sextant {
         std::size_t heatmap_count() const;
         HeatmapData heatmap_data(std::size_t i) const;
 
+        std::size_t fill_count() const;
+        FillData fill_data(std::size_t i) const;
+
         std::size_t axline_count() const;
         AxLineData axline_data(std::size_t i) const;
 
@@ -315,6 +355,13 @@ namespace sextant {
         // As heatmap() takes it: row-major rows x cols over xrange x yrange.
         Axes& set_heatmap_data(std::size_t i, std::span<const double> data, int rows, int cols,
                                Range xrange, Range yrange);
+
+        // A fill's points, validated as fill_between(). The exclude mask
+        // follows FillData::exclude.
+        Axes& set_fill_data(std::size_t i, const FillData& data);
+
+        Axes& set_fill_data(std::size_t i, std::span<const double> x, std::span<const double> y1,
+                            std::span<const double> y2);
 
         // Move a reference line or span (validated as axline()/axspan(); a span's
         // ends are stored swapped when lo > hi).

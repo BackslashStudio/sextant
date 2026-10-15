@@ -47,7 +47,9 @@ namespace sextant {
     // The direction an object runs: a bar stands (Vertical) or lies along x
     // (Horizontal, matplotlib's barh); a reference line or span runs across the
     // frame along x (Horizontal, matplotlib's axhline/axhspan) or along y
-    // (Vertical, axvline/axvspan).
+    // (Vertical, axvline/axvspan); a fill runs along x between two curves of y
+    // (Horizontal, matplotlib's fill_between) or along y (Vertical,
+    // fill_betweenx).
     enum class Orientation { Vertical, Horizontal };
 
     // `size` is the marker's outer diameter. Triangle points up; Star has five
@@ -386,6 +388,67 @@ namespace sextant {
 
         std::string name;
         bool show_legend = true; // see LineOptions::show_legend
+    };
+
+    // The area between two curves (Axes::fill_between()).
+    struct FillOptions {
+        // Horizontal: the band runs along x, between y1(x) and y2(x)
+        // (matplotlib's fill_between); Vertical: along y, between x1(y) and
+        // x2(y) (fill_betweenx).
+        Orientation orientation = Orientation::Horizontal;
+        std::optional<Color> color; // see LineOptions::color
+        float alpha = 1.0f;
+
+        // The outline of each filled region, `linewidth` pixels wide (0, the
+        // default, draws none) in `edgecolor` (unset = `color`) at that color's
+        // own alpha, dashed by `linestyle`.
+        std::optional<Color> edgecolor;
+        float linewidth = 0.0f;
+        LineStyle linestyle = LineStyle::Solid;
+
+        // Steps both curves, as a line's drawstyle steps its points.
+        DrawStyle drawstyle = DrawStyle::Default;
+
+        // Points left out of the fill (the inverse of matplotlib's `where`):
+        // empty = none, else one per point (any other length throws
+        // std::invalid_argument). The filled regions are the runs of points
+        // neither excluded nor holding a NaN. Kept as the object's data: read
+        // back and replaced through FillData::exclude, not through these options.
+        std::vector<bool> exclude;
+
+        // Where a region ends at an excluded point and the curves cross between
+        // that point and the region, the region runs on to the crossing.
+        bool interpolate = false;
+
+        std::string name;
+        bool show_legend = true; // see LineOptions::show_legend
+    };
+
+    // Where the bottom layer of a stack() starts, as matplotlib's stackplot
+    // baselines: Zero at 0; Sym centres the stack on 0; Wiggle minimises the
+    // sum of the layers' squared slopes; WeightedWiggle weights those slopes
+    // by layer size (a streamgraph).
+    enum class StackBaseline { Zero, Sym, Wiggle, WeightedWiggle };
+
+    struct StackOptions {
+        // Horizontal: the layers stack up along y over x; Vertical: along x
+        // over y (the spans then read as y and the layers' widths).
+        Orientation orientation = Orientation::Horizontal;
+        StackBaseline baseline = StackBaseline::Zero;
+
+        // Empty = one color from the cycle per layer, else one per layer (any
+        // other length throws std::invalid_argument).
+        std::vector<Color> colors;
+        // Empty = none, else one legend name per layer (likewise).
+        std::vector<std::string> names;
+
+        // As FillOptions, for every layer.
+        float alpha = 1.0f;
+        std::optional<Color> edgecolor;
+        float linewidth = 0.0f;
+        LineStyle linestyle = LineStyle::Solid;
+        DrawStyle drawstyle = DrawStyle::Default;
+        bool show_legend = true;
     };
 
     // An axis span in data coordinates. For a heatmap, `lo`/`hi` are the outer
@@ -802,6 +865,16 @@ namespace sextant {
     // Axes::axspan(): the band's ends, lo <= hi as axspan() stored them.
     struct AxSpanData {
         double lo = 0.0, hi = 1.0;
+    };
+
+    // Axes::fill_between(): `x` is the run coordinate (y when the fill is
+    // Vertical), `y1` and `y2` the curves, one value each per point (a scalar
+    // y2 comes back repeated). `exclude` as FillOptions::exclude;
+    // set_fill_data(i, FillData) takes it as given (empty clears it), the span
+    // overload keeps it while the point count is unchanged.
+    struct FillData {
+        std::vector<double> x, y1, y2;
+        std::vector<bool> exclude;
     };
 
     // Axes::text() and annotate(): the string and where it is. `arrow` is set

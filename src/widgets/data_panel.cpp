@@ -978,6 +978,45 @@ namespace sextant {
             }
         }
 
+        template<class Push>
+        void fill_style(DataPanelState& st, FillOptions& o, Push&& push) {
+            name_and_key(st, o, push);
+            if (ImGui::Checkbox("Run on to crossings##fillinterp", &o.interpolate)) push();
+            if (begin_field_table("fill")) {
+                field_row("Orientation");
+                if (orientation_combo("##forient", o.orientation)) push();
+                field_row("Color");
+                if (color_swatch("##fcol", *o.color)) push();
+                field_row("Alpha");
+                if (drag_float("##falpha", &o.alpha, 0.0f, 1.0f, 0.005f, "%.2f")) push();
+                field_row("Draw style");
+                if (drawstyle_combo("##fdraw", o.drawstyle)) push();
+                end_field_table();
+            }
+            ImGui::TextDisabled("Crossings: a region ending at an excluded point runs on to where the curves cross.");
+            ImGui::SeparatorText("Outline");
+            if (begin_field_table("filledge")) {
+                field_row("Width");
+                if (drag_float("##few", &o.linewidth, 0.0f, 10.0f, 0.05f, "%.2f px")) push();
+                end_field_table();
+            }
+            if (o.linewidth <= 0.0f) return;
+            bool own = o.edgecolor.has_value();
+            if (ImGui::Checkbox("Own colour##feown", &own)) {
+                o.edgecolor = own ? std::optional<Color>(*o.color) : std::nullopt;
+                push();
+            }
+            if (begin_field_table("filledge2")) {
+                if (o.edgecolor) {
+                    field_row("Color");
+                    if (color_swatch("##fecol", *o.edgecolor)) push();
+                }
+                field_row("Style");
+                if (linestyle_combo("##festyle", o.linestyle)) push();
+                end_field_table();
+            }
+        }
+
         // Contour levels, kept sorted and unique as the heatmap's ingest leaves
         // them. Each commits on Enter or focus loss (edit_cell()).
         template<class Push>
@@ -1093,6 +1132,7 @@ namespace sextant {
                 case PlotKind::ScatterZ: if (!both(ss->scatter_z, sheet.scatter_z)) return; break;
                 case PlotKind::AxLine:   if (!both(ss->axlines, sheet.axlines)) return; break;
                 case PlotKind::AxSpan:   if (!both(ss->axspans, sheet.axspans)) return; break;
+                case PlotKind::Fill:     if (!both(ss->fills, sheet.fills)) return; break;
                 default: return; // the 3D kinds have blocks of their own
             }
             if (!section("Appearance", true)) return;
@@ -1121,6 +1161,9 @@ namespace sextant {
                     break;
                 case PlotKind::AxSpan:
                     axspan_style(st, ss->axspans[i], push_of(ss->axspans[i]));
+                    break;
+                case PlotKind::Fill:
+                    fill_style(st, ss->fills[i], push_of(ss->fills[i]));
                     break;
                 default: break;
             }

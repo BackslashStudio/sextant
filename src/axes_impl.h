@@ -26,6 +26,7 @@ struct Axes::Impl {
     std::vector<TextPlot>     texts;
     std::vector<AxLinePlot>   axlines;
     std::vector<AxSpanPlot>   axspans;
+    std::vector<FillPlot>     fills;
 
     // The figure's FigureOptions::mathtext, set when the figure makes this
     // axes; only warn_math() reads it (drawing reads the snapshot's).
@@ -149,6 +150,7 @@ struct Axes::Impl {
         s.scatter_z = scatter_z;
         s.texts = texts;
         s.axlines = axlines; s.axspans = axspans;
+        s.fills = fills;
         s.title = title; s.xtitle = xtitle; s.ytitle = ytitle;
         s.title_stamps = title_stamps;
         s.grid_enabled   = grid_enabled;   s.grid_opts   = grid_opts;
@@ -202,6 +204,18 @@ struct Axes::Impl {
                       const std::vector<double>* bottom, const char* who);
     void set_heatmap_data(std::size_t i, std::span<const double> data, int rows, int cols,
                           Range xrange, Range yrange, const char* who);
+
+    // fill_between() for Axes and Plane2D: x, y1 and y2 one value each per
+    // point. set_fill_data(): `exclude` the new mask (FillData), or null to
+    // keep it while the point count is unchanged.
+    void ingest_fill(std::span<const double> x, std::span<const double> y1,
+                     std::span<const double> y2, FillOptions opts, const char* who);
+    // stack() for Axes and Plane2D: every check first, then one fill per layer.
+    void ingest_stack(std::span<const double> x, std::span<const std::vector<double>> ys,
+                      const StackOptions& opts, const char* who);
+    void set_fill_data(std::size_t i, std::span<const double> x, std::span<const double> y1,
+                       std::span<const double> y2, const std::vector<bool>* exclude,
+                       const char* who);
 
     // Text (Axes only; a plane has none). Throw on a non-finite number.
     void ingest_text(TextContent c, TextStyle style, const char* who);

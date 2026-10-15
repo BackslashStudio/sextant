@@ -616,6 +616,10 @@ namespace lt {
     void test_reference_lines();
     void test_reference_lines_rendered();
 
+    // fill_between.cpp
+    void test_fill_between();
+    void test_fill_between_rendered();
+
     // text.cpp
     void test_text();
 

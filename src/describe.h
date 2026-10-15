@@ -13,7 +13,8 @@
 //
 // Leaf types: bool, int, float, double, std::size_t, std::string, Color,
 // std::optional<Color>, std::optional<double>, std::optional<float>,
-// std::optional<bool>, std::vector<double>, std::vector<std::string>, Colormap
+// std::optional<bool>, std::vector<double>, std::vector<bool>,
+// std::vector<std::string>, Colormap
 // (named by its name() and from_name(), since registered maps make it
 // open-ended), and the enums below, whose names enum_name() and
 // enum_from_name() give.
@@ -68,6 +69,9 @@ namespace sextant {
     SEXTANT_DESCRIBE(AxSpanOptions,
                      F(orientation) F(color) F(alpha) F(edgecolor) F(linewidth) F(from) F(to) F(name)
                      F(show_legend))
+    SEXTANT_DESCRIBE(FillOptions,
+                     F(orientation) F(color) F(alpha) F(edgecolor) F(linewidth) F(linestyle)
+                     F(drawstyle) F(exclude) F(interpolate) F(name) F(show_legend))
     SEXTANT_DESCRIBE(HeatmapOptions,
                      F(cmap) F(vmin) F(vmax) F(colorbar) F(name) F(origin) F(contours)
                      F(contour_color) F(contour_linewidth) F(contour_labels) F(contour_fontsize)

@@ -100,6 +100,31 @@ namespace sextant::read_back {
         return { p.x.get(), p.y.get(), p.z.get(), p.colors.get() };
     }
 
+    // A fill's three columns, one value each per point.
+    inline void check_fill(std::size_t nx, std::size_t n1, std::size_t n2, const char* who) {
+        if (n1 != nx || n2 != nx)
+            throw std::invalid_argument(std::string(who) + ": x, y1 and y2 must have the same length");
+    }
+
+    // FillOptions::exclude for `n` points, as the column the plot keeps (1 =
+    // excluded): empty, or one per point.
+    inline std::vector<double> take_exclude(const std::vector<bool>& exclude, std::size_t n,
+                                            const char* who) {
+        if (!exclude.empty() && exclude.size() != n)
+            throw std::invalid_argument(std::string(who) + ": exclude must be empty or one per point (got "
+                                        + std::to_string(exclude.size()) + " for "
+                                        + std::to_string(n) + " points)");
+        std::vector<double> out(exclude.size());
+        for (std::size_t i = 0; i < out.size(); ++i) out[i] = exclude[i] ? 1.0 : 0.0;
+        return out;
+    }
+
+    inline FillData to_data(const FillPlot& p) {
+        std::vector<bool> exclude(p.exclude.size());
+        for (std::size_t i = 0; i < exclude.size(); ++i) exclude[i] = p.excluded(i);
+        return { p.x.get(), p.y1.get(), p.y2.get(), std::move(exclude) };
+    }
+
     inline AxLineData to_data(const AxLinePlot& p) { return { p.value }; }
     inline AxSpanData to_data(const AxSpanPlot& p) { return { p.lo, p.hi }; }
 

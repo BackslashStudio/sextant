@@ -471,6 +471,17 @@ namespace sextant {
         Plane2D& imshow(std::span<const double> data, int rows, int cols,
                         HeatmapOptions opts = {});
 
+        // The area between two curves, as Axes::fill_between().
+        Plane2D& fill_between(std::span<const double> x, std::span<const double> y1,
+                              std::span<const double> y2, FillOptions opts = {});
+
+        Plane2D& fill_between(std::span<const double> x, std::span<const double> y1,
+                              double y2 = 0.0, FillOptions opts = {});
+
+        // Stacked areas, as Axes::stack().
+        Plane2D& stack(std::span<const double> x, std::span<const std::vector<double>> ys,
+                       StackOptions opts = {});
+
         // Position along the plane's normal axis, in data units.
         Plane2D& set_offset(double offset);
 
@@ -505,6 +516,9 @@ namespace sextant {
         std::size_t heatmap_count() const;
         HeatmapData heatmap_data(std::size_t i) const;
 
+        std::size_t fill_count() const;
+        FillData fill_data(std::size_t i) const;
+
         // Replace object i's data, as Axes::set_line_data() and its siblings.
         Plane2D& set_line_data(std::size_t i, const LineData& data);
 
@@ -528,6 +542,11 @@ namespace sextant {
 
         Plane2D& set_heatmap_data(std::size_t i, std::span<const double> data, int rows, int cols,
                                   Range xrange, Range yrange);
+
+        Plane2D& set_fill_data(std::size_t i, const FillData& data);
+
+        Plane2D& set_fill_data(std::size_t i, std::span<const double> x, std::span<const double> y1,
+                               std::span<const double> y2);
 
     private:
         struct Impl;

@@ -2860,8 +2860,210 @@ static void test_reference_lines() {
     fig->show(true);
 }
 
+// Step 36d-1: Axes::fill_between() and Plane2D::fill_between(): areas under a
+// curve and bands, exclude and interpolate, steps, the Vertical orientation
+// with an outline, log axes and NaN gaps, planes; the Data panel edits them.
+static void test_fill_between() {
+    using sextant::Orientation;
+    using V = std::vector<double>;
+    auto fig = sextant::Figure::create({.width = 1500, .height = 900, .title = "Filled areas"});
+    fig->suptitle("Filled areas (Axes::fill_between, Plane2D::fill_between)");
+
+    V x(200), y(200), lo(200), hi(200);
+    for (std::size_t i = 0; i < x.size(); ++i) {
+        x[i] = static_cast<double>(i) * 0.05;
+        y[i] = std::sin(x[i]) * 2.0 + 0.3 * std::sin(7.0 * x[i]);
+        const double spread = 0.3 + 0.15 * x[i];
+        lo[i] = y[i] - spread;
+        hi[i] = y[i] + spread;
+    }
+
+    // An area under a curve, and an error band under its line.
+    auto a1 = fig->add_subplot(2, 3, 1);
+    {
+        V base(x.size());
+        for (std::size_t i = 0; i < x.size(); ++i) base[i] = 0.5 + 0.4 * std::cos(x[i]);
+        a1->fill_between(x, base, 0.0, {.color = sextant::Color::Gray, .alpha = 0.4f, .name = "area to 0"});
+        a1->fill_between(x, lo, hi, {.alpha = 0.3f, .name = "band"});
+        a1->line(x, y, {.name = "signal"});
+        a1->legend();
+        a1->set_title("area to 0; a band under its line (edit in the Data panel)");
+    }
+
+    // Exclude and interpolate: green where y1 > y2 runs on to the crossings,
+    // red where y1 < y2 stops at the last kept point.
+    auto a2 = fig->add_subplot(2, 3, 2);
+    {
+        V y1(x.size()), y2(x.size());
+        std::vector<bool> below(x.size()), above(x.size());
+        for (std::size_t i = 0; i < x.size(); ++i) {
+            y1[i] = std::sin(x[i] * 1.3);
+            y2[i] = 0.4 * std::cos(x[i] * 0.7);
+            below[i] = !(y1[i] > y2[i]);
+            above[i] = !(y1[i] < y2[i]);
+        }
+        // Sparse points, so the steps at the crossings show.
+        V xs, s1, s2;
+        std::vector<bool> ex_b, ex_a;
+        for (std::size_t i = 0; i < x.size(); i += 8) {
+            xs.push_back(x[i]);
+            s1.push_back(y1[i]);
+            s2.push_back(y2[i]);
+            ex_b.push_back(below[i]);
+            ex_a.push_back(above[i]);
+        }
+        a2->fill_between(xs, s1, s2, {.color = sextant::Color{0.2f, 0.7f, 0.3f, 1.0f}, .alpha = 0.6f,
+                                      .exclude = ex_b, .interpolate = true, .name = "y1 > y2, interpolate"});
+        a2->fill_between(xs, s1, s2, {.color = sextant::Color::Red, .alpha = 0.6f, .exclude = ex_a,
+                                      .name = "y1 < y2, no interpolate"});
+        a2->line(xs, s1, {.color = sextant::Color::Black, .linewidth = 1.0f});
+        a2->line(xs, s2, {.color = sextant::Color::Black, .linewidth = 1.0f, .linestyle = sextant::LineStyle::Dashed});
+        a2->legend();
+        a2->set_title("exclude (matplotlib's where, inverted) and interpolate");
+    }
+
+    // Steps: the same fill pre, mid and post, each over its step line.
+    auto a3 = fig->add_subplot(2, 3, 3);
+    {
+        const V sx{0, 1, 2, 3, 4, 5};
+        const V sy{1, 3, 2, 4, 3, 5};
+        const sextant::DrawStyle styles[] = {sextant::DrawStyle::StepsPre, sextant::DrawStyle::StepsMid,
+                                             sextant::DrawStyle::StepsPost};
+        const char* names[] = {"steps_pre", "steps_mid", "steps_post"};
+        for (int k = 0; k < 3; ++k) {
+            V shifted(sy);
+            for (double& v : shifted) v += 6.0 * k;
+            a3->fill_between(sx, shifted, 6.0 * k, {.alpha = 0.4f, .drawstyle = styles[k], .name = names[k]});
+            a3->line(sx, shifted, {.color = sextant::Color::Black, .linewidth = 1.0f, .drawstyle = styles[k]});
+            a3->scatter(sx, shifted, {.color = sextant::Color::Black, .size = 5.0f});
+        }
+        a3->legend();
+        a3->set_title("drawstyle: pre, mid, post");
+    }
+
+    // Vertical: fill_betweenx, outlined and dashed.
+    auto a4 = fig->add_subplot(2, 3, 4);
+    {
+        V depth(60), t1(60), t2(60);
+        for (std::size_t i = 0; i < depth.size(); ++i) {
+            depth[i] = static_cast<double>(i) * 0.5;
+            t1[i] = 10.0 + 6.0 * std::exp(-depth[i] / 8.0);
+            t2[i] = t1[i] - 2.0 - 0.5 * std::sin(depth[i]);
+        }
+        a4->fill_between(depth, t2, t1, {.orientation = Orientation::Vertical, .alpha = 0.35f,
+                                         .edgecolor = sextant::Color::Black, .linewidth = 1.5f,
+                                         .linestyle = sextant::LineStyle::Dashed, .name = "range at depth"});
+        a4->line(t1, depth, {.name = "max"});
+        a4->set_ylim(30.0, 0.0);
+        a4->legend();
+        a4->set_title("Vertical (fill_betweenx), dashed outline, y reversed");
+    }
+
+    // Log y: the area to 0 runs off the bottom; NaN points leave gaps.
+    auto a5 = fig->add_subplot(2, 3, 5);
+    {
+        V e(x.size());
+        for (std::size_t i = 0; i < x.size(); ++i) e[i] = std::exp(x[i]);
+        V gappy(e);
+        for (std::size_t i = 60; i < 80; ++i) gappy[i] = std::nan("");
+        a5->fill_between(x, gappy, 0.0, {.alpha = 0.4f, .name = "exp(x) to 0, NaN gap"});
+        a5->line(x, e, {.name = "exp(x)"});
+        a5->set_yscale(sextant::Scale::Log);
+        a5->legend();
+        a5->set_title("log y: y2 = 0 runs off the bottom; a NaN run is a gap");
+    }
+
+    // Planes: a band on the floor, an area on a wall.
+    auto a6 = fig->add_subplot3d(2, 3, 6);
+    {
+        auto floor = a6->plane(sextant::PlaneOrientation::XY, 0.0);
+        floor->fill_between(x, lo, hi, {.alpha = 0.5f, .name = "band on XY"});
+        floor->line(x, y, {.name = "signal on XY"});
+        auto wall = a6->plane(sextant::PlaneOrientation::ZX, 3.0);
+        V zs(x.size());
+        for (std::size_t i = 0; i < x.size(); ++i) zs[i] = 1.0 + std::sin(x[i]) * 0.8;
+        wall->fill_between(x, zs, 0.0, {.orientation = Orientation::Vertical,
+                                        .color = sextant::Color{0.9f, 0.5f, 0.1f, 1.0f}, .alpha = 0.6f,
+                                        .linewidth = 1.0f, .name = "area on ZX"});
+        a6->legend();
+        a6->set_title("planes");
+    }
+
+    savefig_and_check_memory(fig, "test_fill_between");
+    fig->show(true);
+}
+
+// Step 36d-2: Axes::stack() and Plane2D::stack(): the four baselines, colors and
+// names, a Vertical stepped stack with outlines, NaN carried up, a plane; each
+// layer is an ordinary fill afterwards, edited alone in the Data panel.
+static void test_stack() {
+    using sextant::StackBaseline;
+    using V = std::vector<double>;
+    auto fig = sextant::Figure::create({.width = 1500, .height = 900, .title = "Stacked areas"});
+    fig->suptitle("Stacked areas (Axes::stack, Plane2D::stack)");
+
+    // Five bumps, each a layer, peaking at different x.
+    const std::size_t n = 120;
+    V x(n);
+    std::vector<V> ys(5, V(n));
+    for (std::size_t i = 0; i < n; ++i) {
+        x[i] = static_cast<double>(i) * 0.1;
+        for (std::size_t k = 0; k < ys.size(); ++k) {
+            const double c = 1.5 + 2.2 * static_cast<double>(k), w = 1.2 + 0.3 * static_cast<double>(k);
+            ys[k][i] = 0.2 + (1.0 + 0.4 * static_cast<double>(k)) * std::exp(-(x[i] - c) * (x[i] - c) / (2.0 * w * w));
+        }
+    }
+    const std::vector<std::string> names{"a", "b", "c", "d", "e"};
+
+    const std::pair<StackBaseline, const char*> baselines[] = {
+        {StackBaseline::Zero, "baseline Zero"},
+        {StackBaseline::Sym, "baseline Sym"},
+        {StackBaseline::Wiggle, "baseline Wiggle"},
+        {StackBaseline::WeightedWiggle, "baseline WeightedWiggle (a streamgraph)"},
+    };
+    for (int b = 0; b < 4; ++b) {
+        auto ax = fig->add_subplot(2, 3, b + 1);
+        ax->stack(x, ys, {.baseline = baselines[b].first, .names = names, .alpha = 0.85f});
+        if (b == 0) ax->legend();
+        ax->set_title(baselines[b].second);
+    }
+
+    // Vertical, stepped, outlined, own colors; a NaN in layer 1 carries up.
+    auto a5 = fig->add_subplot(2, 3, 5);
+    {
+        const V depth{0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+        std::vector<V> w{{1, 2, 2, 3, 2, 1, 1, 2, 3, 2},
+                         {2, 1, 1, 2, 3, 3, 2, 1, 1, 2},
+                         {1, 1, 2, 1, 1, 2, 3, 3, 2, 1}};
+        w[1][4] = std::nan("");
+        a5->stack(depth, w, {.orientation = sextant::Orientation::Vertical,
+                             .colors = {sextant::Color{0.85f, 0.35f, 0.2f, 1.0f}, sextant::Color{0.95f, 0.75f, 0.2f, 1.0f},
+                                        sextant::Color{0.3f, 0.6f, 0.8f, 1.0f}},
+                             .names = {"sand", "clay", "silt"}, .edgecolor = sextant::Color::Black,
+                             .linewidth = 1.0f, .drawstyle = sextant::DrawStyle::StepsMid});
+        a5->set_ylim(9.5, -0.5);
+        a5->legend();
+        a5->set_title("Vertical, steps_mid, outlined; NaN at depth 4 in clay");
+    }
+
+    // A stack on a plane.
+    auto a6 = fig->add_subplot3d(2, 3, 6);
+    {
+        auto wall = a6->plane(sextant::PlaneOrientation::ZX, 0.0);
+        wall->stack(x, std::span(ys).first(3), {.orientation = sextant::Orientation::Vertical, .baseline = StackBaseline::Sym,
+                                                    .names = {"a", "b", "c"}, .alpha = 0.7f});
+        a6->legend();
+        a6->set_title("a Sym stack up z on a ZX plane");
+    }
+
+    savefig_and_check_memory(fig, "test_stack");
+    fig->show(true);
+}
+
 int main() {
-    test_reference_lines();
+    test_stack();
+    // test_fill_between();
+    // test_reference_lines();
     // test_bar_orientation();
     // test_line_steps();
     // test_marker_sizes();

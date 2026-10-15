@@ -7,6 +7,7 @@
 #include "../rich_text.h"
 #include "../tick_style.h"
 #include "../contour.h"
+#include "../fill_geometry.h"
 #include "../renderer/marker_shape.h"
 #include "../renderer/error_bar_shape.h"
 #include "png_writer.h"
@@ -541,6 +542,32 @@ static void emit_axspan(std::ostringstream& o, const SvgAxesData& d, const AxSpa
     o << "/>\n";
 }
 
+// A fill as one <polygon> per region (fill_geometry.h, as the raster path),
+// its outline the polygon's stroke. A region whose curves cross pinches
+// there; the nonzero rule fills both lobes, as the raster's triangles do.
+static void emit_fill(std::ostringstream& o, const SvgAxesData& d, const FillPlot& p) {
+    const CoordTransform& tr = d.layout.tr;
+    const bool vert = p.vertical();
+    const std::vector<FillRun> runs = fill_runs(p, vert ? tr.ys : tr.xs, vert ? tr.xs : tr.ys);
+    const Color& c = *p.opts.color;
+    const float a = c.a * p.opts.alpha;
+    const bool edged = p.opts.linewidth > 0.0f && p.opts.linestyle != LineStyle::None;
+    for (const FillRun& run : runs) {
+        o << "    <polygon fill=\"" << rgb(c) << "\"";
+        if (a < 1.0f) o << " fill-opacity=\"" << a << "\"";
+        if (edged) {
+            const Color ec = fill_edge(p);
+            o << " stroke=\"" << rgb(ec) << "\" stroke-opacity=\"" << ec.a << "\" stroke-width=\""
+              << p.opts.linewidth << "\"" << dash_attr(p.opts.linestyle);
+        }
+        o << " points=\"";
+        fill_outline(run, [&](double r, double v) {
+            o << tr.scale_to_px(vert ? v : r) << "," << tr.scale_to_py(vert ? r : v) << " ";
+        });
+        o << "\"/>\n";
+    }
+}
+
 // The plot objects in call order, each with its error bars, as
 // DataRenderer::draw_plots().
 static void emit_object(std::ostringstream& o, const SvgAxesData& d, const ObjectRef& r) {
@@ -570,6 +597,9 @@ static void emit_object(std::ostringstream& o, const SvgAxesData& d, const Objec
             break;
         case PlotKind::AxSpan:
             emit_axspan(o, d, d.axspans[r.index]);
+            break;
+        case PlotKind::Fill:
+            emit_fill(o, d, d.fills[r.index]);
             break;
         default: break;
     }
@@ -956,6 +986,10 @@ static void emit_legend(std::ostringstream& o, const SvgAxesData& d, std::size_t
             o << "    <rect x=\"" << sx0 << "\" y=\"" << cy - 5.f
               << "\" width=\"" << kLegendSwatchW << "\" height=\"10\" fill=\"" << fill << "\"";
             if (e.color.a < 1.0f) o << " fill-opacity=\"" << e.color.a << "\"";
+            // A fill's outline (alpha 0 = none), 1 px as a marker key's.
+            if (e.edge.a > 0.0f)
+                o << " stroke=\"" << rgb(e.edge) << "\" stroke-opacity=\"" << e.edge.a
+                  << "\" stroke-width=\"1\"";
             o << "/>\n";
         }
 

@@ -2,6 +2,7 @@
 #include "axis_limits.h"
 #include "read_back.h"
 #include "rich_text.h"
+#include "stack_curves.h"
 #include "ticker.h"
 #include <stdexcept>
 #include <string>
@@ -558,6 +559,69 @@ void Axes::Impl::ingest_axspan(double lo, double hi, AxSpanOptions opts, const c
     axspans.push_back({ lo, hi, std::move(opts), next_snapshot_generation(), next_object_id() });
 }
 
+// The mask is taken out of the options and kept as data, as bar bases are.
+void Axes::Impl::ingest_fill(std::span<const double> x, std::span<const double> y1,
+                             std::span<const double> y2, FillOptions opts, const char* who) {
+    read_back::check_fill(x.size(), y1.size(), y2.size(), who);
+    std::vector<double> exclude = read_back::take_exclude(opts.exclude, x.size(), who);
+    opts.exclude.clear();
+    warn_math(mathtext, who, opts.name);
+    cycle->resolve(opts.color);
+    fills.push_back({
+        read_back::own(x),
+        read_back::own(y1),
+        read_back::own(y2),
+        std::move(opts),
+        next_snapshot_generation(),
+        next_object_id(),
+        std::move(exclude),
+    });
+}
+
+Axes& Axes::fill_between(std::span<const double> x, std::span<const double> y1,
+                         std::span<const double> y2, FillOptions opts) {
+    d->ingest_fill(x, y1, y2, std::move(opts), "fill_between");
+    return *this;
+}
+
+Axes& Axes::fill_between(std::span<const double> x, std::span<const double> y1, double y2,
+                         FillOptions opts) {
+    const std::vector<double> base(x.size(), y2);
+    d->ingest_fill(x, y1, base, std::move(opts), "fill_between");
+    return *this;
+}
+
+void Axes::Impl::ingest_stack(std::span<const double> x, std::span<const std::vector<double>> ys,
+                              const StackOptions& opts, const char* who) {
+    for (const std::vector<double>& y : ys)
+        if (y.size() != x.size())
+            throw std::invalid_argument(std::string(who) + ": every layer needs one value per x");
+    if (!opts.colors.empty() && opts.colors.size() != ys.size())
+        throw std::invalid_argument(std::string(who) + ": colors needs one per layer");
+    if (!opts.names.empty() && opts.names.size() != ys.size())
+        throw std::invalid_argument(std::string(who) + ": names needs one per layer");
+    const std::vector<std::vector<double>> curves = stack_curves(ys, x.size(), opts.baseline);
+    for (std::size_t k = 0; k < ys.size(); ++k) {
+        FillOptions f;
+        f.orientation = opts.orientation;
+        if (!opts.colors.empty()) f.color = opts.colors[k];
+        f.alpha = opts.alpha;
+        f.edgecolor = opts.edgecolor;
+        f.linewidth = opts.linewidth;
+        f.linestyle = opts.linestyle;
+        f.drawstyle = opts.drawstyle;
+        if (!opts.names.empty()) f.name = opts.names[k];
+        f.show_legend = opts.show_legend;
+        ingest_fill(x, curves[k], curves[k + 1], std::move(f), who);
+    }
+}
+
+Axes& Axes::stack(std::span<const double> x, std::span<const std::vector<double>> ys,
+                  StackOptions opts) {
+    d->ingest_stack(x, ys, opts, "stack");
+    return *this;
+}
+
 Axes& Axes::axline(double value, AxLineOptions opts) {
     d->ingest_axline(value, std::move(opts), "axline");
     return *this;
@@ -809,6 +873,12 @@ TextData Axes::text_data(std::size_t i) const {
     return read_back::to_data(read_back::at(d->texts, i, "text_data"));
 }
 
+std::size_t Axes::fill_count() const      { return d->fills.size(); }
+
+FillData Axes::fill_data(std::size_t i) const {
+    return read_back::to_data(read_back::at(d->fills, i, "fill_data"));
+}
+
 std::size_t Axes::axline_count() const    { return d->axlines.size(); }
 std::size_t Axes::axspan_count() const    { return d->axspans.size(); }
 
@@ -912,6 +982,22 @@ void Axes::Impl::set_bar_data(std::size_t i, std::span<const double> x, std::spa
     if (bottom) p.bottom = std::move(bases);
 }
 
+// The mask stays while the point count does (a span overload), else it goes.
+void Axes::Impl::set_fill_data(std::size_t i, std::span<const double> x, std::span<const double> y1,
+                               std::span<const double> y2, const std::vector<bool>* exclude,
+                               const char* who) {
+    FillPlot& p = read_back::at(fills, i, who);
+    read_back::check_fill(x.size(), y1.size(), y2.size(), who);
+    std::vector<double> mask;
+    if (exclude) mask = read_back::take_exclude(*exclude, x.size(), who);
+    if (exclude) p.exclude = std::move(mask);
+    else if (x.size() != p.x.size()) p.exclude = std::vector<double>{};
+    p.x = read_back::own(x);
+    p.y1 = read_back::own(y1);
+    p.y2 = read_back::own(y2);
+    p.data_stamp = next_snapshot_generation();
+}
+
 void Axes::Impl::set_heatmap_data(std::size_t i, std::span<const double> data, int rows, int cols,
                                   Range xrange, Range yrange, const char* who) {
     HeatmapPlot& p = read_back::at(heatmaps, i, who);
@@ -955,6 +1041,15 @@ Axes& Axes::set_bar_data(std::size_t i, const BarData& data) {
 }
 Axes& Axes::set_bar_data(std::size_t i, std::span<const double> x, std::span<const double> height) {
     d->set_bar_data(i, x, height, nullptr, "set_bar_data");
+    return *this;
+}
+Axes& Axes::set_fill_data(std::size_t i, const FillData& data) {
+    d->set_fill_data(i, data.x, data.y1, data.y2, &data.exclude, "set_fill_data");
+    return *this;
+}
+Axes& Axes::set_fill_data(std::size_t i, std::span<const double> x, std::span<const double> y1,
+                          std::span<const double> y2) {
+    d->set_fill_data(i, x, y1, y2, nullptr, "set_fill_data");
     return *this;
 }
 Axes& Axes::set_heatmap_data(std::size_t i, const HeatmapData& data) {

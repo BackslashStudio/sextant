@@ -32,8 +32,9 @@ namespace sextant {
         LineStyle style = LineStyle::Solid; // Line entries only
         MarkerStyle marker = MarkerStyle::Circle; // Marker entries only
 
-        // Marker entries only; alpha 0 (default) = no edge. scatter_z keys are
-        // white with a black edge. Edged Cross/Plus are stroked in `edge`.
+        // Marker and Bar entries only; alpha 0 (default) = no edge. scatter_z
+        // keys are white with a black edge. Edged Cross/Plus are stroked in
+        // `edge`; a Bar entry's edge is a fill's outline.
         Color edge = {0.0f, 0.0f, 0.0f, 0.0f};
 
         // Line entries only: draw the swatch with `cmap` swept along it (the key

@@ -110,6 +110,25 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot& snap) 
         out.push_back(std::move(t));
     }
 
+    // Fills: the run coordinate and the two curves, named for the orientation,
+    // then the mask (1 = excluded) when there is one.
+    for (std::size_t i = 0; i < snap.fills.size(); ++i) {
+        const auto& fp = snap.fills[i];
+        PlotDataTable t;
+        t.kind = PlotKind::Fill;
+        t.plot_index = static_cast<int>(i);
+        t.data_stamp = fp.data_stamp;
+        t.id = fp.id;
+        t.label = pick_label(fp.opts.name, "fill", static_cast<int>(i));
+        const bool v = fp.vertical();
+        t.columns.push_back({v ? "y" : "x", fp.x.data(), fp.x.size()});
+        t.columns.push_back({v ? "x1" : "y1", fp.y1.data(), fp.y1.size()});
+        t.columns.push_back({v ? "x2" : "y2", fp.y2.data(), fp.y2.size()});
+        if (!fp.exclude.empty())
+            t.columns.push_back({"exclude", fp.exclude.data(), fp.exclude.size()});
+        out.push_back(std::move(t));
+    }
+
     // Reference lines and spans: one fixed row, named for the axis they sit on.
     for (std::size_t i = 0; i < snap.axlines.size(); ++i) {
         const auto& ap = snap.axlines[i];
