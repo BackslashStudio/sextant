@@ -11,6 +11,7 @@
 #include "../line_dash.h"
 #include "../line_steps.h"
 #include "../fill_geometry.h"
+#include "../quiver_geometry.h"
 #include "../reference_lines.h"
 #include "error_bar_shape.h"
 #include <glad/glad.h>
@@ -149,6 +150,76 @@ void main() {
     }
     FragColor = uColor;
 }
+)";
+
+    // Quiver arrows: one instance per arrow, its tail and tip in scale space
+    // minus an anchor (uScale/uOffset map them to pixels, so pan/zoom reuse the
+    // buffer; at extreme zoom they are pixels with an identity map). The shape
+    // is built here in pixels, as quiver_geometry.h's arrow_outline(): outline
+    // points 0..6 (the shaft's corners at the tail, the shaft's and the head's at
+    // the head's base, the tip, then back down the other side), drawn as the
+    // head (2,3,4) and the shaft (0,1,5), (0,5,6). An arrow shorter than its
+    // head is the head alone, scaled to its length; the shaft's six vertices
+    // collapse off screen. The color is per instance for a colormapped quiver,
+    // else a constant attribute (the attribute array disabled).
+    static constexpr char k_quiver_vert[] = R"(
+#version 410 core
+layout(location = 0) in float aVertex;   // 0..8: which corner of the three triangles
+layout(location = 1) in vec2 aTail;      // instance
+layout(location = 2) in vec2 aTip;       // instance
+layout(location = 3) in vec4 aColor;     // instance (colormapped), else constant
+out vec4 vColor;
+uniform float uAlpha;        // the quiver's alpha, on top of the color's own
+uniform vec2  uResolution;
+uniform vec2  uScale;
+uniform vec2  uOffset;
+uniform float uWidth;        // logical pixels
+uniform float uHeadWidth;
+uniform float uHeadLength;
+const int kCorner[9] = int[9](2, 3, 4, 0, 1, 5, 0, 5, 6);
+void main() {
+    vec2 t = uScale * aTail + uOffset;
+    vec2 h = uScale * aTip + uOffset;
+    vec2 d = h - t;
+    float len = length(d);
+    int v = int(aVertex + 0.5);
+    float hl = max(uHeadLength, 0.0);
+    bool head_only = len < hl;
+    if (!(len > 0.01) || (head_only && v >= 3)) {
+        gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+        return;
+    }
+    vec2 u = d / len;
+    vec2 n = vec2(-u.y, u.x);
+    float hw = 0.5 * max(uHeadWidth, 0.0);
+    float sw = 0.5 * max(uWidth, 0.0);
+    if (head_only) {
+        hw *= len / hl;
+        hl = len;
+    }
+    vec2 b = h - u * hl;
+    int k = kCorner[v];
+    vec2 px;
+    if (k == 3) {
+        px = h;
+    } else {
+        float side = k < 3 ? 1.0 : -1.0;
+        vec2 base = (k == 0 || k == 6) ? t : b;
+        float w = (k == 2 || k == 4) ? hw : sw;
+        px = base + n * (side * w);
+    }
+    vec2 ndc = (px / uResolution) * 2.0 - 1.0;
+    ndc.y = -ndc.y;
+    gl_Position = vec4(ndc, 0.0, 1.0);
+    vColor = vec4(aColor.rgb, aColor.a * uAlpha);
+}
+)";
+
+    static constexpr char k_quiver_frag[] = R"(
+#version 410 core
+in vec4 vColor;
+out vec4 FragColor;
+void main() { FragColor = vColor; }
 )";
 
     // The marker shapes as one signed distance in quad units (negative inside; the
@@ -1386,6 +1457,21 @@ void main() {
 
         glBindVertexArray(0);
 
+        // --- quiver (instanced arrows) ---
+        quiver_program_ = build_program(k_quiver_vert, k_quiver_frag);
+        glGenVertexArrays(1, &quiver_vao_);
+        glGenBuffers(1, &quiver_corner_vbo_);
+        glBindVertexArray(quiver_vao_);
+        static const float corners9[9] = {0.f, 1.f, 2.f, 3.f, 4.f, 5.f, 6.f, 7.f, 8.f};
+        glBindBuffer(GL_ARRAY_BUFFER, quiver_corner_vbo_);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(corners9), corners9, GL_STATIC_DRAW);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 1, GL_FLOAT, GL_FALSE, sizeof(float), nullptr);
+        glVertexAttribDivisor(0, 0);
+        // Attributes 1 (tail) and 2 (tip) are pointed at each quiver's buffer at
+        // draw time.
+        glBindVertexArray(0);
+
         // --- heatmap ---
         heatmap_program_ = build_program(k_heatmap_vert, k_heatmap_frag);
         glGenVertexArrays(1, &heatmap_vao_);
@@ -1598,6 +1684,12 @@ void main() {
             loc(lineseg_program_, "uHalfWidth"), loc(lineseg_program_, "uDash"),
             loc(lineseg_program_, "uDashPeriod"), loc(lineseg_program_, "uDistScale")
         };
+        quiver_u_ = {
+            loc(quiver_program_, "uResolution"), loc(quiver_program_, "uAlpha"),
+            loc(quiver_program_, "uScale"), loc(quiver_program_, "uOffset"),
+            loc(quiver_program_, "uWidth"), loc(quiver_program_, "uHeadWidth"),
+            loc(quiver_program_, "uHeadLength")
+        };
         scatter_u_ = {
             loc(scatter_program_, "uResolution"), loc(scatter_program_, "uColor"),
             loc(scatter_program_, "uMarker"),
@@ -1742,6 +1834,10 @@ void main() {
         if (lineseg_vao_) glDeleteVertexArrays(1, &lineseg_vao_);
         if (lineseg_program_) glDeleteProgram(lineseg_program_);
 
+        if (quiver_corner_vbo_) glDeleteBuffers(1, &quiver_corner_vbo_);
+        if (quiver_vao_) glDeleteVertexArrays(1, &quiver_vao_);
+        if (quiver_program_) glDeleteProgram(quiver_program_);
+
         if (scatter_inst_vbo_) glDeleteBuffers(1, &scatter_inst_vbo_);
         if (scatter_quad_vbo_) glDeleteBuffers(1, &scatter_quad_vbo_);
         if (scatter_vao_) glDeleteVertexArrays(1, &scatter_vao_);
@@ -1852,6 +1948,7 @@ void main() {
             if (e.edge_vbo) glDeleteBuffers(1, &e.edge_vbo);
         }
         for (auto& [k, e]: fill_cache_) if (e.vbo) glDeleteBuffers(1, &e.vbo);
+        for (auto& [k, e]: quiver_cache_) if (e.vbo) glDeleteBuffers(1, &e.vbo);
         for (auto* m: {
                  &line_err_cache_, &bar_err_cache_,
                  &scatter_err_cache_, &scatterz_err_cache_
@@ -2542,6 +2639,9 @@ void main() {
             case PlotKind::Fill:
                 draw_fill(snap.fills[r.index], static_cast<int>(r.index), tr, pr);
                 break;
+            case PlotKind::Quiver:
+                draw_quiver(snap.quivers[r.index], static_cast<int>(r.index), tr, pr);
+                break;
             default: break;
         }
     }
@@ -2824,6 +2924,123 @@ void main() {
             glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, static_cast<GLsizei>(m));
         }
 
+        glBindVertexArray(0);
+        glUseProgram(0);
+        end_pass();
+    }
+
+    // -------------------------------------------------------------------------
+    // draw_quiver
+    // -------------------------------------------------------------------------
+    void DataRenderer::draw_quiver(const QuiverPlot& p, int index, const CoordTransform& tr,
+                                   const PlotRect& pr) {
+        const CacheKey key{axes_index_, plane_index_, index};
+        QuiverCache& e = quiver_cache_[key];
+        const bool precise = float_resolves_view(e.span_x, tr.sxspan(), tr.pw)
+                             && float_resolves_view(e.span_y, tr.syspan(), tr.ph);
+        const bool ok = e.generation != 0
+                        && e.generation == data_generation_
+                        && same_scales(e.tr, tr)
+                        && e.amp == p.amp()
+                        && e.pivot == p.opts.pivot
+                        && e.mapped == p.colormapped()
+                        && (!e.mapped || (e.cmap == p.opts.cmap && e.vmin == p.opts.vmin
+                                          && e.vmax == p.opts.vmax))
+                        && (e.data_space ? precise : (!precise && same_view(e.tr, tr)));
+        if (!ok) {
+            // The arrows' ends in scale space, then anchored at their extent's
+            // midpoint (residuals <= half the span), as scatter centres are. A
+            // colormapped quiver's colors are baked in after each arrow's ends.
+            const bool mapped = p.colormapped();
+            std::vector<double> ends;
+            std::vector<Color> colors;
+            for_each_quiver_arrow(p, tr.xs, tr.ys,
+                                  [&](std::size_t i, double tx, double ty, double hx, double hy) {
+                ends.insert(ends.end(), {tx, ty, hx, hy});
+                if (mapped) colors.push_back(quiver_arrow_color(p, i));
+            });
+            double xlo = std::numeric_limits<double>::max(), xhi = -xlo, ylo = xlo, yhi = -xlo;
+            for (std::size_t k = 0; k + 1 < ends.size(); k += 2) {
+                xlo = std::min(xlo, ends[k]);
+                xhi = std::max(xhi, ends[k]);
+                ylo = std::min(ylo, ends[k + 1]);
+                yhi = std::max(yhi, ends[k + 1]);
+            }
+            if (xlo > xhi) xlo = xhi = ylo = yhi = 0.0;
+            e.anchor_x = 0.5 * (xlo + xhi);
+            e.span_x = xhi - xlo;
+            e.anchor_y = 0.5 * (ylo + yhi);
+            e.span_y = yhi - ylo;
+            e.data_space = float_resolves_view(e.span_x, tr.sxspan(), tr.pw)
+                           && float_resolves_view(e.span_y, tr.syspan(), tr.ph);
+
+            std::vector<float> inst;
+            inst.reserve(ends.size() * (mapped ? 2 : 1));
+            for (std::size_t k = 0; k + 1 < ends.size(); k += 2) {
+                if (e.data_space) {
+                    inst.push_back(static_cast<float>(ends[k] - e.anchor_x));
+                    inst.push_back(static_cast<float>(ends[k + 1] - e.anchor_y));
+                } else {
+                    inst.push_back(tr.scale_to_px(ends[k]));
+                    inst.push_back(tr.scale_to_py(ends[k + 1]));
+                }
+                if (mapped && k % 4 == 2) {
+                    const Color& c = colors[k / 4];
+                    inst.insert(inst.end(), {c.r, c.g, c.b, c.a});
+                }
+            }
+            if (!inst.empty()) {
+                if (e.vbo == 0) glGenBuffers(1, &e.vbo);
+                glBindBuffer(GL_ARRAY_BUFFER, e.vbo);
+                glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(inst.size() * sizeof(float)),
+                             inst.data(), GL_DYNAMIC_DRAW);
+            }
+            e.instances = static_cast<int>(ends.size() / 4);
+            e.generation = data_generation_;
+            e.amp = p.amp();
+            e.pivot = p.opts.pivot;
+            e.mapped = mapped;
+            e.cmap = p.opts.cmap;
+            e.vmin = p.opts.vmin;
+            e.vmax = p.opts.vmax;
+            e.tr = tr;
+        }
+        if (e.instances <= 0 || e.vbo == 0) return;
+
+        begin_pass(pr, tr.win_h);
+        glUseProgram(quiver_program_);
+        const float res[2] = {tr.win_w, tr.win_h};
+        glUniform2fv(quiver_u_.resolution, 1, res);
+        glBindVertexArray(quiver_vao_);
+        glBindBuffer(GL_ARRAY_BUFFER, e.vbo);
+        const GLsizei stride = (e.mapped ? 8 : 4) * sizeof(float);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, stride, nullptr);
+        glVertexAttribDivisor(1, 1);
+        glEnableVertexAttribArray(2);
+        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, stride,
+                              reinterpret_cast<void *>(2 * sizeof(float)));
+        glVertexAttribDivisor(2, 1);
+        if (e.mapped) {
+            glEnableVertexAttribArray(3);
+            glVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, stride,
+                                  reinterpret_cast<void *>(4 * sizeof(float)));
+            glVertexAttribDivisor(3, 1);
+        } else {
+            const Color& c = *p.opts.color;
+            glDisableVertexAttribArray(3);
+            glVertexAttrib4f(3, c.r, c.g, c.b, c.a);
+        }
+        const DataToPixel m = e.data_space
+                                  ? data_to_pixel(tr, e.anchor_x, e.anchor_y)
+                                  : DataToPixel{{1.0f, 1.0f}, {0.0f, 0.0f}};
+        glUniform2fv(quiver_u_.scale, 1, m.scale);
+        glUniform2fv(quiver_u_.offset, 1, m.offset);
+        glUniform1f(quiver_u_.width, p.opts.width);
+        glUniform1f(quiver_u_.head_width, p.opts.head_width);
+        glUniform1f(quiver_u_.head_length, p.opts.head_length);
+        glUniform1f(quiver_u_.alpha, p.opts.alpha);
+        glDrawArraysInstanced(GL_TRIANGLES, 0, 9, e.instances);
         glBindVertexArray(0);
         glUseProgram(0);
         end_pass();

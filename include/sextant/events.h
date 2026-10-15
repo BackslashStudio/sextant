@@ -32,7 +32,8 @@ namespace sextant {
     enum class PickKind : int {
         None,
         Line, Scatter, ScatterZ, Bar, Heatmap,                // 2D kinds, on an Axes or a Plane2D
-        Bar3D, Surface, SurfaceTri, Scatter3D, Line3D          // 3D kinds
+        Bar3D, Surface, SurfaceTri, Scatter3D, Line3D,         // 3D kinds
+        Quiver                                                // 2D, appended
     };
 
     // What sextant itself did with the input. Informational only: an event is

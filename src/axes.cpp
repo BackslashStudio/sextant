@@ -2,6 +2,7 @@
 #include "axis_limits.h"
 #include "read_back.h"
 #include "rich_text.h"
+#include "quiver_geometry.h"
 #include "stack_curves.h"
 #include "ticker.h"
 #include <stdexcept>
@@ -622,6 +623,44 @@ Axes& Axes::stack(std::span<const double> x, std::span<const std::vector<double>
     return *this;
 }
 
+// An unset amp is chosen from the data here and kept, as matplotlib's.
+// A colormapped quiver keeps a cycle color without using one up, as the 3D
+// kinds' colormapped objects do.
+void Axes::Impl::ingest_quiver(std::span<const double> x, std::span<const double> y,
+                               std::span<const double> u, std::span<const double> v,
+                               const std::span<const double>* c, QuiverOptions opts, const char* who) {
+    read_back::check_quiver(x.size(), y.size(), u.size(), v.size(), who);
+    if (c && c->size() != x.size())
+        throw std::invalid_argument(std::string(who) + ": c must have one value per arrow");
+    if (opts.amp && !(std::isfinite(*opts.amp) && *opts.amp > 0.0))
+        throw std::invalid_argument(std::string(who) + ": amp must be finite and > 0");
+    if (!opts.amp) opts.amp = quiver_auto_amp(x, y, u, v);
+    warn_math(mathtext, who, opts.name);
+    cycle->resolve(opts.color, !c);
+    quivers.push_back({
+        read_back::own(x),
+        read_back::own(y),
+        read_back::own(u),
+        read_back::own(v),
+        std::move(opts),
+        next_snapshot_generation(),
+        next_object_id(),
+        c ? CowVec<double>(read_back::own(*c)) : CowVec<double>{},
+    });
+}
+
+Axes& Axes::quiver(std::span<const double> x, std::span<const double> y, std::span<const double> u,
+                   std::span<const double> v, QuiverOptions opts) {
+    d->ingest_quiver(x, y, u, v, nullptr, std::move(opts), "quiver");
+    return *this;
+}
+
+Axes& Axes::quiver(std::span<const double> x, std::span<const double> y, std::span<const double> u,
+                   std::span<const double> v, std::span<const double> c, QuiverOptions opts) {
+    d->ingest_quiver(x, y, u, v, &c, std::move(opts), "quiver");
+    return *this;
+}
+
 Axes& Axes::axline(double value, AxLineOptions opts) {
     d->ingest_axline(value, std::move(opts), "axline");
     return *this;
@@ -879,6 +918,12 @@ FillData Axes::fill_data(std::size_t i) const {
     return read_back::to_data(read_back::at(d->fills, i, "fill_data"));
 }
 
+std::size_t Axes::quiver_count() const    { return d->quivers.size(); }
+
+QuiverData Axes::quiver_data(std::size_t i) const {
+    return read_back::to_data(read_back::at(d->quivers, i, "quiver_data"));
+}
+
 std::size_t Axes::axline_count() const    { return d->axlines.size(); }
 std::size_t Axes::axspan_count() const    { return d->axspans.size(); }
 
@@ -998,6 +1043,21 @@ void Axes::Impl::set_fill_data(std::size_t i, std::span<const double> x, std::sp
     p.data_stamp = next_snapshot_generation();
 }
 
+void Axes::Impl::set_quiver_data(std::size_t i, std::span<const double> x, std::span<const double> y,
+                                 std::span<const double> u, std::span<const double> v,
+                                 const std::vector<double>* c, const char* who) {
+    QuiverPlot& p = read_back::at(quivers, i, who);
+    read_back::check_quiver(x.size(), y.size(), u.size(), v.size(), who);
+    if (c) read_back::check_quiver_c(c->size(), x.size(), who);
+    if (c) p.c = read_back::own(std::span<const double>(*c));
+    else if (x.size() != p.x.size()) p.c = CowVec<double>{};
+    p.x = read_back::own(x);
+    p.y = read_back::own(y);
+    p.u = read_back::own(u);
+    p.v = read_back::own(v);
+    p.data_stamp = next_snapshot_generation();
+}
+
 void Axes::Impl::set_heatmap_data(std::size_t i, std::span<const double> data, int rows, int cols,
                                   Range xrange, Range yrange, const char* who) {
     HeatmapPlot& p = read_back::at(heatmaps, i, who);
@@ -1050,6 +1110,15 @@ Axes& Axes::set_fill_data(std::size_t i, const FillData& data) {
 Axes& Axes::set_fill_data(std::size_t i, std::span<const double> x, std::span<const double> y1,
                           std::span<const double> y2) {
     d->set_fill_data(i, x, y1, y2, nullptr, "set_fill_data");
+    return *this;
+}
+Axes& Axes::set_quiver_data(std::size_t i, const QuiverData& data) {
+    d->set_quiver_data(i, data.x, data.y, data.u, data.v, &data.c, "set_quiver_data");
+    return *this;
+}
+Axes& Axes::set_quiver_data(std::size_t i, std::span<const double> x, std::span<const double> y,
+                            std::span<const double> u, std::span<const double> v) {
+    d->set_quiver_data(i, x, y, u, v, nullptr, "set_quiver_data");
     return *this;
 }
 Axes& Axes::set_heatmap_data(std::size_t i, const HeatmapData& data) {

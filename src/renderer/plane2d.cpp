@@ -1,6 +1,7 @@
 #include "plane2d.h"
 #include "../colormaps.h"
 #include "../fill_geometry.h"
+#include "../quiver_geometry.h"
 #include "../line_steps.h"
 #include "error_bar_shape.h"
 #include "marker_shape.h"
@@ -392,6 +393,28 @@ namespace sextant {
                         }
                         b.close();
                     }
+                    break;
+                }
+
+                case PlotKind::Quiver: {
+                    // Each arrow's triangles in plane coordinates. Its pixel sizes
+                    // (shaft, head) go through px_u/px_v, as error-bar caps do.
+                    const auto& qp = s.quivers[r.index];
+                    b.open(Kind::Tri);
+                    for_each_quiver_arrow(qp, AxisScale{}, AxisScale{},
+                                          [&](std::size_t i, double tx, double ty, double hx, double hy) {
+                        const Color c = with_alpha(quiver_arrow_color(qp, i), qp.opts.alpha);
+                        float pts[14];
+                        const int n = arrow_outline(static_cast<float>(tx / px_u),
+                                                    static_cast<float>(ty / px_v),
+                                                    static_cast<float>(hx / px_u),
+                                                    static_cast<float>(hy / px_v), qp.opts, pts);
+                        auto at = [&](int k) { return b.at(pts[2 * k] * px_u, pts[2 * k + 1] * px_v); };
+                        arrow_triangles(n, [&](int i, int j, int k) {
+                            b.g.tris.push_back({{at(i), at(j), at(k)}, c});
+                        });
+                    });
+                    b.close();
                     break;
                 }
 

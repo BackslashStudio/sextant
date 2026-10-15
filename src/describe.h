@@ -72,6 +72,9 @@ namespace sextant {
     SEXTANT_DESCRIBE(FillOptions,
                      F(orientation) F(color) F(alpha) F(edgecolor) F(linewidth) F(linestyle)
                      F(drawstyle) F(exclude) F(interpolate) F(name) F(show_legend))
+    SEXTANT_DESCRIBE(QuiverOptions,
+                     F(color) F(alpha) F(cmap) F(vmin) F(vmax) F(colorbar) F(amp) F(pivot) F(width) F(head_width) F(head_length) F(name)
+                     F(show_legend) F(hint_labels))
     SEXTANT_DESCRIBE(HeatmapOptions,
                      F(cmap) F(vmin) F(vmax) F(colorbar) F(name) F(origin) F(contours)
                      F(contour_color) F(contour_linewidth) F(contour_labels) F(contour_fontsize)
@@ -218,6 +221,9 @@ namespace sextant {
                        {"steps_mid", DrawStyle::StepsMid}, {"steps_post", DrawStyle::StepsPost})
     SEXTANT_ENUM_NAMES(Orientation,
                        {"vertical", Orientation::Vertical}, {"horizontal", Orientation::Horizontal})
+    SEXTANT_ENUM_NAMES(QuiverPivot,
+                       {"tail", QuiverPivot::Tail}, {"middle", QuiverPivot::Middle},
+                       {"tip", QuiverPivot::Tip})
     SEXTANT_ENUM_NAMES(MarkerStyle,
                        {"none", MarkerStyle::None}, {"circle", MarkerStyle::Circle},
                        {"square", MarkerStyle::Square}, {"triangle", MarkerStyle::Triangle},

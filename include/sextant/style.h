@@ -451,6 +451,49 @@ namespace sextant {
         bool show_legend = true;
     };
 
+    // Which part of a quiver arrow sits on its (x, y): the tail, the middle or
+    // the tip.
+    enum class QuiverPivot { Tail, Middle, Tip };
+
+    // An arrow field (Axes::quiver()).
+    struct QuiverOptions {
+        // Unset = the next cycle color. With a `c` per arrow (quiver(x, y, u, v,
+        // c)) each arrow is its c through cmap/vmin/vmax instead (a cyclic map
+        // wraps), `color` is unused, and the cycle is not advanced.
+        std::optional<Color> color;
+        float alpha = 1.0f; // multiplies either color's own alpha
+        Colormap cmap = Colormap::Viridis;
+        float vmin = 0.0f;
+        float vmax = 1.0f;
+        // A colorbar for the mapped colors (only with `c`); `name` labels it.
+        bool colorbar = false;
+
+        // Data units of arrow per unit of vector: an arrow runs from (x, y) to
+        // (x + amp*u, y + amp*v), so it points along (u, v) only where one
+        // unit is as long on both axes (Axes::set_aspect). Unset = chosen at the
+        // call from the data, as matplotlib does: the mean arrow becomes the x
+        // extent of the points / (1.8 * max(10, sqrt(N))). The chosen value is
+        // kept (read back through the panel; set_quiver_data() leaves it), so the
+        // frames of an animation stay comparable. matplotlib's `scale` is this
+        // one's inverse (named apart from it, so pyplot keeps `scale`).
+        std::optional<double> amp;
+        QuiverPivot pivot = QuiverPivot::Tail;
+
+        // The arrow's shape in pixels: a shaft `width` wide, then a triangular
+        // head `head_length` long and `head_width` across. An arrow shorter than
+        // its head is all head, scaled down to the arrow's length.
+        float width = 2.0f;
+        float head_width = 7.0f;
+        float head_length = 8.0f;
+
+        std::string name;
+        bool show_legend = true; // see LineOptions::show_legend
+
+        // See LineOptions::hint_labels. Default hover text is "x=.., y=..,
+        // u=.., v=.." (plus ", c=.." with `c`), at the arrow's (x, y).
+        std::vector<std::string> hint_labels;
+    };
+
     // An axis span in data coordinates. For a heatmap, `lo`/`hi` are the outer
     // cell edges, so cell size is (hi - lo) / N. lo > hi mirrors the image;
     // lo == hi is invalid.
@@ -875,6 +918,14 @@ namespace sextant {
     struct FillData {
         std::vector<double> x, y1, y2;
         std::vector<bool> exclude;
+    };
+
+    // Axes::quiver(): each arrow's position and vector, one value each per
+    // arrow, and `c`, the values its colors map (empty = one flat color).
+    // set_quiver_data(i, QuiverData) takes `c` as given (empty or one per
+    // arrow); the span overload keeps it while the arrow count is unchanged.
+    struct QuiverData {
+        std::vector<double> x, y, u, v, c;
     };
 
     // Axes::text() and annotate(): the string and where it is. `arrow` is set

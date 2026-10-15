@@ -317,6 +317,7 @@ namespace sextant {
             std::vector<AxLineOptions> axlines;
             std::vector<AxSpanOptions> axspans;
             std::vector<FillOptions> fills;
+            std::vector<QuiverOptions> quivers;
             std::vector<ObjectId> ids;   // seeded from, kind by kind
         };
 

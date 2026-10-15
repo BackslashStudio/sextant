@@ -314,6 +314,9 @@ int main() {
     // fill_between.cpp
     test_fill_between();
     test_fill_between_rendered();
+    // quiver.cpp
+    test_quiver();
+    test_quiver_rendered();
 
     // text.cpp
     test_text();

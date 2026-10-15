@@ -231,7 +231,7 @@ std::optional<PickHit> find_pick(const RenderSnapshot& snap, const HintProjector
     const std::vector<ObjectRef> order = call_order(snap);
 
     float best_d2 = kHintHitRadiusPx * kHintHitRadiusPx;
-    int         best_kind = -1;          // 0 line, 1 scatter, 2 scatter_z, 3 bar
+    int         best_kind = -1;          // 0 line, 1 scatter, 2 scatter_z, 3 bar, 4 quiver
     std::size_t best_obj  = 0, best_i = 0, best_rank = 0;
     float       best_px   = 0.0f, best_py = 0.0f;
 
@@ -296,6 +296,10 @@ std::optional<PickHit> find_pick(const RenderSnapshot& snap, const HintProjector
                               });
                 break;
             }
+            case PlotKind::Quiver:
+                // At the arrow's (x, y), whatever its pivot.
+                sweep(PlotKind::Quiver, o, 4, rank, snap.quivers[o].x, snap.quivers[o].y, no_hiding);
+                break;
             default: break;
         }
     }
@@ -337,8 +341,8 @@ std::optional<PickHit> find_pick(const RenderSnapshot& snap, const HintProjector
     // Phase 2: the winning point, identified but not yet worded; a heatmap
     // drawn over it hides it, so the cell wins then.
     if (best_kind >= 0 && !(cell && cell_rank > best_rank)) {
-        static const PickKind kKinds[4] = { PickKind::Line, PickKind::Scatter,
-                                            PickKind::ScatterZ, PickKind::Bar };
+        static const PickKind kKinds[5] = { PickKind::Line, PickKind::Scatter,
+                                            PickKind::ScatterZ, PickKind::Bar, PickKind::Quiver };
         PickHit hit;
         hit.kind = kKinds[best_kind];
         hit.object = best_obj;
@@ -387,6 +391,7 @@ std::optional<PickHit> find_pick_layers(const CellLayers& l, float cursor_x, flo
             case PickKind::ScatterZ: id = s.scatter_z[hit->object].id; break;
             case PickKind::Bar:      id = s.bars[hit->object].id; break;
             case PickKind::Heatmap:  id = s.heatmaps[hit->object].id; break;
+            case PickKind::Quiver:   id = s.quivers[hit->object].id; break;
             default: break;
         }
         const float dx = hit->anchor_x - cursor_x, dy = hit->anchor_y - cursor_y;
@@ -427,6 +432,17 @@ std::string format_pick(const RenderSnapshot& snap, const PickHit& hit) {
             const auto& hp = snap.heatmaps[hit.object];
             const float value = i < hp.data.size() ? hp.data[i] : 0.0f;
             return append_label(fmt_heatmap(hit.row, hit.col, value), hp.opts.hint_labels, i);
+        }
+        case PickKind::Quiver: {
+            const auto& qp = snap.quivers[hit.object];
+            char buf[160];
+            if (qp.colormapped() && i < qp.c.size())
+                std::snprintf(buf, sizeof(buf), "x=%.4g, y=%.4g, u=%.4g, v=%.4g, c=%.4g", qp.x[i], qp.y[i],
+                              qp.u[i], qp.v[i], qp.c[i]);
+            else
+                std::snprintf(buf, sizeof(buf), "x=%.4g, y=%.4g, u=%.4g, v=%.4g", qp.x[i], qp.y[i],
+                              qp.u[i], qp.v[i]);
+            return append_label(buf, qp.opts.hint_labels, i);
         }
         default:
             return {};

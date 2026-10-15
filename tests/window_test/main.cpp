@@ -3060,9 +3060,115 @@ static void test_stack() {
     fig->show(true);
 }
 
+// Steps 36e-1/36e-2: Axes::quiver() and Plane2D::quiver(): the automatic amp,
+// equal aspect against free aspect colored by speed (with a colorbar), the
+// three pivots, explicit amp and shape over a heatmap, a log axis, a plane
+// colored by speed. Hover shows x, y, u, v (and c); the Data panel edits the
+// arrows, their c and their appearance.
+static void test_quiver() {
+    using V = std::vector<double>;
+    auto fig = sextant::Figure::create({.width = 1500, .height = 900, .title = "Arrow fields"});
+    fig->suptitle("Arrow fields (Axes::quiver, Plane2D::quiver)");
+
+    // A vortex around the origin on a 15 x 15 grid.
+    V gx, gy, gu, gv;
+    for (int i = 0; i < 15; ++i)
+        for (int j = 0; j < 15; ++j) {
+            const double x = -2.0 + 4.0 * j / 14.0, y = -2.0 + 4.0 * i / 14.0;
+            gx.push_back(x);
+            gy.push_back(y);
+            gu.push_back(-y);
+            gv.push_back(x);
+        }
+
+    auto a1 = fig->add_subplot(2, 3, 1);
+    a1->quiver(gx, gy, gu, gv, {.name = "(-y, x)"});
+    a1->set_aspect(1.0);
+    a1->legend();
+    a1->set_title("automatic amp, equal aspect: arrows circle the origin");
+
+    // Colored by speed (step 36e-2), at free aspect.
+    V speed;
+    for (std::size_t k = 0; k < gx.size(); ++k) speed.push_back(std::hypot(gu[k], gv[k]));
+    auto a2 = fig->add_subplot(2, 3, 2);
+    a2->quiver(gx, gy, gu, gv, speed,
+               {.cmap = sextant::Colormap::Plasma, .vmax = 2.9f, .colorbar = true, .name = "speed"});
+    a2->set_title("c = speed through plasma, free aspect: arrows follow the data units");
+
+    // Pivots: the same vectors put down by tail, middle and tip, the anchors marked.
+    auto a3 = fig->add_subplot(2, 3, 3);
+    {
+        const V px{0, 1, 2, 3, 4}, pu{0.6, 0.6, 0.0, -0.6, -0.6}, pv{0.0, 0.6, 0.8, 0.6, 0.0};
+        const std::pair<sextant::QuiverPivot, const char*> pivots[] = {
+            {sextant::QuiverPivot::Tail, "Tail"}, {sextant::QuiverPivot::Middle, "Middle"},
+            {sextant::QuiverPivot::Tip, "Tip"}};
+        for (int k = 0; k < 3; ++k) {
+            const V py(px.size(), 2.0 * k);
+            a3->quiver(px, py, pu, pv, {.amp = 1.0, .pivot = pivots[k].first, .name = pivots[k].second});
+            a3->scatter(px, py, {.color = sextant::Color::Black, .size = 6.0f, .show_legend = false});
+        }
+        a3->set_aspect(1.0);
+        a3->legend();
+        a3->set_title("pivot: Tail, Middle, Tip (anchors in black)");
+    }
+
+    // The gradient of a bump over its heatmap: explicit amp, thin arrows.
+    auto a4 = fig->add_subplot(2, 3, 4);
+    {
+        const int n = 40;
+        V z(static_cast<std::size_t>(n * n));
+        for (int r = 0; r < n; ++r)
+            for (int c = 0; c < n; ++c) {
+                const double x = -2.0 + 4.0 * (c + 0.5) / n, y = -2.0 + 4.0 * (r + 0.5) / n;
+                z[static_cast<std::size_t>(r * n + c)] = std::exp(-(x * x + y * y));
+            }
+        a4->heatmap(z, n, n, {-2.0, 2.0}, {-2.0, 2.0}, {.cmap = sextant::Colormap::Viridis, .colorbar = true});
+        V qx, qy, qu, qv;
+        for (std::size_t k = 0; k < gx.size(); ++k) {
+            const double e = std::exp(-(gx[k] * gx[k] + gy[k] * gy[k]));
+            qx.push_back(gx[k]);
+            qy.push_back(gy[k]);
+            qu.push_back(2.0 * gx[k] * e);
+            qv.push_back(2.0 * gy[k] * e);
+        }
+        a4->quiver(qx, qy, qu, qv, {.color = sextant::Color::White, .alpha = 0.9f, .amp = 0.35, .width = 1.2f,
+                                    .head_width = 5.0f, .head_length = 6.0f, .name = "-grad"});
+        a4->set_aspect(1.0);
+        a4->set_title("-grad over the heatmap: amp 0.35, thin arrows");
+    }
+
+    // Log x: arrows placed on the scale; one reaching below 0 is left out.
+    auto a5 = fig->add_subplot(2, 3, 5);
+    {
+        const V lx{1, 3, 10, 30, 100, 300}, ly{1, 2, 3, 4, 5, 6};
+        const V lu{1, 3, 10, 30, -500, 300}, lv{0.5, 0.5, 0.5, 0.5, 0.5, 0.5};
+        a5->quiver(lx, ly, lu, lv, {.amp = 1.0, .name = "u = x (one reaching below 0)"});
+        a5->set_xscale(sextant::Scale::Log);
+        a5->legend();
+        a5->set_title("log x: each arrow doubles x");
+    }
+
+    // A plane: the vortex on the floor.
+    auto a6 = fig->add_subplot3d(2, 3, 6);
+    {
+        auto floor = a6->plane(sextant::PlaneOrientation::XY, 0.0);
+        floor->quiver(gx, gy, gu, gv, speed, {.cmap = sextant::Colormap::Viridis, .vmax = 2.9f, .name = "vortex on XY"});
+        auto wall = a6->plane(sextant::PlaneOrientation::ZX, 2.0);
+        // A ZX plane's u is z and its v is x.
+        wall->quiver(V{0.0, 0.0, 0.0}, V{-1.0, 0.0, 1.0}, V{0.5, 1.0, 1.5}, V{0.0, 0.0, 0.0},
+                     {.amp = 1.0, .name = "up z on ZX"});
+        a6->legend();
+        a6->set_title("planes");
+    }
+
+    savefig_and_check_memory(fig, "test_quiver");
+    fig->show(true);
+}
+
 int main() {
+    test_quiver();
     // test_stack();
-    test_fill_between();
+    // test_fill_between();
     // test_reference_lines();
     // test_bar_orientation();
     // test_line_steps();

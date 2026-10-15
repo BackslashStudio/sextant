@@ -1017,6 +1017,55 @@ namespace sextant {
             }
         }
 
+        // A quiver's amp is always set (resolved at the call); kept > 0. A
+        // colormapped one (`p` has c) shows its map instead of the color.
+        template<class Push>
+        void quiver_style(DataPanelState& st, QuiverOptions& o, const QuiverPlot& p, Push&& push) {
+            name_and_key(st, o, push);
+            if (p.colormapped() && ImGui::Checkbox("Colorbar##qcb", &o.colorbar)) push();
+            if (begin_field_table("quiver")) {
+                if (p.colormapped()) {
+                    field_row("Colormap");
+                    if (colormap_combo("##qcmap", o.cmap)) push();
+                    field_row("vmin");
+                    if (drag_float("##qvmin", &o.vmin, -FLT_MAX, FLT_MAX, 0.01f, "%.4g")) push();
+                    field_row("vmax");
+                    if (drag_float("##qvmax", &o.vmax, -FLT_MAX, FLT_MAX, 0.01f, "%.4g")) push();
+                } else {
+                    field_row("Color");
+                    if (color_swatch("##qcol", *o.color)) push();
+                }
+                field_row("Alpha");
+                if (drag_float("##qalpha", &o.alpha, 0.0f, 1.0f, 0.005f, "%.2f")) push();
+                field_row("Amp");
+                double s = o.amp.value_or(1.0);
+                if (drag_double("##qamp", &s, static_cast<float>(s * 0.005), "%.4g") && s > 0.0
+                    && std::isfinite(s)) {
+                    o.amp = s;
+                    push();
+                }
+                field_row("Pivot");
+                static const char* kPivots[] = {"Tail", "Middle", "Tip"};
+                int pivot = static_cast<int>(o.pivot);
+                if (ImGui::Combo("##qpivot", &pivot, kPivots, IM_ARRAYSIZE(kPivots))) {
+                    o.pivot = static_cast<QuiverPivot>(pivot);
+                    push();
+                }
+                end_field_table();
+            }
+            ImGui::TextDisabled("Amp: data units of arrow per unit of vector.");
+            ImGui::SeparatorText("Shape");
+            if (begin_field_table("quivershape")) {
+                field_row("Width");
+                if (drag_float("##qw", &o.width, 0.0f, 20.0f, 0.05f, "%.2f px")) push();
+                field_row("Head width");
+                if (drag_float("##qhw", &o.head_width, 0.0f, 50.0f, 0.1f, "%.1f px")) push();
+                field_row("Head length");
+                if (drag_float("##qhl", &o.head_length, 0.0f, 50.0f, 0.1f, "%.1f px")) push();
+                end_field_table();
+            }
+        }
+
         // Contour levels, kept sorted and unique as the heatmap's ingest leaves
         // them. Each commits on Enter or focus loss (edit_cell()).
         template<class Push>
@@ -1133,6 +1182,7 @@ namespace sextant {
                 case PlotKind::AxLine:   if (!both(ss->axlines, sheet.axlines)) return; break;
                 case PlotKind::AxSpan:   if (!both(ss->axspans, sheet.axspans)) return; break;
                 case PlotKind::Fill:     if (!both(ss->fills, sheet.fills)) return; break;
+                case PlotKind::Quiver:   if (!both(ss->quivers, sheet.quivers)) return; break;
                 default: return; // the 3D kinds have blocks of their own
             }
             if (!section("Appearance", true)) return;
@@ -1164,6 +1214,9 @@ namespace sextant {
                     break;
                 case PlotKind::Fill:
                     fill_style(st, ss->fills[i], push_of(ss->fills[i]));
+                    break;
+                case PlotKind::Quiver:
+                    quiver_style(st, ss->quivers[i], sheet.quivers[i], push_of(ss->quivers[i]));
                     break;
                 default: break;
             }

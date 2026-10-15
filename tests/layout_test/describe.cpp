@@ -252,7 +252,7 @@ namespace lt {
         STRUCT(Vec3) STRUCT(BoxAspect)
         STRUCT(ErrorBarOptions) STRUCT(LineOptions) STRUCT(ScatterOptions) STRUCT(ScatterZOptions)
         STRUCT(BarOptions) STRUCT(HistOptions) STRUCT(AxLineOptions) STRUCT(AxSpanOptions)
-        STRUCT(FillOptions)
+        STRUCT(FillOptions) STRUCT(QuiverOptions)
         STRUCT(HeatmapOptions) STRUCT(GridOptions)
         STRUCT(AxesStyle) STRUCT(LegendOptions) STRUCT(ColorbarOptions) STRUCT(SuptitleOptions)
         STRUCT(FigureMargins) STRUCT(TextOptions) STRUCT(ArrowOptions)

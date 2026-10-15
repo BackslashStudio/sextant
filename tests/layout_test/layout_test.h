@@ -620,6 +620,10 @@ namespace lt {
     void test_fill_between();
     void test_fill_between_rendered();
 
+    // quiver.cpp
+    void test_quiver();
+    void test_quiver_rendered();
+
     // text.cpp
     void test_text();
 

@@ -8,6 +8,7 @@
 #include "../tick_style.h"
 #include "../contour.h"
 #include "../fill_geometry.h"
+#include "../quiver_geometry.h"
 #include "../renderer/marker_shape.h"
 #include "../renderer/error_bar_shape.h"
 #include "png_writer.h"
@@ -568,6 +569,41 @@ static void emit_fill(std::ostringstream& o, const SvgAxesData& d, const FillPlo
     }
 }
 
+// A quiver as one <polygon> per arrow (quiver_geometry.h, as the raster path),
+// in a <g> carrying the fill; a colormapped quiver's fill is on each polygon,
+// the group keeping the quiver's opacity.
+static void emit_quiver(std::ostringstream& o, const SvgAxesData& d, const QuiverPlot& p) {
+    const CoordTransform& tr = d.layout.tr;
+    const bool mapped = p.colormapped();
+    const Color& c = *p.opts.color;
+    const float a = mapped ? p.opts.alpha : c.a * p.opts.alpha;
+    bool open = false;
+    for_each_quiver_arrow(p, tr.xs, tr.ys, [&](std::size_t i, double tx, double ty, double hx, double hy) {
+        float pts[14];
+        const int n = arrow_outline(tr.scale_to_px(tx), tr.scale_to_py(ty), tr.scale_to_px(hx),
+                                    tr.scale_to_py(hy), p.opts, pts);
+        if (n == 0) return;
+        if (!open) {
+            o << "    <g";
+            if (!mapped) o << " fill=\"" << rgb(c) << "\"";
+            if (a < 1.0f) o << " fill-opacity=\"" << a << "\"";
+            o << ">\n";
+            open = true;
+        }
+        o << "      <polygon ";
+        if (mapped) {
+            // A map's own alpha (all 1 for the built-ins) overrides the group's.
+            const Color ci = quiver_arrow_color(p, i);
+            o << "fill=\"" << rgb(ci) << "\" ";
+            if (ci.a < 1.0f) o << "fill-opacity=\"" << ci.a * p.opts.alpha << "\" ";
+        }
+        o << "points=\"";
+        for (int k = 0; k < n; ++k) o << pts[2 * k] << "," << pts[2 * k + 1] << " ";
+        o << "\"/>\n";
+    });
+    if (open) o << "    </g>\n";
+}
+
 // The plot objects in call order, each with its error bars, as
 // DataRenderer::draw_plots().
 static void emit_object(std::ostringstream& o, const SvgAxesData& d, const ObjectRef& r) {
@@ -600,6 +636,9 @@ static void emit_object(std::ostringstream& o, const SvgAxesData& d, const Objec
             break;
         case PlotKind::Fill:
             emit_fill(o, d, d.fills[r.index]);
+            break;
+        case PlotKind::Quiver:
+            emit_quiver(o, d, d.quivers[r.index]);
             break;
         default: break;
     }
@@ -976,6 +1015,18 @@ static void emit_legend(std::ostringstream& o, const SvgAxesData& d, std::size_t
               << "\" x2=\"" << sx1 << "\" y2=\"" << cy
               << "\" stroke=\"" << fill << "\" stroke-width=\"2\""
               << dash_attr(e.style) << "/>\n";
+        } else if (e.kind == LegendKind::Arrow) {
+            // A quiver's key, as the raster's (legend_arrow_outline()).
+            float pts[14];
+            const int n = legend_arrow_outline(sx0, sx1, cy, pts);
+            o << "    <polygon fill=\"" << fill << "\"";
+            if (e.color.a < 1.0f) o << " fill-opacity=\"" << e.color.a << "\"";
+            if (e.edge.a > 0.0f)
+                o << " stroke=\"" << rgb(e.edge) << "\" stroke-opacity=\"" << e.edge.a
+                  << "\" stroke-width=\"1\"";
+            o << " points=\"";
+            for (int k = 0; k < n; ++k) o << pts[2 * k] << "," << pts[2 * k + 1] << " ";
+            o << "\"/>\n";
         } else if (e.kind == LegendKind::Marker) {
             // Same emitter as the data markers. Alpha 0 edge = none (all but
             // scatter_z).

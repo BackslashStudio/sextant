@@ -125,6 +125,24 @@ namespace sextant::read_back {
         return { p.x.get(), p.y1.get(), p.y2.get(), std::move(exclude) };
     }
 
+    // A quiver's four columns, one value each per arrow.
+    inline void check_quiver(std::size_t nx, std::size_t ny, std::size_t nu, std::size_t nv,
+                             const char* who) {
+        if (ny != nx || nu != nx || nv != nx)
+            throw std::invalid_argument(std::string(who) + ": x, y, u and v must have the same length");
+    }
+
+    // A quiver's colour values: none, or one per arrow.
+    inline void check_quiver_c(std::size_t nc, std::size_t n, const char* who) {
+        if (nc != 0 && nc != n)
+            throw std::invalid_argument(std::string(who) + ": c must be empty or one per arrow (got "
+                                        + std::to_string(nc) + " for " + std::to_string(n) + " arrows)");
+    }
+
+    inline QuiverData to_data(const QuiverPlot& p) {
+        return { p.x.get(), p.y.get(), p.u.get(), p.v.get(), p.c.get() };
+    }
+
     inline AxLineData to_data(const AxLinePlot& p) { return { p.value }; }
     inline AxSpanData to_data(const AxSpanPlot& p) { return { p.lo, p.hi }; }
 

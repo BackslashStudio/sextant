@@ -27,6 +27,7 @@ struct Axes::Impl {
     std::vector<AxLinePlot>   axlines;
     std::vector<AxSpanPlot>   axspans;
     std::vector<FillPlot>     fills;
+    std::vector<QuiverPlot>   quivers;
 
     // The figure's FigureOptions::mathtext, set when the figure makes this
     // axes; only warn_math() reads it (drawing reads the snapshot's).
@@ -151,6 +152,7 @@ struct Axes::Impl {
         s.texts = texts;
         s.axlines = axlines; s.axspans = axspans;
         s.fills = fills;
+        s.quivers = quivers;
         s.title = title; s.xtitle = xtitle; s.ytitle = ytitle;
         s.title_stamps = title_stamps;
         s.grid_enabled   = grid_enabled;   s.grid_opts   = grid_opts;
@@ -216,6 +218,17 @@ struct Axes::Impl {
     void set_fill_data(std::size_t i, std::span<const double> x, std::span<const double> y1,
                        std::span<const double> y2, const std::vector<bool>* exclude,
                        const char* who);
+
+    // quiver() for Axes and Plane2D: x, y, u and v one value each per arrow,
+    // `c` (null = flat) one per arrow too; an unset amp is resolved here
+    // (quiver_auto_amp()). set_quiver_data() keeps the amp; `c` the new values
+    // (QuiverData, empty = flat), or null to keep them while the count holds.
+    void ingest_quiver(std::span<const double> x, std::span<const double> y,
+                       std::span<const double> u, std::span<const double> v,
+                       const std::span<const double>* c, QuiverOptions opts, const char* who);
+    void set_quiver_data(std::size_t i, std::span<const double> x, std::span<const double> y,
+                         std::span<const double> u, std::span<const double> v,
+                         const std::vector<double>* c, const char* who);
 
     // Text (Axes only; a plane has none). Throw on a non-finite number.
     void ingest_text(TextContent c, TextStyle style, const char* who);

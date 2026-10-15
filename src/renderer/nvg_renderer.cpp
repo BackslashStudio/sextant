@@ -5,6 +5,7 @@
 #include "../line_dash.h"
 #include "../rich_text.h"
 #include "../contour.h"
+#include "../quiver_geometry.h"
 #include "marker_shape.h"
 #include "nanovg.h"
 #include <algorithm>
@@ -698,6 +699,23 @@ namespace sextant {
                         nvgStroke(vg_);
                     }
                     break;
+                case LegendKind::Arrow: {
+                    // A quiver's key (legend_arrow_outline(), as the SVG's).
+                    float pts[14];
+                    const int n = legend_arrow_outline(sx0, sx1, cy, pts);
+                    if (n == 0) break;
+                    nvgBeginPath(vg_);
+                    nvgMoveTo(vg_, pts[0], pts[1]);
+                    for (int k = 1; k < n; ++k) nvgLineTo(vg_, pts[2 * k], pts[2 * k + 1]);
+                    nvgClosePath(vg_);
+                    nvgFill(vg_);
+                    if (e.edge.a > 0.0f) {
+                        nvgStrokeColor(vg_, nvgRGBAf(e.edge.r, e.edge.g, e.edge.b, e.edge.a));
+                        nvgStrokeWidth(vg_, 1.0f);
+                        nvgStroke(vg_);
+                    }
+                    break;
+                }
             }
 
             const auto& tc = opts.text_color;

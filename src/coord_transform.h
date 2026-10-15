@@ -1,6 +1,7 @@
 #pragma once
 #include "axis_scale.h"
 #include "fill_geometry.h"
+#include "quiver_geometry.h"
 #include "plot_objects.h"
 #include "renderer/plot_rect.h"
 #include "tick.h"
@@ -169,7 +170,8 @@ namespace sextant {
         // auto_bounds() with each value passed through fx/fy first (scale
         // space); a NaN they return widens nothing. Scaled axes only; the
         // all-linear case keeps its own loop (auto_bounds(all)). Fills take the
-        // scales themselves (`xs`, `ys`: what fx and fy apply strictly).
+        // scales themselves, as do quivers (`xs`, `ys`: what fx and fy apply
+        // strictly).
         template <class FX, class FY>
         AutoBounds auto_bounds_in(const AllPlotData& all, FX fx, FY fy,
                                   const AxisScale& xs, const AxisScale& ys) {
@@ -262,6 +264,13 @@ namespace sextant {
                         add(c, v ? xlo : ylo, v ? xhi : yhi);
                     });
                 }
+            // A quiver: both ends of every arrow drawn (quiver_limit_points()).
+            if (all.quivers)
+                for (const auto& qp: *all.quivers)
+                    quiver_limit_points(qp, xs, ys, [&](double x, double y) {
+                        add(x, xlo, xhi);
+                        add(y, ylo, yhi);
+                    });
             AutoBounds b;
             b.x.loose = {xlo, xhi};
             b.y.loose = {ylo, yhi};
@@ -387,6 +396,14 @@ namespace sextant {
                     vhi = std::max(vhi, c);
                 });
             }
+        if (all.quivers)
+            for (const auto& qp: *all.quivers)
+                quiver_limit_points(qp, AxisScale{}, AxisScale{}, [&](double x, double y) {
+                    xlo = std::min(xlo, x);
+                    xhi = std::max(xhi, x);
+                    ylo = std::min(ylo, y);
+                    yhi = std::max(yhi, y);
+                });
         AutoBounds b;
         b.x.loose = {xlo, xhi};
         b.y.loose = {ylo, yhi};

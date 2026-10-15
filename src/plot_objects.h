@@ -23,10 +23,10 @@ namespace sextant {
 // The first five are 2D (also held by planes); then the native 3D kinds,
 // always addressed at the axes (plane -1). Text is held by both 2D and 3D
 // axes (never by a plane); AxLine and AxSpan by 2D axes only (a plane's sheet
-// holds none); Fill by 2D axes and planes. Append new kinds to keep values
-// stable.
+// holds none); Fill and Quiver by 2D axes and planes. Append new kinds to keep
+// values stable.
 enum class PlotKind { Line, Scatter, Bar, Heatmap, ScatterZ, Bar3D, Surface, Scatter3D, Line3D,
-                      SurfaceTri, Text, AxLine, AxSpan, Fill };
+                      SurfaceTri, Text, AxLine, AxSpan, Fill, Quiver };
 
 // A plot object's (or a plane's) identity: kept by set_*_data(), unchanged by
 // removing or reordering its siblings, never reused in a process. Edits carry
@@ -525,8 +525,23 @@ struct FillPlot {
     bool excluded(std::size_t i) const { return i < exclude.size() && exclude[i] != 0.0; }
 };
 
-// The reference kinds and fills are optional so a view built over the first
-// five alone (tests) still reads as before.
+// Axes::quiver(): one arrow per point, from (x, y) along (u, v). `opts.amp`
+// is always set (resolved at the call). quiver_geometry.h places the arrows.
+struct QuiverPlot {
+    CowVec<double> x, y, u, v;
+    QuiverOptions  opts{.color = Color::Blue, .amp = 1.0};
+    unsigned long long data_stamp = 0;
+    ObjectId id = 0;
+    // The values the arrows' colors map (quiver(x, y, u, v, c)); empty = flat.
+    CowVec<double> c;
+
+    std::size_t count() const { return std::min({x.size(), y.size(), u.size(), v.size()}); }
+    double amp() const { return opts.amp.value_or(1.0); }
+    bool colormapped() const { return !c.empty(); }
+};
+
+// The reference kinds, fills and quivers are optional so a view built over the
+// first five alone (tests) still reads as before.
 struct AllPlotData {
     const std::vector<LinePlot>&     lines;
     const std::vector<ScatterPlot>&  scatters;
@@ -536,6 +551,7 @@ struct AllPlotData {
     const std::vector<AxLinePlot>*   axlines = nullptr;
     const std::vector<AxSpanPlot>*   axspans = nullptr;
     const std::vector<FillPlot>*     fills = nullptr;
+    const std::vector<QuiverPlot>*   quivers = nullptr;
 };
 
 // Caller-side stamps of an axes' titles: each set_*title() takes a fresh
@@ -619,6 +635,8 @@ struct RenderSnapshot {
     std::vector<AxSpanPlot>   axspans;
     // Axes::fill(), on axes and planes alike.
     std::vector<FillPlot>     fills;
+    // Axes::quiver(), likewise.
+    std::vector<QuiverPlot>   quivers;
 
     // Font sizes live in axes_style.
     std::string title, xtitle, ytitle;
@@ -650,7 +668,7 @@ struct RenderSnapshot {
     std::optional<std::vector<Tick>> xticks_override, yticks_override;
 
     AllPlotData all() const {
-        return { lines, scatters, bars, heatmaps, scatter_z, &axlines, &axspans, &fills };
+        return { lines, scatters, bars, heatmaps, scatter_z, &axlines, &axspans, &fills, &quivers };
     }
 };
 
@@ -747,7 +765,8 @@ struct ObjectRef {
 
 inline constexpr PlotKind kPlotKinds2D[] = { PlotKind::Line, PlotKind::Scatter, PlotKind::Bar,
                                              PlotKind::Heatmap, PlotKind::ScatterZ, PlotKind::Text,
-                                             PlotKind::AxLine, PlotKind::AxSpan, PlotKind::Fill };
+                                             PlotKind::AxLine, PlotKind::AxSpan, PlotKind::Fill,
+                                             PlotKind::Quiver };
 inline constexpr PlotKind kPlotKinds3D[] = { PlotKind::Bar3D, PlotKind::Surface,
                                              PlotKind::Scatter3D, PlotKind::Line3D,
                                              PlotKind::SurfaceTri, PlotKind::Text };
@@ -768,6 +787,7 @@ R with_kind(S& s, PlotKind kind, F&& f, R none) {
         case PlotKind::AxLine:   return f(s.axlines);
         case PlotKind::AxSpan:   return f(s.axspans);
         case PlotKind::Fill:     return f(s.fills);
+        case PlotKind::Quiver:   return f(s.quivers);
         default:                 return none;
     }
 }
@@ -831,7 +851,7 @@ std::optional<ObjectRef> find_object_in(const S& s, const PlotKind (&kinds)[N], 
 // A plot object taken out by remove_object(), for putting back:
 // where it was among its kind, and the whole object, its id included.
 using PlotObject2D = std::variant<LinePlot, ScatterPlot, BarPlot, HeatmapPlot, ScatterZPlot,
-                                  TextPlot, AxLinePlot, AxSpanPlot, FillPlot>;
+                                  TextPlot, AxLinePlot, AxSpanPlot, FillPlot, QuiverPlot>;
 using PlotObject3D = std::variant<Bar3DPlot, SurfacePlot, Scatter3DPlot, Line3DPlot,
                                   SurfaceTriPlot, TextPlot>;
 template <class Object>
@@ -939,6 +959,8 @@ std::vector<ObjectRef> call_order(const S& s) {
     }
     if constexpr (requires { s.fills; })
         objects_detail::add_order_keys(keys, PlotKind::Fill, s.fills);
+    if constexpr (requires { s.quivers; })
+        objects_detail::add_order_keys(keys, PlotKind::Quiver, s.quivers);
     return objects_detail::sorted_refs(keys);
 }
 
@@ -971,6 +993,7 @@ std::vector<LayerRef> layered_call_order(std::span<const S* const> layers) {
             add(PlotKind::AxSpan, s.axspans);
         }
         if constexpr (requires { s.fills; }) add(PlotKind::Fill, s.fills);
+        if constexpr (requires { s.quivers; }) add(PlotKind::Quiver, s.quivers);
     }
     std::stable_sort(keys.begin(), keys.end(), [](const Key& a, const Key& b) { return a.id < b.id; });
     std::vector<LayerRef> out;
@@ -1159,6 +1182,8 @@ inline std::vector<ColorbarRequest> find_colorbar_requests(const RenderSnapshot&
     for (const ObjectRef& r : call_order(snap)) {
         if (r.kind == PlotKind::Heatmap)       add(snap.heatmaps[r.index].opts);
         else if (r.kind == PlotKind::ScatterZ) add(snap.scatter_z[r.index].opts);
+        else if (r.kind == PlotKind::Quiver && snap.quivers[r.index].colormapped())
+            add(snap.quivers[r.index].opts);
     }
     return reqs;
 }

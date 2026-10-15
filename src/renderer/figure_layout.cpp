@@ -815,6 +815,21 @@ namespace sextant {
                     }
                     break;
                 }
+                case PlotKind::Quiver: {
+                    // An arrow at the quiver's color and opacity; colormapped,
+                    // white with a black edge (the colorbar explains the colors),
+                    // as scatter_z's key.
+                    const auto& qp = snap.quivers[r.index];
+                    if (keyed(qp.opts) && qp.colormapped()) {
+                        entries.push_back({Color::White, qp.opts.name, LegendKind::Arrow, LineStyle::Solid,
+                                           MarkerStyle::Circle, Color::Black});
+                    } else if (keyed(qp.opts)) {
+                        Color c = *qp.opts.color;
+                        c.a *= qp.opts.alpha;
+                        entries.push_back({c, qp.opts.name, LegendKind::Arrow, LineStyle::Solid});
+                    }
+                    break;
+                }
                 default: break; // heatmaps: explained by their colorbar
             }
         }

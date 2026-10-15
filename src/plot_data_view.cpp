@@ -129,6 +129,24 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot& snap) 
         out.push_back(std::move(t));
     }
 
+    // Quivers: each arrow's position and vector, then its color value when
+    // colormapped.
+    for (std::size_t i = 0; i < snap.quivers.size(); ++i) {
+        const auto& qp = snap.quivers[i];
+        PlotDataTable t;
+        t.kind = PlotKind::Quiver;
+        t.plot_index = static_cast<int>(i);
+        t.data_stamp = qp.data_stamp;
+        t.id = qp.id;
+        t.label = pick_label(qp.opts.name, "quiver", static_cast<int>(i));
+        t.columns.push_back({"x", qp.x.data(), qp.x.size()});
+        t.columns.push_back({"y", qp.y.data(), qp.y.size()});
+        t.columns.push_back({"u", qp.u.data(), qp.u.size()});
+        t.columns.push_back({"v", qp.v.data(), qp.v.size()});
+        if (qp.colormapped()) t.columns.push_back({"c", qp.c.data(), qp.c.size()});
+        out.push_back(std::move(t));
+    }
+
     // Reference lines and spans: one fixed row, named for the axis they sit on.
     for (std::size_t i = 0; i < snap.axlines.size(); ++i) {
         const auto& ap = snap.axlines[i];

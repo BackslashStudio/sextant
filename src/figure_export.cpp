@@ -206,6 +206,7 @@ std::string render_figure_svg(const FigureSnapshot& fsnap,
             sd.axlines   = snap.axlines;
             sd.axspans   = snap.axspans;
             sd.fills     = snap.fills;
+            sd.quivers   = snap.quivers;
 
             sd.title           = snap.title;
             sd.xtitle          = snap.xtitle;

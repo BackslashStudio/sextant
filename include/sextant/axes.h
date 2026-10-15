@@ -106,6 +106,30 @@ namespace sextant {
                     StackOptions opts = {});
 
         // ----------------------------------------------------------------
+        // Arrow fields
+        // ----------------------------------------------------------------
+        // An arrow per point (matplotlib's quiver with angles='xy' and
+        // scale_units='xy'): from (x, y) along (u, v) times QuiverOptions::amp,
+        // in data units, shifted by QuiverOptions::pivot. One value each per
+        // arrow, any other lengths throw std::invalid_argument. An arrow with a
+        // NaN, a zero vector, or an end at or below 0 on a log axis is not drawn.
+        // The arrow is sized in pixels across (QuiverOptions::width and the head)
+        // and in data units along, so it points the way the data does only at
+        // equal aspect. Automatic limits take both ends of every arrow drawn.
+        // Hovered at (x, y); drawn with the other plot objects in call order.
+        Axes& quiver(std::span<const double> x, std::span<const double> y,
+                     std::span<const double> u, std::span<const double> v,
+                     QuiverOptions opts = {});
+
+        // The same, each arrow colored by its value in `c` (one per arrow, else
+        // std::invalid_argument) through QuiverOptions::cmap/vmin/vmax, as
+        // matplotlib's quiver(X, Y, U, V, C). An arrow whose c is NaN is not
+        // drawn; QuiverOptions::colorbar explains the colors.
+        Axes& quiver(std::span<const double> x, std::span<const double> y,
+                     std::span<const double> u, std::span<const double> v,
+                     std::span<const double> c, QuiverOptions opts = {});
+
+        // ----------------------------------------------------------------
         // Reference lines and spans
         // ----------------------------------------------------------------
         // A line across the frame at `value`: at y = value by default
@@ -249,7 +273,7 @@ namespace sextant {
         Axes& set_ytick_format(std::string_view fmt);
 
         // The colors an unset `color` takes in turn, one per call that draws in a
-        // flat color: line(), scatter(), bar(), hist(), fill(), axline()
+        // flat color: line(), scatter(), bar(), hist(), fill(), quiver(), axline()
         // (scatter_z(), heatmap() and axspan() take none). Restarts from the first
         // color; empty restores the default,
         // matplotlib's tab10, which starts with Color::Blue. Objects already
@@ -308,6 +332,9 @@ namespace sextant {
         std::size_t fill_count() const;
         FillData fill_data(std::size_t i) const;
 
+        std::size_t quiver_count() const;
+        QuiverData quiver_data(std::size_t i) const;
+
         std::size_t axline_count() const;
         AxLineData axline_data(std::size_t i) const;
 
@@ -362,6 +389,13 @@ namespace sextant {
 
         Axes& set_fill_data(std::size_t i, std::span<const double> x, std::span<const double> y1,
                             std::span<const double> y2);
+
+        // A quiver's arrows, validated as quiver(). The amp stays; `c` follows
+        // QuiverData::c (the span overload keeps it while the count holds).
+        Axes& set_quiver_data(std::size_t i, const QuiverData& data);
+
+        Axes& set_quiver_data(std::size_t i, std::span<const double> x, std::span<const double> y,
+                              std::span<const double> u, std::span<const double> v);
 
         // Move a reference line or span (validated as axline()/axspan(); a span's
         // ends are stored swapped when lo > hi).
