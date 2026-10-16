@@ -14,8 +14,12 @@ namespace {
 // TeX's atom classes, which decide the space between neighbours.
 enum class Cls { Ord, Op, Bin, Rel, Open, Close, Punct };
 
+// An accent drawn over its body: a glyph of the font's, or one of the wide ones
+// drawn as a path across the body.
+enum class Wide { None, Hat, Tilde, RightArrow, LeftArrow };
+
 struct Atom {
-    enum class Kind { Glyphs, Group, Space, Frac, Radical, Overline, Underline } kind = Kind::Glyphs;
+    enum class Kind { Glyphs, Group, Space, Frac, Radical, Overline, Underline, Accent } kind = Kind::Glyphs;
     Cls cls = Cls::Ord;
     std::string text;              // Glyphs
     bool italic = false;           // Glyphs
@@ -26,6 +30,9 @@ struct Atom {
     bool shrink = true;            // Frac: parts one level down (\frac, \tfrac; not \dfrac)
     std::vector<Atom> index;       // Radical: \sqrt[n]
     bool has_index = false;
+    std::string accent;            // Accent: the glyph (UTF-8), "" for a wide one
+    float accent_scale = 1.0f;     // Accent: the glyph's size, of the body's
+    Wide wide = Wide::None;        // Accent
     std::vector<Atom> sub, sup;
     bool has_sub = false, has_sup = false;
 };
@@ -165,6 +172,7 @@ constexpr Symbol kSymbols[] = {
     {"P", 0x00B6, Cls::Ord}, {"copyright", 0x00A9, Cls::Ord}, {"AA", 0x00C5, Cls::Ord},
     {"sqrt", 0x221A, Cls::Ord}, {"surd", 0x221A, Cls::Ord}, {"backslash", 0x005C, Cls::Ord},
     {"top", 0x22A4, Cls::Ord}, {"bot", 0x22A5, Cls::Ord},
+    {"imath", 0x0131, Cls::Ord}, {"jmath", 0x0237, Cls::Ord},   // dotless, for accents
     // Delimiters (their own size; \left/\right are deferred)
     {"langle", 0x27E8, Cls::Open}, {"rangle", 0x27E9, Cls::Close},
     {"lfloor", 0x230A, Cls::Open}, {"rfloor", 0x230B, Cls::Close},
@@ -189,11 +197,29 @@ constexpr SpaceCmd kSpaces[] = {
     {"thinspace", 1.0f / 6.0f}, {"medspace", 2.0f / 9.0f}, {"thickspace", 5.0f / 18.0f},
 };
 
+// Accents: the font's spacing accent (a small arrow for \vec), or a wide one
+// drawn across its body.
+struct AccentCmd {
+    std::string_view name;
+    char32_t cp;
+    Wide wide;
+    float scale;
+};
+constexpr AccentCmd kAccents[] = {
+    {"hat", 0x02C6, Wide::None, 1.0f}, {"bar", 0x00AF, Wide::None, 1.0f},
+    {"tilde", 0x02DC, Wide::None, 1.0f}, {"dot", 0x02D9, Wide::None, 1.0f},
+    {"ddot", 0x00A8, Wide::None, 1.0f}, {"acute", 0x00B4, Wide::None, 1.0f},
+    {"grave", 0x0060, Wide::None, 1.0f}, {"breve", 0x02D8, Wide::None, 1.0f},
+    {"check", 0x02C7, Wide::None, 1.0f}, {"mathring", 0x02DA, Wide::None, 1.0f},
+    {"vec", 0x2192, Wide::None, 0.6f},
+    {"widehat", 0, Wide::Hat, 1.0f}, {"widetilde", 0, Wide::Tilde, 1.0f},
+    {"overrightarrow", 0, Wide::RightArrow, 1.0f}, {"overleftarrow", 0, Wide::LeftArrow, 1.0f},
+};
+
 // Commands known from mathtext that this step does not draw yet.
 constexpr std::string_view kDeferred[] = {
     "binom", "left", "right", "big", "Big", "bigg", "Bigg",
-    "hat", "widehat", "bar", "vec", "dot", "ddot", "tilde", "widetilde", "acute", "grave",
-    "breve", "check", "mathbf", "boldsymbol", "mathcal", "mathbb",
+    "mathbf", "boldsymbol", "mathcal", "mathbb",
     "mathfrak", "mathscr", "mathsf", "mathtt", "color", "stackrel", "overset", "underset",
     "operatorname", "substack",
 };
@@ -442,6 +468,17 @@ private:
             out.push_back(std::move(a));
             return;
         }
+        for (const AccentCmd& acc: kAccents)
+            if (acc.name == name) {
+                Atom a;
+                a.kind = Atom::Kind::Accent;
+                if (acc.cp) a.accent = utf8(acc.cp);
+                a.accent_scale = acc.scale;
+                a.wide = acc.wide;
+                a.group = required_arg(at, name);
+                out.push_back(std::move(a));
+                return;
+            }
         if (name == "sqrt") {
             skip_spaces();
             Atom a;
@@ -630,6 +667,13 @@ struct Box {
     float width = 0.0f;
     float ascent = 0.0f, descent = 0.0f;   // descent <= 0
     float ink_top = 0.0f, ink_bottom = 0.0f;   // y up, ink_bottom <= 0 <= ink_top
+    // The ink's left and right, from the box's left end; left > right while
+    // the box has no ink (an empty group, a space).
+    float ink_left = 1e30f, ink_right = -1e30f;
+    bool has_ink_x() const { return ink_left <= ink_right; }
+    // Holds a run drawn back over another (an accent), which the SVG must place
+    // absolutely; rules and paths make a line placed by themselves.
+    bool placed = false;
 };
 
 // The outline of a polyline stroked with a width per segment, mitred at each
@@ -688,6 +732,10 @@ public:
         const InkBox ink = ink_box(font_, size, t, italic);
         b.ink_top = std::max(0.0f, ink.top);
         b.ink_bottom = std::min(0.0f, ink.bottom);
+        if (ink.right > ink.left) {
+            b.ink_left = ink.left;
+            b.ink_right = ink.right;
+        }
         return b;
     }
 
@@ -737,6 +785,8 @@ private:
         into.descent = std::min(into.descent, b.descent - dy);
         into.ink_top = std::max(into.ink_top, b.ink_top - dy);
         into.ink_bottom = std::min(into.ink_bottom, b.ink_bottom - dy);
+        if (b.has_ink_x()) cover(into, b.ink_left + x, b.ink_right + x);
+        into.placed = into.placed || b.placed;
     }
 
     // Grows `b`'s extents to reach `top` and `bottom` (y up).
@@ -745,6 +795,20 @@ private:
         b.descent = std::min(b.descent, bottom);
         b.ink_top = std::max(b.ink_top, top);
         b.ink_bottom = std::min(b.ink_bottom, bottom);
+    }
+
+    // Grows `b`'s ink to span x0..x1.
+    static void cover(Box& b, float x0, float x1) {
+        b.ink_left = std::min(b.ink_left, x0);
+        b.ink_right = std::max(b.ink_right, x1);
+    }
+
+    // `b`'s extents grown over a drawn path's points (y down).
+    static void reach_path(Box& b, const RichPath& p) {
+        for (const RichPath::Pt& q: p.pts) {
+            reach(b, -q.y, -q.y);
+            cover(b, q.x, q.x);
+        }
     }
 
     // The math axis at `size`, y up: the middle of `=`, where a fraction's bar
@@ -779,6 +843,7 @@ private:
         append(b, den, side + (w - den.width) * 0.5f, -den_base);
         b.rules.push_back({side, -(ax + bar * 0.5f), w, bar});
         reach(b, ax + bar * 0.5f, ax - bar * 0.5f);
+        cover(b, side, side + w);
         b.width = w + 2.0f * side;
         return b;
     }
@@ -797,6 +862,7 @@ private:
             b.rules.push_back({0.0f, -top, b.width, bar});
             reach(b, 0.0f, top - bar - theta);
         }
+        cover(b, 0.0f, b.width);
         return b;
     }
 
@@ -842,12 +908,91 @@ private:
         };
         b.paths.push_back(stroke_outline(spine, {bar, thick, bar, bar}));
         reach(b, top, foot);
+        cover(b, shift + x0, end);
         b.width = end;
+        return b;
+    }
+
+    // An accent over its body (TeX's and matplotlib's): centred on the body's
+    // ink, 2θ clear of it; over one italic letter, moved right by half the slant
+    // of its height, to sit over the letter's top. The body keeps its width.
+    Box accent(const Atom& a, int level) const {
+        using Pt = RichPath::Pt;
+        const float size = base_ * scale_at(level);
+        Box b = list(a.group, level);
+        const float theta = kRuleEm * size;
+        const float bar = std::max(theta, kMinRulePx);
+        float x0 = 0.0f, x1 = b.width;
+        if (b.has_ink_x()) {
+            x0 = b.ink_left;
+            x1 = b.ink_right;
+        }
+        const bool letter = a.group.size() == 1 && a.group[0].kind == Atom::Kind::Glyphs && a.group[0].italic
+                            && !a.group[0].has_sub && !a.group[0].has_sup;
+        const float skew = letter ? kSyntheticSlant * b.ink_top * 0.5f : 0.0f;
+        const float mid = (x0 + x1) * 0.5f + skew;
+        const float lift = b.ink_top + kFracGap * theta;   // the accent's ink bottom, y up
+
+        if (a.wide == Wide::None) {
+            const float asize = size * a.accent_scale;
+            const InkBox ink = ink_box(font_, asize, a.accent);
+            if (ink.right <= ink.left) return b;
+            Box acc = text(a.accent, asize);
+            // Its extent is its ink: an accent reserves no font ascent above it.
+            acc.ascent = ink.top;
+            acc.descent = ink.bottom;
+            append(b, acc, mid - (ink.left + ink.right) * 0.5f, -(lift - ink.bottom));
+            b.placed = true;
+            return b;
+        }
+
+        // Wide accents span the ink (half an em at least), centred as above.
+        const float half = std::max(x1 - x0, 0.5f * size) * 0.5f;
+        const float l = mid - half, r = mid + half, w = r - l;
+        const float weight = std::max(bar, 0.6f * stem(size));
+        switch (a.wide) {
+            case Wide::Hat: {
+                const float h = std::clamp(0.12f * size + 0.05f * w, 0.0f, 0.3f * size);
+                const float y = -(lift + weight * 0.5f);
+                b.paths.push_back(stroke_outline({{l, y}, {mid, y - h}, {r, y}}, {bar, weight}));
+                break;
+            }
+            case Wide::Tilde: {
+                // Up, down, up: h/2·(1 − cos 3πt), heavier on the slopes.
+                const float h = std::clamp(0.08f * size + 0.03f * w, 0.0f, 0.2f * size);
+                const float y = -(lift + weight * 0.5f);
+                constexpr int kSteps = 24;
+                std::vector<Pt> spine;
+                std::vector<float> widths;
+                for (int k = 0; k <= kSteps; ++k) {
+                    const float t = static_cast<float>(k) / kSteps;
+                    spine.push_back({l + w * t, y - h * 0.5f * (1.0f - std::cos(3.0f * 3.14159265f * t))});
+                    if (k < kSteps) {
+                        const float tm = (static_cast<float>(k) + 0.5f) / kSteps;
+                        widths.push_back(bar + (weight - bar) * std::abs(std::sin(3.0f * 3.14159265f * tm)));
+                    }
+                }
+                b.paths.push_back(stroke_outline(spine, widths));
+                break;
+            }
+            default: {
+                // A shaft with an open head: barbs `head` long and wide.
+                const float head = 0.12f * size;
+                const float yc = -(lift + head);
+                const bool right = a.wide == Wide::RightArrow;
+                const float tip = right ? r : l, back = right ? r - 2.0f * head : l + 2.0f * head;
+                b.paths.push_back(stroke_outline({{right ? l : r, yc}, {tip, yc}}, {bar}));
+                b.paths.push_back(stroke_outline({{back, yc - head}, {tip, yc}, {back, yc + head}}, {weight, weight}));
+                break;
+            }
+        }
+        for (const RichPath& p: b.paths) reach_path(b, p);
         return b;
     }
 
     Box nucleus(const Atom& a, int level) const {
         switch (a.kind) {
+            case Atom::Kind::Accent: return accent(a, level);
             case Atom::Kind::Group: {
                 Box b = list(a.group, level);
                 // An empty group still stands on the line, for the scripts it carries.
@@ -972,12 +1117,13 @@ RichLine layout_rich(const std::string& font_path, float size, std::string_view 
         all.descent = std::min(all.descent, b.descent);
         all.ink_top = std::max(all.ink_top, b.ink_top);
         all.ink_bottom = std::min(all.ink_bottom, b.ink_bottom);
+        all.placed = all.placed || b.placed;
     }
     merge_runs(all.runs);
     line.runs = std::move(all.runs);
     line.rules = std::move(all.rules);
     line.paths = std::move(all.paths);
-    line.placed = !line.rules.empty() || !line.paths.empty();
+    line.placed = all.placed || !line.rules.empty() || !line.paths.empty();
     line.width = all.width;
     line.vm = {all.ascent, all.descent, all.ascent - all.descent};
     line.ink_top = all.ink_top;

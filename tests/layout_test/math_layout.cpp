@@ -297,6 +297,123 @@ namespace lt {
                   "legend rows: a tall name makes every row its ink plus 4 px");
         }
 
+        // --- Accents (37b) ---------------------------------------------------------------
+        {
+            std::printf("\n[math layout: accents]\n");
+            const float lift = 2.0f * kTheta;   // the accent's ink over the body's
+            for (const char* s: {"$\\hat{x}$", "$\\bar{x}$", "$\\tilde{x}$", "$\\dot{x}$", "$\\ddot{x}$",
+                                 "$\\acute{x}$", "$\\grave{x}$", "$\\breve{x}$", "$\\check{x}$", "$\\mathring{x}$",
+                                 "$\\vec{x}$", "$\\widehat{xyz}$", "$\\widetilde{xyz}$", "$\\overrightarrow{AB}$",
+                                 "$\\overleftarrow{AB}$", "$\\hat x$", "$\\hat{\\imath}$"}) {
+                check(!math_error(s), std::string("parses: ") + s);
+                check(layout_rich("", kSize, s).placed, std::string("placed: ") + s);
+            }
+            check(math_error("$\\hat$") && math_error("$\\hat$")->reason == "'\\hat' is missing an argument",
+                  "an accent needs its argument");
+
+            // Over an italic letter: centred on its ink, moved right by half the
+            // slant of its height, 2θ clear of it; the letter's width kept.
+            const RichLine hx = layout_rich("", kSize, "$\\hat{x}$");
+            const RichRun* x = run(hx, "x");
+            const RichRun* hat = run(hx, "\xCB\x86");
+            check(hx.runs.size() == 2 && x && hat && close(hat->size, kSize), "\\hat{x}: the letter and ˆ");
+            if (x && hat) {
+                const InkBox ix = ink("x"), ia = ink("\xCB\x86", kSize, false);
+                const float skew = 0.2f * ix.top * 0.5f;
+                check(close(hat->x + (ia.left + ia.right) * 0.5f, x->x + (ix.left + ix.right) * 0.5f + skew, 0.01f),
+                      "\\hat{x}: centred on the letter's ink, half the slant to the right");
+                check(close(-hat->dy + ia.bottom, ix.top + lift, 0.01f), "\\hat{x}: 2θ over the letter's ink");
+                check(close(hx.width, wi("x")), "\\hat{x}: the letter's width");
+                check(close(hx.ink_top, -hat->dy + ia.top, 0.01f) && hx.vm.ascent >= hx.ink_top,
+                      "\\hat{x}: the line reaches the accent's ink");
+            }
+            const RichLine h2 = layout_rich("", kSize, "$\\hat{2}$");
+            if (const RichRun* two = run(h2, "2"), *acc = run(h2, "\xCB\x86"); two && acc) {
+                const InkBox i2 = ink("2", kSize, false), ia = ink("\xCB\x86", kSize, false);
+                check(close(acc->x + (ia.left + ia.right) * 0.5f, (i2.left + i2.right) * 0.5f, 0.01f),
+                      "\\hat{2}: over an upright digit, no skew");
+            }
+            const RichLine hX = layout_rich("", kSize, "$\\hat{X}$");
+            if (const RichRun* a = run(hX, "\xCB\x86"); a && hat)
+                check(a->dy < hat->dy - 0.1f * kSize, "\\hat{X} sits higher than \\hat{x}");
+            const RichLine group = layout_rich("", kSize, "$\\bar{xy}$");
+            if (const RichRun* a = run(group, "\xC2\xAF"); a && !group.runs.empty()) {
+                const InkBox ig = ink("xy"), ia = ink("\xC2\xAF", kSize, false);
+                check(close(a->x + (ia.left + ia.right) * 0.5f, (ig.left + ig.right) * 0.5f, 0.01f),
+                      "\\bar{xy}: centred on the group's ink, no skew");
+            }
+            const RichLine vec = layout_rich("", kSize, "$\\vec{v}$");
+            check(run(vec, "\xE2\x86\x92") && close(run(vec, "\xE2\x86\x92")->size, 0.6f * kSize),
+                  "\\vec: a small arrow");
+            const RichLine sup = layout_rich("", kSize, "$\\hat{x}^2$");
+            const RichLine plain = layout_rich("", kSize, "$x^2$");
+            // The script goes up only by what the accent adds above the font's
+            // ascent (32a's rule for a tall nucleus): nothing on Windows' Times New
+            // Roman, a little on macOS's Times.
+            const float above = std::max(0.0f, hx.ink_top - font_vmetrics("", kSize).ascent);
+            if (run(sup, "2") && run(plain, "2"))
+                check(close(run(sup, "2")->dy, run(plain, "2")->dy - above, 0.01f),
+                      "\\hat{x}^2: the script where x^2's is, raised by what the accent adds");
+
+            // Wide accents: paths across the body's ink, 2θ clear of it.
+            const RichLine wh = layout_rich("", kSize, "$\\widehat{xyz}$");
+            const InkBox ib = ink("xyz");
+            check(wh.paths.size() == 1 && wh.runs.size() == 1, "\\widehat: one path over the body");
+            if (wh.paths.size() == 1) {
+                float lo = 1e9f, hi = -1e9f;
+                for (const auto& q: wh.paths[0].pts) {
+                    lo = std::min(lo, q.x);
+                    hi = std::max(hi, q.x);
+                }
+                const float skewless = (ib.left + ib.right) * 0.5f;
+                check(close((lo + hi) * 0.5f, skewless, 0.5f) && hi - lo >= ib.right - ib.left - 0.01f,
+                      "\\widehat: spans the body's ink, centred");
+                check(close(-path_max_y(wh.paths[0]), ib.top + lift, 0.05f), "\\widehat: 2θ over the ink");
+                check(-path_min_y(wh.paths[0]) - ib.top < 0.45f * kSize, "\\widehat: not too tall");
+            }
+            const RichLine wt = layout_rich("", kSize, "$\\widetilde{xyz}$");
+            check(wt.paths.size() == 1 && -path_min_y(wt.paths[0]) - ib.top < 0.35f * kSize,
+                  "\\widetilde: one low wave over the body");
+            const RichLine ra = layout_rich("", kSize, "$\\overrightarrow{AB}$");
+            const RichLine la = layout_rich("", kSize, "$\\overleftarrow{AB}$");
+            check(ra.paths.size() == 2 && la.paths.size() == 2, "the over-arrows: a shaft and a head");
+            if (ra.paths.size() == 2 && la.paths.size() == 2) {
+                const auto right_of = [](const RichPath& p) {
+                    float hi = -1e9f;
+                    for (const auto& q: p.pts) hi = std::max(hi, q.x);
+                    return hi;
+                };
+                const auto left_of = [](const RichPath& p) {
+                    float lo = 1e9f;
+                    for (const auto& q: p.pts) lo = std::min(lo, q.x);
+                    return lo;
+                };
+                // The head is the second path: at the right for →, the left for ←.
+                check(right_of(ra.paths[1]) > right_of(ra.paths[0]) - 1.0f && left_of(ra.paths[1]) > left_of(ra.paths[0]),
+                      "\\overrightarrow: the head at the right end");
+                check(left_of(la.paths[1]) < left_of(la.paths[0]) + 1.0f && right_of(la.paths[1]) < right_of(la.paths[0]),
+                      "\\overleftarrow: the head at the left end");
+            }
+            const RichLine narrow = layout_rich("", kSize, "$\\widehat{i}$");
+            if (narrow.paths.size() == 1) {
+                float lo = 1e9f, hi = -1e9f;
+                for (const auto& q: narrow.paths[0].pts) {
+                    lo = std::min(lo, q.x);
+                    hi = std::max(hi, q.x);
+                }
+                check(hi - lo >= 0.5f * kSize - 0.01f, "a wide accent is half an em at least");
+            }
+
+            // SVG: an accent's line is placed (its run steps back over the letter).
+            auto fig = Figure::create();
+            auto ax = fig->add_subplot(1, 1, 1);
+            ax->set_title("$\\hat{x}$");
+            const std::string svg = fig->render_svg().svg;
+            const std::size_t t = svg.find("\"><text x=\"");
+            check(t != std::string::npos && svg.find("dx=") == std::string::npos
+                  && svg.find("<tspan x=\"", t) != std::string::npos, "SVG: an accented title is placed");
+        }
+
         // --- Warnings: the new commands no longer warn -------------------------------------
         {
             std::vector<std::string> msgs;
@@ -305,7 +422,9 @@ namespace lt {
             auto ax = fig->add_subplot(1, 1, 1);
             ax->set_title("$\\frac{1}{2}\\sqrt[3]{x}\\overline{y}\\underline{z}$");
             check(msgs.empty(), "no warning for 37a's commands");
-            ax->set_title("$\\hat{x}$");
+            ax->set_title("$\\hat{x}\\widetilde{xy}\\vec{v}\\overleftarrow{AB}\\hat{\\imath}$");
+            check(msgs.empty(), "no warning for 37b's accents");
+            ax->set_title("$\\binom{n}{k}$");
             check(msgs.size() == 1 && msgs[0].find("not supported yet") != std::string::npos,
                   "a still deferred command still warns");
             Figure::set_message_handler(nullptr);
@@ -328,6 +447,11 @@ namespace lt {
             TextOptions big;
             big.fontsize = 24.0f;
             ax->text("$\\frac{a+b}{c} \\quad \\dfrac{1}{2} \\quad \\frac{\\frac{1}{x}+1}{y}$", 0.05, 0.85, big);
+            ax->text("$\\hat{x}\\,\\bar{x}\\,\\tilde{a}\\,\\dot{x}\\,\\ddot{y}\\,\\acute{e}\\,\\grave{a}\\,\\breve{u}"
+                     "\\,\\check{c}\\,\\mathring{A}\\,\\vec{v}\\,\\hat{X}\\,\\bar{F}\\,\\hat{\\imath}\\,\\vec{x}^2$",
+                     0.45, 0.85, big);
+            ax->text("$\\widehat{xyz}\\quad\\widetilde{abc}\\quad\\overrightarrow{AB}\\quad\\overleftarrow{PQ}"
+                     "\\quad\\widehat{i}$", 0.45, 0.65, big);
             ax->text("$\\sqrt{2}\\quad\\sqrt[3]{x}\\quad\\sqrt{\\frac{a}{b}}\\quad\\sqrt{x_i^2+y}$", 0.05, 0.62, big);
             ax->text("$\\overline{AB}\\quad\\underline{xyz}\\quad x^{\\frac{1}{2}}$\nnext line\n$\\frac{1}{2}$ below",
                      0.05, 0.18, big);

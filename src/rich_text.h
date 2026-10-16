@@ -10,7 +10,7 @@ namespace sextant {
 // Rich text: a subset of matplotlib's mathtext. A string with
 // an even, nonzero count of `$` not preceded by a backslash holds math spans;
 // inside one, `^`/`_` scripts, `{}` groups, `\name` symbols and TeX spacing,
-// `\frac`, `\sqrt` and `\overline`/`\underline` (drawn with rules and paths).
+// `\frac`, `\sqrt`, `\overline`/`\underline` and accents (drawn with rules and paths).
 // Letters in a span are italic, as TeX's: Latin and lower-case
 // Greek; digits, symbols, Greek capitals, function names, `\mathrm`/`\text`
 // upright; `\mathit` makes letters and digits italic.
@@ -59,8 +59,8 @@ struct RichLine {
     // The glyphs' and rules' extent, y up (the font's ascent and descent for
     // a line that is not rich).
     float ink_top = 0.0f, ink_bottom = 0.0f;
-    // Holds a fraction, root or rule: its runs are not in pen order (a
-    // denominator steps back under its numerator), so the SVG places each
+    // Holds a fraction, root, rule or accent: its runs are not in pen order (a
+    // denominator or an accent steps back over what precedes it), so the SVG places each
     // run absolutely, and the rules and paths must be drawn too.
     bool placed = false;
 };
