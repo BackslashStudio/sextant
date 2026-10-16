@@ -180,6 +180,7 @@ FigureSnapshot Figure::Impl::build_figure_snapshot() const {
     fs.row_gap = opts.subplot_row_gap;
     fs.margins       = opts.margins;
     fs.mathtext      = opts.mathtext;
+    fs.math_font     = math_font;
     fs.background    = opts.background;
     fs.col_ratios    = col_ratios;
     fs.row_ratios    = row_ratios;
@@ -439,6 +440,9 @@ Figure::Figure(FigureOptions opts) : d(std::make_unique<Impl>()) {
     d->opts = std::move(opts);
         // Normalize supersample once here.
     d->opts.supersample = std::clamp(d->opts.supersample, 1, kMaxSupersample);
+    std::string message;
+    d->math_font = resolve_math_font(d->opts.math_fontset, d->opts.math_font_path, message);
+    if (!message.empty()) emit_message("Figure: " + message);
 }
 
 Figure::~Figure() {

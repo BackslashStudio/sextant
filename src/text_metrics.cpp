@@ -69,8 +69,8 @@ struct FaceRef {
     int index = 0;
 };
 
-// resolved path -> its italic face, nullopt when it has none.
-std::unordered_map<std::string, std::optional<FaceRef>> g_italics;
+// (resolved path, Italic or Bold) -> that face, nullopt when it has none.
+std::unordered_map<std::string, std::optional<FaceRef>> g_styled;
 
 std::string font_key(const std::string& file, int index) {
     return index == 0 ? file : file + "#" + std::to_string(index);
@@ -244,14 +244,27 @@ float measure(const LoadedFont& f, const std::vector<const LoadedFont*>& fallbac
     return x;
 }
 
-// The italic face of the font at resolved `path`, memoized. Caller must hold
-// g_mutex.
-const std::optional<FaceRef>& italic_of(const std::string& path) {
-    if (auto it = g_italics.find(path); it != g_italics.end()) return it->second;
+// The italic or bold face of the font at resolved `path`, memoized. Caller
+// must hold g_mutex.
+const std::optional<FaceRef>& styled_of(const std::string& path, FontFace style) {
+    const std::string key = path + (style == FontFace::Bold ? "|bold" : "|italic");
+    if (auto it = g_styled.find(key); it != g_styled.end()) return it->second;
     std::optional<FaceRef> face;
-    if (const FontEntry* e = find_font_entry(path); e && !e->italic_path.empty())
-        face = FaceRef{e->italic_path, e->italic_index};
-    return g_italics[path] = std::move(face);
+    if (const FontEntry* e = find_font_entry(path)) {
+        if (style == FontFace::Italic && !e->italic_path.empty()) face = FaceRef{e->italic_path, e->italic_index};
+        if (style == FontFace::Bold && !e->bold_path.empty()) face = FaceRef{e->bold_path, e->bold_index};
+    }
+    return g_styled[key] = std::move(face);
+}
+
+// The loaded face `style` reads at resolved `path`: the family's italic or
+// bold face when it has a usable one, else nullopt (upright). Caller must hold
+// g_mutex.
+std::optional<FaceRef> face_for(const std::string& path, FontFace style) {
+    if (style == FontFace::Upright) return std::nullopt;
+    const std::optional<FaceRef>& f = styled_of(path, style);
+    if (f && get_font(f->file, f->index).ok) return f;
+    return std::nullopt;
 }
 
 // The fallback fonts for a string in the font at `path`, in order. Caller must
@@ -259,8 +272,8 @@ const std::optional<FaceRef>& italic_of(const std::string& path) {
 std::vector<const LoadedFont*> fallbacks_for(const std::string& path) {
     std::vector<const LoadedFont*> fallbacks;
     for (const FontEntry* e : fallback_fonts()) {
-        if (e->path == path) continue;
-        const LoadedFont& fb = get_font(e->path);   // map nodes never move
+        if (e->path == path && e->index == 0) continue;
+        const LoadedFont& fb = get_font(e->path, e->index);   // map nodes never move
         if (fb.ok) fallbacks.push_back(&fb);
     }
     return fallbacks;
@@ -404,23 +417,29 @@ float text_width(const std::string& font_path, float px_size, std::string_view t
     return width_locked(path, 0, isize, text);
 }
 
-float text_width_italic(const std::string& font_path, float px_size, std::string_view text) {
+float text_width_face(const std::string& font_path, float px_size, std::string_view text, FontFace face) {
     if (text.empty()) return 0.0f;
     const short isize = quantize_isize(px_size);
     if (isize <= 0) return 0.0f;
     const std::string& path = resolve_path(font_path);
     std::lock_guard<std::mutex> lock(g_mutex);
-    const std::optional<FaceRef>& it = italic_of(path);
-    if (it && get_font(it->file, it->index).ok) return width_locked(it->file, it->index, isize, text);
-    return width_locked(path, 0, isize, text);
+    if (const auto f = face_for(path, face)) return width_locked(f->file, f->index, isize, text);
+    const float w = width_locked(path, 0, isize, text);
+    return face == FontFace::Bold ? w + kFauxBoldEm * static_cast<float>(isize) / 10.0f : w;
 }
 
-bool has_italic_face(const std::string& font_path) {
+float text_width_italic(const std::string& font_path, float px_size, std::string_view text) {
+    return text_width_face(font_path, px_size, text, FontFace::Italic);
+}
+
+bool has_face(const std::string& font_path, FontFace face) {
+    if (face == FontFace::Upright) return true;
     const std::string& path = resolve_path(font_path);
     std::lock_guard<std::mutex> lock(g_mutex);
-    const std::optional<FaceRef>& it = italic_of(path);
-    return it && get_font(it->file, it->index).ok;
+    return face_for(path, face).has_value();
 }
+
+bool has_italic_face(const std::string& font_path) { return has_face(font_path, FontFace::Italic); }
 
 FontVMetrics font_vmetrics(const std::string& font_path, float px_size) {
     const short isize = quantize_isize(px_size);
@@ -441,17 +460,20 @@ FontVMetrics font_vmetrics(const std::string& font_path, float px_size) {
              f.lineh_norm   * fsize / 10.0f };
 }
 
-InkBox ink_box(const std::string& font_path, float px_size, std::string_view text, bool italic) {
+InkBox ink_box(const std::string& font_path, float px_size, std::string_view text, FontFace face) {
     if (text.empty()) return {};
     const short isize = quantize_isize(px_size);
     if (isize <= 0) return {};
     const std::string& path = resolve_path(font_path);
     std::lock_guard<std::mutex> lock(g_mutex);
-    if (italic) {
-        const std::optional<FaceRef>& it = italic_of(path);
-        if (it && get_font(it->file, it->index).ok) return ink_locked(it->file, it->index, isize, text);
-    }
-    return ink_locked(path, 0, isize, text);
+    if (const auto f = face_for(path, face)) return ink_locked(f->file, f->index, isize, text);
+    InkBox b = ink_locked(path, 0, isize, text);
+    if (face == FontFace::Bold && b.right > b.left) b.right += kFauxBoldEm * static_cast<float>(isize) / 10.0f;
+    return b;
+}
+
+InkBox ink_box(const std::string& font_path, float px_size, std::string_view text, bool italic) {
+    return ink_box(font_path, px_size, text, italic ? FontFace::Italic : FontFace::Upright);
 }
 
 InkBox ink_band(const std::string& font_path, float px_size, std::string_view text, float low, float high) {
@@ -463,6 +485,16 @@ InkBox ink_band(const std::string& font_path, float px_size, std::string_view te
     const LoadedFont& f = get_font(path);
     if (!f.ok) return {};
     return measure_ink(f, fallbacks_for(path), static_cast<float>(isize) / 10.0f, text, std::pair{low, high});
+}
+
+bool font_has_glyphs(const std::string& font_path, std::string_view text) {
+    const std::string& path = resolve_path(font_path);
+    std::lock_guard<std::mutex> lock(g_mutex);
+    const LoadedFont& f = get_font(path);
+    if (!f.ok) return false;
+    bool all = true;
+    for_each_codepoint(text, [&](int cp) { all = all && stbtt_FindGlyphIndex(&f.info, cp) != 0; });
+    return all;
 }
 
 bool text_metrics_font_loaded(const std::string& font_path) {

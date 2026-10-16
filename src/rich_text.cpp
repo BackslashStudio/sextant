@@ -1,8 +1,11 @@
 #include "rich_text.h"
 #include "messages.h"
+#include "font_discovery.h"
+#include "sextant/figure.h"
 
 #include <algorithm>
 #include <cmath>
+#include <span>
 #include <string>
 #include <utility>
 
@@ -25,6 +28,8 @@ struct Atom {
     Cls cls = Cls::Ord;
     std::string text;              // Glyphs
     bool italic = false;           // Glyphs
+    bool bold = false;             // Glyphs, in \mathbf
+    bool text_font = false;        // Glyphs of \text or \mathdefault: the text font, not the math one
     // Glyphs: a big operator (1.4× at level 0, its ink centred on the math
     // axis); scripts set above and below it (limits, \sum and \lim), or at its
     // ink (an integral).
@@ -240,8 +245,7 @@ constexpr AccentCmd kAccents[] = {
 
 // Commands known from mathtext that this step does not draw yet.
 constexpr std::string_view kDeferred[] = {
-    "mathbf", "boldsymbol", "mathcal", "mathbb",
-    "mathfrak", "mathscr", "mathsf", "mathtt", "color",
+    "boldsymbol", "color",
 };
 
 template <class T, std::size_t N>
@@ -291,8 +295,52 @@ private:
     // Right: up to a `\middle` or `\right` (left unconsumed), for `\left`.
     // Row: a \substack row, up to `\\` or `}` (consumed; row_more_ says which).
     enum class End { Dollar, Brace, Bracket, Right, Row };
-    // The font a group sets: math's default (italic letters), \mathrm, \mathit.
-    enum class Font { Math, Roman, Italic };
+    // The font a group sets: math's default (italic letters), \mathrm, \mathit,
+    // \mathbf (the bold face), and the alphabets \mathcal/\mathscr, \mathbb,
+    // \mathfrak, \mathsf, \mathtt (Unicode's math alphanumerics, upright).
+    // Default is \mathdefault: upright, in the text font rather than the math one.
+    enum class Font { Math, Roman, Italic, Bold, Script, DoubleStruck, Fraktur, Sans, Mono, Default };
+
+    // A letter or digit of `font`'s alphabet: its code point in Unicode's
+    // Mathematical Alphanumeric Symbols, or the Letterlike Symbols one where
+    // that block has a hole; 0 when the alphabet has none (digits in script and
+    // fraktur) or `font` is not an alphabet.
+    static char32_t alphabet(Font font, char c) {
+        struct Alpha {
+            Font font;
+            char32_t upper, lower, digit;   // the A, a and 0 of the block; digit 0 = none
+        };
+        static constexpr Alpha kAlphas[] = {
+            {Font::Script, 0x1D49C, 0x1D4B6, 0},       {Font::DoubleStruck, 0x1D538, 0x1D552, 0x1D7D8},
+            {Font::Fraktur, 0x1D504, 0x1D51E, 0},      {Font::Sans, 0x1D5A0, 0x1D5BA, 0x1D7E2},
+            {Font::Mono, 0x1D670, 0x1D68A, 0x1D7F6},
+        };
+        struct Hole {
+            Font font;
+            char c;
+            char32_t cp;
+        };
+        static constexpr Hole kHoles[] = {
+            {Font::Script, 'B', 0x212C}, {Font::Script, 'E', 0x2130}, {Font::Script, 'F', 0x2131},
+            {Font::Script, 'H', 0x210B}, {Font::Script, 'I', 0x2110}, {Font::Script, 'L', 0x2112},
+            {Font::Script, 'M', 0x2133}, {Font::Script, 'R', 0x211B}, {Font::Script, 'e', 0x212F},
+            {Font::Script, 'g', 0x210A}, {Font::Script, 'o', 0x2134},
+            {Font::DoubleStruck, 'C', 0x2102}, {Font::DoubleStruck, 'H', 0x210D}, {Font::DoubleStruck, 'N', 0x2115},
+            {Font::DoubleStruck, 'P', 0x2119}, {Font::DoubleStruck, 'Q', 0x211A}, {Font::DoubleStruck, 'R', 0x211D},
+            {Font::DoubleStruck, 'Z', 0x2124},
+            {Font::Fraktur, 'C', 0x212D}, {Font::Fraktur, 'H', 0x210C}, {Font::Fraktur, 'I', 0x2111},
+            {Font::Fraktur, 'R', 0x211C}, {Font::Fraktur, 'Z', 0x2128},
+        };
+        for (const Hole& h: kHoles)
+            if (h.font == font && h.c == c) return h.cp;
+        for (const Alpha& a: kAlphas) {
+            if (a.font != font) continue;
+            if (c >= 'A' && c <= 'Z') return a.upper + static_cast<char32_t>(c - 'A');
+            if (c >= 'a' && c <= 'z') return a.lower + static_cast<char32_t>(c - 'a');
+            if (c >= '0' && c <= '9' && a.digit) return a.digit + static_cast<char32_t>(c - '0');
+        }
+        return 0;
+    }
 
     std::string_view s_;
     std::size_t i_ = 0;
@@ -447,8 +495,11 @@ private:
                 case '\'': a.text = utf8(0x2032); break;                    // a prime
                 default: break;
             }
+            if (const char32_t cp = alphabet(font_, c)) a.text = utf8(cp);
         }
         a.italic = italic(a.text);
+        a.bold = font_ == Font::Bold;
+        a.text_font = font_ == Font::Default;
         out.push_back(std::move(a));
     }
 
@@ -464,6 +515,8 @@ private:
         a.text = utf8(cp);
         a.cls = cls;
         a.italic = italic(a.text);
+        a.bold = font_ == Font::Bold && cls != Cls::Op;
+        a.text_font = font_ == Font::Default;
         if (cls == Cls::Op) {
             a.big = true;
             a.integral = cp == 0x222B || cp == 0x222C || cp == 0x222E;
@@ -617,9 +670,27 @@ private:
             return;
         }
         if (name == "mathrm" || name == "mathit" || name == "mathdefault") {
-            // \mathdefault is matplotlib's text font: upright.
-            out.push_back(font_group(at, name, name == "mathit" ? Font::Italic : Font::Roman));
+            // \mathdefault is matplotlib's text font: upright, never the math font.
+            out.push_back(font_group(at, name, name == "mathit"        ? Font::Italic
+                                               : name == "mathdefault" ? Font::Default
+                                                                       : Font::Roman));
             return;
+        }
+        {
+            struct Named {
+                std::string_view name;
+                Font font;
+            };
+            static constexpr Named kFonts[] = {
+                {"mathbf", Font::Bold}, {"mathcal", Font::Script}, {"mathscr", Font::Script},
+                {"mathbb", Font::DoubleStruck}, {"mathfrak", Font::Fraktur}, {"mathsf", Font::Sans},
+                {"mathtt", Font::Mono},
+            };
+            for (const Named& f: kFonts)
+                if (f.name == name) {
+                    out.push_back(font_group(at, name, f.font));
+                    return;
+                }
         }
         if (name == "operatorname") {
             // An upright operator, spaced as \sin.
@@ -738,6 +809,7 @@ private:
             ++i_;
         }
         if (a.text.empty()) a.kind = Atom::Kind::Group;
+        a.text_font = true;
         return a;
     }
 
@@ -906,19 +978,60 @@ RichPath stroke_outline(const std::vector<RichPath::Pt>& c, const std::vector<fl
     return path;
 }
 
+// `s` in Unicode's math italic (or, `bold`, math bold) letters: Latin, Greek
+// and the Greek variants, the italic `h` its Letterlike hole (ℎ); "" when a
+// character has none (a digit in italic, an accented letter).
+std::string math_letters(std::string_view s, bool bold) {
+    std::string out;
+    for (std::size_t i = 0; i < s.size();) {
+        const std::size_t n = std::min(utf8_len(static_cast<unsigned char>(s[i])), s.size() - i);
+        const char32_t c = first_cp(s.substr(i, n));
+        i += n;
+        char32_t m = 0;
+        if (c >= 'A' && c <= 'Z') m = (bold ? 0x1D400 : 0x1D434) + (c - 'A');
+        else if (c >= 'a' && c <= 'z') m = !bold && c == 'h' ? 0x210E : (bold ? 0x1D41A : 0x1D44E) + (c - 'a');
+        else if (bold && c >= '0' && c <= '9') m = 0x1D7CE + (c - '0');
+        else if (c >= 0x0391 && c <= 0x03A9 && c != 0x03A2) m = (bold ? 0x1D6A8 : 0x1D6E2) + (c - 0x0391);
+        else if (c >= 0x03B1 && c <= 0x03C9) m = (bold ? 0x1D6C2 : 0x1D6FC) + (c - 0x03B1);
+        else {
+            // ϵ ϑ ϰ ϕ ϱ ϖ, after ∂ in each alphabet.
+            constexpr char32_t kVariants[] = {0x03F5, 0x03D1, 0x03F0, 0x03D5, 0x03F1, 0x03D6};
+            for (int k = 0; k < 6; ++k)
+                if (c == kVariants[k]) m = (bold ? 0x1D6DC : 0x1D716) + k;
+        }
+        if (!m) return {};
+        append_utf8(out, m);
+    }
+    return out;
+}
+
 class Layout {
 public:
-    Layout(const std::string& font, float base) : font_(font), base_(base) {}
+    // `font` sets the math (FigureOptions::math_fontset's font, else the
+    // text's), `text_font` the text outside spans and \text.
+    Layout(const std::string& font, const std::string& text_font, float base)
+        : font_(font), text_font_(text_font), base_(base) {}
 
-    Box text(const std::string& t, float size, bool italic = false) const {
+    Box text(std::string t, float size, bool italic = false, bool bold = false, bool in_text_font = false) const {
+        const std::string& path = in_text_font ? text_font_ : font_;
         Box b;
-        const FontVMetrics vm = font_vmetrics(font_, size);
+        const FontVMetrics vm = font_vmetrics(path, size);
         b.ascent = vm.ascent;
         b.descent = vm.descent;
         if (t.empty()) return b;
-        b.width = italic ? text_width_italic(font_, size, t) : text_width(font_, size, t);
-        b.runs.push_back({t, 0.0f, 0.0f, size, b.width, italic});
-        const InkBox ink = ink_box(font_, size, t, italic);
+        // A math font of its own with no italic (bold) face: its math italic
+        // (bold) letters where it has them, else the slant (the double draw).
+        if (path != text_font_ && (italic || bold)
+            && !has_face(path, bold ? FontFace::Bold : FontFace::Italic)) {
+            if (std::string m = math_letters(t, bold); !m.empty() && font_has_glyphs(path, m)) {
+                t = std::move(m);
+                italic = bold = false;
+            }
+        }
+        const FontFace face = bold ? FontFace::Bold : italic ? FontFace::Italic : FontFace::Upright;
+        b.width = face == FontFace::Upright ? text_width(path, size, t) : text_width_face(path, size, t, face);
+        b.runs.push_back({t, 0.0f, 0.0f, size, b.width, italic, bold, path == text_font_ ? std::string() : path});
+        const InkBox ink = ink_box(path, size, t, face);
         b.ink_top = std::max(0.0f, ink.top);
         b.ink_bottom = std::min(0.0f, ink.bottom);
         if (ink.right > ink.left) {
@@ -950,6 +1063,7 @@ public:
 
 private:
     const std::string& font_;
+    const std::string& text_font_;
     float base_;
 
     static void append(Box& into, const Box& b, float x, float dy) {
@@ -1450,7 +1564,7 @@ private:
             case Atom::Kind::Radical: return radical(a, level);
             case Atom::Kind::Overline:
             case Atom::Kind::Underline: return over_under(a, level);
-            default: return a.big ? big_op(a, level) : text(a.text, base_ * scale_at(level), a.italic);
+            default: return a.big ? big_op(a, level) : text(a.text, base_ * scale_at(level), a.italic, a.bold, a.text_font);
         }
     }
 
@@ -1521,7 +1635,7 @@ void merge_runs(std::vector<RichRun>& runs) {
     for (RichRun& r: runs) {
         if (!out.empty()) {
             RichRun& p = out.back();
-            if (p.size == r.size && p.dy == r.dy && p.italic == r.italic
+            if (p.size == r.size && p.dy == r.dy && p.italic == r.italic && p.bold == r.bold && p.font == r.font
                 && std::abs(p.x + p.width - r.x) < 1e-3f) {
                 p.text += r.text;
                 p.width += r.width;
@@ -1534,6 +1648,7 @@ void merge_runs(std::vector<RichRun>& runs) {
 }
 
 thread_local bool t_math_on = true;
+thread_local std::string t_math_font;
 
 } // namespace
 
@@ -1571,12 +1686,12 @@ RichLine layout_rich(const std::string& font_path, float size, std::string_view 
         return line;
     }
 
-    const Layout lay(font_path, size);
+    const Layout lay(t_math_font.empty() ? font_path : t_math_font, font_path, size);
     Box all;
     all.ascent = vm.ascent;
     all.descent = vm.descent;
     for (const Segment& seg: p.segments) {
-        const Box b = seg.math ? lay.list(seg.list, 0) : lay.text(seg.text, size);
+        const Box b = seg.math ? lay.list(seg.list, 0) : lay.text(seg.text, size, false, false, true);
         for (RichRun r: b.runs) {
             r.x += all.width;
             all.runs.push_back(std::move(r));
@@ -1620,8 +1735,37 @@ FontVMetrics label_vmetrics(const std::string& font_path, float size, std::strin
 
 bool mathtext_on() { return t_math_on; }
 
-MathTextScope::MathTextScope(bool on) : prev_(t_math_on) { t_math_on = on; }
-MathTextScope::~MathTextScope() { t_math_on = prev_; }
+const std::string& mathtext_font() { return t_math_font; }
+
+MathTextScope::MathTextScope(bool on, std::string math_font) : prev_(t_math_on), prev_font_(std::move(t_math_font)) {
+    t_math_on = on;
+    t_math_font = std::move(math_font);
+}
+MathTextScope::~MathTextScope() {
+    t_math_on = prev_;
+    t_math_font = std::move(prev_font_);
+}
+
+std::string resolve_math_font(MathFontset set, const std::string& custom_path, std::string& message) {
+    message.clear();
+    if (set == MathFontset::Custom) {
+        if (!custom_path.empty() && text_metrics_font_loaded(custom_path)) return custom_path;
+        message = "math_font_path '" + custom_path + "' cannot be read as a font; math uses the text font";
+        return {};
+    }
+    if (set != MathFontset::Stix && set != MathFontset::Cm) return {};
+    const bool stix = set == MathFontset::Stix;
+    static constexpr std::string_view kStix[] = {"STIX Two Math", "STIX Two Text", "STIXGeneral"};
+    static constexpr std::string_view kCm[] = {"Latin Modern Math", "CMU Serif", "Latin Modern Roman"};
+    std::string names;
+    for (const std::string_view name: stix ? std::span<const std::string_view>(kStix) : std::span<const std::string_view>(kCm)) {
+        if (const FontEntry* e = find_family(name); e && text_metrics_font_loaded(e->path)) return e->path;
+        names += (names.empty() ? "" : ", ") + std::string(name);
+    }
+    message = std::string("math_fontset ") + (stix ? "Stix" : "Cm") + ": none of " + names
+              + " is installed; math uses the text font";
+    return {};
+}
 
 void warn_math(bool mathtext, std::string_view who, std::string_view s) {
     if (!mathtext || s.find('$') == std::string_view::npos) return;

@@ -5,6 +5,9 @@
 #include "layout_test.h"
 #include "rich_text.h"
 
+#include <algorithm>
+#include <filesystem>
+
 namespace lt {
     using namespace sextant;
 
@@ -651,6 +654,217 @@ namespace lt {
                             0.1f * s7, 0.01f), "...their ink 0.1 em apart");
         }
 
+        // --- Bold and the math alphabets ---------------------------------------------------
+        {
+            const float s7 = kSize * 0.7f;
+            for (const char* s: {"$\\mathbf{x}$", "$\\mathcal{A}$", "$\\mathscr{L}$", "$\\mathbb{R}$", "$\\mathfrak{g}$",
+                                 "$\\mathsf{x1}$", "$\\mathtt{x1}$", "$\\mathbf{F}^{\\mathbf{2}}$"})
+                check(!math_error(s), std::string("parses: ") + s);
+            check(math_error("$\\mathbf x$") && math_error("$\\mathbf x$")->reason == "'\\mathbf' needs '{'",
+                  "\\mathbf needs a group");
+
+            // \mathbf: every glyph bold and upright, measured in the bold face.
+            const float bw = text_width_face("", kSize, "x", FontFace::Bold) + text_width_face("", kSize, "2", FontFace::Bold);
+            const RichLine bf = layout_rich("", kSize, "$\\mathbf{x2}$");
+            check(bf.runs.size() == 1 && bf.runs[0].text == "x2" && bf.runs[0].bold && !bf.runs[0].italic
+                  && close(bf.width, bw), "\\mathbf{x2}: one bold upright run, the bold face's width");
+            const RichLine bs = layout_rich("", kSize, "$x^{\\mathbf{n}}$");
+            check(run(bs, "n") && run(bs, "n")->bold && close(run(bs, "n")->size, s7), "\\mathbf in a script");
+            check(!run(layout_rich("", kSize, "$\\mathbf{x}y$"), "y")->bold, "bold ends with its group");
+            const FontEntry* def = pick_default_font();
+            if (has_face("", FontFace::Bold) && def && def->bold_index == 0) {
+                check(text_width_face("", kSize, "Wx", FontFace::Bold) == text_width(def->bold_path, kSize, "Wx"),
+                      "the bold face is the family's own (" + def->bold_path + ")");
+            } else {
+                std::printf("  (the default font has no bold face, or it is a collection's later face: bold-face check skipped)\n");
+            }
+            // No bold face (a copy discovery never listed): upright plus 0.04 em,
+            // drawn twice, and the SVG asks for bold.
+            namespace fs = std::filesystem;
+            if (def) {
+                const fs::path copy = fs::temp_directory_path() / ("sextant_no_bold" + fs::path(def->path).extension().string());
+                std::error_code ec;
+                fs::copy_file(def->path, copy, fs::copy_options::overwrite_existing, ec);
+                if (!ec) {
+                    const std::string cp = copy.string();
+                    check(!has_face(cp, FontFace::Bold)
+                          && close(text_width_face(cp, kSize, "xy", FontFace::Bold), text_width(cp, kSize, "xy") + 0.04f * kSize),
+                          "no bold face: the upright width plus 0.04 em");
+                    const InkBox up = ink_box(cp, kSize, "I", FontFace::Upright), fb = ink_box(cp, kSize, "I", FontFace::Bold);
+                    check(close(fb.right, up.right + 0.04f * kSize) && close(fb.left, up.left), "...its ink 0.04 em wider");
+                    const auto ink_px = [&](const char* s) {
+                        FigureOptions fo;
+                        fo.width = 200;
+                        fo.height = 120;
+                        auto fig = Figure::create(fo);
+                        auto ax = fig->add_subplot(1, 1, 1);
+                        AxesStyle st;
+                        st.show_xticks = st.show_yticks = false;
+                        st.spine_bottom = st.spine_left = st.spine_top = st.spine_right = false;
+                        ax->set_axes_style(st);
+                        TextOptions to;
+                        to.fontsize = 40.0f;
+                        to.font_path = cp;
+                        ax->text(s, Pos::fraction(0.3), Pos::fraction(0.3), to);
+                        const RgbaImage img = fig->render_rgba();
+                        int n = 0;
+                        for (std::size_t k = 0; k + 3 < img.pixels.size(); k += 4) n += img.pixels[k] < 128;
+                        return n;
+                    };
+                    check(ink_px("$\\mathbf{I}$") > ink_px("$\\mathrm{I}$") + 20, "PNG: a faux bold I has more ink than an upright one");
+                    auto fig = Figure::create();
+                    auto ax = fig->add_subplot(1, 1, 1);
+                    TextOptions to;
+                    to.font_path = cp;
+                    ax->text("$\\mathbf{v}$", 0.5, 0.5, to);
+                    check(fig->render_svg().svg.find("font-weight=\"bold\">v</tspan>") != std::string::npos,
+                          "SVG: a bold run is font-weight bold");
+                    fs::remove(copy, ec);
+                }
+            }
+
+            // The alphabets: Unicode's math alphanumerics, the Letterlike holes, digits where they exist.
+            const auto cps = [](const RichLine& l) {
+                std::u32string out;
+                for (const RichRun& r: l.runs)
+                    for (std::size_t i = 0; i < r.text.size();) {
+                        const auto b0 = static_cast<unsigned char>(r.text[i]);
+                        const std::size_t n = b0 < 0x80 ? 1 : (b0 & 0xE0) == 0xC0 ? 2 : (b0 & 0xF0) == 0xE0 ? 3 : 4;
+                        char32_t cp = n == 1 ? b0 : n == 2 ? (b0 & 0x1Fu) : n == 3 ? (b0 & 0x0Fu) : (b0 & 0x07u);
+                        for (std::size_t k = 1; k < n; ++k) cp = (cp << 6) | (static_cast<unsigned char>(r.text[i + k]) & 0x3Fu);
+                        out += cp;
+                        i += n;
+                    }
+                return out;
+            };
+            const struct {
+                const char* src;
+                std::u32string want;
+            } alphas[] = {
+                {"$\\mathcal{ABEaeo1}$", {0x1D49C, 0x212C, 0x2130, 0x1D4B6, 0x212F, 0x2134, '1'}},
+                {"$\\mathscr{LMz}$", {0x2112, 0x2133, 0x1D4CF}},
+                {"$\\mathbb{ARZa09}$", {0x1D538, 0x211D, 0x2124, 0x1D552, 0x1D7D8, 0x1D7E1}},
+                {"$\\mathfrak{ACRg2}$", {0x1D504, 0x212D, 0x211C, 0x1D524, '2'}},
+                {"$\\mathsf{Aa0}$", {0x1D5A0, 0x1D5BA, 0x1D7E2}},
+                {"$\\mathtt{Zz9}$", {0x1D689, 0x1D6A3, 0x1D7FF}},
+            };
+            for (const auto& a: alphas) {
+                const RichLine l = layout_rich("", kSize, a.src);
+                check(cps(l) == a.want && std::none_of(l.runs.begin(), l.runs.end(), [](const RichRun& r) { return r.italic || r.bold; }),
+                      std::string(a.src) + ": its code points, upright");
+            }
+            check(cps(layout_rich("", kSize, "$\\mathbb{R}^n$")) == std::u32string{0x211D, 'n'}
+                  && run(layout_rich("", kSize, "$\\mathbb{R}^n$"), "n")->italic, "the alphabet ends with its group");
+            check(cps(layout_rich("", kSize, "$\\mathcal{\\alpha+}$")) == std::u32string{0x03B1, '+'},
+                  "other characters as \\mathrm");
+
+            // The fallback chain: Cambria Math last on Windows, so every glyph found
+            // before keeps its font; the alphabets' glyphs found somewhere.
+            std::printf("  fallback chain:");
+            for (const FontEntry* e: fallback_fonts()) std::printf(" %s#%d;", e->name.c_str(), e->index);
+            std::printf("\n");
+#if defined(_WIN32)
+            check(!fallback_fonts().empty() && fallback_fonts().back()->name == "Cambria Math"
+                  && fallback_fonts().back()->index == 1, "Windows: Cambria Math, cambria.ttc's face 1, last");
+#endif
+            int found = 0;
+            for (const char* g: {"\xF0\x9D\x92\x9C", "\xE2\x84\x9D", "\xF0\x9D\x94\x84", "\xF0\x9D\x96\xA0", "\xF0\x9D\x99\xB0"}) {
+                const InkBox ib = ink_box("", kSize, g);
+                found += ib.right > ib.left;
+            }
+            std::printf("  math alphabet samples with a glyph: %d of 5\n", found);
+#if defined(_WIN32) || defined(__APPLE__)
+            check(found == 5, "every alphabet has its glyphs in the chain");
+#endif
+        }
+
+        // --- Font sets ---------------------------------------------------------------------
+        {
+            std::string msg;
+            check(resolve_math_font(MathFontset::Text, "", msg).empty() && msg.empty(), "Text: the text font, no message");
+            for (const auto& [set, first, names] :
+                 {std::tuple{MathFontset::Stix, "STIX Two Math", "STIX Two Math, STIX Two Text, STIXGeneral"},
+                  std::tuple{MathFontset::Cm, "Latin Modern Math", "Latin Modern Math, CMU Serif, Latin Modern Roman"}}) {
+                const std::string got = resolve_math_font(set, "", msg);
+                const char* label = set == MathFontset::Stix ? "Stix" : "Cm";
+                const FontEntry* fam = find_family(first);
+                if (!got.empty()) {
+                    std::printf("  %s resolves to %s\n", label, got.c_str());
+                    check(msg.empty() && find_font_entry(got) != nullptr, std::string(label) + ": an installed family, no message");
+                    if (fam) check(got == fam->path, std::string(label) + ": the first of its list");
+                } else {
+                    std::printf("  %s: none installed\n", label);
+                    check(msg == std::string("math_fontset ") + label + ": none of " + names
+                                     + " is installed; math uses the text font",
+                          std::string(label) + " not installed: the message names the families");
+                    std::vector<std::string> msgs;
+                    Figure::set_message_handler([&](std::string_view s) { msgs.emplace_back(s); });
+                    FigureOptions fo;
+                    fo.math_fontset = set;
+                    auto fig = Figure::create(fo);
+                    fig->add_subplot(1, 1, 1)->set_title("$x^2$");
+                    (void) fig->render_svg();
+                    Figure::set_message_handler(nullptr);
+                    check(msgs.size() == 1 && msgs[0] == "Figure: " + msg, std::string(label) + ": one message, at create");
+                }
+            }
+            check(resolve_math_font(MathFontset::Custom, "no/such/font.ttf", msg).empty()
+                  && msg == "math_font_path 'no/such/font.ttf' cannot be read as a font; math uses the text font",
+                  "Custom, unreadable: the text font and a message");
+            check(resolve_math_font(MathFontset::Custom, "", msg).empty() && !msg.empty(), "Custom with no path: likewise");
+
+            // A math font of its own: every run in a span but \text and \mathdefault.
+            const FontEntry* def = pick_default_font();
+            const FontEntry* other = nullptr;
+            for (const FontEntry* e: fallback_fonts())
+                if (e->index == 0 && def && e->path != def->path) {
+                    other = e;
+                    break;
+                }
+            if (other) {
+                const std::string mf = resolve_math_font(MathFontset::Custom, other->path, msg);
+                check(mf == other->path && msg.empty(), "Custom: the file itself (" + other->name + ")");
+                const MathTextScope scope(true, mf);
+                const RichLine l = layout_rich("", kSize, "a $12\\text{ ab}\\,\\mathdefault{c}$");
+                const RichRun* a = run(l, "a ");
+                const RichRun* one = run(l, "12");
+                const RichRun* ab = run(l, " ab");
+                check(a && a->font.empty() && one && one->font == mf && ab && ab->font.empty()
+                      && run(l, "c") && run(l, "c")->font.empty(),
+                      "the span in the math font; outside it, \\text and \\mathdefault in the text font");
+                check(close(one ? one->width : 0.0f, text_width(mf, kSize, "1") + text_width(mf, kSize, "2"), 0.01f)
+                      && l.vm.ascent >= font_vmetrics(mf, kSize).ascent - 1e-3f,
+                      "measured in the math font, its extent in the line's");
+                auto fig = Figure::create({.math_fontset = MathFontset::Custom, .math_font_path = mf});
+                fig->add_subplot(1, 1, 1)->set_title("$y=1$");
+                const std::string svg = fig->render_svg().svg;
+                check(svg.find("font-family=\"'" + other->name + "',") != std::string::npos,
+                      "SVG: a math run names the math font's family");
+            } else {
+                std::printf("  (no second font to use as a math font: Custom checks skipped)\n");
+            }
+            check(run(layout_rich("", kSize, "$x$"), "x")->font.empty(), "no scope: math in the text font");
+
+            // A math font with no italic or bold face: its Unicode math letters.
+            const FontEntry* math = nullptr;
+            for (const char* n: {"STIX Two Math", "DejaVu Math TeX Gyre", "Noto Sans Math"})
+                if (!math) math = find_family(n);
+            if (math && !has_face(math->path, FontFace::Italic) && font_has_glyphs(math->path, "\xF0\x9D\x91\xA5")) {
+                const MathTextScope scope(true, math->path);
+                const RichLine l = layout_rich("", kSize, "$x\\alpha h$");
+                check(run(l, "\xF0\x9D\x91\xA5\xF0\x9D\x9B\xBC\xE2\x84\x8E") && !l.runs[0].italic,
+                      "x, alpha, h: the math italic letters (h its hole), upright, in " + math->name);
+                const RichLine digit = layout_rich("", kSize, "$\\mathit{2}$");
+                const RichRun* two = run(digit, "2");
+                check(two && two->italic, "an italic digit (none in Unicode): slanted");
+                if (!has_face(math->path, FontFace::Bold) && font_has_glyphs(math->path, "\xF0\x9D\x90\xB1"))
+                    check(run(layout_rich("", kSize, "$\\mathbf{x}$"), "\xF0\x9D\x90\xB1") != nullptr,
+                          "\\mathbf: the math bold letters");
+            } else {
+                std::printf("  (no math font without an italic face: math-letter checks skipped)\n");
+            }
+        }
+
         // --- Warnings: the new commands no longer warn -------------------------------------
         {
             std::vector<std::string> msgs;
@@ -666,7 +880,9 @@ namespace lt {
             ax->set_title("$\\sum_{\\substack{i\\\\j}}\\int_0^1\\lim_{x\\to 0}\\overset{a}{b}\\underset{c}{d}"
                           "\\stackrel{e}{=}\\operatorname{tr}\\bigsqcup$");
             check(msgs.empty(), "no warning for 37d's operators");
-            ax->set_title("$\\mathbf{x}$");
+            ax->set_title("$\\mathbf{x}\\mathcal{A}\\mathscr{L}\\mathbb{R}\\mathfrak{g}\\mathsf{s}\\mathtt{t}$");
+            check(msgs.empty(), "no warning for 37e's fonts");
+            ax->set_title("$\\boldsymbol{x}$");
             check(msgs.size() == 1 && msgs[0].find("not supported yet") != std::string::npos,
                   "a still deferred command still warns");
             Figure::set_message_handler(nullptr);
@@ -708,6 +924,8 @@ namespace lt {
                      "\\quad\\prod_{\\substack{0<i<n\\\\ i\\neq j}} a_i$", 0.03, 0.28, big);
             ax->text("$\\bigcup_k A_k\\,\\bigoplus_k V_k\\quad\\overset{!}{=}\\quad A\\stackrel{f}{\\to}B\\quad"
                      "\\underset{x}{\\operatorname{argmax}}\\,g\\quad\\max_x f\\quad x^{\\sum_i y}$", 0.03, 0.19, big);
+            ax->text("$\\mathbf{F} = m\\mathbf{a}\\quad\\mathcal{L}\\,\\mathscr{H}\\quad\\mathbb{R}^n\\,\\mathbb{Z}"
+                     "\\quad\\mathfrak{g}\\quad\\mathsf{sans}\\,\\mathtt{mono}$", 0.03, 0.09, big);
             TextOptions turned = big;
             turned.rotation = 30.0f;
             ax->text("$\\frac{1}{\\sqrt{n}}$", 0.85, 0.22, turned);

@@ -62,12 +62,18 @@ static void savefig_and_check_memory(const std::shared_ptr<sextant::Figure>& fig
 // text). What to look for: nothing overlaps its neighbours; fraction bars,
 // roots, accents and drawn delimiters meet the glyphs cleanly; limits are
 // centred over and under their operator; the PNG and SVG agree.
-static void test_mathtext_gallery() {
+// Two pages: the text font, then a math font (FigureOptions::math_fontset):
+// Stix where installed, else a math font found as Custom (DejaVu Math TeX
+// Gyre, Noto Sans Math), else Cm, which no machine here has -- that page then
+// says so in its title and the console shows the one warning.
+static void mathtext_gallery_page(sextant::MathFontset set, const std::string& path, const std::string& name,
+                                  const std::string& stem) {
     auto fig = sextant::Figure::create({
         .width = 1800, .height = 1100,
-        .title = "sextant — mathtext"
+        .title = "sextant — mathtext (" + name + ")",
+        .math_fontset = set, .math_font_path = path
     });
-    fig->suptitle("Mathtext: source above, drawn below");
+    fig->suptitle("Mathtext in " + name + ": source above, drawn below");
 
     struct Cell {
         const char* title;
@@ -80,6 +86,9 @@ static void test_mathtext_gallery() {
             "a \\leq b \\neq c \\approx d \\in A \\subseteq B",
             "\\sin(\\omega t) \\rightarrow \\infty,\\ \\log_2 n,\\ \\pm\\times\\cdot",
             "\\mathrm{d}x\\,\\mathit{AB2}\\,\\text{rate}_{\\text{in}},\\ f'(x),\\ \\nabla\\cdot F",
+            "\\mathbf{F} = m\\mathbf{a},\\ \\mathbf{x}_{\\mathbf{1}}^2,\\ \\mathsf{sans1}\\,\\mathtt{mono1}",
+            "\\mathcal{L}\\,\\mathcal{H}\\,\\mathscr{E}\\quad\\mathbb{R}^n\\,\\mathbb{Z}\\,\\mathbb{1}\\quad"
+            "\\mathfrak{g}\\,\\mathfrak{R}",
         }},
         {"Fractions, roots, rules", {
             "\\frac{a+b}{c}\\quad\\dfrac{1}{2}\\quad\\tfrac{1}{2}\\quad\\frac12",
@@ -165,8 +174,43 @@ static void test_mathtext_gallery() {
     ax->text("$\\lim_{n\\to\\infty}a_n$\nplain line\n$\\frac{1}{2}$ last", sextant::Pos::fraction(0.62),
              sextant::Pos::fraction(0.40), lines);
 
-    savefig_and_check_memory(fig, "test_mathtext_gallery");
+    savefig_and_check_memory(fig, stem);
     fig->show(true);
+}
+
+static void test_mathtext_gallery() {
+    mathtext_gallery_page(sextant::MathFontset::Text, "", "the text font", "test_mathtext_gallery");
+
+    // The math font: the first choice this machine has, found by creating a
+    // figure with each until one sends no message.
+    struct Choice {
+        sextant::MathFontset set;
+        const char* path;
+        const char* name;
+    };
+    const Choice choices[] = {
+        {sextant::MathFontset::Stix, "", "Stix"},
+        {sextant::MathFontset::Custom, "C:/Windows/Fonts/DejaVuMathTeXGyre.ttf", "DejaVu Math TeX Gyre"},
+        {sextant::MathFontset::Custom, "/usr/share/fonts/TTF/DejaVuMathTeXGyre.ttf", "DejaVu Math TeX Gyre"},
+        {sextant::MathFontset::Custom, "/usr/share/fonts/noto/NotoSansMath-Regular.ttf", "Noto Sans Math"},
+    };
+    bool warned = false;
+    sextant::Figure::set_message_handler([&](std::string_view) { warned = true; });
+    const Choice* pick = nullptr;
+    for (const Choice& c: choices) {
+        warned = false;
+        (void) sextant::Figure::create({.math_fontset = c.set, .math_font_path = c.path});
+        if (!warned) {
+            pick = &c;
+            break;
+        }
+    }
+    sextant::Figure::set_message_handler(nullptr);
+    if (pick)
+        mathtext_gallery_page(pick->set, pick->path, pick->name, "test_mathtext_gallery_math");
+    else
+        mathtext_gallery_page(sextant::MathFontset::Cm, "", "Cm (not installed: the text font)",
+                              "test_mathtext_gallery_math");
 }
 
 // 1. Plot gallery — every basic plot type in one subplot grid.

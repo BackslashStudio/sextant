@@ -7,6 +7,8 @@
 
 namespace sextant {
 
+enum class MathFontset;   // sextant/figure.h
+
 // Rich text: a subset of matplotlib's mathtext. A string with
 // an even, nonzero count of `$` not preceded by a backslash holds math spans;
 // inside one, `^`/`_` scripts, `{}` groups, `\name` symbols and TeX spacing,
@@ -30,6 +32,12 @@ struct RichRun {
     // A math letter: the family's italic face, or the upright one
     // slanted when it has none; measured by text_width_italic().
     bool italic = false;
+    // \mathbf: the family's bold face, upright, or the upright one drawn twice
+    // kFauxBoldEm apart when it has none; measured by text_width_face(Bold).
+    bool bold = false;
+    // The font file the run is drawn in when it is not the line's own: the
+    // math font (FigureOptions::math_fontset) inside a span. "" = the line's.
+    std::string font;
 };
 
 // The slant of an italic run drawn from an upright face: horizontal shift per
@@ -91,21 +99,31 @@ RichLine layout_rich(const std::string& font_path, float size, std::string_view 
 float        label_width(const std::string& font_path, float size, std::string_view s);
 FontVMetrics label_vmetrics(const std::string& font_path, float size, std::string_view s);
 
-// FigureOptions::mathtext for every measure and draw on this thread while it
-// lives. The figure-level entry points (layout, render, export) open one;
-// scopes nest, and with none open math is on.
+// FigureOptions::mathtext and the resolved math font for every measure and
+// draw on this thread while it lives. The figure-level entry points (layout,
+// render, export) open one; scopes nest, and with none open math is on, in the
+// text font.
 // Whether math is on for this thread (the innermost MathTextScope's).
 bool mathtext_on();
+// The math font's file for this thread; "" = each line's own font.
+const std::string& mathtext_font();
 
 class MathTextScope {
 public:
-    explicit MathTextScope(bool on);
+    explicit MathTextScope(bool on, std::string math_font = {});
     ~MathTextScope();
     MathTextScope(const MathTextScope&) = delete;
     MathTextScope& operator=(const MathTextScope&) = delete;
 private:
     bool prev_;
+    std::string prev_font_;
 };
+
+// FigureOptions::math_fontset resolved through discovery: the math font's file,
+// "" for the text font -- Text, or a set none of whose families is installed,
+// or a Custom path that cannot be read; those two also set `message` (one line,
+// for the message handler).
+std::string resolve_math_font(MathFontset set, const std::string& custom_path, std::string& message);
 
 // For a string set through the API: one emit_message() when math is on and
 // the math in `s` does not parse ("<who>: math not parsed at column N: ...;

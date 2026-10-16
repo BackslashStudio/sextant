@@ -264,7 +264,7 @@ namespace lt {
 
 #define ENUM(E) check_enum<E>(#E);
         ENUM(LineStyle) ENUM(MarkerStyle) ENUM(CapStyle) ENUM(AxisPosition)
-        ENUM(LegendAnchor) ENUM(ColorbarAnchor) ENUM(HAlign) ENUM(PanelTheme) ENUM(Projection)
+        ENUM(LegendAnchor) ENUM(ColorbarAnchor) ENUM(HAlign) ENUM(PanelTheme) ENUM(MathFontset) ENUM(Projection)
         ENUM(PlaneOrientation) ENUM(VAlign) ENUM(Coords) ENUM(ArrowHead) ENUM(DrawStyle) ENUM(Orientation)
 #undef ENUM
 

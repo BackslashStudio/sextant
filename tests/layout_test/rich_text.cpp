@@ -146,7 +146,7 @@ namespace lt {
             check(err("$x}$") && err("$x}$")->reason == "'}' without a '{'", "a stray '}'");
             check(err("$x^$") && err("$x^$")->reason.find("nothing to apply") != std::string::npos,
                   "a script with no argument");
-            const auto g = err("$\\mathbf{x}$");
+            const auto g = err("$\\boldsymbol{x}$");
             check(g && g->reason.find("not supported yet") != std::string::npos, "a deferred command says so");
             const auto h = err("ab $\\u$");
             check(h && h->column == 5, "columns count code points from the string's start");

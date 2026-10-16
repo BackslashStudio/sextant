@@ -54,7 +54,7 @@ PlotRect lay_out_block(const TextPlot& p, float ax, float ay, TextDraw& d) {
 
     if (p.content.text.empty() || !(o.fontsize > 0.0f)) return {0.0f, 0.0f, 0.0f, 0.0f};
 
-    const MathTextScope math(d.math);
+    const MathTextScope math(d.math, mathtext_font());
     // Each line is parsed on its own, so a math span never crosses a newline. The
     // block reaches from the first line's top to the last line's bottom (a
     // line's own extent when it has math).

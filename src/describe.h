@@ -117,7 +117,8 @@ namespace sextant {
     // figure.h
     SEXTANT_DESCRIBE(FigureOptions,
                      F(width) F(height) F(title) F(resizable) F(dpi) F(subplot_col_gap)
-                     F(subplot_row_gap) F(margins) F(background) F(mathtext) F(panel_width) F(supersample) F(vsync)
+                     F(subplot_row_gap) F(margins) F(background) F(mathtext) F(math_fontset) F(math_font_path)
+                     F(panel_width) F(supersample) F(vsync)
                      F(theme))
     SEXTANT_DESCRIBE(SvgExportOptions, F(max_splits) F(max_tests))
     SEXTANT_DESCRIBE(PngExportOptions, F(peel_layers) F(dpi))
@@ -266,6 +267,9 @@ namespace sextant {
     SEXTANT_ENUM_NAMES(PanelTheme,
                        {"dark", PanelTheme::Dark}, {"light", PanelTheme::Light},
                        {"classic", PanelTheme::Classic})
+    SEXTANT_ENUM_NAMES(MathFontset,
+                       {"text", MathFontset::Text}, {"stix", MathFontset::Stix}, {"cm", MathFontset::Cm},
+                       {"custom", MathFontset::Custom})
     SEXTANT_ENUM_NAMES(Projection,
                        {"orthographic", Projection::Orthographic},
                        {"perspective", Projection::Perspective})

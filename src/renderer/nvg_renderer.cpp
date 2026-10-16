@@ -56,8 +56,10 @@ namespace sextant {
     NvgRenderer::NvgRenderer(NVGcontext* vg) : vg_(vg) {
         font_ = load_default_font(vg);
         for (const FontEntry* e: fallback_fonts()) {
-            const int h = nvgCreateFont(vg_, ("fallback:" + e->path).c_str(), e->path.c_str());
-            if (h != -1) fallbacks_.emplace_back(e->path, h);
+            const int h = nvgCreateFontAtIndex(vg_, ("fallback:" + e->path + "#" + std::to_string(e->index)).c_str(),
+                                               e->path.c_str(), e->index);
+            // A collection's later face is never the face a string is drawn in.
+            if (h != -1) fallbacks_.emplace_back(e->index == 0 ? e->path : e->path + "#" + std::to_string(e->index), h);
         }
         if (font_ != -1)
             if (const FontEntry* def = pick_default_font()) add_fallbacks(font_, def->path);
@@ -88,22 +90,30 @@ namespace sextant {
         nvgTextAlign(vg_, NVG_ALIGN_LEFT | NVG_ALIGN_BASELINE);
         for (const RichRun& r: l.runs) {
             nvgFontSize(vg_, r.size);
-            if (!r.italic) {
-                nvgText(vg_, x0 + r.x, base + r.dy, r.text.c_str(), nullptr);
-                continue;
+            // The run's font: the line's, or the math font (RichRun::font), in
+            // its bold or italic face when it has one.
+            const std::string& rf = r.font.empty() ? font_path : r.font;
+            int face = r.font.empty() ? -1 : font_for_path(r.font);
+            bool twice = false, slant = false;
+            if (r.bold) {
+                if (const int bf = bold_for_path(rf); bf != -1) face = bf;
+                else twice = true;   // no bold face: the upright one twice, kFauxBoldEm apart
+            } else if (r.italic) {
+                if (const int it = italic_for_path(rf); it != -1) face = it;
+                else slant = true;   // no italic face: the upright one, slanted about its baseline
             }
-            if (const int it = italic_for_path(font_path); it != -1) {
-                nvgFontFaceId(vg_, it);
+            if (face != -1) nvgFontFaceId(vg_, face);
+            if (slant) {
+                nvgSave(vg_);
+                nvgTranslate(vg_, x0 + r.x, base + r.dy);
+                nvgSkewX(vg_, -std::atan(kSyntheticSlant));
+                nvgText(vg_, 0.0f, 0.0f, r.text.c_str(), nullptr);
+                nvgRestore(vg_);
+            } else {
                 nvgText(vg_, x0 + r.x, base + r.dy, r.text.c_str(), nullptr);
-                nvgFontFaceId(vg_, font_for_path(font_path));
-                continue;
+                if (twice) nvgText(vg_, x0 + r.x + kFauxBoldEm * r.size, base + r.dy, r.text.c_str(), nullptr);
             }
-            // No italic face: the upright one, slanted about its baseline.
-            nvgSave(vg_);
-            nvgTranslate(vg_, x0 + r.x, base + r.dy);
-            nvgSkewX(vg_, -std::atan(kSyntheticSlant));
-            nvgText(vg_, 0.0f, 0.0f, r.text.c_str(), nullptr);
-            nvgRestore(vg_);
+            if (face != -1) nvgFontFaceId(vg_, font_for_path(font_path));
         }
         nvgFontSize(vg_, size);
         // Bars and radicals, in the text's fill color.
@@ -130,6 +140,20 @@ namespace sextant {
                 if (h != -1) add_fallbacks(h, e->italic_path);
             }
         italic_cache_[path] = h;
+        return h;
+    }
+
+    int NvgRenderer::bold_for_path(const std::string& path) {
+        if (auto it = bold_cache_.find(path); it != bold_cache_.end()) return it->second;
+        int h = -1;
+        // Only a font text_metrics.cpp also reads bold, so widths agree.
+        if (has_face(path, FontFace::Bold))
+            if (const FontEntry* e = find_font_entry(path)) {
+                h = nvgCreateFontAtIndex(vg_, ("bold:" + e->bold_path + "#" + std::to_string(e->bold_index)).c_str(),
+                                         e->bold_path.c_str(), e->bold_index);
+                if (h != -1) add_fallbacks(h, e->bold_path);
+            }
+        bold_cache_[path] = h;
         return h;
     }
 
@@ -584,7 +608,7 @@ namespace sextant {
                 }
             }
             if (font_ != -1 && !t.lines.empty()) {
-                const MathTextScope math(t.math);
+                const MathTextScope math(t.math, mathtext_font());
                 nvgFontFaceId(vg_, font_for_path(t.font_path));
                 nvgFontSize(vg_, t.fontsize);
                 nvgFillColor(vg_, rgba(t.color));

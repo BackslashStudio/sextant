@@ -75,7 +75,8 @@ static std::string svg_font_family(const AxesStyle& style) {
 // (rich_text.h) one <tspan> per run. Each run moves by dx/dy from where the
 // previous one ended rather than to an absolute x, so text-anchor still places
 // the whole line; a run in a script carries its own font-size, a math letter
-// font-style="italic" (a viewer slants the family when it has no italic face).
+// font-style="italic" (a viewer slants the family when it has no italic face),
+// a \mathbf run font-weight="bold".
 // `size` is the size the enclosing element sets.
 static std::string text_body(const std::string& text, const std::string& font_path, float size) {
     if (!is_rich(text)) return xml_escape(text);
@@ -88,6 +89,8 @@ static std::string text_body(const std::string& text, const std::string& font_pa
         if (r.dy != dy) o << " dy=\"" << r.dy - dy << "\"";
         if (r.size != size) o << " font-size=\"" << r.size << "\"";
         if (r.italic) o << " font-style=\"italic\"";
+        if (r.bold) o << " font-weight=\"bold\"";
+        if (!r.font.empty()) o << " font-family=\"" << svg_font_family_for(r.font) << "\"";
         o << ">" << xml_escape(r.text) << "</tspan>";
         pen = r.x + r.width;
         dy = r.dy;
@@ -120,6 +123,8 @@ static void emit_text(std::ostringstream& o, const char* indent, float x, float 
         o << "<tspan x=\"" << x0 + r.x << "\" y=\"" << y + r.dy << "\"";
         if (r.size != size) o << " font-size=\"" << r.size << "\"";
         if (r.italic) o << " font-style=\"italic\"";
+        if (r.bold) o << " font-weight=\"bold\"";
+        if (!r.font.empty()) o << " font-family=\"" << svg_font_family_for(r.font) << "\"";
         o << ">" << xml_escape(r.text) << "</tspan>";
     }
     o << "</text>";
@@ -952,7 +957,7 @@ static void emit_titles(std::ostringstream& o, const SvgAxesData& d) {
 // render_frame()'s order: over the frame furniture, under the legend.
 static void emit_texts(std::ostringstream& o, const SvgAxesData& d, std::size_t idx) {
     for (const TextDraw& t : d.texts) {
-        const MathTextScope math(t.math);
+        const MathTextScope math(t.math, mathtext_font());
         o << (t.clip ? "  <g clip-path=\"url(#plotArea" + std::to_string(idx) + ")\">\n" : "  <g>\n");
         if (t.shaft.size() >= 4 && t.linewidth > 0.0f) {
             o << "    <polyline fill=\"none\" stroke=\"" << rgb(t.arrow_color)

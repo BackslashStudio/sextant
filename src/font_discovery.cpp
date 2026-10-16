@@ -199,18 +199,32 @@ void scan_dir(const fs::path& dir, bool recursive, std::vector<RawFontInfo>& out
     }
 }
 
+std::string lower(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return std::tolower(c); });
+    return s;
+}
+
 // A plain italic face: "Italic" or "Oblique", alone or after "Regular"/"Book";
 // a bold or light italic is not the regular face's.
 bool is_plain_italic(const std::string& subfamily) {
-    std::string s = subfamily;
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return std::tolower(c); });
+    const std::string s = lower(subfamily);
     for (const char* name : {"italic", "oblique", "regular italic", "regular oblique", "book italic",
                              "book oblique"})
         if (s == name) return true;
     return false;
 }
 
-std::vector<FontEntry> scan_all() {
+// The bold face: subfamily exactly "Bold" (not a bold italic, not a semibold).
+bool is_plain_bold(const std::string& subfamily) { return lower(subfamily) == "bold"; }
+
+struct Scan {
+    std::vector<FontEntry> families;
+    // A collection's later faces, one entry each (FontEntry::index), for the
+    // fallback fonts: Windows' Cambria Math is face 1 of cambria.ttc.
+    std::vector<FontEntry> subfaces;
+};
+
+Scan scan_all() {
     std::vector<RawFontInfo> raw, more;
 #if defined(_WIN32)
     scan_dir("C:/Windows/Fonts", false, raw, more);
@@ -244,30 +258,52 @@ std::vector<FontEntry> scan_all() {
         i = j;
     }
 
-    // Each family's italic face: the first plain one in path order, so the
-    // pick does not depend on the directory listing's order.
-    std::vector<const RawFontInfo*> italics;
+    // Each family's italic and bold faces: the first plain one in path order,
+    // so the pick does not depend on the directory listing's order.
+    std::vector<const RawFontInfo*> italics, bolds;
     for (const auto* list : {&raw, &more})
-        for (const RawFontInfo& r : *list)
+        for (const RawFontInfo& r : *list) {
             if (is_plain_italic(r.subfamily)) italics.push_back(&r);
-    std::sort(italics.begin(), italics.end(), [](const RawFontInfo* a, const RawFontInfo* b) {
+            if (is_plain_bold(r.subfamily)) bolds.push_back(&r);
+        }
+    const auto by_path = [](const RawFontInfo* a, const RawFontInfo* b) {
         return a->path != b->path ? a->path < b->path : a->index < b->index;
-    });
-    for (FontEntry& e : found)
+    };
+    std::sort(italics.begin(), italics.end(), by_path);
+    std::sort(bolds.begin(), bolds.end(), by_path);
+    for (FontEntry& e : found) {
         for (const RawFontInfo* r : italics)
             if (r->family == e.name) {
                 e.italic_path = r->path;
                 e.italic_index = r->index;
                 break;
             }
-    return found;
+        for (const RawFontInfo* r : bolds)
+            if (r->family == e.name) {
+                e.bold_path = r->path;
+                e.bold_index = r->index;
+                break;
+            }
+    }
+    Scan scan{std::move(found), {}};
+    std::sort(more.begin(), more.end(), [&](const RawFontInfo& a, const RawFontInfo& b) { return by_path(&a, &b); });
+    for (const RawFontInfo& r : more) {
+        FontEntry e{r.family, r.path};
+        e.index = r.index;
+        scan.subfaces.push_back(std::move(e));
+    }
+    return scan;
+}
+
+const Scan& scanned() {
+    static const Scan cached = scan_all();
+    return cached;
 }
 
 } // namespace
 
 const std::vector<FontEntry>& discover_system_fonts() {
-    static std::vector<FontEntry> cached = scan_all();
-    return cached;
+    return scanned().families;
 }
 
 const FontEntry* find_font_entry(const std::string& font_path) {
@@ -275,6 +311,12 @@ const FontEntry* find_font_entry(const std::string& font_path) {
     const fs::path wanted(font_path);
     for (const auto& f : discover_system_fonts())
         if (fs::path(f.path) == wanted) return &f;
+    return nullptr;
+}
+
+const FontEntry* find_family(std::string_view name) {
+    for (const auto& f : discover_system_fonts())
+        if (f.name == name) return &f;
     return nullptr;
 }
 
@@ -294,19 +336,23 @@ const std::vector<const FontEntry*>& fallback_fonts() {
     static const std::vector<const FontEntry*> cached = [] {
         // Symbol and math coverage first, then broad text faces with Greek.
 #if defined(_WIN32)
-        const char* wanted[] = {"Segoe UI Symbol", "DejaVu Sans", "Segoe UI"};
+        // Cambria Math last: the math alphabets (37e) and nothing found earlier.
+        const char* wanted[] = {"Segoe UI Symbol", "DejaVu Sans", "Segoe UI", "Cambria Math"};
 #elif defined(__APPLE__)
         const char* wanted[] = {"STIX Two Math", "Apple Symbols", "STIXGeneral", "DejaVu Sans"};
 #else
         const char* wanted[] = {"DejaVu Sans", "Noto Sans Math", "Noto Sans Symbols", "FreeSerif"};
 #endif
         std::vector<const FontEntry*> out;
-        for (const char* name : wanted)
-            for (const auto& f : discover_system_fonts())
-                if (f.name == name) {
-                    out.push_back(&f);
-                    break;
-                }
+        for (const char* name : wanted) {
+            const auto named = [&](const FontEntry& f) { return f.name == name; };
+            const auto& fams = scanned().families;
+            const auto& subs = scanned().subfaces;
+            if (auto it = std::find_if(fams.begin(), fams.end(), named); it != fams.end())
+                out.push_back(&*it);
+            else if (auto jt = std::find_if(subs.begin(), subs.end(), named); jt != subs.end())
+                out.push_back(&*jt);
+        }
         return out;
     }();
     return cached;

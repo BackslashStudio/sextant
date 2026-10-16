@@ -985,7 +985,7 @@ namespace sextant {
 
     FigureMeasure measure_figure(const FigureSnapshot& fsnap, const FigureMeasure* frozen) {
         // FigureOptions::mathtext for every label measured below.
-        const MathTextScope math(fsnap.mathtext);
+        const MathTextScope math(fsnap.mathtext, fsnap.math_font);
         return measure_with(fsnap, prepare_all(fsnap), frozen);
     }
 
@@ -1482,7 +1482,7 @@ namespace sextant {
     FigureLayout compute_figure_layout(const FigureSnapshot& fsnap, int fig_w, int fig_h,
                                        FigureMeasure* out_measure) {
         // FigureOptions::mathtext for every label measured below.
-        const MathTextScope math(fsnap.mathtext);
+        const MathTextScope math(fsnap.mathtext, fsnap.math_font);
         // One prepare() per axes, shared by measure and cell pass (limits and
         // ticks once per frame).
         const std::vector<CellPrep> prep = prepare_all(fsnap);
@@ -1495,7 +1495,7 @@ namespace sextant {
     FigureLayout compute_figure_layout(const FigureSnapshot& fsnap, const FigureMeasure& measure,
                                        int fig_w, int fig_h) {
         // FigureOptions::mathtext for every label measured below.
-        const MathTextScope math(fsnap.mathtext);
+        const MathTextScope math(fsnap.mathtext, fsnap.math_font);
         if (!measure_fits(measure, fsnap)) return compute_figure_layout(fsnap, fig_w, fig_h);
         return layout_with(fsnap, prepare_all(fsnap), measure, fig_w, fig_h);
     }

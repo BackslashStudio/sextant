@@ -15,6 +15,10 @@ namespace sextant {
     // Color preset for the panel chrome only (not plot rendering); fixed at create().
     enum class PanelTheme { Dark, Light, Classic };
 
+    // The font math draws in (FigureOptions::math_fontset): matplotlib's
+    // mathtext.fontset, from the fonts installed.
+    enum class MathFontset { Text, Stix, Cm, Custom };
+
     struct FigureOptions {
         int width = 800;
         int height = 600;
@@ -50,6 +54,17 @@ namespace sextant {
         // set_message_handler() from the call that set it. false draws every
         // string as written.
         bool mathtext = true;
+
+        // The font $...$ spans draw in, as matplotlib's mathtext.fontset, from
+        // installed fonts (none is bundled): Text, the text's own font (the
+        // default); Stix, the first installed of STIX Two Math, STIX Two Text,
+        // STIXGeneral; Cm, of Latin Modern Math, CMU Serif, Latin Modern Roman;
+        // Custom, the font file at math_font_path. None installed, or the file
+        // unreadable: the text font, and creating the figure sends one message
+        // through set_message_handler(). \text{} and \mathdefault{} stay in the
+        // text font. Fixed at create().
+        MathFontset math_fontset = MathFontset::Text;
+        std::string math_font_path;
 
         // Initial width of the docked Cosmetic panel (show() only, never exported).
         float panel_width = 240.0f;
