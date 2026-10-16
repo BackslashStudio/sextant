@@ -72,7 +72,7 @@ jobs:
             xvfb xauth fonts-dejavu-core fonts-liberation
           # Times New Roman: layout_test's math checks run in a Times, as on
           # Windows and macOS. The package downloads the fonts while installing.
-          echo "ttf-mscorefonts-installer msttcorefonts/accept-mscorefonts-eula select true" \
+          echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" \
             | sudo debconf-set-selections
           sudo apt-get install -y --no-install-recommends ttf-mscorefonts-installer
           test -f /usr/share/fonts/truetype/msttcorefonts/Times_New_Roman.ttf \
