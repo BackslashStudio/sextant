@@ -414,6 +414,127 @@ namespace lt {
                   && svg.find("<tspan x=\"", t) != std::string::npos, "SVG: an accented title is placed");
         }
 
+        // --- Delimiters (37c) ------------------------------------------------------------
+        {
+            std::printf("\n[math layout: delimiters]\n");
+            const float ax = axis();
+            const float s7 = kSize * 0.7f;
+            for (const char* s: {"$\\left(x\\right)$", "$\\left[\\frac{a}{b}\\right]$", "$\\left\\{x\\middle|y\\right\\}$",
+                                 "$\\left.\\frac{a}{b}\\right|$", "$\\left<x\\right>$", "$\\left\\langle x\\right\\rangle$",
+                                 "$\\left\\lfloor x\\right\\rfloor$", "$\\left\\lceil x\\right\\rceil$",
+                                 "$\\left/x\\right\\backslash$", "$\\left\\|x\\right\\|$", "$\\left\\Vert x\\right\\Vert$",
+                                 "$\\left\\vert x\\right\\vert$", "$\\left\\lbrace x\\right\\rbrace$", "$\\bigl(x\\bigr)$",
+                                 "$\\Big[$", "$\\bigg\\{$", "$\\Bigg|$", "$\\bigm|$", "$\\binom{n}{k}$",
+                                 "$\\left(x\\right)^2$", "$\\left( \\left[ x \\right] \\right)$"})
+                check(!math_error(s), std::string("parses: ") + s);
+            const auto reason = [](std::string_view s) {
+                const auto e = math_error(s);
+                return e ? e->reason : std::string();
+            };
+            check(reason("$\\left(x$") == "'\\left' is never closed", "an unclosed \\left");
+            check(reason("$x\\right)$") == "'\\right' without a '\\left'", "a \\right with no \\left");
+            check(reason("$x\\middle|y$") == "'\\middle' without a '\\left'", "a \\middle with no \\left");
+            check(reason("$\\left x\\right)$") == "'\\left' needs a delimiter", "\\left needs a delimiter");
+            check(reason("$\\left(x\\right$") == "'\\right' needs a delimiter", "\\right needs a delimiter");
+            check(reason("$\\big$") == "'\\big' needs a delimiter", "\\big needs a delimiter");
+            check(reason("${\\left(x}\\right)$") == "'}' without a '{'", "a group cannot close inside \\left");
+
+            // Small contents: the font's own glyphs, centred on the axis, as (x).
+            const RichLine px = layout_rich("", kSize, "$\\left(x\\right)$");
+            const RichRun* open = run(px, "(");
+            check(open && run(px, ")") && px.paths.empty() && px.rules.empty() && !px.placed,
+                  "\\left(x\\right): the font's parentheses");
+            if (open) {
+                const InkBox ip = ink("(", kSize, false);
+                check(close(-open->dy + (ip.top + ip.bottom) * 0.5f, ax, 0.01f), "...centred on the math axis");
+            }
+            check(close(px.width, layout_rich("", kSize, "$(x)$").width), "...as wide as (x)");
+
+            // Tall contents: drawn, TeX's height, symmetric about the axis.
+            const RichLine fl = layout_rich("", kSize, "$\\frac{a}{b}$");
+            const float h = 2.0f * std::max(fl.ink_top - ax, ax - fl.ink_bottom);
+            const float target = std::max(0.901f * h, h - 0.5f * kSize);
+            const RichLine pf = layout_rich("", kSize, "$\\left(\\frac{a}{b}\\right)$");
+            check(pf.placed && pf.paths.size() == 2 && pf.rules.size() == 1, "(a/b): two drawn parentheses");
+            const float tol = 0.15f * kSize;
+            if (pf.paths.size() == 2) {
+                for (const RichPath& p: pf.paths) {
+                    check(close(-path_min_y(p), ax + target * 0.5f, tol) && close(-path_max_y(p), ax - target * 0.5f, tol),
+                          "(a/b): each parenthesis TeX's height, centred on the axis");
+                }
+                float l0 = 1e9f, r1 = -1e9f;
+                for (const auto& q: pf.paths[0].pts) l0 = std::min(l0, q.x);
+                for (const auto& q: pf.paths[1].pts) r1 = std::max(r1, q.x);
+                check(l0 >= 0.0f && r1 <= pf.width + 1e-3f && pf.width > fl.width, "(a/b): both inside the box, around the fraction");
+            }
+            const RichLine both = layout_rich("", kSize, "$\\left(\\frac{a}{b}\\middle|\\frac{c}{d}\\right)$");
+            check(both.paths.size() == 2 && both.rules.size() == 3, "\\middle: a drawn bar between two fractions");
+            const RichLine none = layout_rich("", kSize, "$\\left.\\frac{a}{b}\\right|$");
+            check(none.paths.empty() && none.rules.size() == 2 && run(none, "a")
+                  && close(run(none, "a")->x, 0.12f * kSize + 0.12f * kSize + (std::max(wi("a", s7), wi("b", s7)) - wi("a", s7)) * 0.5f, 0.01f),
+                  "\\left.: nothing drawn, a null delimiter's space");
+            check(layout_rich("", kSize, "$\\left[\\frac{a}{b}\\right]$").rules.size() == 7, "[a/b]: brackets of three rules");
+            check(layout_rich("", kSize, "$\\left\\lfloor\\frac{a}{b}\\right\\rfloor$").rules.size() == 5
+                  && layout_rich("", kSize, "$\\left\\lceil\\frac{a}{b}\\right\\rceil$").rules.size() == 5,
+                  "floor and ceiling: two rules each");
+            check(layout_rich("", kSize, "$\\left\\|\\frac{a}{b}\\right\\|$").rules.size() == 5, "\\|: two rules each");
+            for (const char* s: {"$\\left<\\frac{a}{b}\\right>$", "$\\left/\\frac{a}{b}\\right\\backslash$",
+                                 "$\\left\\{\\frac{a}{b}\\right\\}$"})
+                check(layout_rich("", kSize, s).paths.size() == 2, std::string("drawn: ") + s);
+            const RichLine br = layout_rich("", kSize, "$\\left\\{\\frac{a}{b}\\right\\}$");
+            if (br.paths.size() == 2) {
+                float lx = 1e9f, ly = 0.0f;
+                for (const auto& q: br.paths[0].pts)
+                    if (q.x < lx) {
+                        lx = q.x;
+                        ly = q.y;
+                    }
+                check(close(-ly, ax, 0.05f * kSize), "\\{: its cusp on the axis");
+            }
+            // Nested: the outer pair is sized by TeX's rule to the inner one's ink
+            // (so it may come out a little shorter, as in TeX).
+            const RichLine nest = layout_rich("", kSize, "$\\left(\\left[\\frac{a}{b}\\right]\\right)$");
+            if (nest.paths.size() == 2 && !nest.rules.empty()) {
+                const RichRule& stem_rule = nest.rules[0];   // the inner '[' stem
+                const float hi = 2.0f * std::max(-stem_rule.y - ax, ax + stem_rule.y + stem_rule.h);
+                const float want = std::max(0.901f * hi, hi - 0.5f * kSize);
+                check(close(path_max_y(nest.paths[0]) - path_min_y(nest.paths[0]), want, tol),
+                      "nested: the outer pair sized to the inner by TeX's rule");
+            } else {
+                check(false, "nested: the outer pair sized to the inner by TeX's rule");
+            }
+
+            // \big and its kin: amsmath's 1.2, 1.8, 2.4, 3.0 em, centred on the axis.
+            float prev = 0.0f;
+            for (const auto& [cmd, em]: {std::pair{"big", 1.2f}, {"Big", 1.8f}, {"bigg", 2.4f}, {"Bigg", 3.0f}}) {
+                const RichLine b = layout_rich("", kSize, std::string("$\\") + cmd + "($");
+                const bool ok = b.paths.size() == 1;
+                const float ht = ok ? path_max_y(b.paths[0]) - path_min_y(b.paths[0]) : 0.0f;
+                check(ok && close(ht, em * kSize, tol) && ht > prev
+                      && close(-(path_max_y(b.paths[0]) + path_min_y(b.paths[0])) * 0.5f, ax, 0.05f * kSize),
+                      std::string("\\") + cmd + "(: " + std::to_string(em).substr(0, 3) + " em, on the axis");
+                prev = ht;
+            }
+            check(close(layout_rich("", kSize, "$a\\bigm|b$").width - layout_rich("", kSize, "$a\\big|b$").width,
+                        2.0f * (5.0f / 18.0f) * kSize, 0.01f),
+                  "\\bigm is a relation, \\big ordinary");
+            check(close(layout_rich("", kSize, "$a\\bigl(b$").width, layout_rich("", kSize, "$a\\big(b$").width),
+                        "\\bigl opens: no space after an ordinary atom");
+
+            // \binom: the parts one level down, no bar, in parentheses sized to them.
+            const RichLine bn = layout_rich("", kSize, "$\\binom{n}{k}$");
+            const RichRun* n = run(bn, "n");
+            const RichRun* k = run(bn, "k");
+            check(n && k && close(n->size, s7) && close(n->x, k->x, 0.5f * kSize) && n->dy < k->dy,
+                  "\\binom: n over k at script size");
+            check(bn.rules.empty() && (bn.paths.size() == 2 || (run(bn, "(") && run(bn, ")"))),
+                  "\\binom: no bar, two parentheses");
+            if (n) check(close(-n->dy + std::min(0.0f, ink("n", s7).bottom), ax + 2.0f * kTheta, 0.01f),
+                         "\\binom: the numerator 2θ over the axis");
+            const RichLine sc = layout_rich("", kSize, "$\\left(x\\right)^2$");
+            check(run(sc, "2") && run(sc, "2")->dy < 0.0f, "a script on \\right)");
+        }
+
         // --- Warnings: the new commands no longer warn -------------------------------------
         {
             std::vector<std::string> msgs;
@@ -424,7 +545,9 @@ namespace lt {
             check(msgs.empty(), "no warning for 37a's commands");
             ax->set_title("$\\hat{x}\\widetilde{xy}\\vec{v}\\overleftarrow{AB}\\hat{\\imath}$");
             check(msgs.empty(), "no warning for 37b's accents");
-            ax->set_title("$\\binom{n}{k}$");
+            ax->set_title("$\\left(\\frac{a}{b}\\middle|\\binom{n}{k}\\right.\\bigl[x\\Biggr\\}$");
+            check(msgs.empty(), "no warning for 37c's delimiters");
+            ax->set_title("$\\mathbf{x}$");
             check(msgs.size() == 1 && msgs[0].find("not supported yet") != std::string::npos,
                   "a still deferred command still warns");
             Figure::set_message_handler(nullptr);
@@ -434,7 +557,7 @@ namespace lt {
         {
             FigureOptions fo;
             fo.width = 900;
-            fo.height = 600;
+            fo.height = 900;
             auto fig = Figure::create(fo);
             auto ax = fig->add_subplot(1, 1, 1);
             ax->line(std::vector<double>{0.0, 1.0}, std::vector<double>{0.0, 1.0},
@@ -446,18 +569,25 @@ namespace lt {
             ax->set_ytitle("$\\frac{\\partial u}{\\partial t}$");
             TextOptions big;
             big.fontsize = 24.0f;
-            ax->text("$\\frac{a+b}{c} \\quad \\dfrac{1}{2} \\quad \\frac{\\frac{1}{x}+1}{y}$", 0.05, 0.85, big);
+            ax->text("$\\frac{a+b}{c} \\quad \\dfrac{1}{2} \\quad \\frac{\\frac{1}{x}+1}{y}$", 0.03, 0.93, big);
             ax->text("$\\hat{x}\\,\\bar{x}\\,\\tilde{a}\\,\\dot{x}\\,\\ddot{y}\\,\\acute{e}\\,\\grave{a}\\,\\breve{u}"
                      "\\,\\check{c}\\,\\mathring{A}\\,\\vec{v}\\,\\hat{X}\\,\\bar{F}\\,\\hat{\\imath}\\,\\vec{x}^2$",
-                     0.45, 0.85, big);
+                     0.03, 0.71, big);
             ax->text("$\\widehat{xyz}\\quad\\widetilde{abc}\\quad\\overrightarrow{AB}\\quad\\overleftarrow{PQ}"
-                     "\\quad\\widehat{i}$", 0.45, 0.65, big);
-            ax->text("$\\sqrt{2}\\quad\\sqrt[3]{x}\\quad\\sqrt{\\frac{a}{b}}\\quad\\sqrt{x_i^2+y}$", 0.05, 0.62, big);
+                     "\\quad\\widehat{i}$", 0.03, 0.61, big);
+            ax->text("$\\left(\\frac{a}{b}\\right)\\left[\\frac{1}{x}\\right]\\left\\{\\frac{\\frac{a}{b}}{c}\\right\\}"
+                     "\\left|\\frac{a}{b}\\right|\\left\\langle\\frac{a}{b}\\right\\rangle\\left\\lfloor\\frac{a}{b}"
+                     "\\right\\rfloor\\left\\lceil\\frac{a}{b}\\right\\rceil\\left\\|\\frac{a}{b}\\right\\|$",
+                     0.03, 0.48, big);
+            ax->text("$\\bigl(\\Bigl(\\biggl(\\Biggl(x\\Biggr)\\biggr)\\Bigr)\\bigr)\\quad\\binom{n}{k}\\quad"
+                     "\\left\\{x\\middle|\\frac{x}{2}>0\\right\\}\\quad\\left/\\frac{a}{b}\\right\\backslash"
+                     "\\quad\\left.\\frac{df}{dx}\\right|_{x=0}$", 0.03, 0.36, big);
+            ax->text("$\\sqrt{2}\\quad\\sqrt[3]{x}\\quad\\sqrt{\\frac{a}{b}}\\quad\\sqrt{x_i^2+y}$", 0.03, 0.82, big);
             ax->text("$\\overline{AB}\\quad\\underline{xyz}\\quad x^{\\frac{1}{2}}$\nnext line\n$\\frac{1}{2}$ below",
-                     0.05, 0.18, big);
+                     0.03, 0.10, big);
             TextOptions turned = big;
             turned.rotation = 30.0f;
-            ax->text("$\\frac{1}{\\sqrt{n}}$", 0.8, 0.45, turned);
+            ax->text("$\\frac{1}{\\sqrt{n}}$", 0.85, 0.22, turned);
             fig->savefig("math_layout.png");
             fig->savefig("math_layout.svg");
         }

@@ -177,7 +177,7 @@ static void test_axes_gallery() {
             .annotate(M_PI / 2.0, 1.0, "$\\sin(\\pi/2) = 1$", sextant::Pos::fraction(0.55),
                       sextant::Pos::fraction(0.93),
                       {.va = sextant::VAlign::Top, .background = {1.0f, 1.0f, 0.85f, 1.0f}, .edge_linewidth = 1.0f})
-            .set_xtitle("$\\hat{\\theta}$ [rad]").set_ytitle("$\\frac{\\sqrt{2}}{2}\\,\\overline{y}$")
+            .set_xtitle("$\\hat{\\theta}$ [rad]").set_ytitle("$\\left(\\frac{\\sqrt{2}}{2}\\right)\\overline{y}$")
             .set_title("Line").legend().grid();
 
     fig->add_subplot(3, 4, 2)

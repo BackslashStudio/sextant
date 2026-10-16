@@ -19,7 +19,9 @@ enum class Cls { Ord, Op, Bin, Rel, Open, Close, Punct };
 enum class Wide { None, Hat, Tilde, RightArrow, LeftArrow };
 
 struct Atom {
-    enum class Kind { Glyphs, Group, Space, Frac, Radical, Overline, Underline, Accent } kind = Kind::Glyphs;
+    enum class Kind {
+        Glyphs, Group, Space, Frac, Radical, Overline, Underline, Accent, Delimited, Sized
+    } kind = Kind::Glyphs;
     Cls cls = Cls::Ord;
     std::string text;              // Glyphs
     bool italic = false;           // Glyphs
@@ -33,6 +35,14 @@ struct Atom {
     std::string accent;            // Accent: the glyph (UTF-8), "" for a wide one
     float accent_scale = 1.0f;     // Accent: the glyph's size, of the body's
     Wide wide = Wide::None;        // Accent
+    bool binom = false;            // Frac: \binom, no bar, in parentheses
+    // Delimited (\left ... \middle ... \right): the parts between delimiters,
+    // each a Group, and the delimiters around and between them (one more).
+    // Sized (\big ...): its one delimiter and height in ems. A delimiter is its
+    // character; 0 is `.`, none.
+    std::vector<Atom> parts;
+    std::vector<char32_t> delims;
+    float delim_em = 0.0f;
     std::vector<Atom> sub, sup;
     bool has_sub = false, has_sup = false;
 };
@@ -218,7 +228,6 @@ constexpr AccentCmd kAccents[] = {
 
 // Commands known from mathtext that this step does not draw yet.
 constexpr std::string_view kDeferred[] = {
-    "binom", "left", "right", "big", "Big", "bigg", "Bigg",
     "mathbf", "boldsymbol", "mathcal", "mathbb",
     "mathfrak", "mathscr", "mathsf", "mathtt", "color", "stackrel", "overset", "underset",
     "operatorname", "substack",
@@ -268,7 +277,8 @@ public:
     }
 
 private:
-    enum class End { Dollar, Brace, Bracket };
+    // Right: up to a `\middle` or `\right` (left unconsumed), for `\left`.
+    enum class End { Dollar, Brace, Bracket, Right };
     // The font a group sets: math's default (italic letters), \mathrm, \mathit.
     enum class Font { Math, Roman, Italic };
 
@@ -296,16 +306,30 @@ private:
 
     [[noreturn]] void fail_unclosed(End end, std::size_t open) const {
         fail(open, end == End::Brace ? "'{' is never closed"
-                   : end == End::Bracket ? "'[' is never closed" : "'$' is never closed");
+                   : end == End::Bracket ? "'[' is never closed"
+                   : end == End::Right ? "'\\left' is never closed" : "'$' is never closed");
     }
 
-    // Atoms up to the closing `$`, `}` or `]` (consumed).
-    MathList list(End end) {
+    // The command name at i_ (which is on a backslash), or "" for a symbol one.
+    std::string_view name_at(std::size_t at) const {
+        std::size_t e = at + 1;
+        while (e < s_.size() && ((s_[e] >= 'a' && s_[e] <= 'z') || (s_[e] >= 'A' && s_[e] <= 'Z'))) ++e;
+        return s_.substr(at + 1, e - at - 1);
+    }
+
+    // Atoms up to the closing `$`, `}` or `]` (consumed), or for End::Right
+    // up to a `\middle` or `\right` (not consumed); `open` is where the
+    // construct began, for the error.
+    MathList list(End end, std::size_t open = std::string_view::npos) {
         MathList out;
-        const std::size_t open = i_ - 1;
+        if (open == std::string_view::npos) open = i_ - 1;
         for (;;) {
             if (i_ >= s_.size()) fail_unclosed(end, open);
             const char c = s_[i_];
+            if (c == '\\' && end == End::Right
+                && (name_at(i_) == "right" || name_at(i_) == "middle")) {
+                break;
+            }
             if (c == ' ' || c == '\t') {
                 ++i_;   // TeX: a typed space does nothing in math
             } else if (c == '$') {
@@ -452,6 +476,45 @@ private:
         const std::string_view name = s_.substr(i_, e - i_);
         i_ = e;
 
+        if (name == "left") {
+            Atom a;
+            a.kind = Atom::Kind::Delimited;
+            a.delims.push_back(delimiter(at, name));
+            for (;;) {
+                Atom part;
+                part.kind = Atom::Kind::Group;
+                part.group = list(End::Right, at);
+                a.parts.push_back(std::move(part));
+                const std::size_t cmd = i_;
+                const std::string_view which = name_at(cmd);
+                i_ = cmd + 1 + which.size();
+                a.delims.push_back(delimiter(cmd, which));
+                if (which == "right") break;
+            }
+            out.push_back(std::move(a));
+            return;
+        }
+        if (name == "right" || name == "middle")
+            fail(at, "'\\" + std::string(name) + "' without a '\\left'");
+        if (const float em = big_em(name); em > 0.0f) {
+            Atom a;
+            a.kind = Atom::Kind::Sized;
+            a.delim_em = em;
+            const char last = name.back();
+            a.cls = last == 'l' ? Cls::Open : last == 'r' ? Cls::Close : last == 'm' ? Cls::Rel : Cls::Ord;
+            a.delims.push_back(delimiter(at, name));
+            out.push_back(std::move(a));
+            return;
+        }
+        if (name == "binom") {
+            Atom a;
+            a.kind = Atom::Kind::Frac;
+            a.binom = true;
+            a.group = required_arg(at, name);
+            a.den = required_arg(at, name);
+            out.push_back(std::move(a));
+            return;
+        }
         if (name == "frac" || name == "tfrac" || name == "dfrac") {
             Atom a;
             a.kind = Atom::Kind::Frac;
@@ -537,6 +600,56 @@ private:
         if (contains(kDeferred, name))
             fail(at, "'\\" + std::string(name) + "' is not supported yet");
         fail(at, "unknown command '\\" + std::string(name) + "'");
+    }
+
+    // The total height, in ems, of `\big` and its kin (`l`/`r`/`m` forms
+    // included): amsmath's 1.2, 1.8, 2.4, 3.0 — plain TeX's 8.5…17.5 pt boxes,
+    // measured as TeX sizes a delimiter, twice their reach from the math axis.
+    // 0 for any other name.
+    static float big_em(std::string_view name) {
+        if (!name.empty() && (name.back() == 'l' || name.back() == 'r' || name.back() == 'm'))
+            name.remove_suffix(1);
+        if (name == "big") return 1.2f;
+        if (name == "Big") return 1.8f;
+        if (name == "bigg") return 2.4f;
+        if (name == "Bigg") return 3.0f;
+        return 0.0f;
+    }
+
+    // The delimiter after `\left`, `\middle`, `\right` or `\big…` (named `cmd`,
+    // at `at`): its character, 0 for `.`.
+    char32_t delimiter(std::size_t at, std::string_view cmd) {
+        skip_spaces();
+        const auto bad = [&] { fail(at, "'\\" + std::string(cmd) + "' needs a delimiter"); };
+        if (i_ >= s_.size()) bad();
+        const char c = s_[i_];
+        if (std::string_view("()[]|/.<>").find(c) != std::string_view::npos) {
+            ++i_;
+            return c == '.' ? 0 : c == '<' ? 0x27E8 : c == '>' ? 0x27E9 : static_cast<char32_t>(c);
+        }
+        if (c != '\\' || i_ + 1 >= s_.size()) bad();
+        const char n = s_[i_ + 1];
+        if (n == '{' || n == '}' || n == '|') {
+            i_ += 2;
+            return n == '|' ? 0x2016 : static_cast<char32_t>(n);
+        }
+        const std::string_view name = name_at(i_);
+        struct Named {
+            std::string_view name;
+            char32_t cp;
+        };
+        static constexpr Named kNamed[] = {
+            {"lbrace", '{'}, {"rbrace", '}'}, {"vert", '|'}, {"Vert", 0x2016},
+            {"langle", 0x27E8}, {"rangle", 0x27E9}, {"lfloor", 0x230A}, {"rfloor", 0x230B},
+            {"lceil", 0x2308}, {"rceil", 0x2309}, {"backslash", '\\'},
+        };
+        for (const Named& d: kNamed)
+            if (d.name == name) {
+                i_ += 1 + name.size();
+                return d.cp;
+            }
+        bad();
+        return 0;
     }
 
     // \text{...}: text kept as typed, spaces included; `\{`, `\}`, `\$` and
@@ -831,20 +944,208 @@ private:
         const Box num = list(a.group, part);
         const Box den = list(a.den, part);
         const float theta = kRuleEm * size;
-        const float bar = std::max(theta, kMinRulePx);
+        const float bar = a.binom ? 0.0f : std::max(theta, kMinRulePx);
         const float ax = axis(size);
-        const float side = kFracSide * size;
+        const float side = a.binom ? 0.0f : kFracSide * size;
         const float w = std::max(num.width, den.width);
         Box b;
-        // Baselines (y up) that leave 2θ between the bar and each part's ink.
+        // Baselines (y up) that leave 2θ between the bar and each part's ink
+        // (the axis for \binom, which has none).
         const float num_base = ax + bar * 0.5f + kFracGap * theta - num.ink_bottom;
         const float den_base = ax - bar * 0.5f - kFracGap * theta - den.ink_top;
         append(b, num, side + (w - num.width) * 0.5f, -num_base);
         append(b, den, side + (w - den.width) * 0.5f, -den_base);
+        b.width = w + 2.0f * side;
+        if (a.binom) return enclose(b, '(', ')', size);
         b.rules.push_back({side, -(ax + bar * 0.5f), w, bar});
         reach(b, ax + bar * 0.5f, ax - bar * 0.5f);
         cover(b, side, side + w);
-        b.width = w + 2.0f * side;
+        return b;
+    }
+
+    // ---- Delimiters ----------------------------------------------------------
+
+    // The height a delimiter around `parts` needs, at `size`: TeX's rule, from
+    // twice their furthest ink from the math axis, h: max(0.901·h, h − 0.5 em)
+    // (\delimiterfactor, \delimitershortfall).
+    float delimiter_height(const std::vector<const Box*>& parts, float size) const {
+        const float ax = axis(size);
+        float reach_ = 0.0f;
+        for (const Box* p: parts) reach_ = std::max({reach_, p->ink_top - ax, ax - p->ink_bottom});
+        const float h = 2.0f * reach_;
+        return std::max(0.901f * h, h - 0.5f * size);
+    }
+
+    // `content` between two delimiters sized to it.
+    Box enclose(const Box& content, char32_t l, char32_t r, float size) const {
+        const float h = delimiter_height({&content}, size);
+        Box b = delimiter(l, h, size);
+        append(b, content, b.width, 0.0f);
+        b.width += content.width;
+        const Box rb = delimiter(r, h, size);
+        append(b, rb, b.width, 0.0f);
+        b.width += rb.width;
+        return b;
+    }
+
+    // One delimiter (0 = none, TeX's null delimiter space) at least `target`
+    // tall, centred on the math axis: the font's glyph while that is tall
+    // enough, else drawn to the height (filled paths and rules, the font's stem
+    // weight), so it stays crisp at any size.
+    Box delimiter(char32_t cp, float target, float size) const {
+        using Pt = RichPath::Pt;
+        Box b;
+        if (cp == 0) {
+            b.width = kFracSide * size;
+            return b;
+        }
+        const float ax = axis(size);
+        const std::string glyph = utf8(cp);
+        const InkBox gi = ink_box(font_, size, glyph);
+        if (gi.top > gi.bottom && target <= gi.top - gi.bottom + 1e-3f) {
+            const Box g = text(glyph, size);
+            append(b, g, 0.0f, -(ax - (gi.top + gi.bottom) * 0.5f));
+            b.width = g.width;
+            return b;
+        }
+
+        const float theta = kRuleEm * size;
+        const float bar = std::max(theta, kMinRulePx);
+        const float s = stem(size);
+        const float pad = 0.08f * size;
+        const float top = ax + target * 0.5f, bot = ax - target * 0.5f;
+        const bool closing = cp == ')' || cp == ']' || cp == '}' || cp == 0x27E9 || cp == 0x230B
+                             || cp == 0x2309 || cp == '\\';
+        // Each shape is built opening (left-hand), y up, then mirrored for a
+        // closing one; `w` is its box width.
+        std::vector<RichRule> rules;   // x, y (top edge, y up), w, h
+        std::vector<RichPath> paths;
+        float w = 0.0f;
+        const auto up = [](float x, float y) { return Pt{x, y}; };
+        switch (cp) {
+            case '(': case ')': {
+                const float te = std::max(bar, 0.4f * s);
+                const float bulge = std::min(0.10f * size + 0.06f * target, 0.45f * size);
+                // A parabola from each end, `hook` tall, straight between: about a
+                // circular arc while short, and as it grows the straight middle of
+                // TeX's built-up parens.
+                const float hook = std::min(0.5f * target, 0.75f * size);
+                const float xin = pad + s * 0.5f;
+                constexpr int kSteps = 32;
+                std::vector<Pt> spine;
+                std::vector<float> widths;
+                for (int i = 0; i <= kSteps; ++i) {
+                    const float t = static_cast<float>(i) / kSteps;
+                    const float d = std::min(t, 1.0f - t) * target;   // from the nearer end
+                    const float f = d >= hook ? 0.0f : (1.0f - d / hook) * (1.0f - d / hook);
+                    spine.push_back(up(xin + bulge * f, top - target * t));
+                    if (i < kSteps) {
+                        const float tm = (static_cast<float>(i) + 0.5f) / kSteps;
+                        widths.push_back(te + (s - te) * std::sin(3.14159265f * tm));
+                    }
+                }
+                paths.push_back(stroke_outline(spine, widths));
+                w = xin + bulge + te * 0.5f + pad;
+                break;
+            }
+            case '[': case ']': case 0x230A: case 0x230B: case 0x2308: case 0x2309: {
+                const float arm = 0.22f * size + 0.03f * target;
+                const float ta = std::max(bar, 0.5f * s);
+                rules.push_back({pad, top, s, target});
+                const bool floor_ = cp == 0x230A || cp == 0x230B, ceil_ = cp == 0x2308 || cp == 0x2309;
+                if (!floor_) rules.push_back({pad, top, arm, ta});
+                if (!ceil_) rules.push_back({pad, bot + ta, arm, ta});
+                w = pad + arm + 0.5f * pad;
+                break;
+            }
+            case '|': case 0x2016: {
+                const float gap = 0.1f * size;
+                rules.push_back({pad, top, s, target});
+                w = pad + s + pad;
+                if (cp == 0x2016) {
+                    rules.push_back({pad + s + gap, top, s, target});
+                    w += s + gap;
+                }
+                break;
+            }
+            case 0x27E8: case 0x27E9: {
+                const float wa = std::max(bar, 0.6f * s);
+                const float dx = std::min(0.10f * size + 0.10f * target, 0.5f * size);
+                const float x0 = pad + wa * 0.5f;
+                paths.push_back(stroke_outline({up(x0 + dx, top), up(x0, ax), up(x0 + dx, bot)}, {wa, wa}));
+                w = x0 + dx + wa * 0.5f + pad;
+                break;
+            }
+            case '/': case '\\': {
+                const float wa = std::max(bar, 0.7f * s);
+                const float dx = std::min(0.3f * target, 0.8f * size);
+                const float x0 = pad + wa * 0.5f;
+                paths.push_back(stroke_outline({up(x0, bot), up(x0 + dx, top)}, {wa}));
+                w = x0 + dx + wa * 0.5f + pad;
+                break;
+            }
+            default: {   // '{', '}': hooks into a stem, a pointed cusp on the axis
+                const float te = std::max(bar, 0.4f * s);
+                const float q = std::min(0.18f * size, target * 0.22f);   // each hook's height
+                const float xl = pad, xm = xl + 0.12f * size + 0.02f * target, xr = xm + 0.16f * size;
+                std::vector<Pt> spine{up(xr, top)};
+                std::vector<float> widths;
+                const auto cubic = [&](Pt p0, Pt p1, Pt p2, Pt p3, float w0, float w1) {
+                    constexpr int n = 10;
+                    for (int i = 1; i <= n; ++i) {
+                        const float t = static_cast<float>(i) / n, u = 1.0f - t;
+                        spine.push_back({u * u * u * p0.x + 3 * u * u * t * p1.x + 3 * u * t * t * p2.x + t * t * t * p3.x,
+                                         u * u * u * p0.y + 3 * u * u * t * p1.y + 3 * u * t * t * p2.y + t * t * t * p3.y});
+                        widths.push_back(w0 + (w1 - w0) * (static_cast<float>(i) - 0.5f) / n);
+                    }
+                };
+                cubic(up(xr, top), up(xm, top), up(xm, top), up(xm, top - q), te, s);
+                spine.push_back(up(xm, ax + q));
+                widths.push_back(s);
+                cubic(up(xm, ax + q), up(xm, ax), up(xm, ax), up(xl, ax), s, te);
+                cubic(up(xl, ax), up(xm, ax), up(xm, ax), up(xm, ax - q), te, s);
+                spine.push_back(up(xm, bot + q));
+                widths.push_back(s);
+                cubic(up(xm, bot + q), up(xm, bot), up(xm, bot), up(xr, bot), s, te);
+                paths.push_back(stroke_outline(spine, widths));
+                w = xr + te * 0.5f + pad;
+                break;
+            }
+        }
+        // Into the box, y down, mirrored for a closing delimiter.
+        const auto mx = [&](float x) { return closing ? w - x : x; };
+        for (RichRule r: rules) {
+            const float x0 = closing ? w - r.x - r.w : r.x;
+            b.rules.push_back({x0, -r.y, r.w, r.h});
+        }
+        for (RichPath p: paths) {
+            for (Pt& q: p.pts) q = {mx(q.x), -q.y};
+            reach_path(b, p);
+            b.paths.push_back(std::move(p));
+        }
+        reach(b, top, bot);
+        cover(b, 0.0f, w);
+        b.width = w;
+        return b;
+    }
+
+    Box delimited(const Atom& a, int level) const {
+        const float size = base_ * scale_at(level);
+        std::vector<Box> parts;
+        for (const Atom& p: a.parts) parts.push_back(list(p.group, level));
+        std::vector<const Box*> ptrs;
+        for (const Box& p: parts) ptrs.push_back(&p);
+        const float h = delimiter_height(ptrs, size);
+        Box b;
+        for (std::size_t i = 0; i < a.delims.size(); ++i) {
+            const Box d = delimiter(a.delims[i], h, size);
+            append(b, d, b.width, 0.0f);
+            b.width += d.width;
+            if (i < parts.size()) {
+                append(b, parts[i], b.width, 0.0f);
+                b.width += parts[i].width;
+            }
+        }
         return b;
     }
 
@@ -993,6 +1294,11 @@ private:
     Box nucleus(const Atom& a, int level) const {
         switch (a.kind) {
             case Atom::Kind::Accent: return accent(a, level);
+            case Atom::Kind::Delimited: return delimited(a, level);
+            case Atom::Kind::Sized: {
+                const float size = base_ * scale_at(level);
+                return delimiter(a.delims.front(), a.delim_em * size, size);
+            }
             case Atom::Kind::Group: {
                 Box b = list(a.group, level);
                 // An empty group still stands on the line, for the scripts it carries.
