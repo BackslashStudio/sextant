@@ -15,12 +15,17 @@ namespace {
 enum class Cls { Ord, Op, Bin, Rel, Open, Close, Punct };
 
 struct Atom {
-    enum class Kind { Glyphs, Group, Space } kind = Kind::Glyphs;
+    enum class Kind { Glyphs, Group, Space, Frac, Radical, Overline, Underline } kind = Kind::Glyphs;
     Cls cls = Cls::Ord;
     std::string text;              // Glyphs
     bool italic = false;           // Glyphs
     float em = 0.0f;               // Space, in ems of the current size
-    std::vector<Atom> group;       // Group
+    // Group; a Frac's numerator; a Radical's radicand; an Over/Underline's body.
+    std::vector<Atom> group;
+    std::vector<Atom> den;         // Frac
+    bool shrink = true;            // Frac: parts one level down (\frac, \tfrac; not \dfrac)
+    std::vector<Atom> index;       // Radical: \sqrt[n]
+    bool has_index = false;
     std::vector<Atom> sub, sup;
     bool has_sub = false, has_sup = false;
 };
@@ -186,9 +191,9 @@ constexpr SpaceCmd kSpaces[] = {
 
 // Commands known from mathtext that this step does not draw yet.
 constexpr std::string_view kDeferred[] = {
-    "frac", "dfrac", "tfrac", "binom", "left", "right", "big", "Big", "bigg", "Bigg",
+    "binom", "left", "right", "big", "Big", "bigg", "Bigg",
     "hat", "widehat", "bar", "vec", "dot", "ddot", "tilde", "widetilde", "acute", "grave",
-    "breve", "check", "overline", "underline", "mathbf", "boldsymbol", "mathcal", "mathbb",
+    "breve", "check", "mathbf", "boldsymbol", "mathcal", "mathbb",
     "mathfrak", "mathscr", "mathsf", "mathtt", "color", "stackrel", "overset", "underset",
     "operatorname", "substack",
 };
@@ -237,7 +242,7 @@ public:
     }
 
 private:
-    enum class End { Dollar, Brace };
+    enum class End { Dollar, Brace, Bracket };
     // The font a group sets: math's default (italic letters), \mathrm, \mathit.
     enum class Font { Math, Roman, Italic };
 
@@ -263,24 +268,29 @@ private:
         while (i_ < s_.size() && (s_[i_] == ' ' || s_[i_] == '\t')) ++i_;
     }
 
-    // Atoms up to the closing `$` or `}` (consumed).
+    [[noreturn]] void fail_unclosed(End end, std::size_t open) const {
+        fail(open, end == End::Brace ? "'{' is never closed"
+                   : end == End::Bracket ? "'[' is never closed" : "'$' is never closed");
+    }
+
+    // Atoms up to the closing `$`, `}` or `]` (consumed).
     MathList list(End end) {
         MathList out;
         const std::size_t open = i_ - 1;
         for (;;) {
-            if (i_ >= s_.size()) {
-                if (end == End::Brace) fail(open, "'{' is never closed");
-                fail(open, "'$' is never closed");
-            }
+            if (i_ >= s_.size()) fail_unclosed(end, open);
             const char c = s_[i_];
             if (c == ' ' || c == '\t') {
                 ++i_;   // TeX: a typed space does nothing in math
             } else if (c == '$') {
-                if (end == End::Brace) fail(open, "'{' is never closed");
+                if (end != End::Dollar) fail_unclosed(end, open);
                 ++i_;
                 break;
             } else if (c == '}') {
                 if (end != End::Brace) fail(i_, "'}' without a '{'");
+                ++i_;
+                break;
+            } else if (c == ']' && end == End::Bracket) {
                 ++i_;
                 break;
             } else if (c == '^' || c == '_') {
@@ -312,6 +322,19 @@ private:
             fail(at, std::string("'") + s_[at] + "' has nothing to apply to");
         if (s_[i_] == '^' || s_[i_] == '_')
             fail(i_, std::string("'") + s_[i_] + "' cannot start a script");
+        return one_atom();
+    }
+
+    // A command's argument: one atom or group, as TeX takes `\frac12`.
+    MathList required_arg(std::size_t at, std::string_view name) {
+        skip_spaces();
+        if (i_ >= s_.size() || s_[i_] == '$' || s_[i_] == '}' || s_[i_] == '^' || s_[i_] == '_')
+            fail(at, "'\\" + std::string(name) + "' is missing an argument");
+        return one_atom();
+    }
+
+    // The atom at i_, a group's contents unwrapped.
+    MathList one_atom() {
         MathList arg;
         atom(arg);
         if (arg.size() == 1 && arg.front().kind == Atom::Kind::Group && !arg.front().has_sub
@@ -402,6 +425,40 @@ private:
         while (e < s_.size() && ((s_[e] >= 'a' && s_[e] <= 'z') || (s_[e] >= 'A' && s_[e] <= 'Z'))) ++e;
         const std::string_view name = s_.substr(i_, e - i_);
         i_ = e;
+
+        if (name == "frac" || name == "tfrac" || name == "dfrac") {
+            Atom a;
+            a.kind = Atom::Kind::Frac;
+            a.shrink = name != "dfrac";
+            a.group = required_arg(at, name);
+            a.den = required_arg(at, name);
+            out.push_back(std::move(a));
+            return;
+        }
+        if (name == "overline" || name == "underline") {
+            Atom a;
+            a.kind = name == "overline" ? Atom::Kind::Overline : Atom::Kind::Underline;
+            a.group = required_arg(at, name);
+            out.push_back(std::move(a));
+            return;
+        }
+        if (name == "sqrt") {
+            skip_spaces();
+            Atom a;
+            a.kind = Atom::Kind::Radical;
+            if (i_ < s_.size() && s_[i_] == '[') {
+                ++i_;
+                a.index = list(End::Bracket);
+                a.has_index = true;
+            } else if (i_ >= s_.size() || std::string_view("$}^_").find(s_[i_]) != std::string_view::npos) {
+                // Nothing to go under: the sign alone, as before roots were drawn.
+                out.push_back(glyph(0x221A, Cls::Ord));
+                return;
+            }
+            a.group = required_arg(at, name);
+            out.push_back(std::move(a));
+            return;
+        }
 
         for (const Symbol& sym: kSymbols)
             if (sym.name == name) {
@@ -554,11 +611,67 @@ constexpr float kScriptSpace = 0.05f;
 // correction). Its subscript stays at the letter's edge.
 constexpr float kSupItalicKern = 0.06f;
 
+// Fractions, roots and rules, in ems of the size they are set at: the rule
+// thickness θ (matplotlib's, which hardcodes 0.75/12 for TrueType fonts), drawn
+// never thinner than a pixel; 2θ between a fraction's bar and each part, 3θ
+// over or under a body for its rule (TeX), TeX's null delimiter space on each
+// side of a fraction.
+constexpr float kRuleEm = 0.0625f;
+constexpr float kMinRulePx = 1.0f;
+constexpr float kFracGap = 2.0f;        // × θ
+constexpr float kFracSide = 0.12f;
+constexpr float kLineGap = 3.0f;        // × θ, over/underline and the root's bar
+constexpr float kRootPad = 2.0f;        // × θ, each side of a radicand
+
 struct Box {
     std::vector<RichRun> runs;
+    std::vector<RichRule> rules;
+    std::vector<RichPath> paths;
     float width = 0.0f;
     float ascent = 0.0f, descent = 0.0f;   // descent <= 0
+    float ink_top = 0.0f, ink_bottom = 0.0f;   // y up, ink_bottom <= 0 <= ink_top
 };
+
+// The outline of a polyline stroked with a width per segment, mitred at each
+// joint (a bevel's midpoint where a mitre would reach past 2 widths), butt
+// ends. y down. Used for the radical.
+RichPath stroke_outline(const std::vector<RichPath::Pt>& c, const std::vector<float>& w) {
+    using Pt = RichPath::Pt;
+    const std::size_t m = c.size() - 1;
+    std::vector<Pt> d(m), n(m);
+    for (std::size_t i = 0; i < m; ++i) {
+        const float dx = c[i + 1].x - c[i].x, dy = c[i + 1].y - c[i].y;
+        const float l = std::max(std::hypot(dx, dy), 1e-6f);
+        d[i] = {dx / l, dy / l};
+        n[i] = {-d[i].y, d[i].x};
+    }
+    const auto side = [&](float sign) {
+        std::vector<Pt> out;
+        out.push_back({c[0].x + sign * n[0].x * w[0] * 0.5f, c[0].y + sign * n[0].y * w[0] * 0.5f});
+        for (std::size_t j = 1; j < m; ++j) {
+            const float h0 = sign * w[j - 1] * 0.5f, h1 = sign * w[j] * 0.5f;
+            const Pt a{c[j].x + n[j - 1].x * h0, c[j].y + n[j - 1].y * h0};
+            const Pt b{c[j].x + n[j].x * h1, c[j].y + n[j].y * h1};
+            // a + d[j-1]·s = b + d[j]·t, solved for s.
+            const float den = d[j - 1].x * d[j].y - d[j - 1].y * d[j].x;
+            Pt p{(a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f};
+            if (std::abs(den) > 1e-6f) {
+                const float s = ((b.x - a.x) * d[j].y - (b.y - a.y) * d[j].x) / den;
+                const Pt q{a.x + d[j - 1].x * s, a.y + d[j - 1].y * s};
+                if (std::hypot(q.x - c[j].x, q.y - c[j].y) <= 2.0f * std::max(w[j - 1], w[j])) p = q;
+            }
+            out.push_back(p);
+        }
+        const float h = sign * w[m - 1] * 0.5f;
+        out.push_back({c[m].x + n[m - 1].x * h, c[m].y + n[m - 1].y * h});
+        return out;
+    };
+    RichPath path;
+    path.pts = side(1.0f);
+    const std::vector<Pt> right = side(-1.0f);
+    path.pts.insert(path.pts.end(), right.rbegin(), right.rend());
+    return path;
+}
 
 class Layout {
 public:
@@ -572,6 +685,9 @@ public:
         if (t.empty()) return b;
         b.width = italic ? text_width_italic(font_, size, t) : text_width(font_, size, t);
         b.runs.push_back({t, 0.0f, 0.0f, size, b.width, italic});
+        const InkBox ink = ink_box(font_, size, t, italic);
+        b.ink_top = std::max(0.0f, ink.top);
+        b.ink_bottom = std::min(0.0f, ink.bottom);
         return b;
     }
 
@@ -605,20 +721,147 @@ private:
             r.dy += dy;
             into.runs.push_back(std::move(r));
         }
+        for (RichRule r: b.rules) {
+            r.x += x;
+            r.y += dy;
+            into.rules.push_back(r);
+        }
+        for (RichPath p: b.paths) {
+            for (RichPath::Pt& q: p.pts) {
+                q.x += x;
+                q.y += dy;
+            }
+            into.paths.push_back(std::move(p));
+        }
         into.ascent = std::max(into.ascent, b.ascent - dy);
         into.descent = std::min(into.descent, b.descent - dy);
+        into.ink_top = std::max(into.ink_top, b.ink_top - dy);
+        into.ink_bottom = std::min(into.ink_bottom, b.ink_bottom - dy);
+    }
+
+    // Grows `b`'s extents to reach `top` and `bottom` (y up).
+    static void reach(Box& b, float top, float bottom) {
+        b.ascent = std::max(b.ascent, top);
+        b.descent = std::min(b.descent, bottom);
+        b.ink_top = std::max(b.ink_top, top);
+        b.ink_bottom = std::min(b.ink_bottom, bottom);
+    }
+
+    // The math axis at `size`, y up: the middle of `=`, where a fraction's bar
+    // sits.
+    float axis(float size) const {
+        const InkBox eq = ink_box(font_, size, "=");
+        return eq.top > eq.bottom ? (eq.top + eq.bottom) * 0.5f : 0.25f * size;
+    }
+
+    // The weight of a stroke drawn to match the font's: its `|`.
+    float stem(float size) const {
+        const InkBox bar = ink_box(font_, size, "|");
+        const float w = bar.right > bar.left ? bar.right - bar.left : 0.08f * size;
+        return std::clamp(w, kMinRulePx, 0.15f * size + kMinRulePx);
+    }
+
+    Box fraction(const Atom& a, int level) const {
+        const float size = base_ * scale_at(level);
+        const int part = a.shrink ? level + 1 : level;
+        const Box num = list(a.group, part);
+        const Box den = list(a.den, part);
+        const float theta = kRuleEm * size;
+        const float bar = std::max(theta, kMinRulePx);
+        const float ax = axis(size);
+        const float side = kFracSide * size;
+        const float w = std::max(num.width, den.width);
+        Box b;
+        // Baselines (y up) that leave 2θ between the bar and each part's ink.
+        const float num_base = ax + bar * 0.5f + kFracGap * theta - num.ink_bottom;
+        const float den_base = ax - bar * 0.5f - kFracGap * theta - den.ink_top;
+        append(b, num, side + (w - num.width) * 0.5f, -num_base);
+        append(b, den, side + (w - den.width) * 0.5f, -den_base);
+        b.rules.push_back({side, -(ax + bar * 0.5f), w, bar});
+        reach(b, ax + bar * 0.5f, ax - bar * 0.5f);
+        b.width = w + 2.0f * side;
+        return b;
+    }
+
+    Box over_under(const Atom& a, int level) const {
+        const float size = base_ * scale_at(level);
+        Box b = list(a.group, level);
+        const float theta = kRuleEm * size;
+        const float bar = std::max(theta, kMinRulePx);
+        if (a.kind == Atom::Kind::Overline) {
+            const float bottom = b.ink_top + kLineGap * theta;
+            b.rules.push_back({0.0f, -(bottom + bar), b.width, bar});
+            reach(b, bottom + bar + theta, 0.0f);
+        } else {
+            const float top = b.ink_bottom - kLineGap * theta;
+            b.rules.push_back({0.0f, -top, b.width, bar});
+            reach(b, 0.0f, top - bar - theta);
+        }
+        return b;
+    }
+
+    // A radical: the sign drawn as one outline with its bar (TeX's shape: a
+    // thin tick, a thick down-stroke, a thin rise into the bar), so the join is
+    // exact at any height; the index, if any, half size in the sign's notch.
+    Box radical(const Atom& a, int level) const {
+        using Pt = RichPath::Pt;
+        const float size = base_ * scale_at(level);
+        const Box body = list(a.group, level);
+        const float theta = kRuleEm * size;
+        const float bar = std::max(theta, kMinRulePx);
+        const float thick = stem(size);
+        const float top = body.ink_top + kLineGap * theta + bar;      // y up
+        const float foot = std::min(body.ink_bottom, 0.0f) - theta;
+        const float h = top - foot;
+        const float tick_y = foot + std::min(0.5f * h, 0.42f * size);
+        // x positions; the index may push everything right.
+        const float x0 = 0.03f * size;
+        const float x1 = x0 + 0.10f * size;
+        const float xf = x1 + 0.17f * size;
+        const float xc = xf + 0.20f * size + 0.06f * h;
+        float shift = 0.0f;
+        Box ib;
+        float index_base = 0.0f;
+        if (a.has_index) {
+            ib = list(a.index, level + 2);
+            index_base = foot + 0.6f * h;
+            shift = std::max(0.0f, ib.width - (x1 + 0.05f * size));
+        }
+        const float bx = shift + xc + kRootPad * theta;
+        const float end = bx + body.width + kRootPad * theta;
+        Box b;
+        if (a.has_index) append(b, ib, shift + x1 + 0.05f * size - ib.width, -index_base);
+        append(b, body, bx, 0.0f);
+        // y down from here on.
+        const std::vector<Pt> spine = {
+            {shift + x0, -tick_y},
+            {shift + x1, -(tick_y + 0.05f * size)},
+            {shift + xf, -foot},
+            {shift + xc, -(top - bar * 0.5f)},
+            {end, -(top - bar * 0.5f)},
+        };
+        b.paths.push_back(stroke_outline(spine, {bar, thick, bar, bar}));
+        reach(b, top, foot);
+        b.width = end;
+        return b;
     }
 
     Box nucleus(const Atom& a, int level) const {
-        if (a.kind == Atom::Kind::Group) {
-            Box b = list(a.group, level);
-            // An empty group still stands on the line, for the scripts it carries.
-            const FontVMetrics vm = font_vmetrics(font_, base_ * scale_at(level));
-            b.ascent = std::max(b.ascent, vm.ascent);
-            b.descent = std::min(b.descent, vm.descent);
-            return b;
+        switch (a.kind) {
+            case Atom::Kind::Group: {
+                Box b = list(a.group, level);
+                // An empty group still stands on the line, for the scripts it carries.
+                const FontVMetrics vm = font_vmetrics(font_, base_ * scale_at(level));
+                b.ascent = std::max(b.ascent, vm.ascent);
+                b.descent = std::min(b.descent, vm.descent);
+                return b;
+            }
+            case Atom::Kind::Frac: return fraction(a, level);
+            case Atom::Kind::Radical: return radical(a, level);
+            case Atom::Kind::Overline:
+            case Atom::Kind::Underline: return over_under(a, level);
+            default: return text(a.text, base_ * scale_at(level), a.italic);
         }
-        return text(a.text, base_ * scale_at(level), a.italic);
     }
 
     Box scripted(const Atom& a, int level) const {
@@ -698,6 +941,8 @@ RichLine layout_rich(const std::string& font_path, float size, std::string_view 
     line.vm = vm;
     Parsed p;
     if (t_math_on && has_math(s)) p = parse(s);
+    line.ink_top = vm.ascent;
+    line.ink_bottom = vm.descent;
     if (p.segments.empty() || p.error) {
         line.width = text_width(font_path, size, s);
         if (!s.empty()) line.runs.push_back({std::string(s), 0.0f, 0.0f, size, line.width});
@@ -714,14 +959,29 @@ RichLine layout_rich(const std::string& font_path, float size, std::string_view 
             r.x += all.width;
             all.runs.push_back(std::move(r));
         }
+        for (RichRule r: b.rules) {
+            r.x += all.width;
+            all.rules.push_back(r);
+        }
+        for (RichPath path: b.paths) {
+            for (RichPath::Pt& q: path.pts) q.x += all.width;
+            all.paths.push_back(std::move(path));
+        }
         all.width += b.width;
         all.ascent = std::max(all.ascent, b.ascent);
         all.descent = std::min(all.descent, b.descent);
+        all.ink_top = std::max(all.ink_top, b.ink_top);
+        all.ink_bottom = std::min(all.ink_bottom, b.ink_bottom);
     }
     merge_runs(all.runs);
     line.runs = std::move(all.runs);
+    line.rules = std::move(all.rules);
+    line.paths = std::move(all.paths);
+    line.placed = !line.rules.empty() || !line.paths.empty();
     line.width = all.width;
     line.vm = {all.ascent, all.descent, all.ascent - all.descent};
+    line.ink_top = all.ink_top;
+    line.ink_bottom = all.ink_bottom;
     return line;
 }
 

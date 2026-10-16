@@ -424,14 +424,19 @@ namespace sextant {
         void fill_legend(CellDecorations& d, std::vector<LegendEntry> entries, const LegendOptions& lo) {
             d.legend_entries = std::move(entries);
             if (d.legend_entries.empty()) return;
-            const float row_h = legend_row_height(lo.fontsize);
+            float row_h = legend_row_height(lo.fontsize);
             float text_w = 0.0f;
             d.legend_entry_w.reserve(d.legend_entries.size());
             for (const auto& e: d.legend_entries) {
                 const float w = label_width(lo.font_path, lo.fontsize, e.name);
                 text_w = std::max(text_w, w);
                 d.legend_entry_w.push_back(kLegendSwatchW + kLegendGap + w);
+                // A name with a fraction or root: its ink plus 2 px each way.
+                if (is_rich(e.name))
+                    if (const RichLine l = layout_rich(lo.font_path, lo.fontsize, e.name); l.placed)
+                        row_h = std::max(row_h, l.ink_top - l.ink_bottom + 4.0f);
             }
+            d.legend_row_h = row_h;
             d.legend_box_w = kLegendPad * 2.0f + kLegendSwatchW + kLegendGap + text_w;
             d.legend_box_h = kLegendPad * 2.0f + row_h * static_cast<float>(d.legend_entries.size());
             d.legend_block = std::max(0.0f, lo.margin) + d.legend_box_w;
@@ -537,7 +542,7 @@ namespace sextant {
                 return layout_legend_rows(m.dec, m.legend_fontsize, extended_w - 2.0f * m.legend_margin);
             // Every other anchor is one column.
             LegendRows out;
-            const float row_h = legend_row_height(m.legend_fontsize);
+            const float row_h = m.dec.legend_row_h;
             out.w = m.dec.legend_box_w;
             out.h = m.dec.legend_box_h;
             out.slots.reserve(m.dec.legend_entries.size());
@@ -687,7 +692,7 @@ namespace sextant {
     LegendRows layout_legend_rows(const CellDecorations& dec, float fontsize, float max_w) {
         LegendRows out;
         if (dec.legend_entries.empty()) return out;
-        const float row_h = legend_row_height(fontsize);
+        const float row_h = dec.legend_row_h > 0.0f ? dec.legend_row_h : legend_row_height(fontsize);
         float cur = 0.0f, content_w = 0.0f;
         int row = 0;
         out.slots.reserve(dec.legend_entries.size());

@@ -636,6 +636,8 @@ namespace lt {
 
     // rich_text.cpp
     void test_rich_text();
+    // math_layout.cpp
+    void test_math_layout();
 
     // describe.cpp
     void test_describe();

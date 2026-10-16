@@ -13,6 +13,7 @@
 #include "text_metrics.h"
 #include "font_discovery.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <fstream>
 #include <mutex>
@@ -54,6 +55,9 @@ struct LoadedFont {
     // Measured widths, bucketed by quantized size.
     std::unordered_map<short, WidthMap> widths;
     std::size_t width_entries = 0;
+    // Ink boxes, the same way (math layout only).
+    std::unordered_map<short, std::unordered_map<std::string, InkBox, SvHash, std::equal_to<>>> inks;
+    std::size_t ink_entries = 0;
 };
 
 std::mutex                                   g_mutex;
@@ -250,6 +254,82 @@ const std::optional<FaceRef>& italic_of(const std::string& path) {
     return g_italics[path] = std::move(face);
 }
 
+// The fallback fonts for a string in the font at `path`, in order. Caller must
+// hold g_mutex.
+std::vector<const LoadedFont*> fallbacks_for(const std::string& path) {
+    std::vector<const LoadedFont*> fallbacks;
+    for (const FontEntry* e : fallback_fonts()) {
+        if (e->path == path) continue;
+        const LoadedFont& fb = get_font(e->path);   // map nodes never move
+        if (fb.ok) fallbacks.push_back(&fb);
+    }
+    return fallbacks;
+}
+
+// measure()'s pen walk, collecting the glyphs' outline boxes instead.
+InkBox measure_ink(const LoadedFont& f, const std::vector<const LoadedFont*>& fallbacks,
+                   float size, std::string_view text) {
+    InkBox box;
+    if (size * 10.0f < 2.0f) return box;
+    const float scale = stbtt_ScaleForMappingEmToPixels(&f.info, size);
+    float x = 0.0f;
+    int prev = -1;
+    bool any = false;
+    for_each_codepoint(text, [&](int cp) {
+        int g = stbtt_FindGlyphIndex(&f.info, cp);
+        const LoadedFont* from = &f;
+        if (g == 0)
+            for (const LoadedFont* fb : fallbacks)
+                if (const int k = stbtt_FindGlyphIndex(&fb->info, cp); k != 0) {
+                    g = k;
+                    from = fb;
+                    break;
+                }
+        x += kern_advance(f.info, prev, g, scale);
+        const float gscale = from == &f ? scale : stbtt_ScaleForMappingEmToPixels(&from->info, size);
+        int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+        if (stbtt_GetGlyphBox(&from->info, g, &x0, &y0, &x1, &y1) && x1 > x0 && y1 > y0) {
+            const InkBox gb{x + x0 * gscale, x + x1 * gscale, y0 * gscale, y1 * gscale};
+            if (!any) box = gb;
+            box.left = std::min(box.left, gb.left);
+            box.right = std::max(box.right, gb.right);
+            box.bottom = std::min(box.bottom, gb.bottom);
+            box.top = std::max(box.top, gb.top);
+            any = true;
+        }
+        int advance = 0, lsb = 0;
+        stbtt_GetGlyphHMetrics(&from->info, g, &advance, &lsb);
+        const short xadv = static_cast<short>(gscale * static_cast<float>(advance) * 10.0f);
+        x += static_cast<float>(static_cast<int>(xadv / 10.0f + 0.5f));
+        prev = g;
+    });
+    return box;
+}
+
+// Ink of `text` in face `index` of `path`, cached. Caller must hold g_mutex.
+InkBox ink_locked(const std::string& path, int index, short isize, std::string_view text) {
+    const float size = static_cast<float>(isize) / 10.0f;
+    LoadedFont& f = get_font(path, index);
+    if (!f.ok) {
+        // No usable font: x-height letters across the estimated advance.
+        std::size_t chars = 0;
+        for_each_codepoint(text, [&](int) { ++chars; });
+        return {0.0f, static_cast<float>(chars) * size * kFallbackAdvanceFactor, 0.0f, size * 0.5f};
+    }
+    auto& bucket = f.inks[isize];
+    if (auto it = bucket.find(text); it != bucket.end()) return it->second;
+    const InkBox b = measure_ink(f, fallbacks_for(path), size, text);
+    if (f.ink_entries >= kWidthCacheCap) {
+        f.inks.clear();
+        f.ink_entries = 0;
+        f.inks[isize].emplace(text, b);
+    } else {
+        bucket.emplace(text, b);
+    }
+    ++f.ink_entries;
+    return b;
+}
+
 // Width of `text` in face `index` of `path`, cached. Caller must hold g_mutex.
 float width_locked(const std::string& path, int index, short isize, std::string_view text) {
     const float size = static_cast<float>(isize) / 10.0f;
@@ -265,13 +345,7 @@ float width_locked(const std::string& path, int index, short isize, std::string_
     // Heterogeneous find; only a miss allocates.
     if (auto it = bucket.find(text); it != bucket.end()) return it->second;
 
-    std::vector<const LoadedFont*> fallbacks;
-    for (const FontEntry* e : fallback_fonts()) {
-        if (e->path == path) continue;
-        const LoadedFont& fb = get_font(e->path);   // map nodes never move
-        if (fb.ok) fallbacks.push_back(&fb);
-    }
-    const float w = measure(f, fallbacks, size, text);
+    const float w = measure(f, fallbacks_for(path), size, text);
     if (f.width_entries >= kWidthCacheCap) {
         f.widths.clear();
         f.width_entries = 0;
@@ -329,6 +403,19 @@ FontVMetrics font_vmetrics(const std::string& font_path, float px_size) {
     return { f.ascent_norm  * fsize / 10.0f,
              f.descent_norm * fsize / 10.0f,
              f.lineh_norm   * fsize / 10.0f };
+}
+
+InkBox ink_box(const std::string& font_path, float px_size, std::string_view text, bool italic) {
+    if (text.empty()) return {};
+    const short isize = quantize_isize(px_size);
+    if (isize <= 0) return {};
+    const std::string& path = resolve_path(font_path);
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (italic) {
+        const std::optional<FaceRef>& it = italic_of(path);
+        if (it && get_font(it->file, it->index).ok) return ink_locked(it->file, it->index, isize, text);
+    }
+    return ink_locked(path, 0, isize, text);
 }
 
 bool text_metrics_font_loaded(const std::string& font_path) {

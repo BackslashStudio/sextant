@@ -163,7 +163,7 @@ static void test_axes_gallery() {
     fig->suptitle("What Axes draws");
 
     fig->add_subplot(3, 4, 1)
-            // Math in text: the legend names, the annotation and the x title.
+            // Math in text: the legend names, the annotation, the x and y titles.
             ->line(x, y_sin, {.color = sextant::Color::Blue, .linewidth = 4.0f, .name = "$\\sin(x)$"})
             .line(x, y_cos, {
                       .color = sextant::Color::Red, .linewidth = 2.0f,
@@ -177,7 +177,7 @@ static void test_axes_gallery() {
             .annotate(M_PI / 2.0, 1.0, "$\\sin(\\pi/2) = 1$", sextant::Pos::fraction(0.55),
                       sextant::Pos::fraction(0.93),
                       {.va = sextant::VAlign::Top, .background = {1.0f, 1.0f, 0.85f, 1.0f}, .edge_linewidth = 1.0f})
-            .set_xtitle("$\\theta$ [rad]")
+            .set_xtitle("$\\theta$ [rad]").set_ytitle("$\\frac{\\sqrt{2}}{2}\\,\\overline{y}$")
             .set_title("Line").legend().grid();
 
     fig->add_subplot(3, 4, 2)
@@ -3229,7 +3229,7 @@ static void test_navigation() {
 }
 
 int main() {
-    test_navigation();
+    // test_navigation();
     // test_quiver();
     // test_stack();
     // test_fill_between();
@@ -3247,7 +3247,7 @@ int main() {
     // test_scales();
     // test_axis_position3d();
     // test_axis_position();
-    // test_axes_gallery();
+    test_axes_gallery();
     // test_axes3d_gallery();
     // test_errorbar3d_gallery();
     // test_line3d_gallery();

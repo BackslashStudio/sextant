@@ -30,6 +30,18 @@ bool has_italic_face(const std::string& font_path);
 
 FontVMetrics font_vmetrics(const std::string& font_path, float px_size);
 
+// The glyph outlines' extent of `text` at `px_size`, y up from the baseline,
+// x from the pen's start: glyphs and pen steps as text_width() takes them, the
+// fallback fonts included (the italic face when `italic`, as
+// text_width_italic()). All zero for an empty string or one with no outlines
+// (spaces); a guess when the font can't be read. For math layout, which places
+// fractions and roots by ink, as TeX does.
+struct InkBox {
+    float left = 0.0f, right = 0.0f;
+    float bottom = 0.0f, top = 0.0f;
+};
+InkBox ink_box(const std::string& font_path, float px_size, std::string_view text, bool italic = false);
+
 // True when real glyph metrics are in use (not the fallback). For tests.
 bool text_metrics_font_loaded(const std::string& font_path);
 

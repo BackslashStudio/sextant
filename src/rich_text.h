@@ -9,7 +9,8 @@ namespace sextant {
 
 // Rich text: a subset of matplotlib's mathtext. A string with
 // an even, nonzero count of `$` not preceded by a backslash holds math spans;
-// inside one, `^`/`_` scripts, `{}` groups, `\name` symbols and TeX spacing.
+// inside one, `^`/`_` scripts, `{}` groups, `\name` symbols and TeX spacing,
+// `\frac`, `\sqrt` and `\overline`/`\underline` (drawn with rules and paths).
 // Letters in a span are italic, as TeX's: Latin and lower-case
 // Greek; digits, symbols, Greek capitals, function names, `\mathrm`/`\text`
 // upright; `\mathit` makes letters and digits italic.
@@ -34,11 +35,34 @@ struct RichRun {
 // unit of height (FreeType's oblique, about 11 degrees).
 constexpr float kSyntheticSlant = 0.2f;
 
+// A filled rectangle in a laid-out line (a fraction bar, an overline): x from
+// the line's left end, y its top edge, down from the baseline.
+struct RichRule {
+    float x = 0.0f, y = 0.0f, w = 0.0f, h = 0.0f;
+};
+
+// A filled outline (a radical): a closed polygon, in the rules' coordinates.
+struct RichPath {
+    struct Pt {
+        float x = 0.0f, y = 0.0f;
+    };
+    std::vector<Pt> pts;
+};
+
 struct RichLine {
     std::vector<RichRun> runs;   // in pen order
+    std::vector<RichRule> rules;
+    std::vector<RichPath> paths;
     float width = 0.0f;
     // Over every run, and never inside the plain font's: line_height = ascent - descent.
     FontVMetrics vm;
+    // The glyphs' and rules' extent, y up (the font's ascent and descent for
+    // a line that is not rich).
+    float ink_top = 0.0f, ink_bottom = 0.0f;
+    // Holds a fraction, root or rule: its runs are not in pen order (a
+    // denominator steps back under its numerator), so the SVG places each
+    // run absolutely, and the rules and paths must be drawn too.
+    bool placed = false;
 };
 
 // matplotlib's test: an even, nonzero count of `$`, less the `\$`s.

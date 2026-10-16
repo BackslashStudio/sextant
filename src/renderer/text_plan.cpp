@@ -62,10 +62,24 @@ PlotRect lay_out_block(const TextPlot& p, float ax, float ay, TextDraw& d) {
     const float ascent = label_vmetrics(o.font_path, o.fontsize, lines.front()).ascent;
     const float descent = label_vmetrics(o.font_path, o.fontsize, lines.back()).descent;
     const float adv = std::max(0.0f, o.linespacing) * o.fontsize;
-    const float n1 = static_cast<float>(lines.size() - 1);
     float w = 0.0f;
     for (const auto& l : lines) w = std::max(w, label_width(o.font_path, o.fontsize, l));
-    const float h = ascent - descent + n1 * adv;
+    // Baselines `adv` apart, except that a line with a fraction or root keeps
+    // kTallLineAir between its ink and its neighbours': base[i] is i·adv plus
+    // what such lines added above it (exactly i·adv when none did).
+    constexpr float kTallLineAir = 0.1f;   // em
+    std::vector<float> base(lines.size(), 0.0f);
+    float extra = 0.0f;
+    RichLine prev = layout_rich(o.font_path, o.fontsize, lines.front());
+    for (std::size_t i = 1; i < lines.size(); ++i) {
+        RichLine cur = layout_rich(o.font_path, o.fontsize, lines[i]);
+        if (prev.placed || cur.placed)
+            extra += std::max(0.0f, cur.ink_top - prev.ink_bottom + kTallLineAir * o.fontsize - adv);
+        base[i] = static_cast<float>(i) * adv + extra;
+        prev = std::move(cur);
+    }
+    const float span = static_cast<float>(lines.size() - 1) * adv + extra;
+    const float h = ascent - descent + span;
 
     float left = 0.0f;
     if (o.ha == HAlign::Center) left = -w * 0.5f;
@@ -75,11 +89,11 @@ PlotRect lay_out_block(const TextPlot& p, float ax, float ay, TextDraw& d) {
         case VAlign::Top:      top = 0.0f; break;
         case VAlign::Center:   top = -h * 0.5f; break;
         case VAlign::Bottom:   top = -h; break;
-        case VAlign::Baseline: top = -(ascent + n1 * adv); break;
+        case VAlign::Baseline: top = -(ascent + span); break;
     }
     const float lx = o.ha == HAlign::Left ? left : (o.ha == HAlign::Center ? left + w * 0.5f : left + w);
     for (std::size_t i = 0; i < lines.size(); ++i)
-        d.lines.push_back({lines[i], lx, top + ascent + static_cast<float>(i) * adv});
+        d.lines.push_back({lines[i], lx, top + ascent + base[i]});
 
     const float pad = std::max(0.0f, o.pad);
     const PlotRect block{left, top, w, h};

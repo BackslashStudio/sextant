@@ -95,6 +95,46 @@ static std::string text_body(const std::string& text, const std::string& font_pa
     return o.str();
 }
 
+// One label: `<text x y[ text-anchor] attrs>body</text>` (text_body()), or, for a
+// line with fractions or roots (RichLine::placed), a <g> carrying `attrs`
+// around a <text> whose runs sit at absolute positions from its left end, and
+// the line's bars and radicals as <rect>/<path>: a denominator steps back under
+// its numerator, and text-anchor over such a line is each viewer's guess.
+// `anchor` null = no attribute (start). `attrs` begins with a space.
+static void emit_text(std::ostringstream& o, const char* indent, float x, float y, const char* anchor,
+                      const std::string& attrs, const std::string& text, const std::string& font_path,
+                      float size) {
+    RichLine line;
+    if (is_rich(text)) line = layout_rich(font_path, size, text);
+    if (!line.placed) {
+        o << indent << "<text x=\"" << x << "\" y=\"" << y << "\"";
+        if (anchor) o << " text-anchor=\"" << anchor << "\"";
+        o << attrs << ">" << text_body(text, font_path, size) << "</text>\n";
+        return;
+    }
+    float x0 = x;
+    if (anchor && std::string_view(anchor) == "middle") x0 -= line.width * 0.5f;
+    else if (anchor && std::string_view(anchor) == "end") x0 -= line.width;
+    o << indent << "<g" << attrs << "><text x=\"" << x0 << "\" y=\"" << y << "\" text-anchor=\"start\">";
+    for (const RichRun& r : line.runs) {
+        o << "<tspan x=\"" << x0 + r.x << "\" y=\"" << y + r.dy << "\"";
+        if (r.size != size) o << " font-size=\"" << r.size << "\"";
+        if (r.italic) o << " font-style=\"italic\"";
+        o << ">" << xml_escape(r.text) << "</tspan>";
+    }
+    o << "</text>";
+    for (const RichRule& r : line.rules)
+        o << "<rect x=\"" << x0 + r.x << "\" y=\"" << y + r.y << "\" width=\"" << r.w << "\" height=\"" << r.h
+          << "\"/>";
+    for (const RichPath& p : line.paths) {
+        o << "<path d=\"";
+        for (std::size_t k = 0; k < p.pts.size(); ++k)
+            o << (k == 0 ? "M" : " L") << x0 + p.pts[k].x << " " << y + p.pts[k].y;
+        o << " Z\"/>";
+    }
+    o << "</g>\n";
+}
+
 // ` fill="..."` for a background rect, plus its opacity when not opaque. Opaque
 // white stays `white` and other opaque colors `#rrggbb`, as the files always had.
 static std::string background_fill(const Color& c) {
@@ -846,8 +886,8 @@ static void emit_ticks_and_labels(std::ostringstream& o, const SvgAxesData& d) {
         for (const auto& t : d.layout.xticks) {
             if (!st.show_xticks || !d.layout.xlabels) break;
             float px = d.layout.tr.to_px(t.value);
-            o << "    <text x=\"" << px << "\" y=\"" << d.layout.xlabel_top + top_baseline_offset(fp, fsz, t.label)
-              << "\" text-anchor=\"middle\">" << text_body(t.label, fp, fsz) << "</text>\n";
+            emit_text(o, "    ", px, d.layout.xlabel_top + top_baseline_offset(fp, fsz, t.label), "middle", "",
+                      t.label, fp, fsz);
         }
     };
     const auto y_labels = [&] {
@@ -856,9 +896,8 @@ static void emit_ticks_and_labels(std::ostringstream& o, const SvgAxesData& d) {
         for (const auto& t : d.layout.yticks) {
             if (!st.show_yticks || !d.layout.ylabels) break;
             float py = d.layout.tr.to_py(t.value);
-            o << "    <text x=\"" << d.layout.ylabel_x
-              << "\" y=\"" << py + middle_baseline_offset(fp, fsz, t.label)
-              << "\" text-anchor=\"" << y_anchor << "\">" << text_body(t.label, fp, fsz) << "</text>\n";
+            emit_text(o, "    ", d.layout.ylabel_x, py + middle_baseline_offset(fp, fsz, t.label), y_anchor, "",
+                      t.label, fp, fsz);
         }
     };
     if (same_labels(xk, yk)) {
@@ -880,21 +919,21 @@ static void emit_ticks_and_labels(std::ostringstream& o, const SvgAxesData& d) {
 static void emit_titles(std::ostringstream& o, const SvgAxesData& d) {
     const std::string& fp = d.axes_style.font_path;
 
+    const auto font_attrs = [&](float fsz, const Color& c) {
+        std::ostringstream a;
+        a << " font-family=\"" << svg_font_family(d.axes_style) << "\""
+          << " font-size=\"" << fsz << "\" fill=\"" << rgb(c) << "\"";
+        return a.str();
+    };
     if (!d.title.empty()) {
         const float fsz = d.axes_style.title_fontsize;
-        o << "  <text x=\"" << d.layout.title_x
-          << "\" y=\"" << d.layout.title_y + middle_baseline_offset(fp, fsz, d.title)
-          << "\" text-anchor=\"middle\" font-family=\"" << svg_font_family(d.axes_style) << "\""
-          << " font-size=\"" << fsz << "\" fill=\"" << rgb(d.axes_style.title_color) << "\">"
-          << text_body(d.title, fp, fsz) << "</text>\n";
+        emit_text(o, "  ", d.layout.title_x, d.layout.title_y + middle_baseline_offset(fp, fsz, d.title), "middle",
+                  font_attrs(fsz, d.axes_style.title_color), d.title, fp, fsz);
     }
     if (!d.xtitle.empty()) {
         const float fsz = d.axes_style.xtitle_fontsize;
-        o << "  <text x=\"" << d.layout.xtitle_x
-          << "\" y=\"" << d.layout.xtitle_y + middle_baseline_offset(fp, fsz, d.xtitle)
-          << "\" text-anchor=\"middle\" font-family=\"" << svg_font_family(d.axes_style) << "\""
-          << " font-size=\"" << fsz << "\" fill=\"" << rgb(d.axes_style.xtitle_color) << "\">"
-          << text_body(d.xtitle, fp, fsz) << "</text>\n";
+        emit_text(o, "  ", d.layout.xtitle_x, d.layout.xtitle_y + middle_baseline_offset(fp, fsz, d.xtitle),
+                  "middle", font_attrs(fsz, d.axes_style.xtitle_color), d.xtitle, fp, fsz);
     }
     if (!d.ytitle.empty()) {
         const float fsz = d.axes_style.ytitle_fontsize;
@@ -902,12 +941,10 @@ static void emit_titles(std::ostringstream& o, const SvgAxesData& d) {
         const float cy = d.layout.ytitle_y;
         // Baseline shift in the rotated frame (as NanoVG does after
         // nvgRotate): under rotate(-90) local +y is global +x.
-        o << "  <text x=\"0\" y=\"" << middle_baseline_offset(fp, fsz, d.ytitle) << "\""
-          << " text-anchor=\"middle\" font-family=\"" << svg_font_family(d.axes_style) << "\""
-          << " font-size=\"" << fsz << "\" fill=\"" << rgb(d.axes_style.ytitle_color) << "\""
-          << " transform=\"rotate(-90," << cx << "," << cy << ")"
-          <<   " translate(" << cx << "," << cy << ")\">"
-          << text_body(d.ytitle, fp, fsz) << "</text>\n";
+        std::ostringstream a;
+        a << font_attrs(fsz, d.axes_style.ytitle_color) << " transform=\"rotate(-90," << cx << "," << cy << ")"
+          << " translate(" << cx << "," << cy << ")\"";
+        emit_text(o, "  ", 0.0f, middle_baseline_offset(fp, fsz, d.ytitle), "middle", a.str(), d.ytitle, fp, fsz);
     }
 }
 
@@ -953,10 +990,10 @@ static void emit_texts(std::ostringstream& o, const SvgAxesData& d, std::size_t 
         const char* anchor = t.ha == HAlign::Left ? "start" : t.ha == HAlign::Right ? "end" : "middle";
         for (const TextDraw::Line& l : t.lines) {
             if (l.text.empty()) continue;
-            o << "      <text x=\"" << l.x << "\" y=\"" << l.y << "\" text-anchor=\"" << anchor
-              << "\" font-family=\"" << svg_font_family_for(t.font_path) << "\" font-size=\"" << t.fontsize
-              << "\" fill=\"" << rgb(t.color) << "\" fill-opacity=\"" << t.color.a << "\">"
-              << text_body(l.text, t.font_path, t.fontsize) << "</text>\n";
+            std::ostringstream a;
+            a << " font-family=\"" << svg_font_family_for(t.font_path) << "\" font-size=\"" << t.fontsize
+              << "\" fill=\"" << rgb(t.color) << "\" fill-opacity=\"" << t.color.a << "\"";
+            emit_text(o, "      ", l.x, l.y, anchor, a.str(), l.text, t.font_path, t.fontsize);
         }
         o << "    </g>\n  </g>\n";
     }
@@ -1044,13 +1081,13 @@ static void emit_legend(std::ostringstream& o, const SvgAxesData& d, std::size_t
             o << "/>\n";
         }
 
-        o << "    <text x=\"" << sx1 + kLegendGap
-          << "\" y=\"" << cy + middle_baseline_offset(opts.font_path, fsz, e.name)
-          << "\" font-family=\"" << svg_font_family_for(opts.font_path)
+        std::ostringstream a;
+        a << " font-family=\"" << svg_font_family_for(opts.font_path)
           << "\" font-size=\"" << fsz
           << "\" fill=\"" << rgb(opts.text_color)
-          << "\" fill-opacity=\"" << opts.text_color.a << "\">"
-          << text_body(e.name, opts.font_path, fsz) << "</text>\n";
+          << "\" fill-opacity=\"" << opts.text_color.a << "\"";
+        emit_text(o, "    ", sx1 + kLegendGap, cy + middle_baseline_offset(opts.font_path, fsz, e.name), nullptr,
+                  a.str(), e.name, opts.font_path, fsz);
     }
 }
 
@@ -1093,13 +1130,13 @@ static void emit_colorbar(std::ostringstream& o, const SvgAxesData& d, std::size
         // one (baseline shift in the rotated frame, as for the y title).
         const float name_base = middle_baseline_offset(cb.font_path, cb.fontsize, cbx.name);
         if (!cbx.name.empty() && cbx.horizontal) {
-            o << "    <text x=\"" << cbx.name_x << "\" y=\"" << cbx.name_y + name_base
-              << "\" text-anchor=\"middle\">" << text_body(cbx.name, cb.font_path, cb.fontsize) << "</text>\n";
+            emit_text(o, "    ", cbx.name_x, cbx.name_y + name_base, "middle", "", cbx.name, cb.font_path,
+                      cb.fontsize);
         } else if (!cbx.name.empty()) {
-            o << "    <text x=\"0\" y=\"" << name_base << "\" text-anchor=\"middle\""
-              << " transform=\"rotate(-90," << cbx.name_x << "," << cbx.name_y << ")"
-              <<   " translate(" << cbx.name_x << "," << cbx.name_y << ")\">"
-              << text_body(cbx.name, cb.font_path, cb.fontsize) << "</text>\n";
+            std::ostringstream a;
+            a << " transform=\"rotate(-90," << cbx.name_x << "," << cbx.name_y << ")"
+              << " translate(" << cbx.name_x << "," << cbx.name_y << ")\"";
+            emit_text(o, "    ", 0.0f, name_base, "middle", a.str(), cbx.name, cb.font_path, cb.fontsize);
         }
         o << "  </g>\n";
     }
@@ -1165,12 +1202,12 @@ static void emit_box3d_labels(std::ostringstream& o,
     for (const auto& l : labels) {
         if (l.text.empty()) continue;
         // Centred on the anchor in both outputs.
-        o << "  <text x=\"" << l.x
-          << "\" y=\"" << l.y + middle_baseline_offset(l.font_path, l.fontsize, l.text)
-          << "\" text-anchor=\"middle\" font-family=\"" << svg_font_family_for(l.font_path)
+        std::ostringstream a;
+        a << " font-family=\"" << svg_font_family_for(l.font_path)
           << "\" font-size=\"" << l.fontsize << "\" fill=\"" << rgb(l.color)
-          << "\" fill-opacity=\"" << l.color.a << "\">"
-          << text_body(l.text, l.font_path, l.fontsize) << "</text>\n";
+          << "\" fill-opacity=\"" << l.color.a << "\"";
+        emit_text(o, "  ", l.x, l.y + middle_baseline_offset(l.font_path, l.fontsize, l.text), "middle", a.str(),
+                  l.text, l.font_path, l.fontsize);
     }
 }
 
@@ -1596,12 +1633,13 @@ std::string svg_document(const SvgFigureData& fd) {
         const char* anchor = so.align == HAlign::Left  ? "start"
                            : so.align == HAlign::Right ? "end"
                                                        : "middle";
-        o << "  <text x=\"" << suptitle_anchor_x(static_cast<float>(fd.width), so)
-          << "\" y=\"" << cy + middle_baseline_offset(so.font_path, fsz, fd.suptitle)
-          << "\" text-anchor=\"" << anchor << "\" font-family=\"" << svg_font_family_for(so.font_path) << "\""
+        std::ostringstream a;
+        a << " font-family=\"" << svg_font_family_for(so.font_path) << "\""
           << " font-size=\"" << fsz << "\" fill=\"" << rgb(so.color)
-          << "\" fill-opacity=\"" << so.color.a << "\">"
-          << text_body(fd.suptitle, so.font_path, fsz) << "</text>\n";
+          << "\" fill-opacity=\"" << so.color.a << "\"";
+        emit_text(o, "  ", suptitle_anchor_x(static_cast<float>(fd.width), so),
+                  cy + middle_baseline_offset(so.font_path, fsz, fd.suptitle), anchor, a.str(), fd.suptitle,
+                  so.font_path, fsz);
     }
 
     for (std::size_t i = 0; i < fd.axes.size(); ++i)

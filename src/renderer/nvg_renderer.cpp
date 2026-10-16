@@ -106,6 +106,17 @@ namespace sextant {
             nvgRestore(vg_);
         }
         nvgFontSize(vg_, size);
+        // Bars and radicals, in the text's fill color.
+        if (!l.placed) return;
+        nvgBeginPath(vg_);
+        for (const RichRule& r: l.rules) nvgRect(vg_, x0 + r.x, base + r.y, r.w, r.h);
+        for (const RichPath& p: l.paths) {
+            if (p.pts.empty()) continue;
+            nvgMoveTo(vg_, x0 + p.pts[0].x, base + p.pts[0].y);
+            for (std::size_t k = 1; k < p.pts.size(); ++k) nvgLineTo(vg_, x0 + p.pts[k].x, base + p.pts[k].y);
+            nvgClosePath(vg_);
+        }
+        nvgFill(vg_);
     }
 
     int NvgRenderer::italic_for_path(const std::string& path) {

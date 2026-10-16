@@ -328,6 +328,8 @@ int main() {
 
     // rich_text.cpp
     test_rich_text();
+    // math_layout.cpp
+    test_math_layout();
 
     // describe.cpp
     test_describe();

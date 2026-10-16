@@ -816,6 +816,7 @@ if(SEXTANT_BUILD_TESTS)
             tests/layout_test/fill_between.cpp
             tests/layout_test/quiver.cpp
             tests/layout_test/rich_text.cpp
+            tests/layout_test/math_layout.cpp
             tests/layout_test/text.cpp
             tests/layout_test/window_wait.cpp
             tests/layout_test/events.cpp)

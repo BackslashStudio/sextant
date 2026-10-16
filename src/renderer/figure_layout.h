@@ -109,6 +109,9 @@ namespace sextant {
         // The box as one column (the shape at every anchor except Outside
         // top/bottom, which wrap; see layout_legend_rows()).
         float legend_box_w = 0.0f, legend_box_h = 0.0f;
+        // Every row's height: legend_row_height(), or more for a name with a
+        // fraction or root (0 = no legend).
+        float legend_row_h = 0.0f;
         // margin + legend_box_w: what a side-anchored legend reserves.
         float legend_block = 0.0f;
     };
