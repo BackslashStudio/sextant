@@ -8,6 +8,7 @@
 #include "render_frame.h"
 #include "coord_transform.h"
 #include "widgets/nav_history.h"
+#include "figure_impl.h"
 
 namespace lt {
     using namespace sextant;
@@ -295,6 +296,44 @@ namespace lt {
             apply_drained(f3, b3);
             check(f3.find3d(2)->camera.azimuth == 45.0 && f3.find2d(1)->xlim_auto,
                   "history: Back skips a camera the program set since");
+        }
+
+        // ---- set_default_camera() names Home's camera, whatever set_camera() said.
+        {
+            FigureSnapshot f4 = twin_and_box();
+            RenderSnapshot3D& r = *f4.find3d(2);
+            r.default_camera.azimuth = 120.0;
+            r.default_camera_set = true;
+            FigureEditBox b4;
+            FigureWindowState s4;
+            FigureContext c4 = panel_ctx(f4, b4, s4);
+            NavHistory& n4 = s4.plot.nav;
+            check(!at_home(n4, f4, 2), "history: with a default camera, the first view is not Home");
+            nav_home(n4, c4, 2);
+            apply_drained(f4, b4);
+            check(r.camera.azimuth == 120.0 && at_home(n4, f4, 2),
+                  "history: Home goes to set_default_camera()'s camera");
+            // The program's set_view() after it does not move Home.
+            r.camera.azimuth = 33.0;
+            r.camera_stamp = 4;
+            check(!at_home(n4, f4, 2), "history: a later set_camera() is not Home");
+            nav_home(n4, c4, 2);
+            apply_drained(f4, b4);
+            check(r.camera.azimuth == 120.0, "history: Home is still the default camera");
+            nav_back(n4, c4);
+            apply_drained(f4, b4);
+            check(r.camera.azimuth == 33.0, "history: and Back returns to the program's camera");
+        }
+        {
+            auto fig = Figure::create({.width = 200, .height = 200});
+            auto a = fig->add_subplot3d(1, 1, 1);
+            a->set_default_camera(Camera3D{.azimuth = 50.0});
+            auto& fi = detail::FigureAccess::impl(*fig);
+            const RenderSnapshot3D sn = fi.find_slot_impl3d(1)->build_snapshot();
+            check(sn.default_camera_set && sn.default_camera.azimuth == 50.0,
+                  "history: set_default_camera() reaches the snapshot, flagged");
+            a->cla();
+            check(!fi.find_slot_impl3d(1)->build_snapshot().default_camera_set, "history: cla() clears the flag");
         }
 
         // ---- The cap.

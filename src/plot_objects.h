@@ -740,8 +740,10 @@ struct RenderSnapshot3D {
     // As TitleStamps, for the camera: set_camera()/set_view()/set_projection()/
     // set_fov() take a fresh stamp, cla() resets it to 0.
     unsigned long long camera_stamp = 0;
-    // What a double-click restores (the reset runs on the render thread).
+    // set_default_camera()'s camera; when `default_camera_set`, Home's camera (the
+    // double-click and Edit > Home, step 36f), else Home is the program's camera.
     Camera3D    default_camera;
+    bool        default_camera_set = false;
 
     double xmin = 0, xmax = 1, ymin = 0, ymax = 1, zmin = 0, zmax = 1;
     bool   xlim_auto = true, ylim_auto = true, zlim_auto = true;

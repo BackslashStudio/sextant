@@ -73,7 +73,8 @@ namespace sextant {
 
     // Keeps Home current: taken from the first snapshot seen; an axis whose stamp
     // differs from Home's is re-taken (the program set it, and the snapshot shows
-    // its value); new axes join, gone ones leave. Once per frame, and before any
+    // its value); new axes join, gone ones leave. A 3D axes with
+    // set_default_camera() has that camera as Home's. Once per frame, and before any
     // other call below reads Home.
     void nav_track_home(NavHistory& h, const FigureSnapshot& fsnap);
 

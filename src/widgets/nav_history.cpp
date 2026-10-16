@@ -63,9 +63,8 @@ bool same_view(const NavView& a, const NavView& b, int slot) {
 void nav_track_home(NavHistory& h, const FigureSnapshot& fsnap) {
     NavView now = capture_view(fsnap);
     if (!h.have_home) {
-        h.home = std::move(now);
+        h.home = now; // then as any frame (a default camera applies)
         h.have_home = true;
-        return;
     }
     // Rebuilt in the snapshot's order: kept entries, re-taken axes, new axes.
     NavView next;
@@ -85,7 +84,14 @@ void nav_track_home(NavHistory& h, const FigureSnapshot& fsnap) {
     for (const NavCamera& n : now.cameras) {
         const auto it = std::find_if(h.home.cameras.begin(), h.home.cameras.end(),
                                      [&](const NavCamera& o) { return o.slot == n.slot; });
-        next.cameras.push_back(it == h.home.cameras.end() || it->stamp != n.stamp ? n : *it);
+        NavCamera c = it == h.home.cameras.end() || it->stamp != n.stamp ? n : *it;
+        // set_default_camera() names Home's camera outright, whatever the
+        // program's set_camera() said since.
+        if (const RenderSnapshot3D* s = fsnap.find3d(n.slot); s && s->default_camera_set) {
+            c.camera = s->default_camera;
+            c.stamp = s->camera_stamp;
+        }
+        next.cameras.push_back(c);
     }
     h.home = std::move(next);
 }

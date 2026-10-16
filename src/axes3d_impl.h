@@ -48,6 +48,8 @@ namespace sextant {
         unsigned long long camera_stamp = 0;
         // What a double-click restores; unaffected by navigation and set_camera().
         Camera3D default_camera;
+        // Whether set_default_camera() was called: then it is Home's camera (step 36f).
+        bool default_camera_set = false;
 
         double xmin = 0, xmax = 1, ymin = 0, ymax = 1, zmin = 0, zmax = 1;
         bool xlim_auto = true, ylim_auto = true, zlim_auto = true;
@@ -141,6 +143,7 @@ namespace sextant {
             s.camera = camera;
             s.camera_stamp = camera_stamp;
             s.default_camera = default_camera;
+            s.default_camera_set = default_camera_set;
             s.xmin = xmin;
             s.xmax = xmax;
             s.ymin = ymin;

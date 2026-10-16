@@ -784,7 +784,9 @@ namespace sextant {
 
         Axes3D& set_fov(double degrees);
 
-        // The camera a double-click resets to. Unaffected by set_camera() and drags.
+        // The camera a double-click (and the window's Edit > Home) resets to.
+        // Unaffected by set_camera() and drags. Never called: those go back to
+        // the camera of the last set_camera()/set_view().
         Axes3D& set_default_camera(Camera3D cam);
 
         // Clears the objects and planes and resets the rest, the color cycle included.

@@ -589,6 +589,7 @@ namespace sextant {
 
     Axes3D& Axes3D::set_default_camera(Camera3D cam) {
         d->default_camera = clamp_camera(cam);
+        d->default_camera_set = true;
         return *this;
     }
 
