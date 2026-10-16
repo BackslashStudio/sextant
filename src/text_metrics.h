@@ -42,6 +42,12 @@ struct InkBox {
 };
 InkBox ink_box(const std::string& font_path, float px_size, std::string_view text, bool italic = false);
 
+// The ink of `text` (upright) between heights `low` and `high` (px, y up), as
+// ink_box() takes it: the outlines' control polygons clipped to the band, so a
+// little wide at a curve. All zero when no outline reaches the band. For the
+// scripts of an integral, set by its hooks' actual reach. Not cached.
+InkBox ink_band(const std::string& font_path, float px_size, std::string_view text, float low, float high);
+
 // True when real glyph metrics are in use (not the fallback). For tests.
 bool text_metrics_font_loaded(const std::string& font_path);
 

@@ -535,6 +535,122 @@ namespace lt {
             check(run(sc, "2") && run(sc, "2")->dy < 0.0f, "a script on \\right)");
         }
 
+        // --- Big operators and limits ------------------------------------------------------
+        {
+            const float s7 = kSize * 0.7f, big = 1.4f * kSize, gap = 0.11f * kSize;
+            const float ax = axis();
+            const std::string sum = "\xE2\x88\x91", integral = "\xE2\x88\xAB";
+            for (const char* s: {"$\\sum_{i=0}^{n}$", "$\\bigoplus_k$", "$\\lim_{x\\to 0}$", "$\\overset{!}{=}$",
+                                 "$\\underset{x}{y}$", "$a\\stackrel{f}{\\to}b$", "$\\operatorname{argmax}_x$",
+                                 "$\\sum_{\\substack{0<i<n\\\\j\\neq i}}$", "$\\substack{a\\\\b\\\\c}$",
+                                 "$\\bigvee\\bigwedge\\bigotimes\\bigodot\\biguplus\\bigsqcup$"})
+                check(!math_error(s), std::string("parses: ") + s);
+            const auto reason = [](const char* s) {
+                const auto e = math_error(s);
+                return e ? e->reason : std::string();
+            };
+            check(reason("$\\substack{a\\\\b$") == "'{' is never closed", "an unclosed \\substack");
+            check(reason("$a\\\\b$") == "'\\\\' is not supported", "\\\\ outside \\substack stays malformed");
+            check(reason("$\\overset{a}$") == "'\\overset' is missing an argument", "\\overset needs two arguments");
+
+            // 1.4x at level 0, the ink centred on the axis; in a script, as any glyph.
+            const RichLine bare = layout_rich("", kSize, "$\\sum$");
+            const RichRun* op = run(bare, sum);
+            const InkBox si = ink(sum, big, false);
+            check(op && close(op->size, big) && bare.placed, "\\sum: 1.4x at level 0");
+            if (op) check(close(-op->dy + (si.top + si.bottom) * 0.5f, ax, 0.01f), "\\sum: its ink centred on the axis");
+            const RichLine sc = layout_rich("", kSize, "$x^{\\sum}$");
+            check(run(sc, sum) && close(run(sc, sum)->size, s7), "\\sum in a script: the script size, unenlarged");
+            const RichLine fr = layout_rich("", kSize, "$\\frac{\\sum}{2}$");
+            check(run(fr, sum) && close(run(fr, sum)->size, s7), "\\sum in a fraction: one level down, unenlarged");
+
+            // Limits: one level down, centred, 0.11 em clear of the operator's ink.
+            const RichLine lim = layout_rich("", kSize, "$\\sum_{i=0}^{n}$");
+            const RichRun* o = run(lim, sum);
+            const RichRun* n = run(lim, "n");
+            const RichRun* z = run(lim, "=0");   // "=" and "0" merge
+            check(o && n && z && close(n->size, s7) && close(z->size, s7), "\\sum_{i=0}^{n}: limits at script size");
+            if (o && n && z) {
+                const float op_top = -o->dy + si.top, op_bottom = -o->dy + si.bottom;
+                check(close(-n->dy + std::min(0.0f, ink("n", s7).bottom), op_top + gap, 0.01f),
+                      "...the upper limit's ink 0.11 em over the operator's");
+                const float under_top = std::max({ink("i", s7).top, ink("=", s7, false).top, ink("0", s7, false).top});
+                check(close(-z->dy + under_top, op_bottom - gap, 0.01f), "...the lower limit's ink 0.11 em under it");
+                check(close(n->x + n->width * 0.5f, o->x + o->width * 0.5f, 0.01f), "...the upper limit centred");
+                check(lim.placed && close(lim.width, std::max(o->width, z->x + z->width - run(lim, "i")->x), 0.01f),
+                      "...the widest of the three sets the width");
+            }
+            const RichLine wide = layout_rich("", kSize, "$\\sum_{i=0,\\ldots,1000}$");
+            const RichRun* wo = run(wide, sum);
+            check(wo && wo->x > 0.0f && wide.width > wo->width + 0.5f * kSize
+                  && close(wo->x + wo->width * 0.5f, wide.width * 0.5f, 0.01f),
+                  "a limit wider than the operator widens the box, the operator centred");
+            const RichLine sp = layout_rich("", kSize, "$\\sum_{i}^{n}$");
+            check(run(sp, "i") && run(sp, "n") && run(sp, "i")->dy > 0.0f
+                  && run(sp, "n")->dy < -0.5f * kSize, "limits above and below, not at the side");
+
+            // \lim and friends: limits under the upright name, at every level.
+            const RichLine l0 = layout_rich("", kSize, "$\\lim_{x\\to 0}$");
+            const RichRun* lr = run(l0, "lim");
+            const RichRun* lx = run(l0, "x");
+            check(lr && lx && close(lr->size, kSize) && !lr->italic && lx->dy > 0.0f && close(lx->size, s7),
+                  "\\lim_{x\\to 0}: the limit under lim");
+            const RichLine mx = layout_rich("", kSize, "$a^{\\max_k b}$");
+            const RichRun* k = run(mx, "k");
+            const RichRun* mr = run(mx, "max");
+            check(k && mr && close(k->size, 0.5f * kSize) && k->dy > mr->dy, "\\max in a script: its limit under it too");
+            const RichLine sn = layout_rich("", kSize, "$\\sin_x$");
+            check(run(sn, "x") && run(sn, "sin") && close(run(sn, "x")->x, run(sn, "sin")->width, 0.01f),
+                  "\\sin keeps side scripts");
+
+            // Integrals: side scripts by the glyph's ink, superscript high, subscript low.
+            const RichLine in = layout_rich("", kSize, "$\\int_0^1$");
+            const RichRun* ig = run(in, integral);
+            const RichRun* one = run(in, "1");
+            const RichRun* zero = run(in, "0");
+            check(ig && one && zero && close(ig->size, big), "\\int_0^1: a 1.4x integral, two scripts");
+            if (ig && one && zero) {
+                const InkBox ii = ink(integral, big, false);
+                const float top = -ig->dy + ii.top, bottom = -ig->dy + ii.bottom;
+                check(close(-one->dy, top - 0.386f * s7, 0.01f), "...the superscript's baseline from the ink top");
+                check(close(-zero->dy, bottom - 0.05f * s7, 0.01f), "...the subscript's baseline from the ink bottom");
+                check(one->x >= ig->x + ig->width - 1e-3f && zero->x <= one->x + 1e-3f && zero->x > ig->x,
+                      "...the superscript past the advance, the subscript no further right");
+                // The glyph's own reach beside the subscript (glyph coordinates: + dy).
+                const InkBox low = ink_band("", big, integral, ii.bottom,
+                                            bottom - 0.05f * s7 + ink("0", s7, false).top + ig->dy);
+                check(low.right > low.left && close(zero->x, ig->x + low.right + 0.05f * kSize, 0.01f),
+                      "...the subscript 0.05 em clear of the glyph beside it");
+                const RichLine again = layout_rich("", kSize, "$\\int_0^1$");
+                check(run(again, "0") && run(again, "0")->x == zero->x, "...the same on a second layout");
+            }
+
+            // \overset, \underset (ordinary), \stackrel (a relation); \operatorname.
+            const RichLine ov = layout_rich("", kSize, "$\\overset{!}{=}$");
+            check(run(ov, "!") && run(ov, "=") && close(run(ov, "!")->size, s7) && run(ov, "!")->dy < 0.0f,
+                  "\\overset{!}{=}: ! over =, one level down");
+            const RichLine un = layout_rich("", kSize, "$\\underset{x}{y}$");
+            check(run(un, "x") && run(un, "y") && run(un, "x")->dy > 0.0f, "\\underset: under");
+            check(close(layout_rich("", kSize, "$a\\stackrel{f}{=}b$").width
+                            - layout_rich("", kSize, "$a\\overset{f}{=}b$").width,
+                        2.0f * (5.0f / 18.0f) * kSize, 0.01f),
+                  "\\stackrel is a relation, \\overset ordinary");
+            float argmax = 0.0f;   // one atom a letter, as \mathrm
+            for (const char* c: {"a", "r", "g", "m", "a", "x"}) argmax += text_width("", kSize, c);
+            check(close(layout_rich("", kSize, "$\\operatorname{argmax} x$").width, argmax + wi("x") + kSize / 6.0f, 0.01f),
+                  "\\operatorname: upright, spaced as \\sin");
+
+            // \substack: rows centred, their ink 0.1 em apart.
+            const RichLine ss = layout_rich("", kSize, "$\\sum_{\\substack{a\\\\b}}$");
+            const RichRun* ra = run(ss, "a");
+            const RichRun* rb = run(ss, "b");
+            check(ra && rb && rb->dy > ra->dy && close(ra->size, s7) && close(rb->size, s7),
+                  "\\substack: rows one under another, at the limit's size");
+            if (ra && rb)
+                check(close(-ra->dy + std::min(0.0f, ink("a", s7).bottom) - (-rb->dy + ink("b", s7).top),
+                            0.1f * s7, 0.01f), "...their ink 0.1 em apart");
+        }
+
         // --- Warnings: the new commands no longer warn -------------------------------------
         {
             std::vector<std::string> msgs;
@@ -547,6 +663,9 @@ namespace lt {
             check(msgs.empty(), "no warning for 37b's accents");
             ax->set_title("$\\left(\\frac{a}{b}\\middle|\\binom{n}{k}\\right.\\bigl[x\\Biggr\\}$");
             check(msgs.empty(), "no warning for 37c's delimiters");
+            ax->set_title("$\\sum_{\\substack{i\\\\j}}\\int_0^1\\lim_{x\\to 0}\\overset{a}{b}\\underset{c}{d}"
+                          "\\stackrel{e}{=}\\operatorname{tr}\\bigsqcup$");
+            check(msgs.empty(), "no warning for 37d's operators");
             ax->set_title("$\\mathbf{x}$");
             check(msgs.size() == 1 && msgs[0].find("not supported yet") != std::string::npos,
                   "a still deferred command still warns");
@@ -584,7 +703,11 @@ namespace lt {
                      "\\quad\\left.\\frac{df}{dx}\\right|_{x=0}$", 0.03, 0.36, big);
             ax->text("$\\sqrt{2}\\quad\\sqrt[3]{x}\\quad\\sqrt{\\frac{a}{b}}\\quad\\sqrt{x_i^2+y}$", 0.03, 0.82, big);
             ax->text("$\\overline{AB}\\quad\\underline{xyz}\\quad x^{\\frac{1}{2}}$\nnext line\n$\\frac{1}{2}$ below",
-                     0.03, 0.10, big);
+                     0.55, 0.86, big);
+            ax->text("$\\sum_{i=0}^{n} x_i\\quad\\int_0^1 f\\,dx\\quad\\oint_C\\quad\\lim_{x\\to 0}\\frac{\\sin x}{x}"
+                     "\\quad\\prod_{\\substack{0<i<n\\\\ i\\neq j}} a_i$", 0.03, 0.28, big);
+            ax->text("$\\bigcup_k A_k\\,\\bigoplus_k V_k\\quad\\overset{!}{=}\\quad A\\stackrel{f}{\\to}B\\quad"
+                     "\\underset{x}{\\operatorname{argmax}}\\,g\\quad\\max_x f\\quad x^{\\sum_i y}$", 0.03, 0.19, big);
             TextOptions turned = big;
             turned.rotation = 30.0f;
             ax->text("$\\frac{1}{\\sqrt{n}}$", 0.85, 0.22, turned);

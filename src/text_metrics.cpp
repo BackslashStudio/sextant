@@ -266,9 +266,12 @@ std::vector<const LoadedFont*> fallbacks_for(const std::string& path) {
     return fallbacks;
 }
 
-// measure()'s pen walk, collecting the glyphs' outline boxes instead.
+// measure()'s pen walk, collecting the glyphs' outline boxes instead; with a
+// `band` (px, y up: low, high), only the outline points (on-curve and control)
+// inside it.
 InkBox measure_ink(const LoadedFont& f, const std::vector<const LoadedFont*>& fallbacks,
-                   float size, std::string_view text) {
+                   float size, std::string_view text,
+                   std::optional<std::pair<float, float>> band = std::nullopt) {
     InkBox box;
     if (size * 10.0f < 2.0f) return box;
     const float scale = stbtt_ScaleForMappingEmToPixels(&f.info, size);
@@ -287,15 +290,48 @@ InkBox measure_ink(const LoadedFont& f, const std::vector<const LoadedFont*>& fa
                 }
         x += kern_advance(f.info, prev, g, scale);
         const float gscale = from == &f ? scale : stbtt_ScaleForMappingEmToPixels(&from->info, size);
-        int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
-        if (stbtt_GetGlyphBox(&from->info, g, &x0, &y0, &x1, &y1) && x1 > x0 && y1 > y0) {
-            const InkBox gb{x + x0 * gscale, x + x1 * gscale, y0 * gscale, y1 * gscale};
+        const auto grow = [&](const InkBox& gb) {
             if (!any) box = gb;
             box.left = std::min(box.left, gb.left);
             box.right = std::max(box.right, gb.right);
             box.bottom = std::min(box.bottom, gb.bottom);
             box.top = std::max(box.top, gb.top);
             any = true;
+        };
+        int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+        if (band) {
+            stbtt_vertex* v = nullptr;
+            const int n = stbtt_GetGlyphShape(&from->info, g, &v);
+            // Each edge of the outline's control polygon (which holds the
+            // curves), clipped to the band.
+            const float lo = band->first, hi = band->second;
+            float px = 0.0f, py = 0.0f;
+            const auto edge = [&](float vx, float vy) {
+                const float ax = x + px * gscale, ay = py * gscale;
+                const float bx = x + vx * gscale, by = vy * gscale;
+                px = vx;
+                py = vy;
+                const float y0c = std::max(std::min(ay, by), lo), y1c = std::min(std::max(ay, by), hi);
+                if (y0c > y1c) return;
+                const auto at = [&](float y) {
+                    return ay == by ? std::max(ax, bx) : ax + (bx - ax) * (y - ay) / (by - ay);
+                };
+                const float xa = ay == by ? std::min(ax, bx) : at(y0c), xb = at(y1c);
+                grow({std::min(xa, xb), std::max(xa, xb), y0c, y1c});
+            };
+            for (int k = 0; k < n; ++k) {
+                if (v[k].type == STBTT_vmove) {
+                    px = v[k].x;
+                    py = v[k].y;
+                    continue;
+                }
+                if (v[k].type == STBTT_vcurve || v[k].type == STBTT_vcubic) edge(v[k].cx, v[k].cy);
+                if (v[k].type == STBTT_vcubic) edge(v[k].cx1, v[k].cy1);
+                edge(v[k].x, v[k].y);
+            }
+            stbtt_FreeShape(&from->info, v);
+        } else if (stbtt_GetGlyphBox(&from->info, g, &x0, &y0, &x1, &y1) && x1 > x0 && y1 > y0) {
+            grow({x + x0 * gscale, x + x1 * gscale, y0 * gscale, y1 * gscale});
         }
         int advance = 0, lsb = 0;
         stbtt_GetGlyphHMetrics(&from->info, g, &advance, &lsb);
@@ -416,6 +452,17 @@ InkBox ink_box(const std::string& font_path, float px_size, std::string_view tex
         if (it && get_font(it->file, it->index).ok) return ink_locked(it->file, it->index, isize, text);
     }
     return ink_locked(path, 0, isize, text);
+}
+
+InkBox ink_band(const std::string& font_path, float px_size, std::string_view text, float low, float high) {
+    if (text.empty()) return {};
+    const short isize = quantize_isize(px_size);
+    if (isize <= 0) return {};
+    const std::string& path = resolve_path(font_path);
+    std::lock_guard<std::mutex> lock(g_mutex);
+    const LoadedFont& f = get_font(path);
+    if (!f.ok) return {};
+    return measure_ink(f, fallbacks_for(path), static_cast<float>(isize) / 10.0f, text, std::pair{low, high});
 }
 
 bool text_metrics_font_loaded(const std::string& font_path) {

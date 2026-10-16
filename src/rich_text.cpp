@@ -20,11 +20,18 @@ enum class Wide { None, Hat, Tilde, RightArrow, LeftArrow };
 
 struct Atom {
     enum class Kind {
-        Glyphs, Group, Space, Frac, Radical, Overline, Underline, Accent, Delimited, Sized
+        Glyphs, Group, Space, Frac, Radical, Overline, Underline, Accent, Delimited, Sized, Stack, Rows
     } kind = Kind::Glyphs;
     Cls cls = Cls::Ord;
     std::string text;              // Glyphs
     bool italic = false;           // Glyphs
+    // Glyphs: a big operator (1.4× at level 0, its ink centred on the math
+    // axis); scripts set above and below it (limits, \sum and \lim), or at its
+    // ink (an integral).
+    bool big = false, limits = false, integral = false;
+    // Stack (\overset, \underset, \stackrel): `group` with these set over and
+    // under it as limits are.
+    std::vector<Atom> over, under;
     float em = 0.0f;               // Space, in ems of the current size
     // Group; a Frac's numerator; a Radical's radicand; an Over/Underline's body.
     std::vector<Atom> group;
@@ -39,7 +46,7 @@ struct Atom {
     // Delimited (\left ... \middle ... \right): the parts between delimiters,
     // each a Group, and the delimiters around and between them (one more).
     // Sized (\big ...): its one delimiter and height in ems. A delimiter is its
-    // character; 0 is `.`, none.
+    // character; 0 is `.`, none. Rows (\substack): its rows, each a Group.
     std::vector<Atom> parts;
     std::vector<char32_t> delims;
     float delim_em = 0.0f;
@@ -165,10 +172,12 @@ constexpr Symbol kSymbols[] = {
     {"Leftrightarrow", 0x21D4, Cls::Rel}, {"iff", 0x21D4, Cls::Rel}, {"implies", 0x21D2, Cls::Rel},
     {"mapsto", 0x21A6, Cls::Rel}, {"uparrow", 0x2191, Cls::Rel}, {"downarrow", 0x2193, Cls::Rel},
     {"longrightarrow", 0x27F6, Cls::Rel}, {"longleftarrow", 0x27F5, Cls::Rel},
-    // Large operators (side scripts only; limits above/below are deferred)
+    // Large operators: every Op here is big (see Parser::glyph())
     {"sum", 0x2211, Cls::Op}, {"prod", 0x220F, Cls::Op}, {"coprod", 0x2210, Cls::Op},
     {"int", 0x222B, Cls::Op}, {"iint", 0x222C, Cls::Op}, {"oint", 0x222E, Cls::Op},
-    {"bigcup", 0x22C3, Cls::Op}, {"bigcap", 0x22C2, Cls::Op},
+    {"bigcup", 0x22C3, Cls::Op}, {"bigcap", 0x22C2, Cls::Op}, {"bigvee", 0x22C1, Cls::Op},
+    {"bigwedge", 0x22C0, Cls::Op}, {"bigoplus", 0x2A01, Cls::Op}, {"bigotimes", 0x2A02, Cls::Op},
+    {"bigodot", 0x2A00, Cls::Op}, {"biguplus", 0x2A04, Cls::Op}, {"bigsqcup", 0x2A06, Cls::Op},
     // Ordinary symbols
     {"infty", 0x221E, Cls::Ord}, {"partial", 0x2202, Cls::Ord}, {"nabla", 0x2207, Cls::Ord},
     {"forall", 0x2200, Cls::Ord}, {"exists", 0x2203, Cls::Ord}, {"emptyset", 0x2205, Cls::Ord},
@@ -196,6 +205,9 @@ constexpr std::string_view kFunctions[] = {
     "tanh", "coth", "log", "ln", "lg", "exp", "lim", "liminf", "limsup", "max", "min", "sup",
     "inf", "det", "dim", "deg", "arg", "ker", "gcd", "hom", "Pr",
 };
+
+// The functions whose scripts are limits, set above and below (matplotlib's).
+constexpr std::string_view kLimitFunctions[] = {"lim", "liminf", "limsup", "sup", "max", "min"};
 
 // Spacing commands, in ems.
 struct SpaceCmd {
@@ -229,8 +241,7 @@ constexpr AccentCmd kAccents[] = {
 // Commands known from mathtext that this step does not draw yet.
 constexpr std::string_view kDeferred[] = {
     "mathbf", "boldsymbol", "mathcal", "mathbb",
-    "mathfrak", "mathscr", "mathsf", "mathtt", "color", "stackrel", "overset", "underset",
-    "operatorname", "substack",
+    "mathfrak", "mathscr", "mathsf", "mathtt", "color",
 };
 
 template <class T, std::size_t N>
@@ -278,13 +289,15 @@ public:
 
 private:
     // Right: up to a `\middle` or `\right` (left unconsumed), for `\left`.
-    enum class End { Dollar, Brace, Bracket, Right };
+    // Row: a \substack row, up to `\\` or `}` (consumed; row_more_ says which).
+    enum class End { Dollar, Brace, Bracket, Right, Row };
     // The font a group sets: math's default (italic letters), \mathrm, \mathit.
     enum class Font { Math, Roman, Italic };
 
     std::string_view s_;
     std::size_t i_ = 0;
     Font font_ = Font::Math;
+    bool row_more_ = false;   // the last End::Row list ended at `\\`
 
     // Whether a glyph atom's text draws italic in the current font.
     bool italic(std::string_view text) const {
@@ -305,7 +318,7 @@ private:
     }
 
     [[noreturn]] void fail_unclosed(End end, std::size_t open) const {
-        fail(open, end == End::Brace ? "'{' is never closed"
+        fail(open, end == End::Brace || end == End::Row ? "'{' is never closed"
                    : end == End::Bracket ? "'[' is never closed"
                    : end == End::Right ? "'\\left' is never closed" : "'$' is never closed");
     }
@@ -330,6 +343,11 @@ private:
                 && (name_at(i_) == "right" || name_at(i_) == "middle")) {
                 break;
             }
+            if (c == '\\' && end == End::Row && i_ + 1 < s_.size() && s_[i_ + 1] == '\\') {
+                i_ += 2;
+                row_more_ = true;
+                break;
+            }
             if (c == ' ' || c == '\t') {
                 ++i_;   // TeX: a typed space does nothing in math
             } else if (c == '$') {
@@ -337,8 +355,9 @@ private:
                 ++i_;
                 break;
             } else if (c == '}') {
-                if (end != End::Brace) fail(i_, "'}' without a '{'");
+                if (end != End::Brace && end != End::Row) fail(i_, "'}' without a '{'");
                 ++i_;
+                row_more_ = false;
                 break;
             } else if (c == ']' && end == End::Bracket) {
                 ++i_;
@@ -445,7 +464,26 @@ private:
         a.text = utf8(cp);
         a.cls = cls;
         a.italic = italic(a.text);
+        if (cls == Cls::Op) {
+            a.big = true;
+            a.integral = cp == 0x222B || cp == 0x222C || cp == 0x222E;
+            a.limits = !a.integral;
+        }
         return a;
+    }
+
+    // `\name{...}`'s group in `font`; `at` is the backslash.
+    Atom font_group(std::size_t at, std::string_view name, Font font) {
+        skip_spaces();
+        if (i_ >= s_.size() || s_[i_] != '{') fail(at, "'\\" + std::string(name) + "' needs '{'");
+        ++i_;
+        const Font outer = font_;
+        font_ = font;
+        Atom g;
+        g.kind = Atom::Kind::Group;
+        g.group = list(End::Brace);
+        font_ = outer;
+        return g;
     }
 
     void command(MathList& out) {
@@ -574,21 +612,45 @@ private:
             Atom a;
             a.text = std::string(name);
             a.cls = Cls::Op;
+            a.limits = contains(kLimitFunctions, name);
             out.push_back(std::move(a));
             return;
         }
         if (name == "mathrm" || name == "mathit" || name == "mathdefault") {
             // \mathdefault is matplotlib's text font: upright.
-            skip_spaces();
-            if (i_ >= s_.size() || s_[i_] != '{') fail(at, "'\\" + std::string(name) + "' needs '{'");
-            ++i_;
-            const Font outer = font_;
-            font_ = name == "mathit" ? Font::Italic : Font::Roman;
-            Atom g;
-            g.kind = Atom::Kind::Group;
-            g.group = list(End::Brace);
-            font_ = outer;
+            out.push_back(font_group(at, name, name == "mathit" ? Font::Italic : Font::Roman));
+            return;
+        }
+        if (name == "operatorname") {
+            // An upright operator, spaced as \sin.
+            Atom g = font_group(at, name, Font::Roman);
+            g.cls = Cls::Op;
             out.push_back(std::move(g));
+            return;
+        }
+        if (name == "overset" || name == "underset" || name == "stackrel") {
+            Atom a;
+            a.kind = Atom::Kind::Stack;
+            a.cls = name == "stackrel" ? Cls::Rel : Cls::Ord;
+            MathList script = required_arg(at, name);
+            (name == "underset" ? a.under : a.over) = std::move(script);
+            a.group = required_arg(at, name);
+            out.push_back(std::move(a));
+            return;
+        }
+        if (name == "substack") {
+            skip_spaces();
+            if (i_ >= s_.size() || s_[i_] != '{') fail(at, "'\\substack' needs '{'");
+            const std::size_t open = i_++;
+            Atom a;
+            a.kind = Atom::Kind::Rows;
+            do {
+                Atom row;
+                row.kind = Atom::Kind::Group;
+                row.group = list(End::Row, open);
+                a.parts.push_back(std::move(row));
+            } while (row_more_);
+            out.push_back(std::move(a));
             return;
         }
         if (name == "text" || name == "textrm") {
@@ -772,6 +834,20 @@ constexpr float kFracGap = 2.0f;        // × θ
 constexpr float kFracSide = 0.12f;
 constexpr float kLineGap = 3.0f;        // × θ, over/underline and the root's bar
 constexpr float kRootPad = 2.0f;        // × θ, each side of a radicand
+
+// Big operators, in ems of the size they are set at: their scale at level 0
+// (matplotlib's), and their limits' ink this far clear of theirs (TeX's
+// big_op_spacing1/2). An integral's scripts: the superscript's baseline
+// kIntSupDrop under its ink top, the subscript's kIntSubDrop under its ink
+// bottom, in ems of the script size (TeX's sup_drop and sub_drop), each
+// kIntKern clear of the glyph beside it. Rows of a \substack: their ink
+// kRowGap apart.
+constexpr float kBigOpScale = 1.4f;
+constexpr float kLimitGap = 0.11f;
+constexpr float kIntSupDrop = 0.386f;
+constexpr float kIntSubDrop = 0.05f;
+constexpr float kIntKern = 0.05f;
+constexpr float kRowGap = 0.1f;
 
 struct Box {
     std::vector<RichRun> runs;
@@ -1291,8 +1367,71 @@ private:
         return b;
     }
 
+    // A big operator: at level 0 kBigOpScale times the size, its ink centred on
+    // the math axis; in a script as any glyph.
+    Box big_op(const Atom& a, int level) const {
+        const float size = base_ * scale_at(level);
+        if (level > 0) return text(a.text, size, a.italic);
+        const float big = kBigOpScale * size;
+        Box g = text(a.text, big);
+        const InkBox ink = ink_box(font_, big, a.text);
+        if (ink.top <= ink.bottom) return g;
+        g.ink_top = ink.top;
+        g.ink_bottom = ink.bottom;
+        Box b;
+        append(b, g, 0.0f, -(axis(size) - (ink.top + ink.bottom) * 0.5f));
+        b.width = g.width;
+        // Taller than a line of text: the room rules of a placed line.
+        b.placed = true;
+        return b;
+    }
+
+    // TeX's limits: `over` and `under` (either may be empty) one level down,
+    // centred on `n`, their ink kLimitGap clear of its ink; the widest of the
+    // three sets the width.
+    Box stack(const Box& n, const MathList& over, const MathList& under, int level) const {
+        const float gap = kLimitGap * base_ * scale_at(level);
+        const Box o = list(over, level + 1), u = list(under, level + 1);
+        float w = n.width;
+        if (!over.empty()) w = std::max(w, o.width);
+        if (!under.empty()) w = std::max(w, u.width);
+        Box b;
+        append(b, n, (w - n.width) * 0.5f, 0.0f);
+        if (!over.empty()) append(b, o, (w - o.width) * 0.5f, -(n.ink_top + gap - o.ink_bottom));
+        if (!under.empty()) append(b, u, (w - u.width) * 0.5f, -(n.ink_bottom - gap - u.ink_top));
+        b.width = w;
+        b.placed = true;
+        return b;
+    }
+
+    // \substack: the rows centred on each other, their ink kRowGap apart, the
+    // block's ink centred on the math axis.
+    Box rows(const Atom& a, int level) const {
+        const float size = base_ * scale_at(level);
+        std::vector<Box> rs;
+        float w = 0.0f;
+        for (const Atom& p: a.parts) {
+            rs.push_back(list(p.group, level));
+            w = std::max(w, rs.back().width);
+        }
+        Box block;
+        float base = 0.0f, prev_bottom = 0.0f;   // y up
+        for (std::size_t i = 0; i < rs.size(); ++i) {
+            if (i > 0) base = prev_bottom - kRowGap * size - rs[i].ink_top;
+            append(block, rs[i], (w - rs[i].width) * 0.5f, -base);
+            prev_bottom = base + rs[i].ink_bottom;
+        }
+        Box b;
+        append(b, block, 0.0f, -(axis(size) - (block.ink_top + block.ink_bottom) * 0.5f));
+        b.width = w;
+        b.placed = true;
+        return b;
+    }
+
     Box nucleus(const Atom& a, int level) const {
         switch (a.kind) {
+            case Atom::Kind::Stack: return stack(list(a.group, level), a.over, a.under, level);
+            case Atom::Kind::Rows: return rows(a, level);
             case Atom::Kind::Accent: return accent(a, level);
             case Atom::Kind::Delimited: return delimited(a, level);
             case Atom::Kind::Sized: {
@@ -1311,14 +1450,46 @@ private:
             case Atom::Kind::Radical: return radical(a, level);
             case Atom::Kind::Overline:
             case Atom::Kind::Underline: return over_under(a, level);
-            default: return text(a.text, base_ * scale_at(level), a.italic);
+            default: return a.big ? big_op(a, level) : text(a.text, base_ * scale_at(level), a.italic);
         }
     }
 
     Box scripted(const Atom& a, int level) const {
         Box n = nucleus(a, level);
         if (!a.has_sub && !a.has_sup) return n;
+        if (a.limits) return stack(n, a.has_sup ? a.sup : MathList{}, a.has_sub ? a.sub : MathList{}, level);
         const float size = base_ * scale_at(level);
+        if (a.integral && !n.runs.empty()) {
+            // At its ink, each script kIntKern clear of the glyph's reach beside
+            // it: a slanted integral's subscript tucks in under its top hook.
+            const float ss = base_ * scale_at(level + 1);
+            const float kern = kIntKern * size;
+            const RichRun glyph = n.runs.front();   // a copy: the scripts grow n.runs
+            const float top = n.ink_top, bottom = n.ink_bottom, x = n.width;
+            // The glyph's reach between two heights of the box (y up).
+            const auto reach_right = [&](float lo, float hi) {
+                const InkBox r = ink_band(font_, glyph.size, glyph.text, lo + glyph.dy, hi + glyph.dy);
+                return r.right > r.left || r.top > r.bottom ? glyph.x + r.right : x - kern;
+            };
+            float end = x;
+            if (a.has_sup) {
+                const Box s = list(a.sup, level + 1);
+                const float base = top - kIntSupDrop * ss;
+                const float sx = std::max(x, reach_right(base + s.ink_bottom, top) + kern);
+                append(n, s, sx, -base);
+                end = std::max(end, sx + s.width);
+            }
+            if (a.has_sub) {
+                const Box s = list(a.sub, level + 1);
+                const float base = bottom - kIntSubDrop * ss;
+                const float sx = reach_right(bottom, base + s.ink_top) + kern;
+                append(n, s, sx, -base);
+                end = std::max(end, sx + s.width);
+            }
+            n.width = end + kScriptSpace * size;
+            n.placed = true;
+            return n;
+        }
         const FontVMetrics vm = font_vmetrics(font_, size);
         // A tall or deep nucleus (a group with scripts of its own) pushes its
         // scripts out by what it adds to the plain font's extent.

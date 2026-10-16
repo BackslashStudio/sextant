@@ -55,6 +55,120 @@ static void savefig_and_check_memory(const std::shared_ptr<sextant::Figure>& fig
            rgba_ok ? "ok" : "BAD SIZE");
 }
 
+// Mathtext gallery: every construct drawn so far, through text(). Each item
+// is its source (grey, plain: no `$`) over the math it draws, so it can be
+// compared with matplotlib's. One cell per kind; the last puts math where
+// labels go (title, axis titles, legend, a rotated, a boxed and a multi-line
+// text). What to look for: nothing overlaps its neighbours; fraction bars,
+// roots, accents and drawn delimiters meet the glyphs cleanly; limits are
+// centred over and under their operator; the PNG and SVG agree.
+static void test_mathtext_gallery() {
+    auto fig = sextant::Figure::create({
+        .width = 1800, .height = 1100,
+        .title = "sextant — mathtext"
+    });
+    fig->suptitle("Mathtext: source above, drawn below");
+
+    struct Cell {
+        const char* title;
+        std::vector<const char*> items;
+    };
+    const Cell cells[] = {
+        {"Scripts, symbols, fonts", {
+            "x^2 + y_i^{n+1} - z_{i,j}",
+            "\\alpha\\beta\\gamma\\epsilon\\phi\\;\\Gamma\\Delta\\Omega\\;\\hbar\\ell\\infty",
+            "a \\leq b \\neq c \\approx d \\in A \\subseteq B",
+            "\\sin(\\omega t) \\rightarrow \\infty,\\ \\log_2 n,\\ \\pm\\times\\cdot",
+            "\\mathrm{d}x\\,\\mathit{AB2}\\,\\text{rate}_{\\text{in}},\\ f'(x),\\ \\nabla\\cdot F",
+        }},
+        {"Fractions, roots, rules", {
+            "\\frac{a+b}{c}\\quad\\dfrac{1}{2}\\quad\\tfrac{1}{2}\\quad\\frac12",
+            "\\frac{\\frac{1}{x}+1}{y}\\quad e^{-\\frac{(x-\\mu)^2}{2\\sigma^2}}",
+            "\\sqrt{2}\\quad\\sqrt[3]{x}\\quad\\sqrt{\\frac{a}{b}}\\quad\\sqrt{x_i^2+y}",
+            "\\overline{AB}\\quad\\underline{xyz}\\quad\\overline{\\overline{z}}\\quad x^{\\frac{1}{2}}",
+            "\\frac{1}{\\sigma\\sqrt{2\\pi}}",
+        }},
+        {"Accents", {
+            "\\hat{x}\\,\\bar{x}\\,\\tilde{a}\\,\\dot{x}\\,\\ddot{y}\\,\\vec{v}",
+            "\\acute{e}\\,\\grave{a}\\,\\breve{u}\\,\\check{c}\\,\\mathring{A}",
+            "\\hat{X}\\,\\bar{F}\\,\\hat{\\imath}\\,\\vec{\\jmath}\\,\\vec{x}^2\\,\\hat{\\theta}_k",
+            "\\widehat{xyz}\\quad\\widetilde{abc}\\quad\\widehat{i}",
+            "\\overrightarrow{AB}\\quad\\overleftarrow{PQ}",
+        }},
+        {"Delimiters", {
+            "\\left(\\frac{a}{b}\\right)\\left[\\frac{1}{x}\\right]\\left\\{\\frac{\\frac{a}{b}}{c}\\right\\}"
+            "\\left(x\\right)",
+            "\\left|\\frac{a}{b}\\right|\\left\\|\\frac{a}{b}\\right\\|\\left\\langle\\frac{a}{b}\\right\\rangle",
+            "\\left\\lfloor\\frac{a}{b}\\right\\rfloor\\left\\lceil\\frac{a}{b}\\right\\rceil",
+            "\\bigl(\\Bigl(\\biggl(\\Biggl(x\\Biggr)\\biggr)\\Bigr)\\bigr)\\quad\\Bigl[\\bigl|x\\bigr|\\Bigr]",
+            "\\binom{n}{k}\\quad\\left\\{x\\middle|\\frac{x}{2}>0\\right\\}\\quad\\left/\\frac{a}{b}\\right\\backslash",
+            "\\left.\\frac{df}{dx}\\right|_{x=0}\\quad\\left(\\sum_{i=1}^{n}x_i\\right)^2",
+        }},
+        {"Operators and limits", {
+            "\\sum_{i=0}^{n} x_i\\quad\\prod_{k=1}^{N} a_k\\quad\\coprod_j",
+            "\\int_0^1 f\\,dx\\quad\\iint_D g\\quad\\oint_C\\vec{F}\\cdot d\\vec{r}",
+            "\\lim_{x\\to 0}\\frac{\\sin x}{x}\\quad\\max_x f\\quad\\sup_{n} a_n",
+            "\\prod_{\\substack{0<i<n\\\\ i\\neq j}} a_i\\quad\\bigcup_k A_k\\quad\\bigoplus_k V_k\\quad x^{\\sum_i y}",
+            "\\overset{!}{=}\\quad A\\stackrel{f}{\\to}B\\quad\\underset{x}{\\operatorname{argmax}}\\,g",
+        }},
+    };
+
+    sextant::AxesStyle bare;
+    bare.show_xticks = bare.show_yticks = false;
+    bare.spine_bottom = bare.spine_left = bare.spine_top = bare.spine_right = false;
+    sextant::TextOptions source;
+    source.fontsize = 10.0f;
+    source.color = {0.45f, 0.45f, 0.45f, 1.0f};
+    source.va = sextant::VAlign::Top;
+    sextant::TextOptions math;
+    math.fontsize = 20.0f;
+    math.va = sextant::VAlign::Top;
+    math.dy = -16.0f;
+    int index = 1;
+    for (const Cell& c: cells) {
+        auto ax = fig->add_subplot(2, 3, index++);
+        ax->set_axes_style(bare).set_title(c.title);
+        const double step = 0.95 / static_cast<double>(c.items.size());
+        for (std::size_t i = 0; i < c.items.size(); ++i) {
+            const double y = 0.98 - step * static_cast<double>(i);
+            ax->text(c.items[i], sextant::Pos::fraction(0.02), sextant::Pos::fraction(y), source);
+            ax->text(std::string("$") + c.items[i] + "$", sextant::Pos::fraction(0.02),
+                     sextant::Pos::fraction(y), math);
+        }
+    }
+
+    // Math where labels go.
+    std::vector<double> t(60), s(60), r(60);
+    for (int i = 0; i < 60; ++i) {
+        t[i] = i / 59.0;
+        s[i] = std::sqrt(t[i]);
+        r[i] = t[i] * t[i];
+    }
+    auto ax = fig->add_subplot(2, 3, 6);
+    ax->line(t, s, {.name = "$\\sqrt{t}$"})
+        .line(t, r, {.name = "$\\overline{x}_n = \\frac{1}{n}\\sum_i x_i$"})
+        .legend()
+        .set_title("$\\sum_{k=1}^{\\infty}\\frac{1}{k^2} = \\frac{\\pi^2}{6}$")
+        .set_xtitle("$\\int_0^t v\\,d\\tau$ [m]")
+        .set_ytitle("$\\left|\\hat{H}(\\omega)\\right|$");
+    sextant::TextOptions turned;
+    turned.fontsize = 18.0f;
+    turned.rotation = 25.0f;
+    ax->text("$\\frac{1}{\\sqrt{n}}\\sum_{i=1}^{n}X_i$", sextant::Pos::fraction(0.55), sextant::Pos::fraction(0.25), turned);
+    sextant::TextOptions boxed;
+    boxed.fontsize = 16.0f;
+    boxed.edge_linewidth = 1.0f;
+    boxed.background = {1.0f, 1.0f, 0.85f, 1.0f};
+    ax->text("$\\hat{\\beta} = \\left(X^TX\\right)^{-1}X^Ty$", sextant::Pos::fraction(0.05), sextant::Pos::fraction(0.62), boxed);
+    sextant::TextOptions lines;
+    lines.fontsize = 14.0f;
+    ax->text("$\\lim_{n\\to\\infty}a_n$\nplain line\n$\\frac{1}{2}$ last", sextant::Pos::fraction(0.62),
+             sextant::Pos::fraction(0.40), lines);
+
+    savefig_and_check_memory(fig, "test_mathtext_gallery");
+    fig->show(true);
+}
+
 // 1. Plot gallery — every basic plot type in one subplot grid.
 static void test_axes_gallery() {
     constexpr int N = 200;
@@ -3247,7 +3361,8 @@ int main() {
     // test_scales();
     // test_axis_position3d();
     // test_axis_position();
-    test_axes_gallery();
+    test_mathtext_gallery();
+    // test_axes_gallery();
     // test_axes3d_gallery();
     // test_errorbar3d_gallery();
     // test_line3d_gallery();
