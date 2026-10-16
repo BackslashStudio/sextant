@@ -6,6 +6,7 @@
 #include "rich_text.h"
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 
 namespace lt {
@@ -99,6 +100,21 @@ namespace lt {
 
     void test_math_layout() {
         std::printf("\n[math layout: fractions, roots, rules]\n");
+
+        // These checks measure in the default font, and their tolerances were
+        // set in Times (Times New Roman on Windows and Linux, Times on macOS):
+        // in another font they pass or fail by chance, so they do not run.
+        // CI installs Times New Roman on Linux (ttf-mscorefonts-installer).
+        {
+            const FontEntry* def = pick_default_font();
+            std::string name = def ? def->name : "none";
+            std::string lower = name;
+            std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return std::tolower(c); });
+            if (lower.find("times") == std::string::npos) {
+                check(false, "the default font is a Times (found " + name + "): math layout checks not run");
+                return;
+            }
+        }
 
         // --- Parsing ------------------------------------------------------------
         for (const char* s: {"$\\frac{a}{b}$", "$\\frac12$", "$\\tfrac{a}{b}$", "$\\dfrac{a}{b}$", "$\\sqrt{x}$",
@@ -494,14 +510,13 @@ namespace lt {
                     }
                 check(close(-ly, ax, 0.05f * kSize), "\\{: its cusp on the axis");
             }
-            // Nested: the outer pair is sized by TeX's rule to the inner one's ink
-            // (so it may come out a little shorter, as in TeX).
+            // Nested: the outer pair is sized by TeX's rule to the furthest ink inside
+            // it. The inner '[' is shorter than the fraction (the rule's 0.901), so
+            // that is still the fraction: both pairs come out the same height.
             const RichLine nest = layout_rich("", kSize, "$\\left(\\left[\\frac{a}{b}\\right]\\right)$");
             if (nest.paths.size() == 2 && !nest.rules.empty()) {
                 const RichRule& stem_rule = nest.rules[0];   // the inner '[' stem
-                const float hi = 2.0f * std::max(-stem_rule.y - ax, ax + stem_rule.y + stem_rule.h);
-                const float want = std::max(0.901f * hi, hi - 0.5f * kSize);
-                check(close(path_max_y(nest.paths[0]) - path_min_y(nest.paths[0]), want, tol),
+                check(close(stem_rule.h, target, 0.01f) && close(path_max_y(nest.paths[0]) - path_min_y(nest.paths[0]), target, tol),
                       "nested: the outer pair sized to the inner by TeX's rule");
             } else {
                 check(false, "nested: the outer pair sized to the inner by TeX's rule");
