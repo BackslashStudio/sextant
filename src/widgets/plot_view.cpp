@@ -177,6 +177,8 @@ PlotViewInfo PlotView::draw(FigureContext& fig, RenderDevice& dev, PlotViewState
         in.released       = ImGui::IsItemDeactivated();
         in.dragged        = io.MouseDragMaxDistanceSqr[ImGuiMouseButton_Left]
                             >= io.MouseDragThreshold * io.MouseDragThreshold;
+        in.shift          = io.KeyShift;
+        in.escape         = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
 
         // Grid boundary dragging first; what it owns doesn't select or
         // navigate.
@@ -199,7 +201,7 @@ PlotViewInfo PlotView::draw(FigureContext& fig, RenderDevice& dev, PlotViewState
         // panel did with it. Read-only: nothing below changes the input.
         report_plot_events(pv, fsnap, layout, in_hovered, in.x, in.y, render_w, render_h,
                            PlotEventInfo{grid.owns,
-                                         pv.navigate_enabled && gate.drag,
+                                         pv.navigate_enabled && (gate.drag || gate.box || gate.box_done),
                                          pv.navigate_enabled && gate.wheel,
                                          pv.navigate_enabled && gate.reset,
                                          fig.selection.slot != selected_before},
@@ -219,6 +221,36 @@ PlotViewInfo PlotView::draw(FigureContext& fig, RenderDevice& dev, PlotViewState
             accent.w *= 0.75f;
             ImGui::GetWindowDrawList()->AddRect(p0, p1, ImGui::GetColorU32(accent),
                                                 0.0f, 0, 1.5f);
+            break;
+        }
+    }
+
+    // A box zoom being dragged: what it will show, over the image (never saved),
+    // clipped to the frame; a side too short to zoom spans the frame.
+    if (gate.box) {
+        for (const AxesLayout& al : layout) {
+            if (al.slot.index != fig.selection.slot) continue;
+            const RenderSnapshot* s = nullptr;
+            for (const auto& a : fsnap.axes)
+                if (a.slot.index == al.slot.index) { s = a.snap2d(); break; }
+            const CoordTransform& tr = al.tr;
+            const auto b = box_pixels(tr, pv.box.x0, pv.box.y0, pv.box.x1, pv.box.y1,
+                                      s && s->aspect.ratio > 0.0);
+            if (!b) break;
+            const float x0 = b->zoom_x ? b->x0 : tr.px, x1 = b->zoom_x ? b->x1 : tr.px + tr.pw;
+            const float y0 = b->zoom_y ? b->y0 : tr.py, y1 = b->zoom_y ? b->y1 : tr.py + tr.ph;
+            const ImVec2 p0(image_pos.x + x0 / to_plot, image_pos.y + y0 / to_plot);
+            const ImVec2 p1(image_pos.x + x1 / to_plot, image_pos.y + y1 / to_plot);
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            dl->PushClipRect(ImVec2(image_pos.x + tr.px / to_plot, image_pos.y + tr.py / to_plot),
+                             ImVec2(image_pos.x + (tr.px + tr.pw) / to_plot,
+                                    image_pos.y + (tr.py + tr.ph) / to_plot), true);
+            ImVec4 accent = ImGui::GetStyleColorVec4(ImGuiCol_CheckMark);
+            ImVec4 fill = accent;
+            fill.w *= 0.15f;
+            dl->AddRectFilled(p0, p1, ImGui::GetColorU32(fill));
+            dl->AddRect(p0, p1, ImGui::GetColorU32(accent), 0.0f, 0, 1.0f);
+            dl->PopClipRect();
             break;
         }
     }
@@ -265,6 +297,13 @@ PlotViewInfo PlotView::draw(FigureContext& fig, RenderDevice& dev, PlotViewState
         }
     }
 
+    // Home follows the program's limits every frame, Navigate on or off; the
+    // input below tells the history when a gesture starts.
+    nav_track_home(pv.nav, fsnap);
+    NavInput nav_in;
+    nav_in.slot = fig.selection.slot;
+    nav_in.time = ImGui::GetTime();
+
     if (pv.navigate_enabled) {
         // Pulled here, after any selection change above: a drag starts from the
         // selected slot's own camera and limits, whichever panels are drawn.
@@ -288,16 +327,19 @@ PlotViewInfo PlotView::draw(FigureContext& fig, RenderDevice& dev, PlotViewState
             const int idx = cur->slot.index;
             Camera3D cam = sv.camera_local;
             bool moved = false;
+            nav_in.drag = gate.drag;
 
             if (gate.drag && (io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f)) {
                 cam = orbit_camera(cam, io.MouseDelta.x * to_plot,
                                         io.MouseDelta.y * to_plot);
                 moved = true;
+                nav_in.moved = true;
             }
 
             if (gate.wheel && io.MouseWheel != 0.0f) {
                 cam = zoom_camera(cam, io.MouseWheel);
                 moved = true;
+                nav_in.wheel = true;
             }
 
             // Fly keys only while the selected cell is hovered or dragged and
@@ -321,12 +363,8 @@ PlotViewInfo PlotView::draw(FigureContext& fig, RenderDevice& dev, PlotViewState
                                                  : Vec3{ -1.0, 0.0, 0.0 },
                                      fly);
                     moved = true;
+                    nav_in.fly = true;
                 }
-            }
-
-            if (gate.reset) {
-                cam = sel3d->default_camera;
-                moved = true;
             }
 
             if (moved) {
@@ -367,6 +405,9 @@ PlotViewInfo PlotView::draw(FigureContext& fig, RenderDevice& dev, PlotViewState
                 });
             };
 
+            nav_in.drag = gate.drag;
+            nav_in.moved = gate.drag && (io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f);
+            nav_in.wheel = gate.wheel && io.MouseWheel != 0.0f;
             if (gate.drag && (io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f))
                 for (const Layer& l : layers)
                     set_limits(l, pan_limits(*l.tr, io.MouseDelta.x * to_plot, io.MouseDelta.y * to_plot));
@@ -379,15 +420,23 @@ PlotViewInfo PlotView::draw(FigureContext& fig, RenderDevice& dev, PlotViewState
                     set_limits(l, zoom_limits(*l.tr, cursor_x, cursor_y, factor));
             }
 
-            if (gate.reset) {
-                sv.xauto_local = sv.yauto_local = true;
+            // The layers share the frame; each maps the box through its own
+            // transform. A ratio (the host's) keeps the frame's shape.
+            if (gate.box_done)
                 for (const Layer& l : layers)
-                    edit_box.update(l.key, [&](AxesEdit& e) {
-                        e.xlim_auto = true; e.ylim_auto = true;
-                        e.lim_seen = l.seen;
-                    });
-            }
+                    if (const auto b = box_pixels(*l.tr, pv.box.x0, pv.box.y0, pv.box.x1,
+                                                  pv.box.y1, sel2d->aspect.ratio > 0.0)) {
+                        set_limits(l, box_limits(*l.tr, *b));
+                        nav_in.box_done = true;
+                    }
         }
+
+        // The view before this frame's edits, if they start a gesture. The
+        // double-click is Home for its cell, and records itself.
+        if (nav_gesture_starts(pv.nav, nav_in)) nav_begin_gesture(pv.nav, fsnap);
+        if (gate.reset && cur) nav_home(pv.nav, fig, cur->slot.index);
+    } else {
+        nav_gesture_starts(pv.nav, NavInput{});
     }
 
     // Box-filter the supersampled target into the texture Image() references

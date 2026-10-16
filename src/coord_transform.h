@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <limits>
+#include <optional>
 
 namespace sextant {
     // -------------------------------------------------------------------------
@@ -98,6 +99,63 @@ namespace sextant {
             tr.xs.inv(cx - (cx - x0) * factor), tr.xs.inv(cx + (x1 - cx) * factor),
             tr.ys.inv(cy - (cy - y0) * factor), tr.ys.inv(cy + (y1 - cy) * factor)
         };
+    }
+
+    // A box side shorter than this (plot pixels) keeps that axis' limits.
+    inline constexpr float kBoxMinSide = 5.0f;
+
+    // The corners of a dragged box, clipped to the frame; with `keep_shape` (an
+    // aspect ratio is set) grown about its centre to the frame's shape, so the
+    // ratio holds. Empty when the box is too small on both sides (a click).
+    struct BoxPixels {
+        float x0, y0, x1, y1;
+        bool zoom_x, zoom_y;
+    };
+    inline std::optional<BoxPixels> box_pixels(const CoordTransform& tr, float ax, float ay,
+                                               float bx, float by, bool keep_shape) {
+        const auto clip = [](float v, float lo, float hi) { return std::clamp(v, lo, hi); };
+        float x0 = clip(std::min(ax, bx), tr.px, tr.px + tr.pw);
+        float x1 = clip(std::max(ax, bx), tr.px, tr.px + tr.pw);
+        float y0 = clip(std::min(ay, by), tr.py, tr.py + tr.ph);
+        float y1 = clip(std::max(ay, by), tr.py, tr.py + tr.ph);
+        bool zx = x1 - x0 >= kBoxMinSide, zy = y1 - y0 >= kBoxMinSide;
+        if (!zx && !zy) return std::nullopt;
+        if (keep_shape && tr.pw > 0.0f && tr.ph > 0.0f) {
+            // The frame's w:h, the short side grown to it.
+            const float w = x1 - x0, h = y1 - y0;
+            if (w * tr.ph < h * tr.pw) {
+                const float nw = h * tr.pw / tr.ph, cx = 0.5f * (x0 + x1);
+                x0 = cx - 0.5f * nw; x1 = cx + 0.5f * nw;
+            } else {
+                const float nh = w * tr.ph / tr.pw, cy = 0.5f * (y0 + y1);
+                y0 = cy - 0.5f * nh; y1 = cy + 0.5f * nh;
+            }
+            zx = zy = true;
+        }
+        return BoxPixels{x0, y0, x1, y1, zx, zy};
+    }
+
+    // The limits showing the box from box_pixels() across the frame: its sides as
+    // fractions of the frame, applied in scale space (as pan_limits()), so a log
+    // axis zooms in decades and reversed limits stay reversed. An axis the box
+    // does not zoom keeps its limits.
+    inline AxisLimits box_limits(const CoordTransform& tr, const BoxPixels& b) {
+        const auto at = [](double s0, double s1, double f) { return s0 + f * (s1 - s0); };
+        AxisLimits out{tr.xmin, tr.xmax, tr.ymin, tr.ymax};
+        if (b.zoom_x) {
+            const double f0 = (static_cast<double>(b.x0) - tr.px) / tr.pw;
+            const double f1 = (static_cast<double>(b.x1) - tr.px) / tr.pw;
+            out.xmin = tr.xs.inv(at(tr.sxmin(), tr.sxmax(), f0));
+            out.xmax = tr.xs.inv(at(tr.sxmin(), tr.sxmax(), f1));
+        }
+        if (b.zoom_y) {
+            // Screen y grows downward: the box's bottom is the low fraction.
+            const double f0 = (static_cast<double>(tr.py) + tr.ph - b.y1) / tr.ph;
+            const double f1 = (static_cast<double>(tr.py) + tr.ph - b.y0) / tr.ph;
+            out.ymin = tr.ys.inv(at(tr.symin(), tr.symax(), f0));
+            out.ymax = tr.ys.inv(at(tr.symin(), tr.symax(), f1));
+        }
+        return out;
     }
 
     // -------------------------------------------------------------------------

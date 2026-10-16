@@ -513,6 +513,13 @@ namespace lt {
 
     void test_plot_view_two_figures();
 
+    // nav_history.cpp
+    void test_box_zoom();
+
+    void test_nav_history();
+
+    void test_box_zoom_view();
+
     // window_shell.cpp
     void test_panel_imgui_setup();
 

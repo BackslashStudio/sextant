@@ -3165,8 +3165,72 @@ static void test_quiver() {
     fig->show(true);
 }
 
+// Step 36f: box zoom and navigation history. Turn on Edit > Navigate, then
+// Shift-drag a box on each 2D panel (a thin one zooms one axis; Esc cancels),
+// pan, scroll, orbit the 3D panel, and walk Edit > Back / Forward / Home. Home
+// and the double-click go to the program's limits: panel 1's set_xlim(2, 8),
+// panel 5's reversed x, the rest automatic.
+static void test_navigation() {
+    using V = std::vector<double>;
+    auto fig = sextant::Figure::create({.width = 1500, .height = 900, .title = "Navigation"});
+    fig->suptitle("Edit > Navigate: Shift-drag zooms to a box; Edit > Back / Forward / Home");
+
+    V x(400), s(400), e(400), c(400);
+    for (std::size_t i = 0; i < x.size(); ++i) {
+        x[i] = 10.0 * static_cast<double>(i) / 399.0;
+        s[i] = std::sin(3.0 * x[i]) + 0.2 * std::sin(17.0 * x[i]);
+        e[i] = std::exp(x[i]);
+        c[i] = std::cos(x[i]);
+    }
+
+    auto a1 = fig->add_subplot(2, 3, 1);
+    a1->line(x, s, {.name = "sin"}).set_xlim(2.0, 8.0);
+    a1->set_title("set_xlim(2, 8): Home comes back here");
+
+    auto a2 = fig->add_subplot(2, 3, 2);
+    a2->line(x, e, {.name = "exp"}).set_yscale(sextant::Scale::Log);
+    a2->set_title("log y: a box zooms in decades");
+
+    auto a3 = fig->add_subplot(2, 3, 3);
+    a3->line(x, s, {.name = "sin"}).set_ytitle("sin");
+    a3->twinx()->line(x, e, {.color = sextant::Color::Orange, .name = "exp"}).set_ytitle("exp");
+    a3->set_title("twinx: both y axes zoom to the box");
+
+    auto a4 = fig->add_subplot(2, 3, 4);
+    {
+        V cx, cy;
+        for (int i = 0; i <= 100; ++i) {
+            const double t = 2.0 * 3.14159265358979 * i / 100.0;
+            cx.push_back(std::cos(t));
+            cy.push_back(std::sin(t));
+        }
+        a4->line(cx, cy, {.name = "circle"});
+        a4->set_aspect(1.0);
+        a4->set_title("equal aspect: the box grows to the frame's shape");
+    }
+
+    auto a5 = fig->add_subplot(2, 3, 5);
+    a5->scatter(x, c, {.name = "cos"}).set_xlim(10.0, 0.0);
+    a5->set_title("reversed x: stays reversed");
+
+    auto a6 = fig->add_subplot3d(2, 3, 6);
+    {
+        V gu, gv, gz;
+        for (int i = 0; i < 30; ++i) gu.push_back(-3.0 + 6.0 * i / 29.0);
+        gv = gu;
+        for (double v : gv)
+            for (double u : gu) gz.push_back(std::sin(u) * std::cos(v));
+        a6->surface(sextant::PlaneOrientation::XY, gu, gv, gz, {.alpha = 0.9f});
+        a6->set_view(-50.0, 28.0);
+        a6->set_title("3D: Back undoes an orbit; Home is set_view(-50, 28)");
+    }
+
+    fig->show(true);
+}
+
 int main() {
-    test_quiver();
+    test_navigation();
+    // test_quiver();
     // test_stack();
     // test_fill_between();
     // test_reference_lines();

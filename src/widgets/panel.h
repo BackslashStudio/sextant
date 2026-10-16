@@ -105,6 +105,8 @@ namespace sextant {
         bool double_clicked = false; // ...and that press completes a double-click
         bool released = false; // the held press ended this frame
         bool dragged = false; // it moved past the drag threshold before ending
+        bool shift = false; // Shift is held (read at the press: a box zoom)
+        bool escape = false; // Esc went down this frame (cancels a box)
     };
 
     // What navigation may do this frame; only for the selected cell (a drag
@@ -114,6 +116,11 @@ namespace sextant {
         bool wheel = false;
         bool keys = false;
         bool reset = false; // double-click to restore the default view
+        // A box zoom (Shift held at a press on a selected 2D cell; then `drag`
+        // stays false): `box` while it is held, `box_done` on the release
+        // that applies it. Esc cancels it. The corners are PlotViewState::box.
+        bool box = false;
+        bool box_done = false;
     };
 
     // Click-to-select (a click without drag selects on release) plus the gate.

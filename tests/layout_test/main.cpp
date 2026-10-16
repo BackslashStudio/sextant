@@ -216,6 +216,11 @@ int main() {
     test_plot_view_draw();
     test_plot_view_two_figures();
 
+    // nav_history.cpp
+    test_box_zoom();
+    test_nav_history();
+    test_box_zoom_view();
+
     // window_shell.cpp
     test_panel_imgui_setup();
     test_figure_window_shell();
