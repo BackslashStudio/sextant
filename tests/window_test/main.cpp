@@ -338,9 +338,17 @@ static void test_axes_gallery() {
             .set_xtitle("$\\hat{\\theta}$ [rad]").set_ytitle("$\\left(\\frac{\\sqrt{2}}{2}\\right)\\overline{y}$")
             .set_title("Line").legend().grid();
 
+    // C starts hidden (step 40): tick Visible on its Data-panel tab and the
+    // limits widen to x = 4, and the legend gains its key.
+    std::vector<double> xc(xb);
+    for (double& v : xc) v += 5.0;
     fig->add_subplot(3, 4, 2)
             ->scatter(xa, ya, {.color = sextant::Color::Blue, .marker = sextant::MarkerStyle::Circle, .name = "A"})
             .scatter(xb, yb, {.color = sextant::Color::Orange, .marker = sextant::MarkerStyle::Diamond, .name = "B"})
+            .scatter(xc, yb, {
+                         .color = sextant::Color::Green, .marker = sextant::MarkerStyle::Square,
+                         .name = "C (hidden)", .visible = false
+                     })
             .set_title("Scatter").legend().grid();
 
     // Labelled, so the legend keys it.
@@ -2962,7 +2970,7 @@ static void test_show_nonblocking() {
 }
 
 int main() {
-    // test_axes_gallery();
+    test_axes_gallery();
     // test_axes3d_gallery();
     // test_figure_layout();
     // test_aspect_scales();
@@ -2982,5 +2990,5 @@ int main() {
     // test_scatter3d();
     // test_show_nonblocking();
     // test_animation();
-    test_events();
+    // test_events();
 }

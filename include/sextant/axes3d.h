@@ -104,6 +104,7 @@ namespace sextant {
         // Legend key: a swatch of `color`. Empty draws no key.
         std::string name;
         bool show_legend = true;
+        bool visible = true;     // see LineOptions::visible
 
         // Optional hover text per bar, below the default "x=.., y=.., height=.."
         // line. Indexed like `heights`. Empty or out of range = none.
@@ -133,6 +134,7 @@ namespace sextant {
         // legend with a swatch of `color`. A colormapped surface has no legend key.
         std::string name;
         bool show_legend = true; // see LineOptions::show_legend
+        bool visible = true;     // see LineOptions::visible
 
         // Below 1 the surface is translucent. Against other translucent objects
         // the ordering is a heuristic.
@@ -180,6 +182,7 @@ namespace sextant {
         // a swatch of `color`. A colormapped mesh has no legend key.
         std::string name;
         bool show_legend = true; // see LineOptions::show_legend
+        bool visible = true;     // see LineOptions::visible
 
         // Below 1 the mesh is translucent. A mesh can occlude itself; depth
         // peeling resolves that exactly, the sorted fallback approximately.
@@ -304,6 +307,7 @@ namespace sextant {
         // colorbar scale.
         std::string name;
         bool show_legend = true; // see LineOptions::show_legend
+        bool visible = true;     // see LineOptions::visible
 
         // Style of the error bars passed as an ErrorBar3D.
         ErrorBar3DOptions errorbar;
@@ -348,6 +352,7 @@ namespace sextant {
         // colormap swept along it.
         std::string name;
         bool show_legend = true; // see LineOptions::show_legend
+        bool visible = true;     // see LineOptions::visible
 
         // Style of the error bars passed as an ErrorBar3D.
         ErrorBar3DOptions errorbar;
@@ -564,6 +569,31 @@ namespace sextant {
 
         Plane2D& set_quiver_data(std::size_t i, std::span<const double> x, std::span<const double> y,
                                  std::span<const double> u, std::span<const double> v);
+
+        // Show or hide object i, as Axes::set_line_visible() and its siblings:
+        // a hidden object leaves the box's auto limits, the legend and the
+        // colorbars (unlike the plane's own Plane2DOptions::visible), and a
+        // plane whose objects are all hidden counts as empty.
+        Plane2D& set_line_visible(std::size_t i, bool visible);
+        bool line_visible(std::size_t i) const;
+
+        Plane2D& set_scatter_visible(std::size_t i, bool visible);
+        bool scatter_visible(std::size_t i) const;
+
+        Plane2D& set_scatter_z_visible(std::size_t i, bool visible);
+        bool scatter_z_visible(std::size_t i) const;
+
+        Plane2D& set_bar_visible(std::size_t i, bool visible);
+        bool bar_visible(std::size_t i) const;
+
+        Plane2D& set_heatmap_visible(std::size_t i, bool visible);
+        bool heatmap_visible(std::size_t i) const;
+
+        Plane2D& set_fill_visible(std::size_t i, bool visible);
+        bool fill_visible(std::size_t i) const;
+
+        Plane2D& set_quiver_visible(std::size_t i, bool visible);
+        bool quiver_visible(std::size_t i) const;
 
     private:
         struct Impl;
@@ -901,6 +931,29 @@ namespace sextant {
         // The string and (x, y, z) only, keeping the rest: a text2d() reads x, y
         // as fractions and ignores z; an annotate() keeps its offset.
         Axes3D& set_text_data(std::size_t i, std::string_view s, double x, double y, double z);
+
+        // ----------------------------------------------------------------
+        // Hiding plot objects
+        // ----------------------------------------------------------------
+        // Show or hide the axes' own object i, as Axes::set_line_visible() and
+        // its siblings (a plane's objects through the Plane2D).
+        Axes3D& set_bar3d_visible(std::size_t i, bool visible);
+        bool bar3d_visible(std::size_t i) const;
+
+        Axes3D& set_surface_visible(std::size_t i, bool visible);
+        bool surface_visible(std::size_t i) const;
+
+        Axes3D& set_surface_tri_visible(std::size_t i, bool visible);
+        bool surface_tri_visible(std::size_t i) const;
+
+        Axes3D& set_scatter3d_visible(std::size_t i, bool visible);
+        bool scatter3d_visible(std::size_t i) const;
+
+        Axes3D& set_line3d_visible(std::size_t i, bool visible);
+        bool line3d_visible(std::size_t i) const;
+
+        Axes3D& set_text_visible(std::size_t i, bool visible);
+        bool text_visible(std::size_t i) const;
 
     private:
         struct Impl;

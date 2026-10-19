@@ -71,6 +71,9 @@ struct PlotStyleEdit {
                  HeatmapOptions, ScatterZOptions, TextStyle,
                  AxLineOptions, AxSpanOptions, FillOptions, QuiverOptions> opts;
     ObjectId id = 0, plane_id = 0;   // see PlotCellEdit
+    // The object's visible_stamp when the panel drew; filled in by
+    // FigureEditBox. A set_<kind>_visible() since keeps its `visible`.
+    unsigned long long visible_seen = ~0ull;
 };
 
 // Insert or remove a whole row/column of a heatmap (or a bar3d/surface grid,
@@ -346,15 +349,21 @@ struct AxesEdit3D {
     std::vector<PlaneEdit> planes;
 
     // Appearance of the axes' own 3D objects, addressed like PlotStyleEdit
-    // (`id` filled in by FigureEditBox). apply_axes3d_edit() preserves
-    // `hint_labels`, which are data edited elsewhere.
-    struct Bar3DEdit   { int plot_index = 0; std::optional<Bar3DOptions>   opts; ObjectId id = 0; };
-    struct SurfaceEdit { int plot_index = 0; std::optional<SurfaceOptions> opts; ObjectId id = 0; };
-    struct Scatter3DEdit { int plot_index = 0; std::optional<Scatter3DOptions> opts; ObjectId id = 0; };
-    struct Line3DEdit  { int plot_index = 0; std::optional<Line3DOptions>  opts; ObjectId id = 0; };
-    struct SurfaceTriEdit { int plot_index = 0; std::optional<SurfaceTriOptions> opts; ObjectId id = 0; };
+    // (`id` and `visible_seen` filled in by FigureEditBox). apply_axes3d_edit()
+    // preserves `hint_labels`, which are data edited elsewhere.
+    template <class O> struct ObjectEdit {
+        int plot_index = 0;
+        std::optional<O> opts;
+        ObjectId id = 0;
+        unsigned long long visible_seen = ~0ull;   // see PlotStyleEdit
+    };
+    using Bar3DEdit      = ObjectEdit<Bar3DOptions>;
+    using SurfaceEdit    = ObjectEdit<SurfaceOptions>;
+    using Scatter3DEdit  = ObjectEdit<Scatter3DOptions>;
+    using Line3DEdit     = ObjectEdit<Line3DOptions>;
+    using SurfaceTriEdit = ObjectEdit<SurfaceTriOptions>;
     // A text's look (its content is a TextDataEdit in plot_ops).
-    struct TextEdit    { int plot_index = 0; std::optional<TextStyle> opts; ObjectId id = 0; };
+    using TextEdit       = ObjectEdit<TextStyle>;
     std::vector<Bar3DEdit>     bars3d;
     std::vector<SurfaceEdit>   surfaces;
     std::vector<Scatter3DEdit> scatter3d;
@@ -1168,13 +1177,19 @@ struct ReplacedOpts {
 };
 
 // Assign an object's options, keeping its current `hint_labels` (data owned by
-// the Data panel, which the options copy may have stale) and, when the new
-// options leave it unset, its `color`. Edits name objects
+// the Data panel, which the options copy may have stale), when the new
+// options leave it unset its `color`, and its `visible` when
+// set_<kind>_visible() ran after the snapshot the edit was made over
+// (`visible_seen`, the object's visible_stamp then). Edits name objects
 // as data ops do (find_object()). Nothing when the object is gone.
 template <class Vec, class Opts>
-std::optional<ReplacedOpts<Opts>> assign_plot_opts(Vec& v, int idx, ObjectId id, const Opts& o) {
+std::optional<ReplacedOpts<Opts>> assign_plot_opts(Vec& v, int idx, ObjectId id, const Opts& o,
+                                                   unsigned long long visible_seen = ~0ull) {
     auto* p = edits_detail::find_object(v, idx, id);
     if (!p) return std::nullopt;
+    // The program's `visible`, if it set one since the panel drew.
+    const std::optional<bool> kept = p->visible_stamp > visible_seen
+                                         ? std::optional(visible_flag(p->opts)) : std::nullopt;
     if constexpr (!requires { p->opts.hint_labels; }) {
         // A text, a reference line or span, a fill: nothing in its style is
         // data (a fill's mask moved out at the call). An unset `color` keeps
@@ -1183,6 +1198,7 @@ std::optional<ReplacedOpts<Opts>> assign_plot_opts(Vec& v, int idx, ObjectId id,
         p->opts = o;
         if constexpr (requires { p->opts.color.has_value(); })
             if (!p->opts.color) p->opts.color = r.old.color;
+        if (kept) visible_flag(p->opts) = *kept;
         return r;
     } else {
         auto labels = std::move(p->opts.hint_labels);
@@ -1197,6 +1213,7 @@ std::optional<ReplacedOpts<Opts>> assign_plot_opts(Vec& v, int idx, ObjectId id,
         // Likewise a quiver's `scale`, set since the call.
         if constexpr (requires { p->opts.amp.has_value(); })
             if (!p->opts.amp) p->opts.amp = r.old.amp;
+        if (kept) visible_flag(p->opts) = *kept;
         return r;
     }
 }
@@ -1232,7 +1249,8 @@ template <class T>
 std::optional<PlotStyleEdit> apply_plot_style_edit(T& t, const PlotStyleEdit& e) {
     return std::visit([&](const auto& o) -> std::optional<PlotStyleEdit> {
         using O = std::decay_t<decltype(o)>;
-        auto r = assign_plot_opts(edits_detail::styled_vector<O>(t), e.plot_index, e.id, o);
+        auto r = assign_plot_opts(edits_detail::styled_vector<O>(t), e.plot_index, e.id, o,
+                                  e.visible_seen);
         if (!r) return std::nullopt;
         PlotStyleEdit inv = e;
         inv.plot_index = r->index;
@@ -1395,7 +1413,7 @@ void apply_axes3d_edit(T& dst, const AxesEdit3D& e, AxesEdit3D* inv = nullptr) {
     auto objects = [](auto& plots, const auto& edits, auto* undo) {
         for (const auto& oe : edits) {
             if (!oe.opts) continue;
-            auto r = assign_plot_opts(plots, oe.plot_index, oe.id, *oe.opts);
+            auto r = assign_plot_opts(plots, oe.plot_index, oe.id, *oe.opts, oe.visible_seen);
             if (!r || !undo) continue;
             auto u = oe;
             u.plot_index = r->index;

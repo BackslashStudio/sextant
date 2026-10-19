@@ -251,6 +251,7 @@ std::vector<TextDraw> plan_texts(const std::vector<TextPlot>& texts, const Coord
     std::vector<TextDraw> out;
     for (const TextPlot& p : texts) {
         const TextContent& c = p.content;
+        if (!object_shown(p)) continue;
         // Hidden while a data coordinate (the text's, or the arrow's point) is
         // out of view.
         if (c.x.space == Coords::Data && !in_view(c.x.v, tr.xmin, tr.xmax)) continue;
@@ -277,6 +278,7 @@ std::vector<TextDraw> plan_texts3d(const std::vector<TextPlot>& texts, const Pro
     const Transform3D& tf = proj.transform();
     for (const TextPlot& p : texts) {
         const TextContent& c = p.content;
+        if (!object_shown(p)) continue;
         TextDraw d;
         if (c.x.space == Coords::Fraction && !c.arrow) {
             // text2d(): the frame, whatever the camera does.

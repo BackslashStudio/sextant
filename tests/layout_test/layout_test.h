@@ -634,6 +634,9 @@ namespace lt {
     // pick_area.cpp
     void test_pick_areas();
 
+    // visible.cpp
+    void test_visible();
+
     // text.cpp
     void test_text();
 

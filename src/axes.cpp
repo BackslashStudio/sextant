@@ -613,6 +613,7 @@ void Axes::Impl::ingest_stack(std::span<const double> x, std::span<const std::ve
         f.drawstyle = opts.drawstyle;
         if (!opts.names.empty()) f.name = opts.names[k];
         f.show_legend = opts.show_legend;
+        f.visible = opts.visible;
         ingest_fill(x, curves[k], curves[k + 1], std::move(f), who);
     }
 }
@@ -973,6 +974,60 @@ Axes& Axes::set_text_data(std::size_t i, std::string_view s, Pos x, Pos y) {
     d->set_text_data(i, std::move(c), "set_text_data");
     return *this;
 }
+
+// --- Hiding plot objects ----------------------------------------------------
+
+Axes& Axes::set_line_visible(std::size_t i, bool visible) {
+    read_back::set_visible(d->lines, i, visible, "set_line_visible");
+    return *this;
+}
+Axes& Axes::set_scatter_visible(std::size_t i, bool visible) {
+    read_back::set_visible(d->scatters, i, visible, "set_scatter_visible");
+    return *this;
+}
+Axes& Axes::set_scatter_z_visible(std::size_t i, bool visible) {
+    read_back::set_visible(d->scatter_z, i, visible, "set_scatter_z_visible");
+    return *this;
+}
+Axes& Axes::set_bar_visible(std::size_t i, bool visible) {
+    read_back::set_visible(d->bars, i, visible, "set_bar_visible");
+    return *this;
+}
+Axes& Axes::set_heatmap_visible(std::size_t i, bool visible) {
+    read_back::set_visible(d->heatmaps, i, visible, "set_heatmap_visible");
+    return *this;
+}
+Axes& Axes::set_fill_visible(std::size_t i, bool visible) {
+    read_back::set_visible(d->fills, i, visible, "set_fill_visible");
+    return *this;
+}
+Axes& Axes::set_quiver_visible(std::size_t i, bool visible) {
+    read_back::set_visible(d->quivers, i, visible, "set_quiver_visible");
+    return *this;
+}
+Axes& Axes::set_axline_visible(std::size_t i, bool visible) {
+    read_back::set_visible(d->axlines, i, visible, "set_axline_visible");
+    return *this;
+}
+Axes& Axes::set_axspan_visible(std::size_t i, bool visible) {
+    read_back::set_visible(d->axspans, i, visible, "set_axspan_visible");
+    return *this;
+}
+Axes& Axes::set_text_visible(std::size_t i, bool visible) {
+    read_back::set_visible(d->texts, i, visible, "set_text_visible");
+    return *this;
+}
+
+bool Axes::line_visible(std::size_t i) const      { return read_back::visible(d->lines, i, "line_visible"); }
+bool Axes::scatter_visible(std::size_t i) const   { return read_back::visible(d->scatters, i, "scatter_visible"); }
+bool Axes::scatter_z_visible(std::size_t i) const { return read_back::visible(d->scatter_z, i, "scatter_z_visible"); }
+bool Axes::bar_visible(std::size_t i) const       { return read_back::visible(d->bars, i, "bar_visible"); }
+bool Axes::heatmap_visible(std::size_t i) const   { return read_back::visible(d->heatmaps, i, "heatmap_visible"); }
+bool Axes::fill_visible(std::size_t i) const      { return read_back::visible(d->fills, i, "fill_visible"); }
+bool Axes::quiver_visible(std::size_t i) const    { return read_back::visible(d->quivers, i, "quiver_visible"); }
+bool Axes::axline_visible(std::size_t i) const    { return read_back::visible(d->axlines, i, "axline_visible"); }
+bool Axes::axspan_visible(std::size_t i) const    { return read_back::visible(d->axspans, i, "axspan_visible"); }
+bool Axes::text_visible(std::size_t i) const      { return read_back::visible(d->texts, i, "text_visible"); }
 
 // set_*_data(): find object i, validate the new data as plotting it would, then
 // swap it in. Nothing changes if either throws.

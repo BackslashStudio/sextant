@@ -33,7 +33,8 @@ namespace sextant {
     };
 
     // Honored for data lines, grid lines and legend swatches in every output.
-    // `None` draws no stroke, and drops a data series from the legend.
+    // `None` draws no stroke, and drops a data series from the legend; its error
+    // bars, limits and hover stay (to hide a whole series, LineOptions::visible).
     enum class LineStyle { Solid, Dashed, Dotted, DashDot, None };
 
     // How a 2D line runs between its points (matplotlib's drawstyle): Default
@@ -227,6 +228,12 @@ namespace sextant {
         LineStyle linestyle = LineStyle::Solid;
         std::string name;
         bool show_legend = true;
+        // false hides the object as if it were absent: not drawn or exported,
+        // no legend key or colorbar, no hover or pick, and the auto limits leave
+        // it out. Its data stays (read back and replaced as usual), and so do its
+        // color, its place in the draw order and its index. Axes::set_line_visible()
+        // and the like change it after the call; the Data panel has a checkbox.
+        bool visible = true;
         float alpha = 1.0f;
 
         // Add a closing segment from the last point to the first. No point is
@@ -260,6 +267,7 @@ namespace sextant {
         MarkerStyle marker = MarkerStyle::Circle;
         std::string name;
         bool show_legend = true; // see LineOptions::show_legend
+        bool visible = true;     // see LineOptions::visible
 
         // Opacity of the marker's fill (on top of `color`'s own alpha). 0 leaves a
         // hollow marker: only its outline, if `edge_linewidth` > 0, is drawn.
@@ -307,6 +315,7 @@ namespace sextant {
         // as the marker shape filled white with a black edge.
         std::string name;
         bool show_legend = true; // see LineOptions::show_legend
+        bool visible = true;     // see LineOptions::visible
 
         // Style of the error bars passed as an ErrorBar; unset color = black.
         ErrorBarOptions errorbar;
@@ -334,6 +343,7 @@ namespace sextant {
         float alpha = 1.0f;
         std::string name;
         bool show_legend = true; // see LineOptions::show_legend
+        bool visible = true;     // see LineOptions::visible
         Color edgecolor = Color::Black;
         float linewidth = 0.5f;
 
@@ -367,6 +377,7 @@ namespace sextant {
 
         std::string name;
         bool show_legend = true; // see LineOptions::show_legend
+        bool visible = true;     // see LineOptions::visible
     };
 
     // A band across the frame between two values (Axes::axspan()).
@@ -388,6 +399,7 @@ namespace sextant {
 
         std::string name;
         bool show_legend = true; // see LineOptions::show_legend
+        bool visible = true;     // see LineOptions::visible
     };
 
     // The area between two curves (Axes::fill()).
@@ -422,6 +434,7 @@ namespace sextant {
 
         std::string name;
         bool show_legend = true; // see LineOptions::show_legend
+        bool visible = true;     // see LineOptions::visible
     };
 
     // Where the bottom layer of a stack() starts, as matplotlib's stackplot
@@ -449,6 +462,7 @@ namespace sextant {
         LineStyle linestyle = LineStyle::Solid;
         DrawStyle drawstyle = DrawStyle::Default;
         bool show_legend = true;
+        bool visible = true;     // every layer's FillOptions::visible
     };
 
     // Which part of a quiver arrow sits on its (x, y): the tail, the middle or
@@ -488,6 +502,7 @@ namespace sextant {
 
         std::string name;
         bool show_legend = true; // see LineOptions::show_legend
+        bool visible = true;     // see LineOptions::visible
 
         // See LineOptions::hint_labels. Default hover text is "x=.., y=..,
         // u=.., v=.." (plus ", c=.." with `c`), at the arrow's (x, y).
@@ -509,6 +524,7 @@ namespace sextant {
 
         // Names the color scale on this heatmap's colorbar (see ScatterZOptions::name).
         std::string name;
+        bool visible = true; // see LineOptions::visible
 
         // Where row 0 is drawn: "lower" (bottom, the default) or "upper" (top, as
         // an image). Anything else throws std::invalid_argument.
@@ -811,6 +827,10 @@ namespace sextant {
         // when the figure's is on too). false draws this text as written, as
         // matplotlib's parse_math=False.
         bool parse_math = true;
+
+        // false hides the text, an annotate()'s arrow with it: not drawn or
+        // exported. Axes::set_text_visible() changes it after the call.
+        bool visible = true;
     };
 
     // The arrow annotate() draws from its text to the point.

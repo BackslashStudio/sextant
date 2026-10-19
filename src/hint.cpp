@@ -531,6 +531,7 @@ std::optional<PickHit> find_pick3d(const RenderSnapshot3D& snap, const Projector
     // Every bar, tested individually (cheap slab tests; no index).
     for (std::size_t o = 0; o < snap.bars3d.size(); ++o) {
         const Bar3DPlot& b = snap.bars3d[o];
+        if (!object_shown(b)) continue;
         for (std::size_t k = 0; k < b.count(); ++k) {
             float depth = 0.0f;
             if (bar3d_ray_hit(b, k, proj, cursor_x, cursor_y, depth))
@@ -541,6 +542,7 @@ std::optional<PickHit> find_pick3d(const RenderSnapshot3D& snap, const Projector
     // Every surface cell (two triangle tests each).
     for (std::size_t o = 0; o < snap.surfaces.size(); ++o) {
         const SurfacePlot& s = snap.surfaces[o];
+        if (!object_shown(s)) continue;
         if (s.heights.size() < s.count()) continue;
         for (std::size_t k = 0; k < s.cell_count(); ++k) {
             float depth = 0.0f;
@@ -553,6 +555,7 @@ std::optional<PickHit> find_pick3d(const RenderSnapshot3D& snap, const Projector
     // Every mesh face (one triangle test each; no acceleration structure).
     for (std::size_t o = 0; o < snap.surface_tri.size(); ++o) {
         const SurfaceTriPlot& s = snap.surface_tri[o];
+        if (!object_shown(s)) continue;
         for (std::size_t f = 0; f < s.face_count(); ++f) {
             float depth = 0.0f;
             std::size_t vertex = 0;
@@ -567,6 +570,7 @@ std::optional<PickHit> find_pick3d(const RenderSnapshot3D& snap, const Projector
     // a point hidden by its size is not hit.
     for (std::size_t o = 0; o < snap.scatter3d.size(); ++o) {
         const Scatter3DPlot& s = snap.scatter3d[o];
+        if (!object_shown(s)) continue;
         if (s.opts.marker == MarkerStyle::None) continue;
         const Transform3D& tf = proj.transform();
         for (std::size_t i = 0; i < s.count(); ++i) {
@@ -585,6 +589,7 @@ std::optional<PickHit> find_pick3d(const RenderSnapshot3D& snap, const Projector
     // box centre, at least `radius`.
     for (std::size_t o = 0; o < snap.lines3d.size(); ++o) {
         const Line3DPlot& l = snap.lines3d[o];
+        if (!object_shown(l)) continue;
         if (l.opts.linewidth <= 0.0f) continue;
         const float r = std::max(l.opts.linewidth * 0.5f, radius);
         const Transform3D& tf = proj.transform();

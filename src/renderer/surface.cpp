@@ -196,7 +196,7 @@ namespace sextant {
 
         std::vector<std::size_t> plot_order;
         for (std::size_t i = 0; i < surfaces.size(); ++i)
-            if (surfaces[i].cell_count() > 0
+            if (object_shown(surfaces[i]) && surfaces[i].cell_count() > 0
                 && surfaces[i].heights.size() >= surfaces[i].count())
                 plot_order.push_back(i);
         std::stable_sort(plot_order.begin(), plot_order.end(),

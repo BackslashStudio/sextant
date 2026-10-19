@@ -79,13 +79,14 @@ namespace sextant {
         double zmin = 0.0, zmax = 1.0;
     };
 
-    // True when a plane has plot objects. An empty plane contributes nothing to
-    // limits, not even its offset.
+    // True when a plane has shown plot objects (object_shown()). An empty plane,
+    // or one whose objects are all hidden, contributes nothing to limits, not
+    // even its offset.
     inline bool plane_has_data(const PlaneSnapshot& p) {
         const AllPlotData all = p.sheet.all();
-        return !all.lines.empty() || !all.scatters.empty() || !all.bars.empty()
-               || !all.heatmaps.empty() || !all.scatter_z.empty()
-               || (all.fills && !all.fills->empty()) || (all.quivers && !all.quivers->empty());
+        return any_shown(all.lines) || any_shown(all.scatters) || any_shown(all.bars)
+               || any_shown(all.heatmaps) || any_shown(all.scatter_z)
+               || (all.fills && any_shown(*all.fills)) || (all.quivers && any_shown(*all.quivers));
     }
 
     // True when a plane is drawn this frame. Drawing paths check this; layout does
@@ -117,6 +118,7 @@ namespace sextant {
         };
 
         for (const Bar3DPlot& b: bars) {
+            if (!object_shown(b)) continue;
             const Axis3Map m = axis_map(b.orient);
             // The footprint, not just the grid coordinate.
             const double hu = b.u_width * 0.5, hv = b.v_width * 0.5;
@@ -137,6 +139,7 @@ namespace sextant {
 
         // A surface's samples are its extent (no footprint); heights don't force zero.
         for (const SurfacePlot& s: surfaces) {
+            if (!object_shown(s)) continue;
             if (s.cell_count() == 0 || s.heights.size() < s.count()) continue;
             const Axis3Map m = axis_map(s.orient);
             for (std::size_t i = 0; i < s.u.size(); ++i) {
@@ -179,6 +182,7 @@ namespace sextant {
         };
 
         for (const Scatter3DPlot& s: points) {
+            if (!object_shown(s)) continue;
             grow_err(s.x, s.y, s.z, s.err);
             for (std::size_t i = 0; i < s.count(); ++i) {
                 lo[0] = std::min(lo[0], s.x[i]);
@@ -193,6 +197,7 @@ namespace sextant {
         // A path's points are its extent. Its width depends on the box, so it is
         // not included.
         for (const Line3DPlot& l: lines) {
+            if (!object_shown(l)) continue;
             grow_err(l.x, l.y, l.z, l.err);
             for (std::size_t i = 0; i < l.count(); ++i) {
                 lo[0] = std::min(lo[0], l.x[i]);
@@ -206,6 +211,7 @@ namespace sextant {
 
         // A mesh's vertices are its extent, including ones no triangle uses.
         for (const SurfaceTriPlot& m: meshes) {
+            if (!object_shown(m)) continue;
             for (std::size_t i = 0; i < m.count(); ++i) {
                 lo[0] = std::min(lo[0], m.x[i]);
                 hi[0] = std::max(hi[0], m.x[i]);

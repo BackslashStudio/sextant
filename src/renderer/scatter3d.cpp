@@ -74,7 +74,7 @@ namespace sextant {
 
         for (std::size_t pi = 0; pi < points.size(); ++pi) {
             const Scatter3DPlot& s = points[pi];
-            if (s.opts.marker == MarkerStyle::None) continue;
+            if (!object_shown(s) || s.opts.marker == MarkerStyle::None) continue;
             double vmin = 0.0, vmax = 1.0;
             scatter3d_value_range(s, vmin, vmax);
             for (std::size_t i = 0; i < s.count(); ++i) {

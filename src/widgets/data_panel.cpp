@@ -706,6 +706,15 @@ namespace sextant {
             else box.update(idx, [&](AxesEdit& e) { merge(e.plot_styles); });
         }
 
+        // The object's `visible`, first in its Appearance block. Unlike a plane's,
+        // it takes the object out of the limits and the keys too, so say so.
+        template<class Push>
+        void visible_toggle(bool& visible, Push&& push) {
+            if (ImGui::Checkbox("Visible##objvis", &visible)) push();
+            if (!visible)
+                ImGui::TextDisabled("Hidden: not drawn, keyed or hovered, and out of the auto limits.");
+        }
+
         // The name (legend key and colorbar title), and the legend-key switch for
         // kinds that have one. One shared name buffer, see text_field().
         template<class Opts, class Push>
@@ -1190,6 +1199,10 @@ namespace sextant {
             auto push_of = [&](const auto& o) {
                 return [&, p = &o] { push_plot_style(edit_box, idx, is3d, t.plane_index, pi, *p); };
             };
+            with_kind(*ss, t.kind, [&](auto& v) {
+                visible_toggle(visible_flag(v[i]), push_of(v[i]));
+                return true;
+            }, false);
             switch (t.kind) {
                 case PlotKind::Line:
                     line_style(st, ss->lines[i], sheet.lines[i], on_plane, push_of(ss->lines[i]));
@@ -1241,6 +1254,7 @@ namespace sextant {
                     e.bars3d.push_back({bi, o});
                 });
             };
+            visible_toggle(o.visible, push_bar);
             if (begin_field_table("bar3dname")) {
                 field_row("Name");
                 if (text_field("##b3dname", o.name, st.name_buf, sizeof st.name_buf)) push_bar();
@@ -1303,6 +1317,7 @@ namespace sextant {
                     e.surfaces.push_back({si, o});
                 });
             };
+            visible_toggle(o.visible, push_surf);
             // One name: the colorbar title with `colormap`, else the legend key.
             if (begin_field_table("surfname")) {
                 field_row("Name");
@@ -1370,6 +1385,7 @@ namespace sextant {
                     e.scatter3d.push_back({ci, o});
                 });
             };
+            visible_toggle(o.visible, push_cloud);
             // One name for the colorbar and the legend key.
             if (begin_field_table("cloudname")) {
                 field_row("Name");
@@ -1431,6 +1447,7 @@ namespace sextant {
                     e.lines3d.push_back({li, o});
                 });
             };
+            visible_toggle(o.visible, push_path);
             if (begin_field_table("pathname")) {
                 field_row("Name");
                 if (text_field("##pathname", o.name, st.name_buf, sizeof st.name_buf))
@@ -1489,6 +1506,7 @@ namespace sextant {
                     e.surface_tri.push_back({mi, o});
                 });
             };
+            visible_toggle(o.visible, push_mesh);
             // One name: the colorbar title when colormapped, else the legend key.
             if (begin_field_table("meshname")) {
                 field_row("Name");
@@ -1718,6 +1736,7 @@ namespace sextant {
             };
             static const char* kVAligns[] = {"Top", "Center", "Baseline", "Bottom"};
             TextOptions& o = s.text;
+            if (ImGui::Checkbox("Visible##textvis", &o.visible)) push_style();
             if (begin_field_table("textstyle")) {
                 field_row("Font");
                 ImGui::SetNextItemWidth(-FLT_MIN);

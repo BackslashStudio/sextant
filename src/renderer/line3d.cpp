@@ -81,7 +81,7 @@ namespace sextant {
 
         for (std::size_t li = 0; li < lines.size(); ++li) {
             const Line3DPlot& l = lines[li];
-            if (l.opts.linewidth <= 0.0f) continue;
+            if (!object_shown(l) || l.opts.linewidth <= 0.0f) continue;
             double vmin = 0.0, vmax = 1.0;
             line3d_value_range(l, vmin, vmax);
             const double span = vmax - vmin;

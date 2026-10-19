@@ -186,7 +186,7 @@ namespace sextant {
 
         std::vector<std::size_t> plot_order;
         for (std::size_t i = 0; i < meshes.size(); ++i)
-            if (meshes[i].face_count() > 0) plot_order.push_back(i);
+            if (object_shown(meshes[i]) && meshes[i].face_count() > 0) plot_order.push_back(i);
         std::stable_sort(plot_order.begin(), plot_order.end(),
                          [&](std::size_t a, std::size_t b) {
                              return surface_tri_plot_distance(meshes[a], proj) >

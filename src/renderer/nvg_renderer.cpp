@@ -296,7 +296,7 @@ namespace sextant {
                                     unsigned long long data_generation, int axes_index) {
         bool any = false;
         for (const auto& hp: snap.heatmaps)
-            if (!hp.opts.contours.empty()) {
+            if (object_shown(hp) && !hp.opts.contours.empty()) {
                 any = true;
                 break;
             }
@@ -308,7 +308,7 @@ namespace sextant {
 
         for (std::size_t i = 0; i < snap.heatmaps.size(); ++i) {
             const auto& hp = snap.heatmaps[i];
-            if (hp.opts.contours.empty() || hp.rows <= 0 || hp.cols <= 0) continue;
+            if (!object_shown(hp) || hp.opts.contours.empty() || hp.rows <= 0 || hp.cols <= 0) continue;
 
             const ContourSet& set = cache.get(axes_index, -1, static_cast<int>(i),
                                               data_generation, hp);

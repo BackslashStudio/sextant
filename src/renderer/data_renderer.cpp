@@ -3512,19 +3512,19 @@ void main() {
         for (const PlaneSnapshot& p: snap.planes)
             any_translucent = any_translucent || (plane_translucent(p) && plane_drawn(p));
         for (const Bar3DPlot& b: snap.bars3d)
-            any_translucent = any_translucent || bar3d_translucent(b);
+            any_translucent = any_translucent || (object_shown(b) && bar3d_translucent(b));
         for (const SurfacePlot& sp: snap.surfaces)
-            any_translucent = any_translucent || surface_translucent(sp);
+            any_translucent = any_translucent || (object_shown(sp) && surface_translucent(sp));
         for (const SurfaceTriPlot& sm: snap.surface_tri)
-            any_translucent = any_translucent || surface_tri_translucent(sm);
+            any_translucent = any_translucent || (object_shown(sm) && surface_tri_translucent(sm));
         for (const Scatter3DPlot& sc: snap.scatter3d)
-            any_translucent = any_translucent || scatter3d_translucent(sc);
+            any_translucent = any_translucent || (object_shown(sc) && scatter3d_translucent(sc));
         for (const Line3DPlot& ln: snap.lines3d)
-            any_translucent = any_translucent || line3d_translucent(ln);
+            any_translucent = any_translucent || (object_shown(ln) && line3d_translucent(ln));
         for (const Scatter3DPlot& sc: snap.scatter3d)
-            any_translucent = any_translucent || errorbar3d_translucent(sc);
+            any_translucent = any_translucent || (object_shown(sc) && errorbar3d_translucent(sc));
         for (const Line3DPlot& ln: snap.lines3d)
-            any_translucent = any_translucent || errorbar3d_translucent(ln);
+            any_translucent = any_translucent || (object_shown(ln) && errorbar3d_translucent(ln));
         if (!any_translucent) return;
         if (peel_translucent3d(snap, proj, pr, win_w, win_h)) return;
 
@@ -3542,25 +3542,25 @@ void main() {
             if (plane_translucent(snap.planes[i]) && plane_drawn(snap.planes[i]))
                 list.push_back({Kind::Plane, i, plane_distance(snap.planes[i], proj)});
         for (std::size_t i = 0; i < snap.bars3d.size(); ++i)
-            if (bar3d_translucent(snap.bars3d[i]))
+            if (object_shown(snap.bars3d[i]) && bar3d_translucent(snap.bars3d[i]))
                 list.push_back({Kind::Bar, i, bar3d_plot_distance(snap.bars3d[i], proj)});
         for (std::size_t i = 0; i < snap.surfaces.size(); ++i)
-            if (surface_translucent(snap.surfaces[i]))
+            if (object_shown(snap.surfaces[i]) && surface_translucent(snap.surfaces[i]))
                 list.push_back({Kind::Surface, i, surface_plot_distance(snap.surfaces[i], proj)});
         for (std::size_t i = 0; i < snap.surface_tri.size(); ++i)
-            if (surface_tri_translucent(snap.surface_tri[i]))
+            if (object_shown(snap.surface_tri[i]) && surface_tri_translucent(snap.surface_tri[i]))
                 list.push_back({
                     Kind::Mesh, i,
                     surface_tri_plot_distance(snap.surface_tri[i], proj)
                 });
         for (std::size_t i = 0; i < snap.scatter3d.size(); ++i)
-            if (scatter3d_translucent(snap.scatter3d[i]))
+            if (object_shown(snap.scatter3d[i]) && scatter3d_translucent(snap.scatter3d[i]))
                 list.push_back({
                     Kind::Scatter, i,
                     scatter3d_plot_distance(snap.scatter3d[i], proj)
                 });
         for (std::size_t i = 0; i < snap.lines3d.size(); ++i)
-            if (line3d_translucent(snap.lines3d[i]))
+            if (object_shown(snap.lines3d[i]) && line3d_translucent(snap.lines3d[i]))
                 list.push_back({
                     Kind::Line, i,
                     line3d_plot_distance(snap.lines3d[i], proj)
@@ -3568,13 +3568,13 @@ void main() {
         // A series' error bars at the series' distance, after it (drawn over it on
         // ties).
         for (std::size_t i = 0; i < snap.scatter3d.size(); ++i)
-            if (errorbar3d_translucent(snap.scatter3d[i]))
+            if (object_shown(snap.scatter3d[i]) && errorbar3d_translucent(snap.scatter3d[i]))
                 list.push_back({
                     Kind::ErrorBar, i,
                     scatter3d_plot_distance(snap.scatter3d[i], proj)
                 });
         for (std::size_t i = 0; i < snap.lines3d.size(); ++i)
-            if (errorbar3d_translucent(snap.lines3d[i]))
+            if (object_shown(snap.lines3d[i]) && errorbar3d_translucent(snap.lines3d[i]))
                 list.push_back({
                     Kind::ErrorBar, snap.scatter3d.size() + i,
                     line3d_plot_distance(snap.lines3d[i], proj)
@@ -4130,7 +4130,7 @@ void main() {
         for (const std::size_t bi: plot_order) {
             const Bar3DPlot& b = bars[bi];
             const std::size_t n = b.count();
-            if (n == 0 || b.heights.size() < n) continue;
+            if (!object_shown(b) || n == 0 || b.heights.size() < n) continue;
             const bool translucent = bar3d_translucent(b);
 
             const CacheKey key{axes_index_, -1, static_cast<int>(bi)};
@@ -4376,7 +4376,7 @@ void main() {
         std::vector<std::uint32_t> indices;
         for (const std::size_t si: plot_order) {
             const SurfacePlot& s = surfaces[si];
-            if (s.cell_count() == 0 || s.heights.size() < s.count()) continue;
+            if (!object_shown(s) || s.cell_count() == 0 || s.heights.size() < s.count()) continue;
             const bool translucent = surface_translucent(s);
             const std::size_t nc = s.cell_cols();
 
@@ -4626,7 +4626,7 @@ void main() {
         std::vector<std::uint32_t> indices;
         for (const std::size_t mi: plot_order) {
             const SurfaceTriPlot& s = meshes[mi];
-            if (s.face_count() == 0 || s.count() == 0) continue;
+            if (!object_shown(s) || s.face_count() == 0 || s.count() == 0) continue;
             const bool translucent = surface_tri_translucent(s);
 
             const CacheKey key{axes_index_, -1, static_cast<int>(mi)};
@@ -4899,7 +4899,7 @@ void main() {
         std::vector<float> sorted;
         for (const std::size_t si: plot_order) {
             const Scatter3DPlot& s = points[si];
-            if (s.count() == 0 || s.opts.marker == MarkerStyle::None) continue;
+            if (!object_shown(s) || s.count() == 0 || s.opts.marker == MarkerStyle::None) continue;
             const bool translucent = scatter3d_translucent(s);
 
             const CacheKey key{axes_index_, -1, static_cast<int>(si)};
@@ -5095,7 +5095,7 @@ void main() {
         std::vector<float> sorted;
         for (const std::size_t li: plot_order) {
             const Line3DPlot& l = lines[li];
-            if (l.segment_count() == 0) continue;
+            if (!object_shown(l) || l.segment_count() == 0) continue;
             const bool translucent = line3d_translucent(l);
 
             const CacheKey key{axes_index_, -1, static_cast<int>(li)};
@@ -5317,11 +5317,14 @@ void main() {
         const bool want_translucent = (pass == ScenePass::Translucent);
 
         // Series k is a cloud for k < ns, else a path.
+        // A hidden series hides its error bars too.
         auto drawn = [&](std::size_t k) {
             return k < ns
-                       ? errorbar3d_drawn(snap.scatter3d[k].err, snap.scatter3d[k].opts.errorbar)
-                       : errorbar3d_drawn(snap.lines3d[k - ns].err,
-                                          snap.lines3d[k - ns].opts.errorbar);
+                       ? object_shown(snap.scatter3d[k])
+                             && errorbar3d_drawn(snap.scatter3d[k].err, snap.scatter3d[k].opts.errorbar)
+                       : object_shown(snap.lines3d[k - ns])
+                             && errorbar3d_drawn(snap.lines3d[k - ns].err,
+                                                 snap.lines3d[k - ns].opts.errorbar);
         };
         auto translucent = [&](std::size_t k) {
             return k < ns

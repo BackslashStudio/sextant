@@ -30,6 +30,18 @@ namespace sextant::read_back {
         return v[i];
     }
 
+    // set_<kind>_visible(): the flag, with a fresh visible_stamp so a Data-panel
+    // style edit made before it keeps it (assign_plot_opts()).
+    template <typename V>
+    void set_visible(V& v, std::size_t i, bool visible, const char* who) {
+        auto& p = at(v, i, who);
+        visible_flag(p.opts) = visible;
+        p.visible_stamp = next_snapshot_generation();
+    }
+
+    template <typename V>
+    bool visible(const V& v, std::size_t i, const char* who) { return object_shown(at(v, i, who)); }
+
     // For set_*_data(): error bars, hint_labels, marker sizes and bar bases stay while the
     // point count (a grid's shape) is unchanged and are dropped otherwise, as
     // they would no longer line up. Then takes a fresh data_stamp.

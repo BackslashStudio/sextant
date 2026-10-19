@@ -157,7 +157,7 @@ std::vector<Bar3DPolygon> plan_bars3d(const Projector3D& proj,
     // plane exists between two bar grids).
     std::vector<std::size_t> plot_order;
     for (std::size_t i = 0; i < bars.size(); ++i)
-        if (bars[i].count() > 0 && bars[i].heights.size() >= bars[i].count())
+        if (object_shown(bars[i]) && bars[i].count() > 0 && bars[i].heights.size() >= bars[i].count())
             plot_order.push_back(i);
     std::stable_sort(plot_order.begin(), plot_order.end(),
                      [&](std::size_t a, std::size_t b) {

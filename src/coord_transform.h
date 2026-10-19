@@ -268,14 +268,17 @@ namespace sextant {
             };
 
             for (const auto& lp: all.lines) {
+                if (!object_shown(lp)) continue;
                 add_points(lp.x, lp.y);
                 grow_err(lp.x, lp.y, lp.err);
             }
             for (const auto& sp: all.scatters) {
+                if (!object_shown(sp)) continue;
                 add_points(sp.x, sp.y);
                 grow_err(sp.x, sp.y, sp.err);
             }
             for (const auto& sp: all.scatter_z) {
+                if (!object_shown(sp)) continue;
                 add_points(sp.x, sp.y);
                 grow_err(sp.x, sp.y, sp.err);
             }
@@ -294,6 +297,7 @@ namespace sextant {
                 }
             };
             for (const auto& bp: all.bars) {
+                if (!object_shown(bp)) continue;
                 if (bp.horizontal()) add_bars(bp, fy, ylo, yhi, fx, xlo, xhi);
                 else add_bars(bp, fx, xlo, xhi, fy, ylo, yhi);
                 // Error bars hang off the tip, not the base.
@@ -305,17 +309,20 @@ namespace sextant {
             // A reference line or span counts on its own axis only.
             if (all.axlines)
                 for (const auto& lp: *all.axlines) {
+                    if (!object_shown(lp)) continue;
                     if (lp.on_x()) add(fx(lp.value), xlo, xhi);
                     else add(fy(lp.value), ylo, yhi);
                 }
             if (all.axspans)
                 for (const auto& sp: *all.axspans) {
+                    if (!object_shown(sp)) continue;
                     if (sp.on_x()) { add(fx(sp.lo), xlo, xhi); add(fx(sp.hi), xlo, xhi); }
                     else { add(fy(sp.lo), ylo, yhi); add(fy(sp.hi), ylo, yhi); }
                 }
             // A fill: its runs' points on both curves (fill_limit_points()).
             if (all.fills)
                 for (const auto& fp: *all.fills) {
+                    if (!object_shown(fp)) continue;
                     const bool v = fp.vertical();
                     fill_limit_points(fp, v ? ys : xs, v ? xs : ys, [&](double r, double c) {
                         add(r, v ? ylo : xlo, v ? yhi : xhi);
@@ -324,15 +331,18 @@ namespace sextant {
                 }
             // A quiver: both ends of every arrow drawn (quiver_limit_points()).
             if (all.quivers)
-                for (const auto& qp: *all.quivers)
+                for (const auto& qp: *all.quivers) {
+                    if (!object_shown(qp)) continue;
                     quiver_limit_points(qp, xs, ys, [&](double x, double y) {
                         add(x, xlo, xhi);
                         add(y, ylo, yhi);
                     });
+                }
             AutoBounds b;
             b.x.loose = {xlo, xhi};
             b.y.loose = {ylo, yhi};
             for (const auto& hp: all.heatmaps) {
+                if (!object_shown(hp)) continue;
                 // The heatmap's extent, unpadded; either range may be reversed.
                 b.x.tight.add(fx(hp.xrange.lo));
                 b.x.tight.add(fx(hp.xrange.hi));
@@ -343,7 +353,7 @@ namespace sextant {
         }
     } // namespace bounds_detail
 
-    // Unpadded bounds of every plot object, split as AutoAxis describes. Written out
+    // Unpadded bounds of every shown plot object (object_shown()), split as AutoAxis describes. Written out
     // rather than auto_bounds_in() with identities: it runs per frame, and in an
     // unoptimised build the lambdas cost a call per value (layout_test's debug budget).
     inline AutoBounds auto_bounds(const AllPlotData& all) {
@@ -372,6 +382,7 @@ namespace sextant {
         };
 
         for (const auto& lp: all.lines) {
+            if (!object_shown(lp)) continue;
             for (double v: lp.x) {
                 xlo = std::min(xlo, v);
                 xhi = std::max(xhi, v);
@@ -383,6 +394,7 @@ namespace sextant {
             grow_err(lp.x, lp.y, lp.err);
         }
         for (const auto& sp: all.scatters) {
+            if (!object_shown(sp)) continue;
             for (double v: sp.x) {
                 xlo = std::min(xlo, v);
                 xhi = std::max(xhi, v);
@@ -394,6 +406,7 @@ namespace sextant {
             grow_err(sp.x, sp.y, sp.err);
         }
         for (const auto& sp: all.scatter_z) {
+            if (!object_shown(sp)) continue;
             for (double v: sp.x) {
                 xlo = std::min(xlo, v);
                 xhi = std::max(xhi, v);
@@ -405,6 +418,7 @@ namespace sextant {
             grow_err(sp.x, sp.y, sp.err);
         }
         for (const auto& bp: all.bars) {
+            if (!object_shown(bp)) continue;
             // Thickness along the category axis, base to tip along the value axis.
             const bool lying = bp.horizontal();
             double& clo = lying ? ylo : xlo;
@@ -429,6 +443,7 @@ namespace sextant {
         // A reference line or span counts on its own axis only.
         if (all.axlines)
             for (const auto& lp: *all.axlines) {
+                if (!object_shown(lp)) continue;
                 double& lo = lp.on_x() ? xlo : ylo;
                 double& hi = lp.on_x() ? xhi : yhi;
                 lo = std::min(lo, lp.value);
@@ -436,6 +451,7 @@ namespace sextant {
             }
         if (all.axspans)
             for (const auto& sp: *all.axspans) {
+                if (!object_shown(sp)) continue;
                 double& lo = sp.on_x() ? xlo : ylo;
                 double& hi = sp.on_x() ? xhi : yhi;
                 lo = std::min(lo, std::min(sp.lo, sp.hi));
@@ -443,6 +459,7 @@ namespace sextant {
             }
         if (all.fills)
             for (const auto& fp: *all.fills) {
+                if (!object_shown(fp)) continue;
                 double& rlo = fp.vertical() ? ylo : xlo;
                 double& rhi = fp.vertical() ? yhi : xhi;
                 double& vlo = fp.vertical() ? xlo : ylo;
@@ -455,17 +472,20 @@ namespace sextant {
                 });
             }
         if (all.quivers)
-            for (const auto& qp: *all.quivers)
+            for (const auto& qp: *all.quivers) {
+                if (!object_shown(qp)) continue;
                 quiver_limit_points(qp, AxisScale{}, AxisScale{}, [&](double x, double y) {
                     xlo = std::min(xlo, x);
                     xhi = std::max(xhi, x);
                     ylo = std::min(ylo, y);
                     yhi = std::max(yhi, y);
                 });
+            }
         AutoBounds b;
         b.x.loose = {xlo, xhi};
         b.y.loose = {ylo, yhi};
         for (const auto& hp: all.heatmaps) {
+            if (!object_shown(hp)) continue;
             // The heatmap's extent, unpadded; either range may be reversed.
             b.x.tight.add(hp.xrange.lo);
             b.x.tight.add(hp.xrange.hi);

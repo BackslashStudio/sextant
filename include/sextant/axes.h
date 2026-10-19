@@ -410,6 +410,46 @@ namespace sextant {
         // The string and position only; an annotation keeps its arrow and point.
         Axes& set_text_data(std::size_t i, std::string_view s, Pos x, Pos y);
 
+        // ----------------------------------------------------------------
+        // Hiding plot objects
+        // ----------------------------------------------------------------
+        // Show or hide object i (its options' `visible`, see
+        // LineOptions::visible), keeping its data, options and place; with
+        // Figure::refresh() after. A hidden object leaves the auto limits, the
+        // legend and the colorbars. Wins over a Data-panel Visible toggle made
+        // before the call. Throws std::out_of_range for i >= `*_count()`.
+        Axes& set_line_visible(std::size_t i, bool visible);
+        bool line_visible(std::size_t i) const;
+
+        Axes& set_scatter_visible(std::size_t i, bool visible);
+        bool scatter_visible(std::size_t i) const;
+
+        Axes& set_scatter_z_visible(std::size_t i, bool visible);
+        bool scatter_z_visible(std::size_t i) const;
+
+        Axes& set_bar_visible(std::size_t i, bool visible);
+        bool bar_visible(std::size_t i) const;
+
+        Axes& set_heatmap_visible(std::size_t i, bool visible);
+        bool heatmap_visible(std::size_t i) const;
+
+        // A stack()'s layers are fills of their own.
+        Axes& set_fill_visible(std::size_t i, bool visible);
+        bool fill_visible(std::size_t i) const;
+
+        Axes& set_quiver_visible(std::size_t i, bool visible);
+        bool quiver_visible(std::size_t i) const;
+
+        Axes& set_axline_visible(std::size_t i, bool visible);
+        bool axline_visible(std::size_t i) const;
+
+        Axes& set_axspan_visible(std::size_t i, bool visible);
+        bool axspan_visible(std::size_t i) const;
+
+        // An annotation's arrow goes with its text.
+        Axes& set_text_visible(std::size_t i, bool visible);
+        bool text_visible(std::size_t i) const;
+
     private:
         struct Impl;
         std::unique_ptr<Impl> d;

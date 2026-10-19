@@ -808,4 +808,50 @@ namespace sextant {
     Axes3D& Axes3D::set_line3d_data(std::size_t i, const Line3DData& v) {
         return set_line3d_data(i, v.x, v.y, v.z, v.colors);
     }
+
+    // --- Hiding plot objects ------------------------------------------------
+
+    Axes3D& Axes3D::set_bar3d_visible(std::size_t i, bool visible) {
+        read_back::set_visible(d->bars3d, i, visible, "Axes3D::set_bar3d_visible");
+        return *this;
+    }
+    Axes3D& Axes3D::set_surface_visible(std::size_t i, bool visible) {
+        read_back::set_visible(d->surfaces, i, visible, "Axes3D::set_surface_visible");
+        return *this;
+    }
+    Axes3D& Axes3D::set_surface_tri_visible(std::size_t i, bool visible) {
+        read_back::set_visible(d->surface_tri, i, visible, "Axes3D::set_surface_tri_visible");
+        return *this;
+    }
+    Axes3D& Axes3D::set_scatter3d_visible(std::size_t i, bool visible) {
+        read_back::set_visible(d->scatter3d, i, visible, "Axes3D::set_scatter3d_visible");
+        return *this;
+    }
+    Axes3D& Axes3D::set_line3d_visible(std::size_t i, bool visible) {
+        read_back::set_visible(d->lines3d, i, visible, "Axes3D::set_line3d_visible");
+        return *this;
+    }
+    Axes3D& Axes3D::set_text_visible(std::size_t i, bool visible) {
+        read_back::set_visible(d->texts, i, visible, "Axes3D::set_text_visible");
+        return *this;
+    }
+
+    bool Axes3D::bar3d_visible(std::size_t i) const {
+        return read_back::visible(d->bars3d, i, "Axes3D::bar3d_visible");
+    }
+    bool Axes3D::surface_visible(std::size_t i) const {
+        return read_back::visible(d->surfaces, i, "Axes3D::surface_visible");
+    }
+    bool Axes3D::surface_tri_visible(std::size_t i) const {
+        return read_back::visible(d->surface_tri, i, "Axes3D::surface_tri_visible");
+    }
+    bool Axes3D::scatter3d_visible(std::size_t i) const {
+        return read_back::visible(d->scatter3d, i, "Axes3D::scatter3d_visible");
+    }
+    bool Axes3D::line3d_visible(std::size_t i) const {
+        return read_back::visible(d->lines3d, i, "Axes3D::line3d_visible");
+    }
+    bool Axes3D::text_visible(std::size_t i) const {
+        return read_back::visible(d->texts, i, "Axes3D::text_visible");
+    }
 } // namespace sextant

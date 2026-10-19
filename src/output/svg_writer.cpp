@@ -842,7 +842,7 @@ static void emit_plots(std::ostringstream& o, const SvgAxesData& d) {
 // border and grid, as in render_frame().
 static bool has_contours(const SvgAxesData& d) {
     for (const auto& hp : d.heatmaps)
-        if (!hp.opts.contours.empty() && hp.rows > 0 && hp.cols > 0) return true;
+        if (object_shown(hp) && !hp.opts.contours.empty() && hp.rows > 0 && hp.cols > 0) return true;
     return false;
 }
 
@@ -882,7 +882,7 @@ static void emit_contour_draw(std::ostringstream& o, const SvgAxesData& d,
 
 static void emit_contours(std::ostringstream& o, const SvgAxesData& d) {
     for (const auto& hp : d.heatmaps) {
-        if (hp.opts.contours.empty() || hp.rows <= 0 || hp.cols <= 0) continue;
+        if (!object_shown(hp) || hp.opts.contours.empty() || hp.rows <= 0 || hp.cols <= 0) continue;
         const ContourSet  set = trace_contours(hp);
         const ContourDraw cd  = plan_contours(set, d.layout.tr, hp.opts,
                                               d.axes_style.font_path);
