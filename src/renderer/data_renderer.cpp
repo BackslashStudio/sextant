@@ -121,36 +121,34 @@ void main() {
 
     vec2  d  = p1 - p0;
     float dl = length(d);
-    if (dl < 1e-6) {                        // zero-length segment: cull the quad
-        gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
-        return;
-    }
-    vec2 nb = vec2(-d.y, d.x) / dl;         // this segment's left normal
+    vec2 nb = vec2(-d.y, d.x) / max(dl, 1e-6);   // this segment's left normal
 
     vec2 o0, o1;
     if (!miter_joint(pp, p0, p1, o0)) o0 = nb;
     bool bevel = !miter_joint(p0, p1, pn, o1);
     if (bevel) o1 = nb;
 
-    vec2 px;
-    if (aCorner.x < 1.5) {
-        px = mix(p0, p1, aCorner.x)
-           + mix(o0, o1, aCorner.x) * (aCorner.y * uHalfWidth);
-    } else {
-        // The bevel: p1 and the two segments' corners on the outer side. It
-        // collapses to p1 for a miter or at the end of the path.
-        px = p1;
-        vec2 dn = pn - p1;
-        float dnl = length(dn);
-        if (bevel && dnl > 1e-6 && aCorner.y > 0.5) {
-            float side = (d.x * dn.y - d.y * dn.x) > 0.0 ? -1.0 : 1.0;
-            vec2 n = aCorner.y < 1.5 ? nb : vec2(-dn.y, dn.x) / dnl;
-            px += n * (side * uHalfWidth);
-        }
-    }
+    float t = min(aCorner.x, 1.0);
+    vec2 quad = mix(p0, p1, t) + mix(o0, o1, t) * (aCorner.y * uHalfWidth);
+
+    // The bevel: p1 and the two segments' corners on the outer side. None for
+    // a miter, at the end of the path, or at an exact reversal (no area).
+    vec2 dn = pn - p1;
+    float dnl = length(dn);
+    float turn = (d.x * dn.y - d.y * dn.x) / (max(dl, 1e-6) * max(dnl, 1e-6));   // sin of the turn
+    float side = turn > 0.0 ? -1.0 : 1.0;
+    bool beveled = bevel && dnl > 1e-6 && abs(turn) > 1e-4;
+    float open = aCorner.y > 0.5 ? side * uHalfWidth : 0.0;
+    vec2 n = aCorner.y < 1.5 ? nb : vec2(-dn.y, dn.x) / max(dnl, 1e-6);
+    vec2 px = aCorner.x > 1.5 ? p1 + n * open : quad;
+
     vec2 ndc = (px / uResolution) * 2.0 - 1.0;
     ndc.y = -ndc.y;
-    gl_Position = vec4(ndc, 0.0, 1.0);
+    // A zero-length segment is culled (its quad would have no direction), and
+    // so is a bevel that is not drawn: left as a triangle collapsed onto p1,
+    // Mesa's llvmpipe dropped the whole draw (no line at all; CI, 2026-10-19).
+    bool cull = dl < 1e-6 || (aCorner.x > 1.5 && !beveled);
+    gl_Position = cull ? vec4(2.0, 2.0, 2.0, 1.0) : vec4(ndc, 0.0, 1.0);
 
     // Distance along the centreline (so dashes don't shear across the width);
     // only the accumulated prefix needs the uDistScale correction.
