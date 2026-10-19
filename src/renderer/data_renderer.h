@@ -646,7 +646,7 @@ private:
     // Instanced line-segment program
     unsigned int lineseg_program_   = 0;
     unsigned int lineseg_vao_       = 0;
-    unsigned int lineseg_corner_vbo_ = 0;   // static 4-vertex unit quad
+    unsigned int lineseg_corner_vbo_ = 0;   // static k_lineseg_corners
     unsigned int ref_vbo_ = 0;              // a reference line's padded ends, per draw
     unsigned int fill_edge_vbo_ = 0;        // a fill outline's padded ring, per draw
     unsigned int fill_dist_vbo_ = 0;        // and its arc lengths (dashes)

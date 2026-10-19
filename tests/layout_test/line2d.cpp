@@ -203,6 +203,116 @@ namespace lt {
                   "would otherwise change about the picture");
         }
 
+        // A hairpin, turning past the miter limit, is beveled: each segment keeps
+        // its full width up to the turn. (Both once took the next segment's normal
+        // there, which pinched the first segment to a wedge, nearly nothing at its
+        // middle.) Laid out in pixels; the two arms are ~27 px apart at the middle.
+        {
+            LinePlot pin = triangle(false);
+            pin.opts.linewidth = 12.0f;
+            const float fx[3] = {0.1f, 0.9f, 0.1f}, fy[3] = {0.3f, 0.4f, 0.5f};
+            float qx[3], qy[3];
+            std::vector<double> x, y;
+            for (int i = 0; i < 3; ++i) {
+                qx[i] = tr.px + fx[i] * tr.pw;
+                qy[i] = tr.py + fy[i] * tr.ph;
+                x.push_back(tr.to_data_x(qx[i]));
+                y.push_back(tr.to_data_y(qy[i]));
+            }
+            pin.x = std::move(x);
+            pin.y = std::move(y);
+            LinePlot faint = pin;
+            faint.opts.alpha = 0.5f;
+            {
+                GLContext ctx({.width = W, .height = H, .title = "layout_test", .visible = false});
+                RenderDevice dev;
+                DataRenderer data;
+                export_figure_png(dev, data, one_axes(pin), "line_hairpin.png", W, H, 1);
+                export_figure_png(dev, data, one_axes(faint), "line_hairpin_alpha.png", W, H, 1);
+            }
+            // Translucent, it is painted once: 8 px back from the turn, inside
+            // both arms, the same color as the middle of one (blended twice there,
+            // it was darker).
+            {
+                int w = 0, h = 0, comp = 0;
+                unsigned char* px = stbi_load("line_hairpin_alpha.png", &w, &h, &comp, 4);
+                check(px != nullptr && w == W && h == H, "rendered: line_hairpin_alpha.png decoded");
+                if (px) {
+                    auto green = [&](float x, float y) {
+                        return static_cast<int>(px[(static_cast<int>(y) * w + static_cast<int>(x)) * 4 + 1]);
+                    };
+                    const int both = green(qx[1] - 8.0f, qy[1]);
+                    const int one = green(0.5f * (qx[0] + qx[1]), 0.5f * (qy[0] + qy[1]));
+                    stbi_image_free(px);
+                    std::printf("  hairpin at alpha 0.5: green %d where the arms overlap, %d on one\n", both, one);
+                    check(one > 60 && one < 200 && std::abs(both - one) <= 3,
+                          "rendered: a translucent stroke blends once where its own segments overlap "
+                          "(" + std::to_string(both) + " vs " + std::to_string(one) + ")");
+                }
+            }
+            int w = 0, h = 0, comp = 0;
+            unsigned char* px = stbi_load("line_hairpin.png", &w, &h, &comp, 4);
+            check(px != nullptr && w == W && h == H, "rendered: line_hairpin.png decoded");
+            if (px) {
+                // Ink across the first arm at its middle, sampled along its normal.
+                const float dx = qx[1] - qx[0], dy = qy[1] - qy[0], len = std::hypot(dx, dy);
+                const float nx = -dy / len, ny = dx / len;
+                const float cx = 0.5f * (qx[0] + qx[1]), cy = 0.5f * (qy[0] + qy[1]);
+                int lit = 0;
+                for (float t = -12.0f; t <= 12.0f; t += 0.25f) {
+                    const int ix = static_cast<int>(cx + t * nx), iy = static_cast<int>(cy + t * ny);
+                    if (ix < 0 || iy < 0 || ix >= w || iy >= h) continue;
+                    const unsigned char* p = px + (iy * w + ix) * 4;
+                    if (p[0] > 120 && p[1] < 100 && p[2] < 100) ++lit;
+                }
+                stbi_image_free(px);
+                const float width = 0.25f * static_cast<float>(lit);
+                std::printf("  hairpin: first arm %.2f px wide at its middle (linewidth 12)\n", width);
+                check(std::fabs(width - 12.0f) <= 1.5f,
+                      "rendered: a hairpin past the miter limit keeps the full line width "
+                      "along the segment before the turn (" + std::to_string(width) + " px)");
+            }
+        }
+
+        // The SVG bevels where the shader does. A hairpin is past the miter limit,
+        // which an SVG viewer bevels by itself: one element. A tight zigzag
+        // (20 px segments, 120 degree turns, width 30) is within the limit, but
+        // the shader bevels it so its quads don't fold over; the SVG is cut at
+        // each of the four inner joints, each corner its own beveled polyline.
+        {
+            auto pixels_to_line = [&](std::initializer_list<float> fx, std::initializer_list<float> fy,
+                                      float width) {
+                LinePlot lp = triangle(false);
+                lp.opts.linewidth = width;
+                std::vector<double> x, y;
+                for (const float f : fx) x.push_back(tr.to_data_x(tr.px + f));
+                for (const float f : fy) y.push_back(tr.to_data_y(tr.py + f));
+                lp.x = std::move(x);
+                lp.y = std::move(y);
+                return lp;
+            };
+            auto count = [](const std::string& s, const std::string& what) {
+                int k = 0;
+                for (std::size_t p = s.find(what); p != std::string::npos; p = s.find(what, p + 1)) ++k;
+                return k;
+            };
+            export_figure_svg(one_axes(pixels_to_line({30, 300, 30}, {80, 110, 140}, 12.0f)),
+                              "line_hairpin.svg", W, H);
+            const std::string pin = read_file("line_hairpin.svg");
+            check(count(pin, "<polyline") == 1 && count(pin, "stroke-linejoin") == 0,
+                  "rendered: a hairpin past the miter limit is one SVG polyline (the viewer bevels it)");
+
+            export_figure_svg(one_axes(pixels_to_line({40, 50, 60, 70, 80, 90},
+                                                      {120, 137.3f, 120, 137.3f, 120, 137.3f}, 30.0f)),
+                              "line_zigzag.svg", W, H);
+            const std::string zig = read_file("line_zigzag.svg");
+            std::printf("  zigzag SVG: %d polylines, %d beveled corners\n", count(zig, "<polyline"),
+                        count(zig, "stroke-linejoin=\"bevel\""));
+            check(count(zig, "<polyline") == 9 && count(zig, "stroke-linejoin=\"bevel\"") == 4,
+                  "rendered: SVG cuts a tight zigzag at the joints the shader bevels -- five pieces "
+                  "and four beveled corners, so its corners match the PNG's");
+        }
+
         // A plane's strokes use the same accessors.
         {
             auto plane_segs = [](bool loop) {

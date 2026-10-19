@@ -253,24 +253,126 @@ static void emit_grid(std::ostringstream& o, const SvgAxesData& d) {
     o << "  </g>\n";
 }
 
+// A stroke path in pixels, as the stroke shader draws it.
+struct PixelPath {
+    std::vector<float> x, y;
+    bool loop = false;
+};
+
+// The joints of `p` the stroke shader bevels and an SVG viewer would miter
+// (stroke_short_bevel()), ascending.
+static std::vector<std::size_t> short_bevels(const PixelPath& p, float width) {
+    std::vector<std::size_t> out;
+    const std::size_t n = p.x.size();
+    if (n < 3) return out;
+    for (std::size_t j = p.loop ? 0 : 1; j < (p.loop ? n : n - 1); ++j) {
+        const std::size_t a = j == 0 ? n - 1 : j - 1, b = j + 1 == n ? 0 : j + 1;
+        if (stroke_short_bevel(p.x[a], p.y[a], p.x[j], p.y[j], p.x[b], p.y[b], 0.5f * width))
+            out.push_back(j);
+    }
+    return out;
+}
+
+// `p` stroked in `color` at `opacity` and `width`, with the joints in `bevels`
+// beveled: polylines from cut to cut (a loop is also cut at its first point),
+// each cut's corner a polyline of its own with 0.05 px arms carrying the join,
+// beveled or SVG's default miter. The dash phase follows the shader's arc
+// length from the first point, which a loop's closing segment continues. The
+// pieces overlap, so a translucent stroke is an opaque one in a <g> carrying
+// the opacity: composited once, as one path is (and the shader's PaintOnce).
+static void emit_beveled_stroke(std::ostringstream& o, const PixelPath& p,
+                                const std::vector<std::size_t>& bevels,
+                                const std::string& color, float opacity, float width,
+                                LineStyle ls) {
+    std::ostringstream st;
+    st << " stroke=\"" << color << "\" stroke-width=\"" << width << "\"";
+    const std::string stroke = st.str();
+    if (opacity < 1.0f) o << "  <g opacity=\"" << opacity << "\">\n";
+    const std::size_t n = p.x.size();
+    auto len = [&](std::size_t a, std::size_t b) {
+        return std::hypot(static_cast<double>(p.x[b]) - p.x[a], static_cast<double>(p.y[b]) - p.y[a]);
+    };
+    std::vector<double> arc(n, 0.0);
+    for (std::size_t i = 1; i < n; ++i) arc[i] = arc[i - 1] + len(i - 1, i);
+    const std::string dash = dash_attr(ls);
+
+    auto open = [&](double offset) {
+        o << "  <polyline fill=\"none\"" << stroke << dash;
+        if (!dash.empty()) o << " stroke-dashoffset=\"" << offset << "\"";
+    };
+    auto piece = [&](std::size_t from, std::size_t points) {
+        open(arc[from]);
+        o << " points=\"";
+        for (std::size_t k = 0; k < points; ++k) {
+            const std::size_t i = (from + k) % n;
+            o << p.x[i] << "," << p.y[i] << " ";
+        }
+        o << "\"/>\n";
+    };
+
+    std::vector<std::size_t> cuts = bevels;
+    if (p.loop && (cuts.empty() || cuts.front() != 0)) cuts.insert(cuts.begin(), 0);
+    if (p.loop) {
+        for (std::size_t c = 0; c < cuts.size(); ++c) {
+            const std::size_t from = cuts[c], to = cuts[(c + 1) % cuts.size()];
+            piece(from, (to + n - from - 1) % n + 2);
+        }
+    } else {
+        std::size_t from = 0;
+        for (const std::size_t j : cuts) {
+            piece(from, j - from + 1);
+            from = j;
+        }
+        piece(from, n - from);
+    }
+
+    constexpr float arm = 0.05f;
+    for (const std::size_t j : cuts) {
+        const std::size_t a = j == 0 ? n - 1 : j - 1, b = j + 1 == n ? 0 : j + 1;
+        const double la = len(a, j), lb = len(j, b);
+        if (!(la > 1e-6) || !(lb > 1e-6)) continue;
+        const double at = j == 0 ? arc[n - 1] + la : arc[j];
+        open(at - arm);
+        if (std::binary_search(bevels.begin(), bevels.end(), j)) o << " stroke-linejoin=\"bevel\"";
+        o << " points=\""
+          << p.x[j] - arm * (p.x[j] - p.x[a]) / la << "," << p.y[j] - arm * (p.y[j] - p.y[a]) / la << " "
+          << p.x[j] << "," << p.y[j] << " "
+          << p.x[j] + arm * (p.x[b] - p.x[j]) / lb << "," << p.y[j] + arm * (p.y[b] - p.y[j]) / lb
+          << "\"/>\n";
+    }
+    if (opacity < 1.0f) o << "  </g>\n";
+}
+
 static void emit_lines(std::ostringstream& o, const SvgAxesData& d,
                        std::span<const std::size_t> which) {
     for (const std::size_t k : which) {
         const auto& lp = d.lines[k];
         if (lp.x.empty() || lp.opts.linestyle == LineStyle::None) continue;
 
-        // A closed path is a <polygon> (fill="none") so the seam gets a join;
-        // SVG's default miterlimit 4 matches the stroke shader.
-        const char* tag = lp.opts.loop && lp.x.size() >= 2 ? "polygon" : "polyline";
-        o << "  <" << tag << " fill=\"none\" stroke=\"" << rgb(*lp.opts.color)
-          << "\" stroke-opacity=\"" << lp.opts.alpha
-          << "\" stroke-width=\"" << lp.opts.linewidth << "\""
-          << dash_attr(lp.opts.linestyle)
-          << " points=\"";
+        PixelPath path;
+        path.loop = lp.opts.loop && lp.x.size() >= 2;
         StrokePath sp;
         sp.build(lp.x.data(), lp.y.data(), lp.x.size(), lp.opts.drawstyle, lp.opts.loop);
-        for (std::size_t i = 0; i < sp.n; ++i)
-            o << d.layout.tr.to_px(sp.x[i]) << "," << d.layout.tr.to_py(sp.y[i]) << " ";
+        for (std::size_t i = 0; i < sp.n; ++i) {
+            path.x.push_back(d.layout.tr.to_px(sp.x[i]));
+            path.y.push_back(d.layout.tr.to_py(sp.y[i]));
+        }
+        std::ostringstream stroke;
+        stroke << " stroke=\"" << rgb(*lp.opts.color) << "\" stroke-opacity=\"" << lp.opts.alpha
+               << "\" stroke-width=\"" << lp.opts.linewidth << "\"";
+
+        // Where the shader bevels a joint SVG would miter, the path is cut there.
+        const std::vector<std::size_t> bevels = short_bevels(path, lp.opts.linewidth);
+        if (!bevels.empty()) {
+            emit_beveled_stroke(o, path, bevels, rgb(*lp.opts.color), lp.opts.alpha, lp.opts.linewidth,
+                                lp.opts.linestyle);
+            continue;
+        }
+        // A closed path is a <polygon> (fill="none") so the seam gets a join;
+        // SVG's default miterlimit 4 matches the stroke shader.
+        o << "  <" << (path.loop ? "polygon" : "polyline") << " fill=\"none\"" << stroke.str()
+          << dash_attr(lp.opts.linestyle) << " points=\"";
+        for (std::size_t i = 0; i < path.x.size(); ++i) o << path.x[i] << "," << path.y[i] << " ";
         o << "\"/>\n";
     }
 }
@@ -598,19 +700,52 @@ static void emit_fill(std::ostringstream& o, const SvgAxesData& d, const FillPlo
     const Color& c = *p.opts.color;
     const float a = c.a * p.opts.alpha;
     const bool edged = p.opts.linewidth > 0.0f && p.opts.linestyle != LineStyle::None;
+    std::string stroke;
+    if (edged) {
+        const Color ec = fill_edge(p);
+        std::ostringstream s;
+        s << " stroke=\"" << rgb(ec) << "\" stroke-opacity=\"" << ec.a << "\" stroke-width=\""
+          << p.opts.linewidth << "\"";
+        stroke = s.str();
+    }
     for (const FillRun& run : runs) {
+        PixelPath ring;
+        ring.loop = true;
+        fill_outline(run, [&](double r, double v) {
+            ring.x.push_back(tr.scale_to_px(vert ? v : r));
+            ring.y.push_back(tr.scale_to_py(vert ? r : v));
+        });
+        // The outline as the raster strokes it (draw_fill): repeated points
+        // dropped. Where it bevels a joint SVG would miter, the polygon is fill
+        // only and the outline is drawn cut at those joints.
+        std::vector<std::size_t> bevels;
+        PixelPath outline;
+        if (edged) {
+            outline.loop = true;
+            for (std::size_t i = 0; i < ring.x.size(); ++i) {
+                if (!outline.x.empty() && outline.x.back() == ring.x[i] && outline.y.back() == ring.y[i])
+                    continue;
+                outline.x.push_back(ring.x[i]);
+                outline.y.push_back(ring.y[i]);
+            }
+            while (outline.x.size() >= 2 && outline.x.front() == outline.x.back()
+                   && outline.y.front() == outline.y.back()) {
+                outline.x.pop_back();
+                outline.y.pop_back();
+            }
+            bevels = short_bevels(outline, p.opts.linewidth);
+        }
+
         o << "    <polygon fill=\"" << rgb(c) << "\"";
         if (a < 1.0f) o << " fill-opacity=\"" << a << "\"";
-        if (edged) {
-            const Color ec = fill_edge(p);
-            o << " stroke=\"" << rgb(ec) << "\" stroke-opacity=\"" << ec.a << "\" stroke-width=\""
-              << p.opts.linewidth << "\"" << dash_attr(p.opts.linestyle);
-        }
+        if (edged && bevels.empty()) o << stroke << dash_attr(p.opts.linestyle);
         o << " points=\"";
-        fill_outline(run, [&](double r, double v) {
-            o << tr.scale_to_px(vert ? v : r) << "," << tr.scale_to_py(vert ? r : v) << " ";
-        });
+        for (std::size_t i = 0; i < ring.x.size(); ++i) o << ring.x[i] << "," << ring.y[i] << " ";
         o << "\"/>\n";
+        if (!bevels.empty()) {
+            const Color ec = fill_edge(p);
+            emit_beveled_stroke(o, outline, bevels, rgb(ec), ec.a, p.opts.linewidth, p.opts.linestyle);
+        }
     }
 }
 

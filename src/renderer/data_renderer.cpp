@@ -65,11 +65,18 @@ void main() { FragColor = uColor; }
     // prev/p0/p1/next from the same buffer at four offsets; the buffer is padded
     // with the first and last point, so the ends degenerate to butt caps.
     //
-    // Joins are mitered. The `den > 1/kMiterLimit` guard handles near-180-degree
-    // reversals, where `na + nb` cancels and its direction is noise.
+    // Joins are mitered up to kMiterLimit (SVG's default stroke-miterlimit, which
+    // svg_writer relies on), and beveled past it or where the inner miter corner
+    // would run past half of either segment (a short segment between sharp turns,
+    // whose quad would otherwise fold over). A bevel ends both segments square
+    // on their own normals and the segment before the joint also draws the
+    // outer triangle between the two ends. Both segments decide the joint from
+    // the same three points, so they agree. (Before, past the limit both took the
+    // next segment's normal, which skewed the earlier segment into a wedge.)
     static constexpr char k_lineseg_vert[] = R"(
 #version 410 core
-layout(location = 0) in vec2 aCorner;   // x: 0 at p0, 1 at p1;  y: -1/+1 across
+layout(location = 0) in vec2 aCorner;   // quad: x 0 at p0, 1 at p1, y -1/+1 across;
+                                        // x = 2: the bevel at p1, y picks the vertex
 layout(location = 1) in vec2 aPrev;     // instance: the four consecutive points
 layout(location = 2) in vec2 aP0;
 layout(location = 3) in vec2 aP1;
@@ -83,16 +90,27 @@ uniform float uHalfWidth;   // logical pixels
 uniform float uDistScale;   // aDist was measured at a different zoom; rescale
 const float kMiterLimit = 4.0;
 
-// Offset at the joint of segments with left normals na and nb; falls back to
-// nb when the bisector is unusable.
-vec2 joint_offset(vec2 na, vec2 nb) {
-    vec2 m = na + nb;
+// The joint at j of segments a->j and j->b: true for a miter, with `off` the
+// offset of the left corners (1/cos(theta/2) along the bisector); false for a
+// bevel or a path end (a zero-length neighbour), where each side keeps its own
+// normal.
+bool miter_joint(vec2 a, vec2 j, vec2 b, out vec2 off) {
+    off = vec2(0.0);
+    vec2 da = j - a, db = b - j;
+    float la = length(da), lb = length(db);
+    if (la <= 1e-6 || lb <= 1e-6) return false;
+    vec2 nb = vec2(-db.y, db.x) / lb;
+    vec2 m = vec2(-da.y, da.x) / la + nb;
     float ml = length(m);
-    if (ml < 1e-3) return nb;              // ~180 degree reversal
+    if (ml < 1e-3) return false;           // ~180 degree reversal
     m /= ml;
     float den = dot(m, nb);
-    if (den <= 1.0 / kMiterLimit) return nb;   // too sharp, or den gone negative
-    return m / den;                            // 1/cos(theta/2)
+    if (den <= 1.0 / kMiterLimit) return false;   // too sharp, or den gone negative
+    // The inner corner slides tan(theta/2) half widths along both segments; past
+    // half the shorter one a quad would fold over itself.
+    if (uHalfWidth * sqrt(max(1.0 - den * den, 0.0)) > 0.5 * min(la, lb) * den) return false;
+    off = m / den;                                // 1/cos(theta/2)
+    return true;
 }
 
 void main() {
@@ -109,18 +127,27 @@ void main() {
     }
     vec2 nb = vec2(-d.y, d.x) / dl;         // this segment's left normal
 
-    vec2 o0 = nb;
-    vec2 dp = p0 - pp;
-    float dpl = length(dp);
-    if (dpl > 1e-6) o0 = joint_offset(vec2(-dp.y, dp.x) / dpl, nb);
+    vec2 o0, o1;
+    if (!miter_joint(pp, p0, p1, o0)) o0 = nb;
+    bool bevel = !miter_joint(p0, p1, pn, o1);
+    if (bevel) o1 = nb;
 
-    vec2 o1 = nb;
-    vec2 dn = pn - p1;
-    float dnl = length(dn);
-    if (dnl > 1e-6) o1 = joint_offset(nb, vec2(-dn.y, dn.x) / dnl);
-
-    vec2 px = mix(p0, p1, aCorner.x)
-            + mix(o0, o1, aCorner.x) * (aCorner.y * uHalfWidth);
+    vec2 px;
+    if (aCorner.x < 1.5) {
+        px = mix(p0, p1, aCorner.x)
+           + mix(o0, o1, aCorner.x) * (aCorner.y * uHalfWidth);
+    } else {
+        // The bevel: p1 and the two segments' corners on the outer side. It
+        // collapses to p1 for a miter or at the end of the path.
+        px = p1;
+        vec2 dn = pn - p1;
+        float dnl = length(dn);
+        if (bevel && dnl > 1e-6 && aCorner.y > 0.5) {
+            float side = (d.x * dn.y - d.y * dn.x) > 0.0 ? -1.0 : 1.0;
+            vec2 n = aCorner.y < 1.5 ? nb : vec2(-dn.y, dn.x) / dnl;
+            px += n * (side * uHalfWidth);
+        }
+    }
     vec2 ndc = (px / uResolution) * 2.0 - 1.0;
     ndc.y = -ndc.y;
     gl_Position = vec4(ndc, 0.0, 1.0);
@@ -128,7 +155,7 @@ void main() {
     // Distance along the centreline (so dashes don't shear across the width);
     // only the accumulated prefix needs the uDistScale correction.
     float d0 = aDist * uDistScale;
-    vDist = d0 + dl * aCorner.x;
+    vDist = d0 + dl * min(aCorner.x, 1.0);   // the bevel sits at p1
 }
 )";
 
@@ -151,6 +178,14 @@ void main() {
     FragColor = uColor;
 }
 )";
+
+    // k_lineseg_vert's aCorner per instance, drawn as GL_TRIANGLES: the
+    // segment's quad, then the bevel at p1.
+    static constexpr float k_lineseg_corners[] = {
+        0.f, -1.f, 0.f, 1.f, 1.f, -1.f,
+        0.f, 1.f, 1.f, -1.f, 1.f, 1.f,
+        2.f, 0.f, 2.f, 1.f, 2.f, 2.f};
+    static constexpr int k_lineseg_vertices = sizeof(k_lineseg_corners) / (2 * sizeof(float));
 
     // Quiver arrows: one instance per arrow, its tail and tip in scale space
     // minus an anchor (uScale/uOffset map them to pixels, so pan/zoom reuse the
@@ -1171,6 +1206,58 @@ void main() {
         glDisable(GL_SCISSOR_TEST);
     }
 
+    namespace {
+        // Translucent strokes paint each pixel once, as an SVG path does: a
+        // stroke's own quads overlap inside a beveled turn and where it crosses
+        // itself, and would blend twice there. Each translucent stroke tests and
+        // writes a stencil value of its own, so it skips what it already painted
+        // while other strokes still blend over it. The (scissored) stencil is
+        // cleared before the first value and after the last, since NanoVG expects
+        // zeros, and again when the 255 values run out. A target without a stencil
+        // passes every test: the overlaps then blend twice, as before.
+        class PaintOnce {
+        public:
+            PaintOnce() = default;
+            PaintOnce(const PaintOnce&) = delete;
+            PaintOnce& operator=(const PaintOnce&) = delete;
+
+            // Before each stroke's draw.
+            void stroke(bool translucent) {
+                if (!translucent) {
+                    glDisable(GL_STENCIL_TEST);
+                    return;
+                }
+                if (ref_ == 0 || ref_ == 255) {
+                    clear();
+                    ref_ = 0;
+                }
+                ++ref_;
+                glEnable(GL_STENCIL_TEST);
+                glStencilFunc(GL_NOTEQUAL, ref_, 0xFF);
+                glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+            }
+
+            // Before end_pass(), while the scissor still holds the plot rect.
+            void finish() {
+                if (ref_ == 0) return;
+                clear();
+                glDisable(GL_STENCIL_TEST);
+                glStencilFunc(GL_ALWAYS, 0, 0xFF);
+                glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+                ref_ = 0;
+            }
+
+        private:
+            static void clear() {
+                glStencilMask(0xFF);
+                glClearStencil(0);
+                glClear(GL_STENCIL_BUFFER_BIT);
+            }
+
+            int ref_ = 0;
+        };
+    } // namespace
+
     // Exact equality: the transform is recomputed deterministically, so it is
     // bit-identical unless the view really moved.
     namespace {
@@ -1383,10 +1470,9 @@ void main() {
         glGenVertexArrays(1, &lineseg_vao_);
         glGenBuffers(1, &lineseg_corner_vbo_);
         glBindVertexArray(lineseg_vao_);
-        // Unit quad as a triangle strip: x picks the segment end, y the side.
-        static const float corners[8] = {0.f, -1.f, 0.f, 1.f, 1.f, -1.f, 1.f, 1.f};
         glBindBuffer(GL_ARRAY_BUFFER, lineseg_corner_vbo_);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(corners), corners, GL_STATIC_DRAW);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(k_lineseg_corners), k_lineseg_corners,
+                     GL_STATIC_DRAW);
         glEnableVertexAttribArray(0);
         glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), nullptr);
         glVertexAttribDivisor(0, 0);
@@ -1572,6 +1658,8 @@ void main() {
         glBindVertexArray(0);
 
         // --- 3D bar edges (world-space ribbons) ---
+        // Unit quad as a triangle strip: x picks the segment end, y the side.
+        static const float corners[8] = {0.f, -1.f, 0.f, 1.f, 1.f, -1.f, 1.f, 1.f};
         bar3d_edge_program_ = build_program(
             expand_shader(k_bar3d_edge_vert, "RIBBON", k_ribbon_expand).c_str(),
             k_flat_frag);
@@ -1976,6 +2064,7 @@ void main() {
 
         std::vector<float> pts, dists;
         StrokePath path;
+        PaintOnce once;
         for (const std::size_t li : which) {
             const auto& lp = lines[li];
             if (lp.x.size() < 2) continue;
@@ -2160,8 +2249,10 @@ void main() {
             const auto& c = *lp.opts.color;
             glUniform4f(lineseg_u_.color,
                         c.r, c.g, c.b, c.a * lp.opts.alpha);
-            glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, e.segments);
+            once.stroke(c.a * lp.opts.alpha < 1.0f);
+            glDrawArraysInstanced(GL_TRIANGLES, 0, k_lineseg_vertices, e.segments);
         }
+        once.finish();
 
         glBindVertexArray(0);
         glUseProgram(0);
@@ -2689,7 +2780,7 @@ void main() {
 
         const Color& c = *p.opts.color;
         glUniform4f(lineseg_u_.color, c.r, c.g, c.b, c.a * p.opts.alpha);
-        glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, 1);
+        glDrawArraysInstanced(GL_TRIANGLES, 0, k_lineseg_vertices, 1);
 
         glBindVertexArray(0);
         glUseProgram(0);
@@ -2862,6 +2953,7 @@ void main() {
         glUniform4f(lineseg_u_.color, ec.r, ec.g, ec.b, ec.a);
 
         std::vector<float> ring, pts, dists;
+        PaintOnce once; // each region's outline as one stroke, as each SVG polygon
         for (const FillRun& run : rs) {
             // The ring in pixels, a point equal to the one before it dropped (a
             // zero-length segment has no direction to join).
@@ -2921,8 +3013,10 @@ void main() {
                 glDisableVertexAttribArray(5);
                 glVertexAttrib1f(5, 0.0f);
             }
-            glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, static_cast<GLsizei>(m));
+            once.stroke(ec.a < 1.0f);
+            glDrawArraysInstanced(GL_TRIANGLES, 0, k_lineseg_vertices, static_cast<GLsizei>(m));
         }
+        once.finish();
 
         glBindVertexArray(0);
         glUseProgram(0);
