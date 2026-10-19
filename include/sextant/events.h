@@ -33,7 +33,8 @@ namespace sextant {
         None,
         Line, Scatter, ScatterZ, Bar, Heatmap,                // 2D kinds, on an Axes or a Plane2D
         Bar3D, Surface, SurfaceTri, Scatter3D, Line3D,         // 3D kinds
-        Quiver                                                // 2D, appended
+        Quiver,                                               // 2D, appended
+        Fill                                                  // 2D (fill(), stack()), appended
     };
 
     // What sextant itself did with the input. Informational only: an event is
@@ -97,11 +98,15 @@ namespace sextant {
         int width = 0;
         int height = 0;
 
-        // Pick (the position fields above describe the press): what was under it,
-        // within 12 pixels, nearest first. `pick_object`: index within its kind
+        // Pick (the position fields above describe the press): what was under it.
+        // A point, marker, arrow or path vertex within the pick radius
+        // (Figure::set_pick_radius(), 12 by default) answers first, the nearest;
+        // else the topmost bar, fill or heatmap the press is inside, whose
+        // position is the event's xdata/ydata. `pick_object`: index within its kind
         // (on the axes, or on the plane when pick_plane >= 0); `pick_index`: the
         // element -- point, bar, marker or vertex index; a sample of a surface;
-        // the flat cell index (row * columns + column) of a heatmap or bar3d;
+        // the flat cell index (row * columns + column) of a heatmap or bar3d; a
+        // fill's segment i, between its points i and i + 1;
         // `pick_row`/`pick_col` for those grids, else -1. `pick_plane` is the
         // plane's index in Axes3D::plane_at(), or -1 for an object of the axes
         // itself. Indices refer to the data the window drew: a program that
@@ -113,8 +118,8 @@ namespace sextant {
         int pick_col = -1;
         int pick_plane = -1;
         // Whose object `pick_object` indexes in a 2D cell with twins: 0 the
-        // axes' own, 1 its twinx(), 2 its twiny(). Of two equally near objects
-        // the later call wins, whichever axes took it.
+        // axes' own, 1 its twinx(), 2 its twiny(). Of two equally near points,
+        // or two areas, the later call wins, whichever axes took it.
         int pick_twin = 0;
     };
 

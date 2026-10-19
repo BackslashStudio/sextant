@@ -117,7 +117,7 @@ namespace sextant {
     // figure.h
     SEXTANT_DESCRIBE(FigureOptions,
                      F(width) F(height) F(title) F(resizable) F(dpi) F(subplot_col_gap)
-                     F(subplot_row_gap) F(margins) F(background) F(mathtext) F(math_fontset) F(math_font_path)
+                     F(subplot_row_gap) F(margins) F(background) F(pick_radius) F(mathtext) F(math_fontset) F(math_font_path)
                      F(panel_width) F(supersample) F(vsync)
                      F(theme))
     SEXTANT_DESCRIBE(SvgExportOptions, F(max_splits) F(max_tests))

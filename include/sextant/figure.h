@@ -46,6 +46,12 @@ namespace sextant {
         // set_background().
         Color background = {0.93f, 0.93f, 0.93f, 1.0f};
 
+        // How near, in pixels, the cursor must come to a point, marker, arrow or
+        // path vertex for the hover hint and a Pick to find it. Bars, fills and
+        // heatmaps answer where the cursor is inside them instead. Must be
+        // finite and >= 0. Also set_pick_radius().
+        float pick_radius = 12.0f;
+
         // Math in text: a string with an even, nonzero count of `$` not preceded
         // by a backslash draws its $...$ spans as math, a subset of matplotlib's
         // mathtext (x^2, x_i, \alpha, \pm, ...). Titles, tick labels, legend and
@@ -324,6 +330,12 @@ namespace sextant {
 
         // The fill behind the whole figure; see FigureOptions::background.
         void set_background(Color color);
+
+        // See FigureOptions::pick_radius; shown at the next refresh(). Throws
+        // std::invalid_argument for a negative or non-finite radius.
+        void set_pick_radius(float px);
+
+        float pick_radius() const;
 
         // Relative column widths / row heights of the subplot grid, e.g. {2, 1};
         // a span gets the sum of its weights. Empty = equal (default). Throws

@@ -258,8 +258,8 @@ namespace lt {
                   "colorbars: in call order (outward from the frame), not heatmaps first");
         }
 
-        // Hover: of two points at one spot, the later object's; a heatmap made
-        // later hides the point, so its cell wins.
+        // Hover: of two points at one spot, the later object's; a point beats a
+        // heatmap whenever either was made (step 39).
         const CoordTransform tr{0.0, 10.0, 0.0, 10.0, 0.0f, 0.0f, 400.0f, 400.0f, 400.0f, 400.0f};
         auto pick = [&](ObjectId line_id, ObjectId scatter_id, ObjectId heat_id) {
             RenderSnapshot s = snap_0_10();
@@ -279,7 +279,7 @@ namespace lt {
         };
         check(pick(2, 1, 0) == PickKind::Line && pick(1, 2, 0) == PickKind::Scatter,
               "hover: of equal distances, the object made later (the one on top)");
-        check(pick(1, 2, 3) == PickKind::Heatmap && pick(2, 3, 1) == PickKind::Scatter,
-              "hover: a heatmap made after the point hides it; one made before does not");
+        check(pick(1, 2, 3) == PickKind::Scatter && pick(2, 3, 1) == PickKind::Scatter,
+              "hover: a point beats a heatmap, made after it or before");
     }
 } // namespace lt

@@ -274,16 +274,16 @@ PlotViewInfo PlotView::draw(FigureContext& fig, RenderDevice& dev, PlotViewState
                 const CellLayers l = cell_layers(*fa, *cell);
                 std::size_t k = 0;
                 if (const auto hit = find_pick_layers(l, cursor_x, cursor_y, k, &pv.hint_index,
-                                                      fsnap.data_generation))
+                                                      fsnap.data_generation, fsnap.pick_radius))
                     hint = HintResult{format_pick(*l.snaps[k], *hit), hit->anchor_x, hit->anchor_y};
             } else if (fa && fa->snap2d()) {
                 pv.hint_index.set_frame_key(fsnap.data_generation, cell->slot.index);
                 hint = find_hint(*fa->snap2d(), cell->tr, cursor_x, cursor_y,
-                                 &pv.hint_index);
+                                 &pv.hint_index, fsnap.pick_radius);
             } else if (fa && fa->snap3d() && cell->proj3d) {
                 pv.hint_index.set_frame_key(fsnap.data_generation, cell->slot.index);
                 hint = find_hint3d(*fa->snap3d(), *cell->proj3d, cursor_x, cursor_y,
-                                   &pv.hint_index);
+                                   &pv.hint_index, fsnap.pick_radius);
             }
             if (hint) {
                 plot_fbo.bind();

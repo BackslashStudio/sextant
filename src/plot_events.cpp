@@ -78,14 +78,14 @@ static bool fill_pick(Event& e, const FigureSnapshot& fsnap, const std::vector<A
         // Every layer of a twinned cell.
         const CellLayers l = cell_layers(*fa, *cell);
         std::size_t k = 0;
-        hit = find_pick_layers(l, e.x, e.y, k, index, fsnap.data_generation);
+        hit = find_pick_layers(l, e.x, e.y, k, index, fsnap.data_generation, fsnap.pick_radius);
         if (hit) twin = l.layers[k];
     } else if (fa->snap2d()) {
         if (index) index->set_frame_key(fsnap.data_generation, cell->slot.index);
-        hit = find_pick(*fa->snap2d(), HintProjector(cell->tr), e.x, e.y, index);
+        hit = find_pick(*fa->snap2d(), HintProjector(cell->tr), e.x, e.y, index, fsnap.pick_radius);
     } else if (fa->snap3d() && cell->proj3d) {
         if (index) index->set_frame_key(fsnap.data_generation, cell->slot.index);
-        hit = find_pick3d(*fa->snap3d(), *cell->proj3d, e.x, e.y, index);
+        hit = find_pick3d(*fa->snap3d(), *cell->proj3d, e.x, e.y, index, fsnap.pick_radius);
     }
     if (!hit) return false;
 

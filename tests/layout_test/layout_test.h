@@ -631,6 +631,9 @@ namespace lt {
     void test_quiver();
     void test_quiver_rendered();
 
+    // pick_area.cpp
+    void test_pick_areas();
+
     // text.cpp
     void test_text();
 

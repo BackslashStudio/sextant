@@ -322,6 +322,8 @@ int main() {
     // quiver.cpp
     test_quiver();
     test_quiver_rendered();
+    // pick_area.cpp
+    test_pick_areas();
 
     // text.cpp
     test_text();

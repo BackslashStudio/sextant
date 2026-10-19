@@ -3,7 +3,7 @@
 // NaN, steps, interpolate, log), the triangles (no overlap, crossings), and
 // automatic limits (both orientations, an orientation edit, a twin, log);
 // the Data panel, its cell, row and style edits with undo, the journal's
-// replay; legend keys; no hover; planes; GL against SVG.
+// replay; legend keys; hover; planes; GL against SVG.
 // Part of sextant_layout_test; see layout_test.h.
 #include "layout_test.h"
 #include "axis_limits.h"
@@ -409,11 +409,12 @@ namespace lt {
                   "legend: a patch at the fill's opacity, outlined in the edge color when the fill is");
         }
 
-        // Not hovered.
+        // Hovered where it covers (step 39; pick_area.cpp has the rest).
         {
             const CoordTransform tr{0.0, 2.0, 0.0, 3.0, 0.0f, 0.0f, 400.0f, 400.0f, 400.0f, 400.0f};
-            check(!find_hint(s, tr, tr.to_px(1.0), tr.to_py(1.0)) && !find_hint(s, tr, tr.to_px(1.0), tr.to_py(2.0)),
-                  "hover: a fill is not hovered");
+            const auto h = find_pick(s, tr, tr.to_px(1.0), tr.to_py(1.0));
+            check(h && h->kind == PickKind::Fill && find_hint(s, tr, tr.to_px(1.0), tr.to_py(1.0)),
+                  "hover: a fill is hovered where it covers");
         }
 
         // The journal: panel edits reach the snapshot, replay onto the live

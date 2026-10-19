@@ -2272,17 +2272,29 @@ static void test_events() {
     const char* consumed_names[] = {"none", "select", "navigate", "grid-drag"};
     const char* kinds[] = {"close", "down", "up", "move", "scroll", "key-down", "key-up", "resize", "pick"};
     const char* pick_names[] = {"none", "line", "scatter", "scatter_z", "bar", "heatmap",
-                                "bar3d", "surface", "surface_tri", "scatter3d", "line3d"};
+                                "bar3d", "surface", "surface_tri", "scatter3d", "line3d",
+                                "quiver", "fill"};
 
-    auto fig = sextant::Figure::create({.width = 900, .height = 450, .title = "events"});
+    auto fig = sextant::Figure::create({.width = 1350, .height = 450, .title = "events"});
     constexpr int N = 60;
     std::vector<double> x(N), y(N);
     for (int i = 0; i < N; ++i) {
         x[i] = i * 0.1;
         y[i] = std::sin(x[i]);
     }
-    fig->add_subplot(1, 2, 1)->line(x, y).set_title("2D: click for data coordinates");
-    auto ax3 = fig->add_subplot3d(1, 2, 2);
+    fig->add_subplot(1, 3, 1)->line(x, y).set_title("2D: click for data coordinates");
+
+    // Step 39: bars and fills answer by area, a point within the radius first.
+    auto areas = fig->add_subplot(1, 3, 2);
+    {
+        const std::vector<double> xs{0, 1, 2, 3, 4, 5, 6};
+        const std::vector<std::vector<double>> layers{{1, 2, 1.5, 2.5, 2, 1, 1.5}, {1, 1, 2, 1, 1.5, 2, 1}};
+        areas->stack(xs, layers, {.names = {"low", "high"}, .alpha = 0.6f});
+        areas->bar(std::vector<double>{8, 9, 10}, std::vector<double>{2, 4, 3}, {.name = "bars"});
+        areas->scatter(std::vector<double>{2, 9}, std::vector<double>{3, 4}, {.color = sextant::Color::Black});
+        areas->legend().set_title("Areas: inside a band or bar; the dots first");
+    }
+    auto ax3 = fig->add_subplot3d(1, 3, 3);
     ax3->set_title("3D: data only where a plane is hit");
     ax3->plane(sextant::PlaneOrientation::XY, 0.0)->line(x, y);
 

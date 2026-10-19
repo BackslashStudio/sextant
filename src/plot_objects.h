@@ -1155,6 +1155,9 @@ struct FigureSnapshot {
     // See FigureOptions::background.
     Color background = {0.93f, 0.93f, 0.93f, 1.0f};
 
+    // FigureOptions::pick_radius: what the hover hint and a Pick search with.
+    float pick_radius = 12.0f;
+
     // FigureOptions::mathtext; layout, render and export open a MathTextScope with it,
     // and the math font (FigureOptions::math_fontset resolved; "" = the text font).
     bool mathtext = true;

@@ -142,6 +142,61 @@ void fill_outline(const FillRun& run, F&& emit) {
     for (std::size_t k = run.size(); k-- > 0;) emit(run.r[k], run.b[k]);
 }
 
+namespace fill_detail {
+    // (r, v) is between the curves over r0..r1, both straight there: the area
+    // fill_triangles() covers for that interval. A riser (r0 == r1) has none.
+    inline bool interval_holds(double r0, double a0, double b0, double r1, double a1, double b1,
+                               double r, double v) {
+        if (!(r0 != r1)) return false;
+        const double t = (r - r0) / (r1 - r0);
+        if (!(t >= 0.0 && t <= 1.0)) return false;
+        const double ya = a0 + t * (a1 - a0), yb = b0 + t * (b1 - b0);
+        return v >= std::min(ya, yb) && v <= std::max(ya, yb);
+    }
+} // namespace fill_detail
+
+// The segment of `p` whose filled area holds (r, v), in scale space through
+// rs/vs as fill_runs(): the i of the points i and i + 1 the area lies between
+// (a step's corners belong to their pair; with `interpolate`, the reach to a
+// crossing belongs to the pair it crosses in). -1 outside every region.
+inline long fill_segment_at(const FillPlot& p, const AxisScale& rs, const AxisScale& vs,
+                            double r, double v) {
+    const std::size_t n = fill_detail::point_count(p);
+    long found = -1;
+    std::vector<double> sx, s1, sx2, s2;
+    auto vertex_holds = [&](double cr, double cv, std::size_t i, bool lead) {
+        const double ri = rs.fwd(p.x[i]), ai = vs.fwd(p.y1[i]), bi = vs.fwd(p.y2[i]);
+        return lead ? fill_detail::interval_holds(cr, cv, cv, ri, ai, bi, r, v)
+                    : fill_detail::interval_holds(ri, ai, bi, cr, cv, cv, r, v);
+    };
+    for_each_fill_run(p, rs, [&](std::size_t b, std::size_t e) {
+        if (found >= 0 || e - b < 2) return;
+        double cr = 0.0, cv = 0.0;
+        if (p.opts.interpolate && b > 0 && fill_crossing(p, b, b - 1, rs, vs, cr, cv)
+            && vertex_holds(cr, cv, b, true)) {
+            found = static_cast<long>(b - 1);
+            return;
+        }
+        for (std::size_t i = b; i + 1 < e; ++i) {
+            // The pair alone expands as it does inside the run.
+            step_vertices(p.x.data() + i, p.y1.data() + i, 2, p.opts.drawstyle, false, sx, s1);
+            step_vertices(p.x.data() + i, p.y2.data() + i, 2, p.opts.drawstyle, false, sx2, s2);
+            for (std::size_t k = 0; k + 1 < sx.size(); ++k) {
+                if (fill_detail::interval_holds(rs.fwd(sx[k]), vs.fwd(s1[k]), vs.fwd(s2[k]),
+                                                rs.fwd(sx[k + 1]), vs.fwd(s1[k + 1]),
+                                                vs.fwd(s2[k + 1]), r, v)) {
+                    found = static_cast<long>(i);
+                    return;
+                }
+            }
+        }
+        if (p.opts.interpolate && e < n && fill_crossing(p, e - 1, e, rs, vs, cr, cv)
+            && vertex_holds(cr, cv, e - 1, false))
+            found = static_cast<long>(e - 1);
+    });
+    return found;
+}
+
 // The outline color: `edgecolor`, else the fill's.
 inline Color fill_edge(const FillPlot& p) { return p.opts.edgecolor.value_or(*p.opts.color); }
 
