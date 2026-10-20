@@ -35,6 +35,31 @@ namespace sextant::platform {
         std::this_thread::sleep_for(std::chrono::microseconds(200));
     }
 
+    void set_app_icon(const unsigned char* rgba, int size) {
+        @autoreleasepool {
+            NSBundle* bundle = [NSBundle mainBundle];
+            if ([bundle objectForInfoDictionaryKey:@"CFBundleIconFile"] ||
+                [bundle objectForInfoDictionaryKey:@"CFBundleIconName"])
+                return; // a real Mac app keeps its own icon
+            NSBitmapImageRep* rep = [[NSBitmapImageRep alloc]
+                initWithBitmapDataPlanes:nullptr pixelsWide:size pixelsHigh:size
+                bitsPerSample:8 samplesPerPixel:4 hasAlpha:YES isPlanar:NO
+                colorSpaceName:NSDeviceRGBColorSpace bytesPerRow:size * 4 bitsPerPixel:32];
+            if (!rep) return;
+            // NSBitmapImageRep wants premultiplied alpha; the source is straight.
+            unsigned char* dst = [rep bitmapData];
+            for (int i = 0; i < size * size; ++i) {
+                const unsigned a = rgba[i * 4 + 3];
+                for (int c = 0; c < 3; ++c)
+                    dst[i * 4 + c] = static_cast<unsigned char>((rgba[i * 4 + c] * a + 127) / 255);
+                dst[i * 4 + 3] = static_cast<unsigned char>(a);
+            }
+            NSImage* img = [[NSImage alloc] initWithSize:NSMakeSize(size, size)];
+            [img addRepresentation:rep];
+            [NSApp setApplicationIconImage:img];
+        }
+    }
+
     bool console_input_ready() {
         pollfd p{STDIN_FILENO, POLLIN, 0};
         // POLLHUP/POLLNVAL too: a closed or absent stdin reads EOF at once.

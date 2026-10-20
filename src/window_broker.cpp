@@ -2,7 +2,7 @@
 #include "window_link.h"
 #include "platform/platform.h"
 #include "messages.h"
-#if defined(SEXTANT_WINDOW_ICON) && !defined(__APPLE__)
+#if defined(SEXTANT_WINDOW_ICON)
 #include "window_icon.h"
 #endif
 
@@ -118,11 +118,16 @@ namespace sextant {
         // --- the owning thread -------------------------------------------------
 
         // The sextant icon on the title bar and taskbar (src/window_icon.h).
-        // macOS has no per-window icon (the Dock's comes from the app bundle),
-        // and GLFW reports an error for trying, so it is not asked there.
+        // macOS has no per-window icon and GLFW reports an error for trying, so
+        // there it sets the Dock icon instead, once (platform::set_app_icon).
         // -DSEXTANT_WINDOW_ICON=OFF leaves every window the platform default.
         void set_icon([[maybe_unused]] GLFWwindow* w) {
-#if defined(SEXTANT_WINDOW_ICON) && !defined(__APPLE__)
+#if defined(SEXTANT_WINDOW_ICON) && defined(__APPLE__)
+            static const bool once = (platform::set_app_icon(
+                window_icon::k_images[std::size(window_icon::k_images) - 1].rgba,
+                window_icon::k_images[std::size(window_icon::k_images) - 1].size), true);
+            (void) once;
+#elif defined(SEXTANT_WINDOW_ICON)
             GLFWimage images[std::size(window_icon::k_images)];
             for (std::size_t i = 0; i < std::size(images); ++i) {
                 const auto& src = window_icon::k_images[i];

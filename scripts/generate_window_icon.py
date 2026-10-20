@@ -19,8 +19,8 @@ from PIL import Image
 SVG = "doc/icons/sextant-icon.svg"
 OUT = "src/window_icon.h"
 # Win32 picks the closest to the small (16/24/32) and big (32/48/64) icon size
-# of the display's scale; X11 takes every one.
-SIZES = (16, 24, 32, 48, 64)
+# of the display's scale; X11 takes every one; the largest is the macOS Dock icon.
+SIZES = (16, 24, 32, 48, 64, 128)
 
 
 def render(svg_path: Path, size: int) -> bytes:
