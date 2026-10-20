@@ -104,6 +104,7 @@ namespace sextant {
         // Legend key: a swatch of `color`. Empty draws no key.
         std::string name;
         bool show_legend = true;
+        bool visible = true;     // see LineOptions::visible
 
         // Optional hover text per bar, below the default "x=.., y=.., height=.."
         // line. Indexed like `heights`. Empty or out of range = none.
@@ -133,6 +134,7 @@ namespace sextant {
         // legend with a swatch of `color`. A colormapped surface has no legend key.
         std::string name;
         bool show_legend = true; // see LineOptions::show_legend
+        bool visible = true;     // see LineOptions::visible
 
         // Below 1 the surface is translucent. Against other translucent objects
         // the ordering is a heuristic.
@@ -180,6 +182,7 @@ namespace sextant {
         // a swatch of `color`. A colormapped mesh has no legend key.
         std::string name;
         bool show_legend = true; // see LineOptions::show_legend
+        bool visible = true;     // see LineOptions::visible
 
         // Below 1 the mesh is translucent. A mesh can occlude itself; depth
         // peeling resolves that exactly, the sorted fallback approximately.
@@ -304,6 +307,7 @@ namespace sextant {
         // colorbar scale.
         std::string name;
         bool show_legend = true; // see LineOptions::show_legend
+        bool visible = true;     // see LineOptions::visible
 
         // Style of the error bars passed as an ErrorBar3D.
         ErrorBar3DOptions errorbar;
@@ -348,6 +352,7 @@ namespace sextant {
         // colormap swept along it.
         std::string name;
         bool show_legend = true; // see LineOptions::show_legend
+        bool visible = true;     // see LineOptions::visible
 
         // Style of the error bars passed as an ErrorBar3D.
         ErrorBar3DOptions errorbar;
@@ -471,6 +476,26 @@ namespace sextant {
         Plane2D& imshow(std::span<const double> data, int rows, int cols,
                         HeatmapOptions opts = {});
 
+        // The area between two curves, as Axes::fill().
+        Plane2D& fill(std::span<const double> x, std::span<const double> y1,
+                              std::span<const double> y2, FillOptions opts = {});
+
+        Plane2D& fill(std::span<const double> x, std::span<const double> y1,
+                              double y2 = 0.0, FillOptions opts = {});
+
+        // Stacked areas, as Axes::stack().
+        Plane2D& stack(std::span<const double> x, std::span<const std::vector<double>> ys,
+                       StackOptions opts = {});
+
+        // An arrow field, as Axes::quiver().
+        Plane2D& quiver(std::span<const double> x, std::span<const double> y,
+                        std::span<const double> u, std::span<const double> v,
+                        QuiverOptions opts = {});
+
+        Plane2D& quiver(std::span<const double> x, std::span<const double> y,
+                        std::span<const double> u, std::span<const double> v,
+                        std::span<const double> c, QuiverOptions opts = {});
+
         // Position along the plane's normal axis, in data units.
         Plane2D& set_offset(double offset);
 
@@ -505,6 +530,12 @@ namespace sextant {
         std::size_t heatmap_count() const;
         HeatmapData heatmap_data(std::size_t i) const;
 
+        std::size_t fill_count() const;
+        FillData fill_data(std::size_t i) const;
+
+        std::size_t quiver_count() const;
+        QuiverData quiver_data(std::size_t i) const;
+
         // Replace object i's data, as Axes::set_line_data() and its siblings.
         Plane2D& set_line_data(std::size_t i, const LineData& data);
 
@@ -528,6 +559,41 @@ namespace sextant {
 
         Plane2D& set_heatmap_data(std::size_t i, std::span<const double> data, int rows, int cols,
                                   Range xrange, Range yrange);
+
+        Plane2D& set_fill_data(std::size_t i, const FillData& data);
+
+        Plane2D& set_fill_data(std::size_t i, std::span<const double> x, std::span<const double> y1,
+                               std::span<const double> y2);
+
+        Plane2D& set_quiver_data(std::size_t i, const QuiverData& data);
+
+        Plane2D& set_quiver_data(std::size_t i, std::span<const double> x, std::span<const double> y,
+                                 std::span<const double> u, std::span<const double> v);
+
+        // Show or hide object i, as Axes::set_line_visible() and its siblings:
+        // a hidden object leaves the box's auto limits, the legend and the
+        // colorbars (unlike the plane's own Plane2DOptions::visible), and a
+        // plane whose objects are all hidden counts as empty.
+        Plane2D& set_line_visible(std::size_t i, bool visible);
+        bool line_visible(std::size_t i) const;
+
+        Plane2D& set_scatter_visible(std::size_t i, bool visible);
+        bool scatter_visible(std::size_t i) const;
+
+        Plane2D& set_scatter_z_visible(std::size_t i, bool visible);
+        bool scatter_z_visible(std::size_t i) const;
+
+        Plane2D& set_bar_visible(std::size_t i, bool visible);
+        bool bar_visible(std::size_t i) const;
+
+        Plane2D& set_heatmap_visible(std::size_t i, bool visible);
+        bool heatmap_visible(std::size_t i) const;
+
+        Plane2D& set_fill_visible(std::size_t i, bool visible);
+        bool fill_visible(std::size_t i) const;
+
+        Plane2D& set_quiver_visible(std::size_t i, bool visible);
+        bool quiver_visible(std::size_t i) const;
 
     private:
         struct Impl;
@@ -748,7 +814,9 @@ namespace sextant {
 
         Axes3D& set_fov(double degrees);
 
-        // The camera a double-click resets to. Unaffected by set_camera() and drags.
+        // The camera a double-click (and the window's Edit > Home) resets to.
+        // Unaffected by set_camera() and drags. Never called: those go back to
+        // the camera of the last set_camera()/set_view().
         Axes3D& set_default_camera(Camera3D cam);
 
         // Clears the objects and planes and resets the rest, the color cycle included.
@@ -863,6 +931,29 @@ namespace sextant {
         // The string and (x, y, z) only, keeping the rest: a text2d() reads x, y
         // as fractions and ignores z; an annotate() keeps its offset.
         Axes3D& set_text_data(std::size_t i, std::string_view s, double x, double y, double z);
+
+        // ----------------------------------------------------------------
+        // Hiding plot objects
+        // ----------------------------------------------------------------
+        // Show or hide the axes' own object i, as Axes::set_line_visible() and
+        // its siblings (a plane's objects through the Plane2D).
+        Axes3D& set_bar3d_visible(std::size_t i, bool visible);
+        bool bar3d_visible(std::size_t i) const;
+
+        Axes3D& set_surface_visible(std::size_t i, bool visible);
+        bool surface_visible(std::size_t i) const;
+
+        Axes3D& set_surface_tri_visible(std::size_t i, bool visible);
+        bool surface_tri_visible(std::size_t i) const;
+
+        Axes3D& set_scatter3d_visible(std::size_t i, bool visible);
+        bool scatter3d_visible(std::size_t i) const;
+
+        Axes3D& set_line3d_visible(std::size_t i, bool visible);
+        bool line3d_visible(std::size_t i) const;
+
+        Axes3D& set_text_visible(std::size_t i, bool visible);
+        bool text_visible(std::size_t i) const;
 
     private:
         struct Impl;

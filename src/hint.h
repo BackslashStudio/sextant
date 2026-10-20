@@ -12,8 +12,13 @@
 
 namespace sextant {
 
-// Pixel hit radius for the nearest-point hover search.
+// Pixel hit radius for the nearest-point hover search: the default of
+// FigureOptions::pick_radius, which callers pass on as `radius`.
 constexpr float kHintHitRadiusPx = 12.0f;
+
+// How far outside a bar a press still counts as on it, so a thin or
+// zero-height bar stays hittable.
+constexpr float kBarHitMarginPx = 1.5f;
 
 struct HintResult {
     std::string text;                  // may contain embedded '\n'
@@ -79,6 +84,11 @@ public:
         return true;
     }
 
+    // The scales between data and the drawing: the axes' own; identities on a
+    // plane, which has none.
+    AxisScale x_scale() const { return tr_ ? tr_->xs : AxisScale{}; }
+    AxisScale y_scale() const { return tr_ ? tr_->ys : AxisScale{}; }
+
 private:
     const CoordTransform* tr_   = nullptr;
     const Projector3D*    proj_ = nullptr;
@@ -91,21 +101,31 @@ private:
 // `element` is the point, bar, cell, sample, marker or vertex; `plane` is -1 for
 // an object of the axes itself, else the index into RenderSnapshot3D::planes
 // (a 2D kind on that plane's sheet). `row`/`col`: heatmap cells, else -1.
+// An area hit (pick_is_area()) also has the cursor's data position, `data_x`/
+// `data_y` (on a plane, in the plane's own coordinates).
 struct PickHit {
     PickKind    kind = PickKind::None;
     int         plane = -1;
     std::size_t object = 0, element = 0;
     int         row = -1, col = -1;
     float       anchor_x = 0, anchor_y = 0;   // physical pixels
+    double      data_x = 0.0, data_y = 0.0;
 };
 
-// The hit find_hint() words: nearest point across line/scatter/scatter_z/bar
-// within kHintHitRadiusPx (of equal distances, the later call's), else the
-// heatmap cell under the cursor; a heatmap drawn over that point wins too (it
-// hides it). `index` as for find_hint().
+// The 2D kinds hit by the area they cover rather than at a point.
+inline bool pick_is_area(PickKind k) {
+    return k == PickKind::Bar || k == PickKind::Fill || k == PickKind::Heatmap;
+}
+
+// The hit find_hint() words. First the nearest point across line/scatter/
+// scatter_z/quiver within `radius` pixels (of equal distances, the later
+// call's), whatever the draw order; else the topmost bar (within
+// kBarHitMarginPx), fill or heatmap cell the cursor is inside. `index` as for
+// find_hint().
 std::optional<PickHit> find_pick(const RenderSnapshot& snap, const HintProjector& proj,
                                  float cursor_x, float cursor_y,
-                                 HintIndexCache* index = nullptr);
+                                 HintIndexCache* index = nullptr,
+                                 float radius = kHintHitRadiusPx);
 
 // A 2D cell's layers (Axes::twinx()) as drawn: its own axes, then its twins,
 // each with its transform, edit key (axes_key()) and layer number.
@@ -116,33 +136,36 @@ struct CellLayers {
 };
 CellLayers cell_layers(const FigureAxesSnapshot& fa, const AxesLayout& cell);
 
-// find_pick() over every layer of a 2D cell, each through its own transform:
-// the nearest point in pixels, the later object on a tie; a heatmap cell
-// against a point goes to whichever drew later, as within one axes. `layer`
-// receives the winner's index in `l`. `index`, if given, is keyed per layer
-// on `data_generation`.
+// find_pick() over every layer of a 2D cell, each through its own transform,
+// as within one axes: a point beats an area; the nearest point in pixels, the
+// later object on a tie; of two areas the later object. `layer` receives the
+// winner's index in `l`. `index`, if given, is keyed per layer on
+// `data_generation`.
 std::optional<PickHit> find_pick_layers(const CellLayers& l, float cursor_x, float cursor_y,
                                         std::size_t& layer, HintIndexCache* index = nullptr,
-                                        unsigned long long data_generation = 0);
+                                        unsigned long long data_generation = 0,
+                                        float radius = kHintHitRadiusPx);
 
 // 3D: the nearest thing the cursor ray meets, as find_hint3d() searches it.
+// `radius`: the least a marker or path vertex is hit within, and the radius of
+// the 2D search on a plane.
 std::optional<PickHit> find_pick3d(const RenderSnapshot3D& snap, const Projector3D& proj,
                                    float cursor_x, float cursor_y,
-                                   HintIndexCache* index = nullptr);
+                                   HintIndexCache* index = nullptr,
+                                   float radius = kHintHitRadiusPx);
 
 // The hint text for a hit found in `snap` (2D kinds), or in a 3D snapshot (any
 // kind, planes included). What find_hint()/find_hint3d() return.
 std::string format_pick(const RenderSnapshot& snap, const PickHit& hit);
 std::string format_pick3d(const RenderSnapshot3D& snap, const PickHit& hit);
 
-// The text for find_pick()'s hit: nearest point across line/scatter/scatter_z/bar
-// within kHintHitRadiusPx, else the heatmap cell under the cursor (or the cell,
-// when that heatmap is drawn over the point). nullopt = nothing. `index`
-// (optional, set_frame_key() already called) only speeds up the search.
+// The text for find_pick()'s hit. nullopt = nothing. `index` (optional,
+// set_frame_key() already called) only speeds up the search.
 std::optional<HintResult> find_hint(const RenderSnapshot& snap,
                                     const HintProjector& proj,
                                     float cursor_x, float cursor_y,
-                                    HintIndexCache* index = nullptr);
+                                    HintIndexCache* index = nullptr,
+                                    float radius = kHintHitRadiusPx);
 
 // 3D: casts the cursor ray against planes and bars, nearest first. A bar
 // answers by being hit; a plane via find_hint(). `index`, if given, must have
@@ -150,6 +173,7 @@ std::optional<HintResult> find_hint(const RenderSnapshot& snap,
 std::optional<HintResult> find_hint3d(const RenderSnapshot3D& snap,
                                       const Projector3D& proj,
                                       float cursor_x, float cursor_y,
-                                      HintIndexCache* index = nullptr);
+                                      HintIndexCache* index = nullptr,
+                                      float radius = kHintHitRadiusPx);
 
 } // namespace sextant

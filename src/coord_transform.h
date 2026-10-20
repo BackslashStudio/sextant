@@ -1,5 +1,7 @@
 #pragma once
 #include "axis_scale.h"
+#include "fill_geometry.h"
+#include "quiver_geometry.h"
 #include "plot_objects.h"
 #include "renderer/plot_rect.h"
 #include "tick.h"
@@ -9,6 +11,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <limits>
+#include <optional>
 
 namespace sextant {
     // -------------------------------------------------------------------------
@@ -43,6 +46,15 @@ namespace sextant {
         float to_py(double y) const {
             if (ys.linear()) return py + ph - static_cast<float>((y - ymin) / (ymax - ymin)) * ph;
             return py + ph - static_cast<float>((sy(y) - symin()) / syspan()) * ph;
+        }
+
+        // A value already in scale space (sx()/sy()) to pixels: to_px()/to_py()
+        // without the scale, the same arithmetic.
+        float scale_to_px(double s) const {
+            return px + static_cast<float>((s - sxmin()) / sxspan()) * pw;
+        }
+        float scale_to_py(double s) const {
+            return py + ph - static_cast<float>((s - symin()) / syspan()) * ph;
         }
 
         // Inverse of to_px/to_py — screen pixel back to data space (pan/zoom).
@@ -87,6 +99,63 @@ namespace sextant {
             tr.xs.inv(cx - (cx - x0) * factor), tr.xs.inv(cx + (x1 - cx) * factor),
             tr.ys.inv(cy - (cy - y0) * factor), tr.ys.inv(cy + (y1 - cy) * factor)
         };
+    }
+
+    // A box side shorter than this (plot pixels) keeps that axis' limits.
+    inline constexpr float kBoxMinSide = 5.0f;
+
+    // The corners of a dragged box, clipped to the frame; with `keep_shape` (an
+    // aspect ratio is set) grown about its centre to the frame's shape, so the
+    // ratio holds. Empty when the box is too small on both sides (a click).
+    struct BoxPixels {
+        float x0, y0, x1, y1;
+        bool zoom_x, zoom_y;
+    };
+    inline std::optional<BoxPixels> box_pixels(const CoordTransform& tr, float ax, float ay,
+                                               float bx, float by, bool keep_shape) {
+        const auto clip = [](float v, float lo, float hi) { return std::clamp(v, lo, hi); };
+        float x0 = clip(std::min(ax, bx), tr.px, tr.px + tr.pw);
+        float x1 = clip(std::max(ax, bx), tr.px, tr.px + tr.pw);
+        float y0 = clip(std::min(ay, by), tr.py, tr.py + tr.ph);
+        float y1 = clip(std::max(ay, by), tr.py, tr.py + tr.ph);
+        bool zx = x1 - x0 >= kBoxMinSide, zy = y1 - y0 >= kBoxMinSide;
+        if (!zx && !zy) return std::nullopt;
+        if (keep_shape && tr.pw > 0.0f && tr.ph > 0.0f) {
+            // The frame's w:h, the short side grown to it.
+            const float w = x1 - x0, h = y1 - y0;
+            if (w * tr.ph < h * tr.pw) {
+                const float nw = h * tr.pw / tr.ph, cx = 0.5f * (x0 + x1);
+                x0 = cx - 0.5f * nw; x1 = cx + 0.5f * nw;
+            } else {
+                const float nh = w * tr.ph / tr.pw, cy = 0.5f * (y0 + y1);
+                y0 = cy - 0.5f * nh; y1 = cy + 0.5f * nh;
+            }
+            zx = zy = true;
+        }
+        return BoxPixels{x0, y0, x1, y1, zx, zy};
+    }
+
+    // The limits showing the box from box_pixels() across the frame: its sides as
+    // fractions of the frame, applied in scale space (as pan_limits()), so a log
+    // axis zooms in decades and reversed limits stay reversed. An axis the box
+    // does not zoom keeps its limits.
+    inline AxisLimits box_limits(const CoordTransform& tr, const BoxPixels& b) {
+        const auto at = [](double s0, double s1, double f) { return s0 + f * (s1 - s0); };
+        AxisLimits out{tr.xmin, tr.xmax, tr.ymin, tr.ymax};
+        if (b.zoom_x) {
+            const double f0 = (static_cast<double>(b.x0) - tr.px) / tr.pw;
+            const double f1 = (static_cast<double>(b.x1) - tr.px) / tr.pw;
+            out.xmin = tr.xs.inv(at(tr.sxmin(), tr.sxmax(), f0));
+            out.xmax = tr.xs.inv(at(tr.sxmin(), tr.sxmax(), f1));
+        }
+        if (b.zoom_y) {
+            // Screen y grows downward: the box's bottom is the low fraction.
+            const double f0 = (static_cast<double>(tr.py) + tr.ph - b.y1) / tr.ph;
+            const double f1 = (static_cast<double>(tr.py) + tr.ph - b.y0) / tr.ph;
+            out.ymin = tr.ys.inv(at(tr.symin(), tr.symax(), f0));
+            out.ymax = tr.ys.inv(at(tr.symin(), tr.symax(), f1));
+        }
+        return out;
     }
 
     // -------------------------------------------------------------------------
@@ -158,9 +227,12 @@ namespace sextant {
     namespace bounds_detail {
         // auto_bounds() with each value passed through fx/fy first (scale
         // space); a NaN they return widens nothing. Scaled axes only; the
-        // all-linear case keeps its own loop (auto_bounds(all)).
+        // all-linear case keeps its own loop (auto_bounds(all)). Fills take the
+        // scales themselves, as do quivers (`xs`, `ys`: what fx and fy apply
+        // strictly).
         template <class FX, class FY>
-        AutoBounds auto_bounds_in(const AllPlotData& all, FX fx, FY fy) {
+        AutoBounds auto_bounds_in(const AllPlotData& all, FX fx, FY fy,
+                                  const AxisScale& xs, const AxisScale& ys) {
             double xlo = std::numeric_limits<double>::max();
             double xhi = -std::numeric_limits<double>::max();
             double ylo = std::numeric_limits<double>::max();
@@ -196,14 +268,17 @@ namespace sextant {
             };
 
             for (const auto& lp: all.lines) {
+                if (!object_shown(lp)) continue;
                 add_points(lp.x, lp.y);
                 grow_err(lp.x, lp.y, lp.err);
             }
             for (const auto& sp: all.scatters) {
+                if (!object_shown(sp)) continue;
                 add_points(sp.x, sp.y);
                 grow_err(sp.x, sp.y, sp.err);
             }
             for (const auto& sp: all.scatter_z) {
+                if (!object_shown(sp)) continue;
                 add_points(sp.x, sp.y);
                 grow_err(sp.x, sp.y, sp.err);
             }
@@ -222,6 +297,7 @@ namespace sextant {
                 }
             };
             for (const auto& bp: all.bars) {
+                if (!object_shown(bp)) continue;
                 if (bp.horizontal()) add_bars(bp, fy, ylo, yhi, fx, xlo, xhi);
                 else add_bars(bp, fx, xlo, xhi, fy, ylo, yhi);
                 // Error bars hang off the tip, not the base.
@@ -233,18 +309,40 @@ namespace sextant {
             // A reference line or span counts on its own axis only.
             if (all.axlines)
                 for (const auto& lp: *all.axlines) {
+                    if (!object_shown(lp)) continue;
                     if (lp.on_x()) add(fx(lp.value), xlo, xhi);
                     else add(fy(lp.value), ylo, yhi);
                 }
             if (all.axspans)
                 for (const auto& sp: *all.axspans) {
+                    if (!object_shown(sp)) continue;
                     if (sp.on_x()) { add(fx(sp.lo), xlo, xhi); add(fx(sp.hi), xlo, xhi); }
                     else { add(fy(sp.lo), ylo, yhi); add(fy(sp.hi), ylo, yhi); }
+                }
+            // A fill: its runs' points on both curves (fill_limit_points()).
+            if (all.fills)
+                for (const auto& fp: *all.fills) {
+                    if (!object_shown(fp)) continue;
+                    const bool v = fp.vertical();
+                    fill_limit_points(fp, v ? ys : xs, v ? xs : ys, [&](double r, double c) {
+                        add(r, v ? ylo : xlo, v ? yhi : xhi);
+                        add(c, v ? xlo : ylo, v ? xhi : yhi);
+                    });
+                }
+            // A quiver: both ends of every arrow drawn (quiver_limit_points()).
+            if (all.quivers)
+                for (const auto& qp: *all.quivers) {
+                    if (!object_shown(qp)) continue;
+                    quiver_limit_points(qp, xs, ys, [&](double x, double y) {
+                        add(x, xlo, xhi);
+                        add(y, ylo, yhi);
+                    });
                 }
             AutoBounds b;
             b.x.loose = {xlo, xhi};
             b.y.loose = {ylo, yhi};
             for (const auto& hp: all.heatmaps) {
+                if (!object_shown(hp)) continue;
                 // The heatmap's extent, unpadded; either range may be reversed.
                 b.x.tight.add(fx(hp.xrange.lo));
                 b.x.tight.add(fx(hp.xrange.hi));
@@ -255,7 +353,7 @@ namespace sextant {
         }
     } // namespace bounds_detail
 
-    // Unpadded bounds of every plot object, split as AutoAxis describes. Written out
+    // Unpadded bounds of every shown plot object (object_shown()), split as AutoAxis describes. Written out
     // rather than auto_bounds_in() with identities: it runs per frame, and in an
     // unoptimised build the lambdas cost a call per value (layout_test's debug budget).
     inline AutoBounds auto_bounds(const AllPlotData& all) {
@@ -284,6 +382,7 @@ namespace sextant {
         };
 
         for (const auto& lp: all.lines) {
+            if (!object_shown(lp)) continue;
             for (double v: lp.x) {
                 xlo = std::min(xlo, v);
                 xhi = std::max(xhi, v);
@@ -295,6 +394,7 @@ namespace sextant {
             grow_err(lp.x, lp.y, lp.err);
         }
         for (const auto& sp: all.scatters) {
+            if (!object_shown(sp)) continue;
             for (double v: sp.x) {
                 xlo = std::min(xlo, v);
                 xhi = std::max(xhi, v);
@@ -306,6 +406,7 @@ namespace sextant {
             grow_err(sp.x, sp.y, sp.err);
         }
         for (const auto& sp: all.scatter_z) {
+            if (!object_shown(sp)) continue;
             for (double v: sp.x) {
                 xlo = std::min(xlo, v);
                 xhi = std::max(xhi, v);
@@ -317,6 +418,7 @@ namespace sextant {
             grow_err(sp.x, sp.y, sp.err);
         }
         for (const auto& bp: all.bars) {
+            if (!object_shown(bp)) continue;
             // Thickness along the category axis, base to tip along the value axis.
             const bool lying = bp.horizontal();
             double& clo = lying ? ylo : xlo;
@@ -341,6 +443,7 @@ namespace sextant {
         // A reference line or span counts on its own axis only.
         if (all.axlines)
             for (const auto& lp: *all.axlines) {
+                if (!object_shown(lp)) continue;
                 double& lo = lp.on_x() ? xlo : ylo;
                 double& hi = lp.on_x() ? xhi : yhi;
                 lo = std::min(lo, lp.value);
@@ -348,15 +451,41 @@ namespace sextant {
             }
         if (all.axspans)
             for (const auto& sp: *all.axspans) {
+                if (!object_shown(sp)) continue;
                 double& lo = sp.on_x() ? xlo : ylo;
                 double& hi = sp.on_x() ? xhi : yhi;
                 lo = std::min(lo, std::min(sp.lo, sp.hi));
                 hi = std::max(hi, std::max(sp.lo, sp.hi));
             }
+        if (all.fills)
+            for (const auto& fp: *all.fills) {
+                if (!object_shown(fp)) continue;
+                double& rlo = fp.vertical() ? ylo : xlo;
+                double& rhi = fp.vertical() ? yhi : xhi;
+                double& vlo = fp.vertical() ? xlo : ylo;
+                double& vhi = fp.vertical() ? xhi : yhi;
+                fill_limit_points(fp, AxisScale{}, AxisScale{}, [&](double r, double c) {
+                    rlo = std::min(rlo, r);
+                    rhi = std::max(rhi, r);
+                    vlo = std::min(vlo, c);
+                    vhi = std::max(vhi, c);
+                });
+            }
+        if (all.quivers)
+            for (const auto& qp: *all.quivers) {
+                if (!object_shown(qp)) continue;
+                quiver_limit_points(qp, AxisScale{}, AxisScale{}, [&](double x, double y) {
+                    xlo = std::min(xlo, x);
+                    xhi = std::max(xhi, x);
+                    ylo = std::min(ylo, y);
+                    yhi = std::max(yhi, y);
+                });
+            }
         AutoBounds b;
         b.x.loose = {xlo, xhi};
         b.y.loose = {ylo, yhi};
         for (const auto& hp: all.heatmaps) {
+            if (!object_shown(hp)) continue;
             // The heatmap's extent, unpadded; either range may be reversed.
             b.x.tight.add(hp.xrange.lo);
             b.x.tight.add(hp.xrange.hi);
@@ -371,7 +500,7 @@ namespace sextant {
     inline AutoBounds auto_bounds(const AllPlotData& all, const AxisScale& xs, const AxisScale& ys) {
         if (xs.linear() && ys.linear()) return auto_bounds(all);
         return bounds_detail::auto_bounds_in(all, [&xs](double v) { return xs.fwd_strict(v); },
-                                      [&ys](double v) { return ys.fwd_strict(v); });
+                                      [&ys](double v) { return ys.fwd_strict(v); }, xs, ys);
     }
 
     // Padded automatic bounds: auto_bounds() through pad_axis().

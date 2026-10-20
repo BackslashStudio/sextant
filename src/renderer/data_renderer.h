@@ -185,6 +185,12 @@ private:
     // flat program), from reference_lines.h's pixel geometry; nothing cached.
     void draw_axline(const AxLinePlot& p, const CoordTransform& tr, const PlotRect& pr);
     void draw_axspan(const AxSpanPlot& p, const CoordTransform& tr, const PlotRect& pr);
+    // A fill (fill_geometry.h): its triangles cached as bars' fills are, its
+    // outline stroked per frame through the segment program.
+    void draw_fill(const FillPlot& p, int index, const CoordTransform& tr, const PlotRect& pr);
+    // A quiver (quiver_geometry.h): its arrows' ends cached as scatter centres
+    // are, shaped in pixels by the instanced arrow program.
+    void draw_quiver(const QuiverPlot& p, int index, const CoordTransform& tr, const PlotRect& pr);
 
     float pixel_ratio_ = 1.0f;
 
@@ -292,6 +298,41 @@ private:
         float              pixel_ratio = 0.0f;
     };
     std::unordered_map<CacheKey, BarCache, CacheKeyHash> bar_cache_;
+
+    // Fills: triangles in scale space around an anchor (pan/zoom reuse them)
+    // or, when float cannot resolve the view there, in pixels with the view in
+    // the key. The options that move the regions are in the key too.
+    struct FillCache {
+        unsigned int       vbo = 0;   int verts = 0;
+        unsigned long long generation = 0;
+        Orientation        orientation = Orientation::Horizontal;
+        DrawStyle          drawstyle = DrawStyle::Default;
+        bool               interpolate = false;
+        double             anchor_x = 0.0, anchor_y = 0.0;
+        double             span_x = 0.0, span_y = 0.0;
+        bool               data_space = true;
+        CoordTransform     tr{};
+    };
+    std::unordered_map<CacheKey, FillCache, CacheKeyHash> fill_cache_;
+
+    // Quivers: each arrow's tail and tip (4 floats) in scale space around an
+    // anchor, or in pixels with the view in the key, as fills. The options that
+    // move the ends are in the key; the shape is uniforms.
+    struct QuiverCache {
+        unsigned int       vbo = 0;   int instances = 0;
+        unsigned long long generation = 0;
+        double             amp = 0.0;
+        QuiverPivot        pivot = QuiverPivot::Tail;
+        // Colormapped: 8 floats per arrow (ends, then RGBA), the map in the key.
+        bool               mapped = false;
+        Colormap           cmap = Colormap::Viridis;
+        float              vmin = 0.0f, vmax = 1.0f;
+        double             anchor_x = 0.0, anchor_y = 0.0;
+        double             span_x = 0.0, span_y = 0.0;
+        bool               data_space = true;
+        CoordTransform     tr{};
+    };
+    std::unordered_map<CacheKey, QuiverCache, CacheKeyHash> quiver_cache_;
 
     // 2D error bars: pixel-space geometry (transform in key). Two buffers (box
     // interior at box_alpha, the rest opaque); one map per kind, since CacheKey
@@ -584,6 +625,9 @@ private:
                                 half_width = -1, dash = -1, dash_period = -1,
                                 dist_scale = -1; };
     SegUniforms    lineseg_u_{};
+    struct QuiverUniforms { int resolution = -1, alpha = -1, scale = -1, offset = -1,
+                                width = -1, head_width = -1, head_length = -1; };
+    QuiverUniforms quiver_u_{};
     struct MarkerUniforms { int resolution = -1, color = -1, marker = -1,
                                 scale = -1, offset = -1,
                                 edge = -1, edge_w = -1, edge_face = -1; };
@@ -602,8 +646,15 @@ private:
     // Instanced line-segment program
     unsigned int lineseg_program_   = 0;
     unsigned int lineseg_vao_       = 0;
-    unsigned int lineseg_corner_vbo_ = 0;   // static 4-vertex unit quad
+    unsigned int lineseg_corner_vbo_ = 0;   // static k_lineseg_corners
     unsigned int ref_vbo_ = 0;              // a reference line's padded ends, per draw
+    unsigned int fill_edge_vbo_ = 0;        // a fill outline's padded ring, per draw
+    unsigned int fill_dist_vbo_ = 0;        // and its arc lengths (dashes)
+
+    // Quiver instanced program (k_quiver_vert)
+    unsigned int quiver_program_    = 0;
+    unsigned int quiver_vao_        = 0;
+    unsigned int quiver_corner_vbo_ = 0;   // static: the nine corner indices
 
     // Scatter instanced program
     unsigned int scatter_program_ = 0;

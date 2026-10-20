@@ -23,9 +23,10 @@ namespace sextant {
 // The first five are 2D (also held by planes); then the native 3D kinds,
 // always addressed at the axes (plane -1). Text is held by both 2D and 3D
 // axes (never by a plane); AxLine and AxSpan by 2D axes only (a plane's sheet
-// holds none). Append new kinds to keep values stable.
+// holds none); Fill and Quiver by 2D axes and planes. Append new kinds to keep
+// values stable.
 enum class PlotKind { Line, Scatter, Bar, Heatmap, ScatterZ, Bar3D, Surface, Scatter3D, Line3D,
-                      SurfaceTri, Text, AxLine, AxSpan };
+                      SurfaceTri, Text, AxLine, AxSpan, Fill, Quiver };
 
 // A plot object's (or a plane's) identity: kept by set_*_data(), unchanged by
 // removing or reordering its siblings, never reused in a process. Edits carry
@@ -134,6 +135,12 @@ struct LinePlot {
         a = s;
         b = (s + 1 == count()) ? 0 : s + 1;
     }
+
+    // set_<kind>_visible()'s next_snapshot_generation(), 0 = never called; a
+    // panel style edit made over an older one keeps `opts.visible` (see
+    // assign_plot_opts()). Last, so the plotting calls' positional braces
+    // leave it 0.
+    unsigned long long visible_stamp = 0;
 };
 
 struct ScatterPlot {
@@ -145,6 +152,8 @@ struct ScatterPlot {
     // Per-point diameters (ScatterOptions::sizes, taken at the call); empty =
     // opts.size for all. See marker_size_at().
     CowVec<double> sizes;
+
+    unsigned long long visible_stamp = 0;
 };
 
 // bar_width is in data units, already resolved (spacing x width fraction for
@@ -164,6 +173,8 @@ struct BarPlot {
     bool horizontal() const { return opts.orientation == Orientation::Horizontal; }
     double base_at(std::size_t i) const { return i < bottom.size() ? bottom[i] : 0.0; }
     double tip_at(std::size_t i) const { return base_at(i) + heights[i]; }
+
+    unsigned long long visible_stamp = 0;
 };
 
 // The bars' tips (base + height), as a column: `heights` itself without bases.
@@ -215,6 +226,8 @@ struct HeatmapPlot {
         const double h = yrange.hi - yrange.lo;
         return h != 0.0 ? (y - yrange.lo) / h * rows : 0.0;
     }
+
+    unsigned long long visible_stamp = 0;
 };
 
 // Continuous-color scatter: z is mapped through opts.cmap/vmin/vmax.
@@ -225,6 +238,8 @@ struct ScatterZPlot {
     unsigned long long data_stamp = 0;
     ObjectId id = 0;
     CowVec<double>  sizes;   // as ScatterPlot::sizes
+
+    unsigned long long visible_stamp = 0;
 };
 
 // A marker's pixel diameter: its own from `sizes` when the series has them,
@@ -281,6 +296,8 @@ struct Bar3DPlot {
     // Extent along the standing axis, low end first (negative heights hang down).
     double h_lo(std::size_t k) const { return std::min(bottom_at(k), bottom_at(k) + height_at(k)); }
     double h_hi(std::size_t k) const { return std::max(bottom_at(k), bottom_at(k) + height_at(k)); }
+
+    unsigned long long visible_stamp = 0;
 };
 
 // A surface over a u x v grid, laid out like Bar3DPlot. Draws the
@@ -301,6 +318,8 @@ struct SurfacePlot {
     std::size_t cell_rows() const { return u.size() > 1 ? u.size() - 1 : 0; }
     std::size_t cell_cols() const { return v.size() > 1 ? v.size() - 1 : 0; }
     std::size_t cell_count() const { return cell_rows() * cell_cols(); }
+
+    unsigned long long visible_stamp = 0;
 };
 
 // Colormap range for a surface: opts.vmin/vmax, or the data range when equal.
@@ -359,6 +378,8 @@ struct SurfaceTriPlot {
                  i < y.size() ? y[i] : 0.0,
                  i < z.size() ? z[i] : 0.0 };
     }
+
+    unsigned long long visible_stamp = 0;
 };
 
 // Colormap range for a mesh's `colors`, as surface_value_range().
@@ -392,6 +413,8 @@ struct Scatter3DPlot {
     std::size_t count() const { return x.size(); }
     bool colormapped() const { return !colors.empty(); }
     double color_at(std::size_t i) const { return i < colors.size() ? colors[i] : 0.0; }
+
+    unsigned long long visible_stamp = 0;
 };
 
 // Colormap range for a scatter3d's `colors`, as surface_value_range().
@@ -438,6 +461,8 @@ struct Line3DPlot {
         a = s;
         b = (s + 1 == count()) ? 0 : s + 1;
     }
+
+    unsigned long long visible_stamp = 0;
 };
 
 // Colormap range for a line3d's `colors`, as surface_value_range().
@@ -484,6 +509,8 @@ struct TextPlot {
     TextStyle   opts;
     unsigned long long data_stamp = 0;
     ObjectId id = 0;
+
+    unsigned long long visible_stamp = 0;
 };
 
 // Axes::axline(): `value` on the axis the orientation names (y for Horizontal).
@@ -495,6 +522,8 @@ struct AxLinePlot {
 
     // Whether `value` is an x value (a Vertical line).
     bool on_x() const { return opts.orientation == Orientation::Vertical; }
+
+    unsigned long long visible_stamp = 0;
 };
 
 // Axes::axspan(): lo..hi on the axis the orientation names, as AxLinePlot.
@@ -505,10 +534,48 @@ struct AxSpanPlot {
     ObjectId id = 0;
 
     bool on_x() const { return opts.orientation == Orientation::Vertical; }
+
+    unsigned long long visible_stamp = 0;
 };
 
-// The reference kinds are optional so a view built over the first five alone
-// (tests, a plane's sheet) still reads as before.
+// Axes::fill(): the area between y1 and y2 along x, one value of each
+// per point. `x` is the run coordinate, on the y axis when the fill is
+// Vertical (and y1/y2 then on x). fill_geometry.h turns it into regions.
+struct FillPlot {
+    CowVec<double> x, y1, y2;
+    FillOptions    opts{.color = Color::Blue};
+    unsigned long long data_stamp = 0;
+    ObjectId id = 0;
+    // FillOptions::exclude, taken at the call: one per point, nonzero = left
+    // out (a column of numbers, so the Data panel edits it as the others);
+    // empty = none.
+    CowVec<double> exclude;
+
+    bool vertical() const { return opts.orientation == Orientation::Vertical; }
+    bool excluded(std::size_t i) const { return i < exclude.size() && exclude[i] != 0.0; }
+
+    unsigned long long visible_stamp = 0;
+};
+
+// Axes::quiver(): one arrow per point, from (x, y) along (u, v). `opts.amp`
+// is always set (resolved at the call). quiver_geometry.h places the arrows.
+struct QuiverPlot {
+    CowVec<double> x, y, u, v;
+    QuiverOptions  opts{.color = Color::Blue, .amp = 1.0};
+    unsigned long long data_stamp = 0;
+    ObjectId id = 0;
+    // The values the arrows' colors map (quiver(x, y, u, v, c)); empty = flat.
+    CowVec<double> c;
+
+    std::size_t count() const { return std::min({x.size(), y.size(), u.size(), v.size()}); }
+    double amp() const { return opts.amp.value_or(1.0); }
+    bool colormapped() const { return !c.empty(); }
+
+    unsigned long long visible_stamp = 0;
+};
+
+// The reference kinds, fills and quivers are optional so a view built over the
+// first five alone (tests) still reads as before.
 struct AllPlotData {
     const std::vector<LinePlot>&     lines;
     const std::vector<ScatterPlot>&  scatters;
@@ -517,6 +584,8 @@ struct AllPlotData {
     const std::vector<ScatterZPlot>& scatter_z;
     const std::vector<AxLinePlot>*   axlines = nullptr;
     const std::vector<AxSpanPlot>*   axspans = nullptr;
+    const std::vector<FillPlot>*     fills = nullptr;
+    const std::vector<QuiverPlot>*   quivers = nullptr;
 };
 
 // Caller-side stamps of an axes' titles: each set_*title() takes a fresh
@@ -598,6 +667,10 @@ struct RenderSnapshot {
     // Nor reference lines and spans (Axes::axline()/axspan()).
     std::vector<AxLinePlot>   axlines;
     std::vector<AxSpanPlot>   axspans;
+    // Axes::fill(), on axes and planes alike.
+    std::vector<FillPlot>     fills;
+    // Axes::quiver(), likewise.
+    std::vector<QuiverPlot>   quivers;
 
     // Font sizes live in axes_style.
     std::string title, xtitle, ytitle;
@@ -628,7 +701,9 @@ struct RenderSnapshot {
     // Explicit ticks; absent = generate_ticks().
     std::optional<std::vector<Tick>> xticks_override, yticks_override;
 
-    AllPlotData all() const { return { lines, scatters, bars, heatmaps, scatter_z, &axlines, &axspans }; }
+    AllPlotData all() const {
+        return { lines, scatters, bars, heatmaps, scatter_z, &axlines, &axspans, &fills, &quivers };
+    }
 };
 
 // What a share group holds in common, copied from one member to another;
@@ -699,8 +774,10 @@ struct RenderSnapshot3D {
     // As TitleStamps, for the camera: set_camera()/set_view()/set_projection()/
     // set_fov() take a fresh stamp, cla() resets it to 0.
     unsigned long long camera_stamp = 0;
-    // What a double-click restores (the reset runs on the render thread).
+    // set_default_camera()'s camera; when `default_camera_set`, Home's camera (the
+    // double-click and Edit > Home, step 36f), else Home is the program's camera.
     Camera3D    default_camera;
+    bool        default_camera_set = false;
 
     double xmin = 0, xmax = 1, ymin = 0, ymax = 1, zmin = 0, zmax = 1;
     bool   xlim_auto = true, ylim_auto = true, zlim_auto = true;
@@ -724,7 +801,8 @@ struct ObjectRef {
 
 inline constexpr PlotKind kPlotKinds2D[] = { PlotKind::Line, PlotKind::Scatter, PlotKind::Bar,
                                              PlotKind::Heatmap, PlotKind::ScatterZ, PlotKind::Text,
-                                             PlotKind::AxLine, PlotKind::AxSpan };
+                                             PlotKind::AxLine, PlotKind::AxSpan, PlotKind::Fill,
+                                             PlotKind::Quiver };
 inline constexpr PlotKind kPlotKinds3D[] = { PlotKind::Bar3D, PlotKind::Surface,
                                              PlotKind::Scatter3D, PlotKind::Line3D,
                                              PlotKind::SurfaceTri, PlotKind::Text };
@@ -744,6 +822,8 @@ R with_kind(S& s, PlotKind kind, F&& f, R none) {
         case PlotKind::Text:     return f(s.texts);
         case PlotKind::AxLine:   return f(s.axlines);
         case PlotKind::AxSpan:   return f(s.axspans);
+        case PlotKind::Fill:     return f(s.fills);
+        case PlotKind::Quiver:   return f(s.quivers);
         default:                 return none;
     }
 }
@@ -791,6 +871,16 @@ ObjectId object_id_at(const S& s, PlotKind kind, int index) {
     }, kNoObject);
 }
 
+// The visible_stamp of the object at (kind, index); ~0 (older than nothing) if
+// there is none.
+template <class S>
+unsigned long long visible_stamp_at(const S& s, PlotKind kind, int index) {
+    return with_kind(s, kind, [index](const auto& v) {
+        return index >= 0 && static_cast<std::size_t>(index) < v.size()
+                   ? v[static_cast<std::size_t>(index)].visible_stamp : ~0ull;
+    }, ~0ull);
+}
+
 // Where object `id` is among `kinds` of a holder, if anywhere.
 template <class S, std::size_t N>
 std::optional<ObjectRef> find_object_in(const S& s, const PlotKind (&kinds)[N], ObjectId id) {
@@ -807,7 +897,7 @@ std::optional<ObjectRef> find_object_in(const S& s, const PlotKind (&kinds)[N], 
 // A plot object taken out by remove_object(), for putting back:
 // where it was among its kind, and the whole object, its id included.
 using PlotObject2D = std::variant<LinePlot, ScatterPlot, BarPlot, HeatmapPlot, ScatterZPlot,
-                                  TextPlot, AxLinePlot, AxSpanPlot>;
+                                  TextPlot, AxLinePlot, AxSpanPlot, FillPlot, QuiverPlot>;
 using PlotObject3D = std::variant<Bar3DPlot, SurfacePlot, Scatter3DPlot, Line3DPlot,
                                   SurfaceTriPlot, TextPlot>;
 template <class Object>
@@ -875,6 +965,25 @@ std::optional<std::size_t> move_object_in(S& s, const PlotKind (&kinds)[N], Obje
 // draws over an earlier one whatever their kinds. What drawing, export, the
 // legend, the colorbars and the hover hint all follow. Equal ids (objects built
 // by hand with id 0, in tests) keep the listed kind order, then the index.
+// Hidden objects (object_shown()) are left out, as all of those skip them.
+
+// Whether an object is drawn at all: its options' `visible`. Ink, export, legend
+// keys, colorbars, hover, pick and auto limits ask it; read-back, edits and the
+// Data panel do not. A plane's own `visible` is separate (plane_drawn()).
+template <class P> bool object_shown(const P& p) { return p.opts.visible; }
+inline bool object_shown(const TextPlot& t) { return t.opts.text.visible; }
+
+// The `visible` field of an object's options (a text's is in its TextOptions).
+template <class O> bool& visible_flag(O& o) {
+    if constexpr (requires { o.text.visible; }) return o.text.visible;
+    else return o.visible;
+}
+template <class V> bool any_shown(const V& v) {
+    for (const auto& p : v)
+        if (object_shown(p)) return true;
+    return false;
+}
+
 namespace objects_detail {
 struct OrderKey {
     ObjectId  id;
@@ -883,7 +992,8 @@ struct OrderKey {
 
 template <class V>
 void add_order_keys(std::vector<OrderKey>& keys, PlotKind kind, const V& v) {
-    for (std::size_t i = 0; i < v.size(); ++i) keys.push_back({ v[i].id, { kind, i } });
+    for (std::size_t i = 0; i < v.size(); ++i)
+        if (object_shown(v[i])) keys.push_back({ v[i].id, { kind, i } });
 }
 
 inline std::vector<ObjectRef> sorted_refs(std::vector<OrderKey>& keys) {
@@ -913,6 +1023,10 @@ std::vector<ObjectRef> call_order(const S& s) {
         objects_detail::add_order_keys(keys, PlotKind::AxLine, s.axlines);
         objects_detail::add_order_keys(keys, PlotKind::AxSpan, s.axspans);
     }
+    if constexpr (requires { s.fills; })
+        objects_detail::add_order_keys(keys, PlotKind::Fill, s.fills);
+    if constexpr (requires { s.quivers; })
+        objects_detail::add_order_keys(keys, PlotKind::Quiver, s.quivers);
     return objects_detail::sorted_refs(keys);
 }
 
@@ -933,7 +1047,8 @@ std::vector<LayerRef> layered_call_order(std::span<const S* const> layers) {
     for (std::size_t k = 0; k < layers.size(); ++k) {
         const S& s = *layers[k];
         const auto add = [&](PlotKind kind, const auto& v) {
-            for (std::size_t i = 0; i < v.size(); ++i) keys.push_back({ v[i].id, { k, { kind, i } } });
+            for (std::size_t i = 0; i < v.size(); ++i)
+                if (object_shown(v[i])) keys.push_back({ v[i].id, { k, { kind, i } } });
         };
         add(PlotKind::Heatmap, s.heatmaps);
         add(PlotKind::Bar, s.bars);
@@ -944,6 +1059,8 @@ std::vector<LayerRef> layered_call_order(std::span<const S* const> layers) {
             add(PlotKind::AxLine, s.axlines);
             add(PlotKind::AxSpan, s.axspans);
         }
+        if constexpr (requires { s.fills; }) add(PlotKind::Fill, s.fills);
+        if constexpr (requires { s.quivers; }) add(PlotKind::Quiver, s.quivers);
     }
     std::stable_sort(keys.begin(), keys.end(), [](const Key& a, const Key& b) { return a.id < b.id; });
     std::vector<LayerRef> out;
@@ -1103,8 +1220,13 @@ struct FigureSnapshot {
     // See FigureOptions::background.
     Color background = {0.93f, 0.93f, 0.93f, 1.0f};
 
-    // FigureOptions::mathtext; layout, render and export open a MathTextScope with it.
+    // FigureOptions::pick_radius: what the hover hint and a Pick search with.
+    float pick_radius = 12.0f;
+
+    // FigureOptions::mathtext; layout, render and export open a MathTextScope with it,
+    // and the math font (FigureOptions::math_fontset resolved; "" = the text font).
     bool mathtext = true;
+    std::string math_font;
 
     // Grid weights; empty = equal. Read through grid_weights().
     std::vector<float> col_ratios, row_ratios;
@@ -1132,6 +1254,8 @@ inline std::vector<ColorbarRequest> find_colorbar_requests(const RenderSnapshot&
     for (const ObjectRef& r : call_order(snap)) {
         if (r.kind == PlotKind::Heatmap)       add(snap.heatmaps[r.index].opts);
         else if (r.kind == PlotKind::ScatterZ) add(snap.scatter_z[r.index].opts);
+        else if (r.kind == PlotKind::Quiver && snap.quivers[r.index].colormapped())
+            add(snap.quivers[r.index].opts);
     }
     return reqs;
 }

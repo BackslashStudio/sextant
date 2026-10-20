@@ -70,6 +70,13 @@ jobs:
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev \
             libwayland-dev libxkbcommon-dev wayland-protocols \
             xvfb xauth fonts-dejavu-core fonts-liberation
+          # Times New Roman: layout_test's math checks run in a Times, as on
+          # Windows and macOS. The package downloads the fonts while installing.
+          echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" \
+            | sudo debconf-set-selections
+          sudo apt-get install -y --no-install-recommends ttf-mscorefonts-installer
+          test -f /usr/share/fonts/truetype/msttcorefonts/Times_New_Roman.ttf \
+            || { echo "::error::Times New Roman did not install"; exit 1; }
           if [ -n "${{ matrix.stdlib }}" ]; then
             sudo apt-get install -y --no-install-recommends clang libc++-dev libc++abi-dev
           fi

@@ -2,6 +2,8 @@
 #include "axis_limits.h"
 #include "read_back.h"
 #include "rich_text.h"
+#include "quiver_geometry.h"
+#include "stack_curves.h"
 #include "ticker.h"
 #include <stdexcept>
 #include <string>
@@ -558,6 +560,108 @@ void Axes::Impl::ingest_axspan(double lo, double hi, AxSpanOptions opts, const c
     axspans.push_back({ lo, hi, std::move(opts), next_snapshot_generation(), next_object_id() });
 }
 
+// The mask is taken out of the options and kept as data, as bar bases are.
+void Axes::Impl::ingest_fill(std::span<const double> x, std::span<const double> y1,
+                             std::span<const double> y2, FillOptions opts, const char* who) {
+    read_back::check_fill(x.size(), y1.size(), y2.size(), who);
+    std::vector<double> exclude = read_back::take_exclude(opts.exclude, x.size(), who);
+    opts.exclude.clear();
+    warn_math(mathtext, who, opts.name);
+    cycle->resolve(opts.color);
+    fills.push_back({
+        read_back::own(x),
+        read_back::own(y1),
+        read_back::own(y2),
+        std::move(opts),
+        next_snapshot_generation(),
+        next_object_id(),
+        std::move(exclude),
+    });
+}
+
+Axes& Axes::fill(std::span<const double> x, std::span<const double> y1,
+                         std::span<const double> y2, FillOptions opts) {
+    d->ingest_fill(x, y1, y2, std::move(opts), "fill");
+    return *this;
+}
+
+Axes& Axes::fill(std::span<const double> x, std::span<const double> y1, double y2,
+                         FillOptions opts) {
+    const std::vector<double> base(x.size(), y2);
+    d->ingest_fill(x, y1, base, std::move(opts), "fill");
+    return *this;
+}
+
+void Axes::Impl::ingest_stack(std::span<const double> x, std::span<const std::vector<double>> ys,
+                              const StackOptions& opts, const char* who) {
+    for (const std::vector<double>& y : ys)
+        if (y.size() != x.size())
+            throw std::invalid_argument(std::string(who) + ": every layer needs one value per x");
+    if (!opts.colors.empty() && opts.colors.size() != ys.size())
+        throw std::invalid_argument(std::string(who) + ": colors needs one per layer");
+    if (!opts.names.empty() && opts.names.size() != ys.size())
+        throw std::invalid_argument(std::string(who) + ": names needs one per layer");
+    const std::vector<std::vector<double>> curves = stack_curves(ys, x.size(), opts.baseline);
+    for (std::size_t k = 0; k < ys.size(); ++k) {
+        FillOptions f;
+        f.orientation = opts.orientation;
+        if (!opts.colors.empty()) f.color = opts.colors[k];
+        f.alpha = opts.alpha;
+        f.edgecolor = opts.edgecolor;
+        f.linewidth = opts.linewidth;
+        f.linestyle = opts.linestyle;
+        f.drawstyle = opts.drawstyle;
+        if (!opts.names.empty()) f.name = opts.names[k];
+        f.show_legend = opts.show_legend;
+        f.visible = opts.visible;
+        ingest_fill(x, curves[k], curves[k + 1], std::move(f), who);
+    }
+}
+
+Axes& Axes::stack(std::span<const double> x, std::span<const std::vector<double>> ys,
+                  StackOptions opts) {
+    d->ingest_stack(x, ys, opts, "stack");
+    return *this;
+}
+
+// An unset amp is chosen from the data here and kept, as matplotlib's.
+// A colormapped quiver keeps a cycle color without using one up, as the 3D
+// kinds' colormapped objects do.
+void Axes::Impl::ingest_quiver(std::span<const double> x, std::span<const double> y,
+                               std::span<const double> u, std::span<const double> v,
+                               const std::span<const double>* c, QuiverOptions opts, const char* who) {
+    read_back::check_quiver(x.size(), y.size(), u.size(), v.size(), who);
+    if (c && c->size() != x.size())
+        throw std::invalid_argument(std::string(who) + ": c must have one value per arrow");
+    if (opts.amp && !(std::isfinite(*opts.amp) && *opts.amp > 0.0))
+        throw std::invalid_argument(std::string(who) + ": amp must be finite and > 0");
+    if (!opts.amp) opts.amp = quiver_auto_amp(x, y, u, v);
+    warn_math(mathtext, who, opts.name);
+    cycle->resolve(opts.color, !c);
+    quivers.push_back({
+        read_back::own(x),
+        read_back::own(y),
+        read_back::own(u),
+        read_back::own(v),
+        std::move(opts),
+        next_snapshot_generation(),
+        next_object_id(),
+        c ? CowVec<double>(read_back::own(*c)) : CowVec<double>{},
+    });
+}
+
+Axes& Axes::quiver(std::span<const double> x, std::span<const double> y, std::span<const double> u,
+                   std::span<const double> v, QuiverOptions opts) {
+    d->ingest_quiver(x, y, u, v, nullptr, std::move(opts), "quiver");
+    return *this;
+}
+
+Axes& Axes::quiver(std::span<const double> x, std::span<const double> y, std::span<const double> u,
+                   std::span<const double> v, std::span<const double> c, QuiverOptions opts) {
+    d->ingest_quiver(x, y, u, v, &c, std::move(opts), "quiver");
+    return *this;
+}
+
 Axes& Axes::axline(double value, AxLineOptions opts) {
     d->ingest_axline(value, std::move(opts), "axline");
     return *this;
@@ -809,6 +913,18 @@ TextData Axes::text_data(std::size_t i) const {
     return read_back::to_data(read_back::at(d->texts, i, "text_data"));
 }
 
+std::size_t Axes::fill_count() const      { return d->fills.size(); }
+
+FillData Axes::fill_data(std::size_t i) const {
+    return read_back::to_data(read_back::at(d->fills, i, "fill_data"));
+}
+
+std::size_t Axes::quiver_count() const    { return d->quivers.size(); }
+
+QuiverData Axes::quiver_data(std::size_t i) const {
+    return read_back::to_data(read_back::at(d->quivers, i, "quiver_data"));
+}
+
 std::size_t Axes::axline_count() const    { return d->axlines.size(); }
 std::size_t Axes::axspan_count() const    { return d->axspans.size(); }
 
@@ -858,6 +974,60 @@ Axes& Axes::set_text_data(std::size_t i, std::string_view s, Pos x, Pos y) {
     d->set_text_data(i, std::move(c), "set_text_data");
     return *this;
 }
+
+// --- Hiding plot objects ----------------------------------------------------
+
+Axes& Axes::set_line_visible(std::size_t i, bool visible) {
+    read_back::set_visible(d->lines, i, visible, "set_line_visible");
+    return *this;
+}
+Axes& Axes::set_scatter_visible(std::size_t i, bool visible) {
+    read_back::set_visible(d->scatters, i, visible, "set_scatter_visible");
+    return *this;
+}
+Axes& Axes::set_scatter_z_visible(std::size_t i, bool visible) {
+    read_back::set_visible(d->scatter_z, i, visible, "set_scatter_z_visible");
+    return *this;
+}
+Axes& Axes::set_bar_visible(std::size_t i, bool visible) {
+    read_back::set_visible(d->bars, i, visible, "set_bar_visible");
+    return *this;
+}
+Axes& Axes::set_heatmap_visible(std::size_t i, bool visible) {
+    read_back::set_visible(d->heatmaps, i, visible, "set_heatmap_visible");
+    return *this;
+}
+Axes& Axes::set_fill_visible(std::size_t i, bool visible) {
+    read_back::set_visible(d->fills, i, visible, "set_fill_visible");
+    return *this;
+}
+Axes& Axes::set_quiver_visible(std::size_t i, bool visible) {
+    read_back::set_visible(d->quivers, i, visible, "set_quiver_visible");
+    return *this;
+}
+Axes& Axes::set_axline_visible(std::size_t i, bool visible) {
+    read_back::set_visible(d->axlines, i, visible, "set_axline_visible");
+    return *this;
+}
+Axes& Axes::set_axspan_visible(std::size_t i, bool visible) {
+    read_back::set_visible(d->axspans, i, visible, "set_axspan_visible");
+    return *this;
+}
+Axes& Axes::set_text_visible(std::size_t i, bool visible) {
+    read_back::set_visible(d->texts, i, visible, "set_text_visible");
+    return *this;
+}
+
+bool Axes::line_visible(std::size_t i) const      { return read_back::visible(d->lines, i, "line_visible"); }
+bool Axes::scatter_visible(std::size_t i) const   { return read_back::visible(d->scatters, i, "scatter_visible"); }
+bool Axes::scatter_z_visible(std::size_t i) const { return read_back::visible(d->scatter_z, i, "scatter_z_visible"); }
+bool Axes::bar_visible(std::size_t i) const       { return read_back::visible(d->bars, i, "bar_visible"); }
+bool Axes::heatmap_visible(std::size_t i) const   { return read_back::visible(d->heatmaps, i, "heatmap_visible"); }
+bool Axes::fill_visible(std::size_t i) const      { return read_back::visible(d->fills, i, "fill_visible"); }
+bool Axes::quiver_visible(std::size_t i) const    { return read_back::visible(d->quivers, i, "quiver_visible"); }
+bool Axes::axline_visible(std::size_t i) const    { return read_back::visible(d->axlines, i, "axline_visible"); }
+bool Axes::axspan_visible(std::size_t i) const    { return read_back::visible(d->axspans, i, "axspan_visible"); }
+bool Axes::text_visible(std::size_t i) const      { return read_back::visible(d->texts, i, "text_visible"); }
 
 // set_*_data(): find object i, validate the new data as plotting it would, then
 // swap it in. Nothing changes if either throws.
@@ -912,6 +1082,37 @@ void Axes::Impl::set_bar_data(std::size_t i, std::span<const double> x, std::spa
     if (bottom) p.bottom = std::move(bases);
 }
 
+// The mask stays while the point count does (a span overload), else it goes.
+void Axes::Impl::set_fill_data(std::size_t i, std::span<const double> x, std::span<const double> y1,
+                               std::span<const double> y2, const std::vector<bool>* exclude,
+                               const char* who) {
+    FillPlot& p = read_back::at(fills, i, who);
+    read_back::check_fill(x.size(), y1.size(), y2.size(), who);
+    std::vector<double> mask;
+    if (exclude) mask = read_back::take_exclude(*exclude, x.size(), who);
+    if (exclude) p.exclude = std::move(mask);
+    else if (x.size() != p.x.size()) p.exclude = std::vector<double>{};
+    p.x = read_back::own(x);
+    p.y1 = read_back::own(y1);
+    p.y2 = read_back::own(y2);
+    p.data_stamp = next_snapshot_generation();
+}
+
+void Axes::Impl::set_quiver_data(std::size_t i, std::span<const double> x, std::span<const double> y,
+                                 std::span<const double> u, std::span<const double> v,
+                                 const std::vector<double>* c, const char* who) {
+    QuiverPlot& p = read_back::at(quivers, i, who);
+    read_back::check_quiver(x.size(), y.size(), u.size(), v.size(), who);
+    if (c) read_back::check_quiver_c(c->size(), x.size(), who);
+    if (c) p.c = read_back::own(std::span<const double>(*c));
+    else if (x.size() != p.x.size()) p.c = CowVec<double>{};
+    p.x = read_back::own(x);
+    p.y = read_back::own(y);
+    p.u = read_back::own(u);
+    p.v = read_back::own(v);
+    p.data_stamp = next_snapshot_generation();
+}
+
 void Axes::Impl::set_heatmap_data(std::size_t i, std::span<const double> data, int rows, int cols,
                                   Range xrange, Range yrange, const char* who) {
     HeatmapPlot& p = read_back::at(heatmaps, i, who);
@@ -955,6 +1156,24 @@ Axes& Axes::set_bar_data(std::size_t i, const BarData& data) {
 }
 Axes& Axes::set_bar_data(std::size_t i, std::span<const double> x, std::span<const double> height) {
     d->set_bar_data(i, x, height, nullptr, "set_bar_data");
+    return *this;
+}
+Axes& Axes::set_fill_data(std::size_t i, const FillData& data) {
+    d->set_fill_data(i, data.x, data.y1, data.y2, &data.exclude, "set_fill_data");
+    return *this;
+}
+Axes& Axes::set_fill_data(std::size_t i, std::span<const double> x, std::span<const double> y1,
+                          std::span<const double> y2) {
+    d->set_fill_data(i, x, y1, y2, nullptr, "set_fill_data");
+    return *this;
+}
+Axes& Axes::set_quiver_data(std::size_t i, const QuiverData& data) {
+    d->set_quiver_data(i, data.x, data.y, data.u, data.v, &data.c, "set_quiver_data");
+    return *this;
+}
+Axes& Axes::set_quiver_data(std::size_t i, std::span<const double> x, std::span<const double> y,
+                            std::span<const double> u, std::span<const double> v) {
+    d->set_quiver_data(i, x, y, u, v, nullptr, "set_quiver_data");
     return *this;
 }
 Axes& Axes::set_heatmap_data(std::size_t i, const HeatmapData& data) {

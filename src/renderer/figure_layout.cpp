@@ -1,6 +1,7 @@
 #include "figure_layout.h"
 #include "../axis_limits.h"
 #include "../axis_placement.h"
+#include "../fill_geometry.h"
 #include "../rich_text.h"
 #include "../tick_style.h"
 #include "../ticker.h"
@@ -423,14 +424,19 @@ namespace sextant {
         void fill_legend(CellDecorations& d, std::vector<LegendEntry> entries, const LegendOptions& lo) {
             d.legend_entries = std::move(entries);
             if (d.legend_entries.empty()) return;
-            const float row_h = legend_row_height(lo.fontsize);
+            float row_h = legend_row_height(lo.fontsize);
             float text_w = 0.0f;
             d.legend_entry_w.reserve(d.legend_entries.size());
             for (const auto& e: d.legend_entries) {
                 const float w = label_width(lo.font_path, lo.fontsize, e.name);
                 text_w = std::max(text_w, w);
                 d.legend_entry_w.push_back(kLegendSwatchW + kLegendGap + w);
+                // A name with a fraction or root: its ink plus 2 px each way.
+                if (is_rich(e.name))
+                    if (const RichLine l = layout_rich(lo.font_path, lo.fontsize, e.name); l.placed)
+                        row_h = std::max(row_h, l.ink_top - l.ink_bottom + 4.0f);
             }
+            d.legend_row_h = row_h;
             d.legend_box_w = kLegendPad * 2.0f + kLegendSwatchW + kLegendGap + text_w;
             d.legend_box_h = kLegendPad * 2.0f + row_h * static_cast<float>(d.legend_entries.size());
             d.legend_block = std::max(0.0f, lo.margin) + d.legend_box_w;
@@ -536,7 +542,7 @@ namespace sextant {
                 return layout_legend_rows(m.dec, m.legend_fontsize, extended_w - 2.0f * m.legend_margin);
             // Every other anchor is one column.
             LegendRows out;
-            const float row_h = legend_row_height(m.legend_fontsize);
+            const float row_h = m.dec.legend_row_h;
             out.w = m.dec.legend_box_w;
             out.h = m.dec.legend_box_h;
             out.slots.reserve(m.dec.legend_entries.size());
@@ -686,7 +692,7 @@ namespace sextant {
     LegendRows layout_legend_rows(const CellDecorations& dec, float fontsize, float max_w) {
         LegendRows out;
         if (dec.legend_entries.empty()) return out;
-        const float row_h = legend_row_height(fontsize);
+        const float row_h = dec.legend_row_h > 0.0f ? dec.legend_row_h : legend_row_height(fontsize);
         float cur = 0.0f, content_w = 0.0f;
         int row = 0;
         out.slots.reserve(dec.legend_entries.size());
@@ -797,6 +803,35 @@ namespace sextant {
                         Color c = *sp.opts.color;
                         c.a *= sp.opts.alpha;
                         entries.push_back({c, sp.opts.name, LegendKind::Bar, LineStyle::Solid});
+                    }
+                    break;
+                }
+                case PlotKind::Fill: {
+                    // A patch at the fill's opacity, as a span's; outlined when
+                    // the fill is.
+                    const auto& fp = snap.fills[r.index];
+                    if (keyed(fp.opts)) {
+                        Color c = *fp.opts.color;
+                        c.a *= fp.opts.alpha;
+                        LegendEntry e{c, fp.opts.name, LegendKind::Bar, LineStyle::Solid};
+                        if (fp.opts.linewidth > 0.0f && fp.opts.linestyle != LineStyle::None)
+                            e.edge = fill_edge(fp);
+                        entries.push_back(std::move(e));
+                    }
+                    break;
+                }
+                case PlotKind::Quiver: {
+                    // An arrow at the quiver's color and opacity; colormapped,
+                    // white with a black edge (the colorbar explains the colors),
+                    // as scatter_z's key.
+                    const auto& qp = snap.quivers[r.index];
+                    if (keyed(qp.opts) && qp.colormapped()) {
+                        entries.push_back({Color::White, qp.opts.name, LegendKind::Arrow, LineStyle::Solid,
+                                           MarkerStyle::Circle, Color::Black});
+                    } else if (keyed(qp.opts)) {
+                        Color c = *qp.opts.color;
+                        c.a *= qp.opts.alpha;
+                        entries.push_back({c, qp.opts.name, LegendKind::Arrow, LineStyle::Solid});
                     }
                     break;
                 }
@@ -950,7 +985,7 @@ namespace sextant {
 
     FigureMeasure measure_figure(const FigureSnapshot& fsnap, const FigureMeasure* frozen) {
         // FigureOptions::mathtext for every label measured below.
-        const MathTextScope math(fsnap.mathtext);
+        const MathTextScope math(fsnap.mathtext, fsnap.math_font);
         return measure_with(fsnap, prepare_all(fsnap), frozen);
     }
 
@@ -1447,7 +1482,7 @@ namespace sextant {
     FigureLayout compute_figure_layout(const FigureSnapshot& fsnap, int fig_w, int fig_h,
                                        FigureMeasure* out_measure) {
         // FigureOptions::mathtext for every label measured below.
-        const MathTextScope math(fsnap.mathtext);
+        const MathTextScope math(fsnap.mathtext, fsnap.math_font);
         // One prepare() per axes, shared by measure and cell pass (limits and
         // ticks once per frame).
         const std::vector<CellPrep> prep = prepare_all(fsnap);
@@ -1460,7 +1495,7 @@ namespace sextant {
     FigureLayout compute_figure_layout(const FigureSnapshot& fsnap, const FigureMeasure& measure,
                                        int fig_w, int fig_h) {
         // FigureOptions::mathtext for every label measured below.
-        const MathTextScope math(fsnap.mathtext);
+        const MathTextScope math(fsnap.mathtext, fsnap.math_font);
         if (!measure_fits(measure, fsnap)) return compute_figure_layout(fsnap, fig_w, fig_h);
         return layout_with(fsnap, prepare_all(fsnap), measure, fig_w, fig_h);
     }

@@ -21,11 +21,11 @@ namespace lt {
             stbtt_fontinfo info{};
             bool ok = false;
 
-            explicit Face(const std::string& file) {
+            explicit Face(const std::string& file, int index = 0) {
                 std::ifstream in(file, std::ios::binary);
                 data.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
                 if (data.empty()) return;
-                const int offset = stbtt_GetFontOffsetForIndex(data.data(), 0);
+                const int offset = stbtt_GetFontOffsetForIndex(data.data(), index);
                 ok = offset >= 0 && stbtt_InitFont(&info, data.data(), offset);
             }
         };
@@ -39,8 +39,8 @@ namespace lt {
     GlyphBoxes::GlyphBoxes(const std::string& font_file) : impl_(std::make_unique<Impl>()) {
         impl_->face = std::make_unique<Face>(font_file);
         for (const sextant::FontEntry* e: sextant::fallback_fonts()) {
-            if (e->path == font_file) continue;
-            auto f = std::make_unique<Face>(e->path);
+            if (e->path == font_file && e->index == 0) continue;
+            auto f = std::make_unique<Face>(e->path, e->index);
             if (f->ok) impl_->fallbacks.push_back(std::move(f));
         }
     }

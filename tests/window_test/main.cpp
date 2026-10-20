@@ -55,6 +55,164 @@ static void savefig_and_check_memory(const std::shared_ptr<sextant::Figure>& fig
            rgba_ok ? "ok" : "BAD SIZE");
 }
 
+// Mathtext gallery: every construct drawn so far, through text(). Each item
+// is its source (grey, plain: no `$`) over the math it draws, so it can be
+// compared with matplotlib's. One cell per kind; the last puts math where
+// labels go (title, axis titles, legend, a rotated, a boxed and a multi-line
+// text). What to look for: nothing overlaps its neighbours; fraction bars,
+// roots, accents and drawn delimiters meet the glyphs cleanly; limits are
+// centred over and under their operator; the PNG and SVG agree.
+// Two pages: the text font, then a math font (FigureOptions::math_fontset):
+// Stix where installed, else a math font found as Custom (DejaVu Math TeX
+// Gyre, Noto Sans Math), else Cm, which no machine here has -- that page then
+// says so in its title and the console shows the one warning.
+static void mathtext_gallery_page(sextant::MathFontset set, const std::string& path, const std::string& name,
+                                  const std::string& stem) {
+    auto fig = sextant::Figure::create({
+        .width = 1800, .height = 1100,
+        .title = "sextant — mathtext (" + name + ")",
+        .math_fontset = set, .math_font_path = path
+    });
+    fig->suptitle("Mathtext in " + name + ": source above, drawn below");
+
+    struct Cell {
+        const char* title;
+        std::vector<const char*> items;
+    };
+    const Cell cells[] = {
+        {"Scripts, symbols, fonts", {
+            "x^2 + y_i^{n+1} - z_{i,j}",
+            "\\alpha\\beta\\gamma\\epsilon\\phi\\;\\Gamma\\Delta\\Omega\\;\\hbar\\ell\\infty",
+            "a \\leq b \\neq c \\approx d \\in A \\subseteq B",
+            "\\sin(\\omega t) \\rightarrow \\infty,\\ \\log_2 n,\\ \\pm\\times\\cdot",
+            "\\mathrm{d}x\\,\\mathit{AB2}\\,\\text{rate}_{\\text{in}},\\ f'(x),\\ \\nabla\\cdot F",
+            "\\mathbf{F} = m\\mathbf{a},\\ \\mathbf{x}_{\\mathbf{1}}^2,\\ \\mathsf{sans1}\\,\\mathtt{mono1}",
+            "\\mathcal{L}\\,\\mathcal{H}\\,\\mathscr{E}\\quad\\mathbb{R}^n\\,\\mathbb{Z}\\,\\mathbb{1}\\quad"
+            "\\mathfrak{g}\\,\\mathfrak{R}",
+        }},
+        {"Fractions, roots, rules", {
+            "\\frac{a+b}{c}\\quad\\dfrac{1}{2}\\quad\\tfrac{1}{2}\\quad\\frac12",
+            "\\frac{\\frac{1}{x}+1}{y}\\quad e^{-\\frac{(x-\\mu)^2}{2\\sigma^2}}",
+            "\\sqrt{2}\\quad\\sqrt[3]{x}\\quad\\sqrt{\\frac{a}{b}}\\quad\\sqrt{x_i^2+y}",
+            "\\overline{AB}\\quad\\underline{xyz}\\quad\\overline{\\overline{z}}\\quad x^{\\frac{1}{2}}",
+            "\\frac{1}{\\sigma\\sqrt{2\\pi}}",
+        }},
+        {"Accents", {
+            "\\hat{x}\\,\\bar{x}\\,\\tilde{a}\\,\\dot{x}\\,\\ddot{y}\\,\\vec{v}",
+            "\\acute{e}\\,\\grave{a}\\,\\breve{u}\\,\\check{c}\\,\\mathring{A}",
+            "\\hat{X}\\,\\bar{F}\\,\\hat{\\imath}\\,\\vec{\\jmath}\\,\\vec{x}^2\\,\\hat{\\theta}_k",
+            "\\widehat{xyz}\\quad\\widetilde{abc}\\quad\\widehat{i}",
+            "\\overrightarrow{AB}\\quad\\overleftarrow{PQ}",
+        }},
+        {"Delimiters", {
+            "\\left(\\frac{a}{b}\\right)\\left[\\frac{1}{x}\\right]\\left\\{\\frac{\\frac{a}{b}}{c}\\right\\}"
+            "\\left(x\\right)",
+            "\\left|\\frac{a}{b}\\right|\\left\\|\\frac{a}{b}\\right\\|\\left\\langle\\frac{a}{b}\\right\\rangle",
+            "\\left\\lfloor\\frac{a}{b}\\right\\rfloor\\left\\lceil\\frac{a}{b}\\right\\rceil",
+            "\\bigl(\\Bigl(\\biggl(\\Biggl(x\\Biggr)\\biggr)\\Bigr)\\bigr)\\quad\\Bigl[\\bigl|x\\bigr|\\Bigr]",
+            "\\binom{n}{k}\\quad\\left\\{x\\middle|\\frac{x}{2}>0\\right\\}\\quad\\left/\\frac{a}{b}\\right\\backslash",
+            "\\left.\\frac{df}{dx}\\right|_{x=0}\\quad\\left(\\sum_{i=1}^{n}x_i\\right)^2",
+        }},
+        {"Operators and limits", {
+            "\\sum_{i=0}^{n} x_i\\quad\\prod_{k=1}^{N} a_k\\quad\\coprod_j",
+            "\\int_0^1 f\\,dx\\quad\\iint_D g\\quad\\oint_C\\vec{F}\\cdot d\\vec{r}",
+            "\\lim_{x\\to 0}\\frac{\\sin x}{x}\\quad\\max_x f\\quad\\sup_{n} a_n",
+            "\\prod_{\\substack{0<i<n\\\\ i\\neq j}} a_i\\quad\\bigcup_k A_k\\quad\\bigoplus_k V_k\\quad x^{\\sum_i y}",
+            "\\overset{!}{=}\\quad A\\stackrel{f}{\\to}B\\quad\\underset{x}{\\operatorname{argmax}}\\,g",
+        }},
+    };
+
+    sextant::AxesStyle bare;
+    bare.show_xticks = bare.show_yticks = false;
+    bare.spine_bottom = bare.spine_left = bare.spine_top = bare.spine_right = false;
+    sextant::TextOptions source;
+    source.fontsize = 10.0f;
+    source.color = {0.45f, 0.45f, 0.45f, 1.0f};
+    source.va = sextant::VAlign::Top;
+    sextant::TextOptions math;
+    math.fontsize = 20.0f;
+    math.va = sextant::VAlign::Top;
+    math.dy = -16.0f;
+    int index = 1;
+    for (const Cell& c: cells) {
+        auto ax = fig->add_subplot(2, 3, index++);
+        ax->set_axes_style(bare).set_title(c.title);
+        const double step = 0.95 / static_cast<double>(c.items.size());
+        for (std::size_t i = 0; i < c.items.size(); ++i) {
+            const double y = 0.98 - step * static_cast<double>(i);
+            ax->text(c.items[i], sextant::Pos::fraction(0.02), sextant::Pos::fraction(y), source);
+            ax->text(std::string("$") + c.items[i] + "$", sextant::Pos::fraction(0.02),
+                     sextant::Pos::fraction(y), math);
+        }
+    }
+
+    // Math where labels go.
+    std::vector<double> t(60), s(60), r(60);
+    for (int i = 0; i < 60; ++i) {
+        t[i] = i / 59.0;
+        s[i] = std::sqrt(t[i]);
+        r[i] = t[i] * t[i];
+    }
+    auto ax = fig->add_subplot(2, 3, 6);
+    ax->line(t, s, {.name = "$\\sqrt{t}$"})
+        .line(t, r, {.name = "$\\overline{x}_n = \\frac{1}{n}\\sum_i x_i$"})
+        .legend()
+        .set_title("$\\sum_{k=1}^{\\infty}\\frac{1}{k^2} = \\frac{\\pi^2}{6}$")
+        .set_xtitle("$\\int_0^t v\\,d\\tau$ [m]")
+        .set_ytitle("$\\left|\\hat{H}(\\omega)\\right|$");
+    sextant::TextOptions turned;
+    turned.fontsize = 18.0f;
+    turned.rotation = 25.0f;
+    ax->text("$\\frac{1}{\\sqrt{n}}\\sum_{i=1}^{n}X_i$", sextant::Pos::fraction(0.55), sextant::Pos::fraction(0.25), turned);
+    sextant::TextOptions boxed;
+    boxed.fontsize = 16.0f;
+    boxed.edge_linewidth = 1.0f;
+    boxed.background = {1.0f, 1.0f, 0.85f, 1.0f};
+    ax->text("$\\hat{\\beta} = \\left(X^TX\\right)^{-1}X^Ty$", sextant::Pos::fraction(0.05), sextant::Pos::fraction(0.62), boxed);
+    sextant::TextOptions lines;
+    lines.fontsize = 14.0f;
+    ax->text("$\\lim_{n\\to\\infty}a_n$\nplain line\n$\\frac{1}{2}$ last", sextant::Pos::fraction(0.62),
+             sextant::Pos::fraction(0.40), lines);
+
+    savefig_and_check_memory(fig, stem);
+    fig->show(true);
+}
+
+static void test_mathtext_gallery() {
+    mathtext_gallery_page(sextant::MathFontset::Text, "", "the text font", "test_mathtext_gallery");
+
+    // The math font: the first choice this machine has, found by creating a
+    // figure with each until one sends no message.
+    struct Choice {
+        sextant::MathFontset set;
+        const char* path;
+        const char* name;
+    };
+    const Choice choices[] = {
+        {sextant::MathFontset::Stix, "", "Stix"},
+        {sextant::MathFontset::Custom, "C:/Windows/Fonts/DejaVuMathTeXGyre.ttf", "DejaVu Math TeX Gyre"},
+        {sextant::MathFontset::Custom, "/usr/share/fonts/TTF/DejaVuMathTeXGyre.ttf", "DejaVu Math TeX Gyre"},
+        {sextant::MathFontset::Custom, "/usr/share/fonts/noto/NotoSansMath-Regular.ttf", "Noto Sans Math"},
+    };
+    bool warned = false;
+    sextant::Figure::set_message_handler([&](std::string_view) { warned = true; });
+    const Choice* pick = nullptr;
+    for (const Choice& c: choices) {
+        warned = false;
+        (void) sextant::Figure::create({.math_fontset = c.set, .math_font_path = c.path});
+        if (!warned) {
+            pick = &c;
+            break;
+        }
+    }
+    sextant::Figure::set_message_handler(nullptr);
+    if (pick)
+        mathtext_gallery_page(pick->set, pick->path, pick->name, "test_mathtext_gallery_math");
+    else
+        mathtext_gallery_page(sextant::MathFontset::Cm, "", "Cm (not installed: the text font)",
+                              "test_mathtext_gallery_math");
+}
+
 // 1. Plot gallery — every basic plot type in one subplot grid.
 static void test_axes_gallery() {
     constexpr int N = 200;
@@ -163,7 +321,7 @@ static void test_axes_gallery() {
     fig->suptitle("What Axes draws");
 
     fig->add_subplot(3, 4, 1)
-            // Math in text: the legend names, the annotation and the x title.
+            // Math in text: the legend names, the annotation, the x and y titles.
             ->line(x, y_sin, {.color = sextant::Color::Blue, .linewidth = 4.0f, .name = "$\\sin(x)$"})
             .line(x, y_cos, {
                       .color = sextant::Color::Red, .linewidth = 2.0f,
@@ -177,12 +335,20 @@ static void test_axes_gallery() {
             .annotate(M_PI / 2.0, 1.0, "$\\sin(\\pi/2) = 1$", sextant::Pos::fraction(0.55),
                       sextant::Pos::fraction(0.93),
                       {.va = sextant::VAlign::Top, .background = {1.0f, 1.0f, 0.85f, 1.0f}, .edge_linewidth = 1.0f})
-            .set_xtitle("$\\theta$ [rad]")
+            .set_xtitle("$\\hat{\\theta}$ [rad]").set_ytitle("$\\left(\\frac{\\sqrt{2}}{2}\\right)\\overline{y}$")
             .set_title("Line").legend().grid();
 
+    // C starts hidden (step 40): tick Visible on its Data-panel tab and the
+    // limits widen to x = 4, and the legend gains its key.
+    std::vector<double> xc(xb);
+    for (double& v : xc) v += 5.0;
     fig->add_subplot(3, 4, 2)
             ->scatter(xa, ya, {.color = sextant::Color::Blue, .marker = sextant::MarkerStyle::Circle, .name = "A"})
             .scatter(xb, yb, {.color = sextant::Color::Orange, .marker = sextant::MarkerStyle::Diamond, .name = "B"})
+            .scatter(xc, yb, {
+                         .color = sextant::Color::Green, .marker = sextant::MarkerStyle::Square,
+                         .name = "C (hidden)", .visible = false
+                     })
             .set_title("Scatter").legend().grid();
 
     // Labelled, so the legend keys it.
@@ -521,21 +687,8 @@ static void test_axes3d_gallery() {
     savefig_and_check_memory(fig, "test_axes3d_gallery");
 }
 
-// -------------------------------------------------------------------------
-// Translucency across every pair of 3D kinds
-// -------------------------------------------------------------------------
-// Six cells, one per pair of kinds, each built so the two objects genuinely
-// interleave in depth. Orbit slowly, including past both poles and near zero
-// elevation:
-//   - nothing may pop (no whole-object order flips);
-//   - both sides of every crossing (cells 1, 3, 5) must be right;
-//   - colors must not depend on insertion order.
-// Compare with SEXTANT_PEEL_LAYERS=0 (whole-object order): every cell should
-// change. The SVG is saved too and is expected to be wrong in places (the
-// vector path has no depth test).
-// -------------------------------------------------------------------------
 // line3d gallery: four cells, each judged by eye.
-static void test_line3d_gallery() {
+static void test_line3d() {
     auto fig = sextant::Figure::create({
         .width = 1500, .height = 820,
         .title = "sextant — line3d"
@@ -653,7 +806,7 @@ static void test_line3d_gallery() {
     }
 
     fig->show(true);
-    savefig_and_check_memory(fig, "test_line3d_gallery");
+    savefig_and_check_memory(fig, "test_line3d");
 }
 
 // -------------------------------------------------------------------------
@@ -666,7 +819,7 @@ static void test_line3d_gallery() {
 //   3. A path with caps and blocks under perspective: near bars are larger as
 //      a whole.
 //   4. A colormapped cloud: error bars default to black and darken with depth.
-static void test_errorbar3d_gallery() {
+static void part_errorbar3d() {
     auto fig = sextant::Figure::create({
         .width = 1500, .height = 860,
         .title = "sextant — 3D error bars"
@@ -762,7 +915,7 @@ static void test_errorbar3d_gallery() {
     }
 
     fig->show(true);
-    savefig_and_check_memory(fig, "test_errorbar3d_gallery");
+    savefig_and_check_memory(fig, "part_errorbar3d");
 }
 
 // -------------------------------------------------------------------------
@@ -774,7 +927,7 @@ static void test_errorbar3d_gallery() {
 //      ribbon because shading is two-sided. Wireframe on.
 //   4. Translucency and self-occlusion: compare the PNG with the SVG, and with
 //      SEXTANT_PEEL_LAYERS=1.
-static void test_surface_tri_gallery() {
+static void test_surface_tri() {
     auto fig = sextant::Figure::create({
         .width = 1500, .height = 820,
         .title = "sextant — surface_tri"
@@ -934,178 +1087,11 @@ static void test_surface_tri_gallery() {
     }
 
     fig->show(true);
-    savefig_and_check_memory(fig, "test_surface_tri_gallery");
-}
-
-static void test_translucent3d() {
-    constexpr int NU = 13, NV = 13;
-    std::vector<double> gx(NU), gy(NV), ripple(NU * NV), bowl(NU * NV);
-    for (int i = 0; i < NU; ++i) gx[static_cast<std::size_t>(i)] = -3.0 + 6.0 * i / (NU - 1);
-    for (int j = 0; j < NV; ++j) gy[static_cast<std::size_t>(j)] = -3.0 + 6.0 * j / (NV - 1);
-    for (int i = 0; i < NU; ++i)
-        for (int j = 0; j < NV; ++j) {
-            const double x = gx[static_cast<std::size_t>(i)];
-            const double y = gy[static_cast<std::size_t>(j)];
-            const double r = std::hypot(x, y);
-            ripple[static_cast<std::size_t>(i * NV + j)] = 1.6 * std::exp(-r / 2.0) * std::cos(r * 1.7);
-            // A saddle, so the sheets in cell 3 cross along two lines.
-            bowl[static_cast<std::size_t>(i * NV + j)] = 0.22 * (x * x - y * y);
-        }
-
-    // A field for the planes, so crossing contents visibly change over.
-    constexpr int NX = 40, NY = 40;
-    auto slice_at = [&](double z) {
-        std::vector<double> m(static_cast<std::size_t>(NY) * NX);
-        for (int r = 0; r < NY; ++r)
-            for (int c = 0; c < NX; ++c) {
-                const double x = -3.0 + 6.0 * c / (NX - 1);
-                const double y = -3.0 + 6.0 * r / (NY - 1);
-                m[static_cast<std::size_t>(r) * NX + c] =
-                        std::sin(x + z) * std::cos(y - z);
-            }
-        return m;
-    };
-
-    auto tr = sextant::Figure::create({
-        .width = 1500, .height = 950,
-        .title = "translucent 3D", .subplot_col_gap = 0.0f
-    });
-    tr->suptitle("Translucent blending, every pair of kinds");
-
-    const sextant::Range ext{-3.0, 3.0};
-
-    // The two planes use different ends of viridis, so crossings show a hue
-    // change.
-    const sextant::HeatmapOptions kCool{.vmin = -1.2f, .vmax = 5.0f};
-    const sextant::HeatmapOptions kWarm{.vmin = -5.0f, .vmax = 1.2f};
-
-    // 1. Plane x plane: two slices crossing at right angles.
-    auto c1 = tr->add_subplot3d(2, 3, 1);
-    c1->set_title("Plane x plane (crossing)")
-            .set_xtitle("x").set_ytitle("y").set_ztitle("z");
-    c1->plane(sextant::PlaneOrientation::XY, 0.0, {.alpha = 0.6f})
-            ->heatmap(slice_at(0.0), NY, NX, ext, ext, kCool);
-    c1->plane(sextant::PlaneOrientation::YZ, 0.0, {.alpha = 0.6f})
-            ->heatmap(slice_at(1.5), NY, NX, ext, ext, kWarm);
-
-    // 2. Bar x bar: the same footprint offset by half a cell, so bars
-    // alternate along any horizontal ray.
-    std::vector<double> gx2(NU), gy2(NV);
-    for (int i = 0; i < NU; ++i) gx2[static_cast<std::size_t>(i)] = gx[static_cast<std::size_t>(i)] + 0.25;
-    for (int j = 0; j < NV; ++j) gy2[static_cast<std::size_t>(j)] = gy[static_cast<std::size_t>(j)] + 0.25;
-    auto c2 = tr->add_subplot3d(2, 3, 2);
-    c2->set_title("Bar x bar (interleaved)")
-            .set_xtitle("x").set_ytitle("y").set_ztitle("z");
-    c2->bar3d(sextant::PlaneOrientation::XY, gx, gy, ripple,
-              {
-                  .color = sextant::Color::Orange, .alpha = 0.5f,
-                  .width = 0.45f, .depth = 0.45f, .bottom = -1.5
-              });
-    c2->bar3d(sextant::PlaneOrientation::XY, gx2, gy2, bowl,
-              {
-                  .color = sextant::Color::Blue, .alpha = 0.5f,
-                  .width = 0.45f, .depth = 0.45f, .bottom = -1.5
-              });
-
-    // 3. Surface x surface: a ripple and a saddle crossing along two curves.
-    auto c3 = tr->add_subplot3d(2, 3, 3);
-    c3->set_title("Surface x surface (two crossings)")
-            .set_xtitle("x").set_ytitle("y").set_ztitle("z");
-    c3->surface(sextant::PlaneOrientation::XY, gx, gy, ripple,
-                {.color = sextant::Color::from_hex(0xff5533), .alpha = 0.55f});
-    c3->surface(sextant::PlaneOrientation::XY, gx, gy, bowl,
-                {.color = sextant::Color::from_hex(0x3388ff), .alpha = 0.55f});
-
-    // 4. Plane x bar: a vertical cut through the grid.
-    auto c4 = tr->add_subplot3d(2, 3, 4);
-    c4->set_title("Plane x bar (a cut through the grid)")
-            .set_xtitle("x").set_ytitle("y").set_ztitle("z");
-    c4->bar3d(sextant::PlaneOrientation::XY, gx, gy, ripple,
-              {
-                  .color = sextant::Color::Green, .alpha = 0.5f,
-                  .width = 0.8f, .depth = 0.8f, .bottom = -1.5
-              });
-    c4->plane(sextant::PlaneOrientation::YZ, 0.0, {.alpha = 0.6f})
-            ->heatmap(slice_at(0.6), NY, NX, ext, ext, kWarm);
-
-    // 5. Plane x surface: the sheet is above the plane in the middle and below
-    // it at the rim.
-    auto c5 = tr->add_subplot3d(2, 3, 5);
-    c5->set_title("Plane x surface (crossing)")
-            .set_xtitle("x").set_ytitle("y").set_ztitle("z");
-    c5->surface(sextant::PlaneOrientation::XY, gx, gy, ripple,
-                {.colormap = true, .cmap = sextant::Colormap::Viridis, .alpha = 0.6f});
-    c5->plane(sextant::PlaneOrientation::XY, 0.35, {.alpha = 0.6f})
-            ->heatmap(slice_at(0.35), NY, NX, ext, ext, kWarm);
-
-    // 6. Bar x surface: the sheet at half the bars' height, inside every bar,
-    // so no whole-object order works from any camera.
-    std::vector<double> midway(NU * NV);
-    for (std::size_t k = 0; k < midway.size(); ++k) midway[k] = -1.5 + 0.5 * ripple[k];
-    auto c6 = tr->add_subplot3d(2, 3, 6);
-    c6->set_title("Bar x surface (sheet inside the bars)")
-            .set_xtitle("x").set_ytitle("y").set_ztitle("z");
-    c6->bar3d(sextant::PlaneOrientation::XY, gx, gy, ripple,
-              {
-                  .color = sextant::Color::Orange, .alpha = 0.5f,
-                  .width = 0.7f, .depth = 0.7f, .bottom = -1.5
-              });
-    c6->surface(sextant::PlaneOrientation::XY, gx, gy, midway,
-                {.colormap = true, .cmap = sextant::Colormap::Viridis, .alpha = 0.55f});
-
-    tr->savefig("test_translucent3d.png");
-    tr->savefig("test_translucent3d.svg");
-    printf("Saved: test_translucent3d.png/.svg\n");
-    printf("Orbit each cell, especially to elevation ~0. Re-run with\n"
-        "SEXTANT_PEEL_LAYERS=0 to see the whole-object order it replaces.\n");
-
-    tr->show();
-}
-
-static void test_savefig() {
-    constexpr int N = 80;
-    std::vector<double> x(N), y_sin(N);
-    for (int i = 0; i < N; ++i) {
-        x[i] = i * 2.0 * M_PI / N;
-        y_sin[i] = std::sin(x[i]);
-    }
-
-    const std::vector<double> months = {1, 2, 3, 4, 5, 6};
-    const std::vector<double> sales = {42, 55, 61, 49, 78, 83};
-
-    constexpr int R = 24, C = 24;
-    std::vector<double> gauss(R * C);
-    for (int r = 0; r < R; ++r)
-        for (int c = 0; c < C; ++c) {
-            double dr = (r - R / 2.0) / (R / 6.0), dc = (c - C / 2.0) / (C / 6.0);
-            gauss[r * C + c] = std::exp(-(dr * dr + dc * dc));
-        }
-
-    auto fig = sextant::Figure::create({.width = 1400, .height = 480, .title = "Headless export"});
-    fig->add_subplot(1, 3, 1)
-            ->line(x, y_sin, {.color = sextant::Color::Blue, .linewidth = 2.0f, .name = "sin(x)"})
-            .set_title("Line").set_xtitle("x").set_ytitle("y").legend().grid();
-    fig->add_subplot(1, 3, 2)
-            ->bar(months, sales, {.color = sextant::Color::Cyan, .edgecolor = sextant::Color::Black})
-            .set_title("Bar").set_xtitle("month").set_ytitle("units").grid();
-    // The gallery's contours through the headless path (no window, no GL).
-    fig->add_subplot(1, 3, 3)
-            ->imshow(gauss, R, C, {
-                         .cmap = sextant::Colormap::Viridis, .vmin = 0.0f, .vmax = 1.0f, .colorbar = true,
-                         .contours = {0.2, 0.4, 0.6, 0.8},
-                         .contour_color = {1.0f, 1.0f, 1.0f, 0.9f},
-                         .contour_linewidth = 1.5f,
-                         .contour_labels = true
-                     })
-            .set_title("Heatmap + contours");
-
-    fig->savefig("test_export.png");
-    fig->savefig("test_export.svg");
-    printf("Saved: test_export.png, test_export.svg\n");
+    savefig_and_check_memory(fig, "test_surface_tri");
 }
 
 // 3. Non-blocking show — window runs in background while main thread continues
-static void test_show_nonblocking() {
+static void part_nonblocking() {
     constexpr int N = 100;
     std::vector<double> x(N), y(N);
     for (int i = 0; i < N; ++i) {
@@ -1122,6 +1108,7 @@ static void test_show_nonblocking() {
             .grid();
 
     fig->show(false); // returns immediately; window lives on background thread
+    savefig_and_check_memory(fig, "test_show_nonblocking");
     printf("[main] show(false) returned  is_open=%s\n", fig->is_open() ? "true" : "false");
 
     for (int i = 1; i <= 5; ++i) {
@@ -1135,7 +1122,7 @@ static void test_show_nonblocking() {
 
 // 3b. wait_closed() and run() — waiting on the windows themselves, with no
 // console in it. Close the windows with their own buttons.
-static void test_wait_and_run() {
+static void part_wait_and_run() {
     auto make = [](const char* title, double phase) {
         constexpr int N = 100;
         std::vector<double> x(N), y(N);
@@ -1165,7 +1152,7 @@ static void test_wait_and_run() {
 }
 
 // 4. refresh() before show() — must throw std::logic_error
-static void test_refresh_before_show() {
+static void part_refresh_before_show() {
     auto fig = sextant::Figure::create();
     bool threw = false;
     try {
@@ -1175,120 +1162,6 @@ static void test_refresh_before_show() {
     }
     printf("[main] refresh() before show() threw logic_error: %s\n",
            threw ? "true" : "false");
-}
-
-// 5. Live refresh — mutate Axes from the main thread while the render thread
-// runs.
-static void test_live_refresh() {
-    constexpr int N = 100;
-    std::vector<double> x(N);
-    for (int i = 0; i < N; ++i) x[i] = i * 2.0 * M_PI / N;
-
-    auto fig = sextant::Figure::create({.width = 700, .height = 450, .title = "Live refresh"});
-    auto ax = fig->axes();
-
-    std::vector<double> y0(N);
-    for (int i = 0; i < N; ++i) y0[i] = std::sin(x[i]);
-    ax->line(x, y0, {.color = sextant::Color::Blue, .linewidth = 2.0f})
-            .set_title("Live refresh test");
-
-    fig->show(false);
-
-    // set_line_data() keeps the title and any pan/zoom, which cla() would reset.
-    for (int i = 0; i < 20; ++i) {
-        pump_for(std::chrono::milliseconds(50));
-        std::vector<double> y(N);
-        for (int j = 0; j < N; ++j) y[j] = std::sin(x[j] + i * 0.1);
-        ax->set_line_data(0, {x, y});
-        fig->refresh();
-    }
-
-    fig->close();
-    printf("[main] live refresh test done\n");
-}
-
-// 6. suptitle + auto layout — 2x2 grid, no axes titles anywhere
-static void test_suptitle_layout() {
-    constexpr int N = 60;
-    std::vector<double> x(N), y(N);
-    for (int i = 0; i < N; ++i) {
-        x[i] = i * 2.0 * M_PI / N;
-        y[i] = std::sin(x[i]);
-    }
-
-    auto fig = sextant::Figure::create({.width = 900, .height = 700, .title = "suptitle + layout"});
-    fig->suptitle("Figure-wide title");
-    auto ax1 = fig->add_subplot(2, 2, 1);
-    auto ax2 = fig->add_subplot(2, 2, 2);
-    auto ax3 = fig->add_subplot(2, 2, 3);
-    auto ax4 = fig->add_subplot(2, 2, 4);
-    ax1->line(x, y, {.color = sextant::Color::Blue});
-    ax2->line(x, y, {.color = sextant::Color::Red});
-    ax3->line(x, y, {.color = sextant::Color::Green});
-    ax4->line(x, y, {.color = sextant::Color::Purple});
-    // No titles anywhere: the layout should reserve nothing for them.
-
-    fig->savefig("test_suptitle_tight.png");
-    // Fig->show();
-    printf("Saved: test_suptitle_tight.png\n");
-}
-
-// 7. Widget panel + pan/zoom — right-side Dear ImGui control panel.
-static void test_widget_panel() {
-    constexpr int N = 100;
-    std::vector<double> x(N), y(N);
-    for (int i = 0; i < N; ++i) {
-        x[i] = i * 2.0 * M_PI / N;
-        y[i] = std::sin(x[i]);
-    }
-    const std::vector<double> months = {1, 2, 3, 4, 5, 6};
-    const std::vector<double> sales = {42, 55, 61, 49, 78, 83};
-
-    auto fig = sextant::Figure::create({.width = 1100, .height = 600, .title = "Widget panel"});
-    fig->add_subplot(1, 2, 1)
-            ->line(x, y, {.color = sextant::Color::Blue, .linewidth = 2.0f})
-            .set_title("Sine").set_xtitle("x").set_ytitle("y").grid();
-    fig->add_subplot(1, 2, 2)
-            ->bar(months, sales, {.color = sextant::Color::Cyan})
-            .set_title("Sales");
-
-    fig->show(true); // panel edits apply live via the window thread's own per-frame drain
-}
-
-// 12. Frame-driven resize: the window grows so the plot frame gets the
-// requested size. Interactive; the headless half is in sextant_layout_test.
-static void test_frame_resize() {
-    constexpr int N = 120;
-    std::vector<double> x(N), y(N);
-    for (int i = 0; i < N; ++i) {
-        x[i] = i * 4.0 * M_PI / N;
-        y[i] = std::sin(x[i]) * std::exp(-x[i] / 12.0);
-    }
-
-    auto fig = sextant::Figure::create({.width = 700, .height = 500, .title = "Frame resize"});
-    fig->axes()->line(x, y, {
-                          .color = sextant::Color::Blue, .linewidth = 2.0f,
-                          .name = "damped sine"
-                      })
-            .set_title("Damped sine").set_xtitle("t (s)").set_ytitle("amplitude")
-            .legend().grid();
-
-    const auto a = fig->size_for_frame(400, 300);
-    printf("[main] a 400x300 plot frame needs a %dx%d figure\n", a.width, a.height);
-
-    fig->show(false);
-    pump_for(std::chrono::seconds(3));
-
-    printf("[main] resizing so the plot frame is 400x300\n");
-    fig->resize_to_frame(400, 300);
-    pump_for(std::chrono::seconds(3));
-
-    printf("[main] resizing so the plot frame is 700x260\n");
-    fig->resize_to_frame(700, 260);
-    pump_for(std::chrono::seconds(3));
-
-    printf("[main] press ENTER to close\n");
-    std::cin.get();
 }
 
 // Subplot spans: one 3x3 grid with four spans and two single cells (one 3D):
@@ -1311,7 +1184,7 @@ static void test_frame_resize() {
 //   * hover hints everywhere, and the heatmap's colorbar beside {5,6};
 //   * File > Resize to plot frame sizes the selected span's frame;
 //   * the saved PNG/SVG match the window.
-static void test_subplot_spans() {
+static void part_spans() {
     constexpr int N = 240;
     std::vector<double> t(N), s1(N), s2(N), drift(N);
     for (int i = 0; i < N; ++i) {
@@ -1391,555 +1264,11 @@ static void test_subplot_spans() {
     expect_throw("add_subplot(2, 2, 1)", [&] { fig->add_subplot(2, 2, 1); });
     expect_throw("add_subplot({3, 4})", [&] { fig->add_subplot({3, 4}); });
 
-    fig->savefig("test_subplot_spans.png");
-    fig->savefig("test_subplot_spans.svg");
-    printf("Saved: test_subplot_spans.png/.svg\n");
+    fig->savefig("part_spans.png");
+    fig->savefig("part_spans.svg");
+    printf("Saved: part_spans.png/.svg\n");
 
     fig->show(true);
-}
-
-static void test_theming() {
-    constexpr int N = 100;
-    std::vector<double> x(N), y(N);
-    for (int i = 0; i < N; ++i) {
-        x[i] = i * 2.0 * M_PI / N;
-        y[i] = std::sin(x[i]);
-    }
-    const std::vector<double> months = {1, 2, 3, 4, 5, 6};
-    const std::vector<double> sales = {42, 55, 61, 49, 78, 83};
-
-    auto make_fig = [&](sextant::PanelTheme theme, std::string_view title) {
-        auto fig = sextant::Figure::create({.width = 1100, .height = 600, .title = std::string(title), .theme = theme});
-        fig->add_subplot(1, 2, 1)
-                ->line(x, y, {.color = sextant::Color::Blue, .linewidth = 2.0f})
-                .set_title("Sine").set_xtitle("x").set_ytitle("y").grid();
-        fig->add_subplot(1, 2, 2)
-                ->bar(months, sales, {.color = sextant::Color::Cyan})
-                .set_title("Sales");
-        return fig;
-    };
-    // Named variables so all three windows stay open together.
-    auto dark = make_fig(sextant::PanelTheme::Dark, "Theming: Dark");
-    auto light = make_fig(sextant::PanelTheme::Light, "Theming: Light");
-    auto classic = make_fig(sextant::PanelTheme::Classic, "Theming: Classic");
-    dark->show(false);
-    light->show(false);
-    classic->show(true);
-}
-
-// 9. Mouse hint -- hover tooltips over a grid of kinds. Interactive; checklist
-// in the test docs.
-static void test_mouse_hint() {
-    constexpr int N = 60;
-    std::vector<double> x(N), y(N);
-    std::vector<std::string> line_hints(N);
-    for (int i = 0; i < N; ++i) {
-        x[i] = i * 2.0 * M_PI / N;
-        y[i] = std::sin(x[i]);
-    }
-    // Label the max and min of the sine wave.
-    const auto peak = std::max_element(y.begin(), y.end()) - y.begin();
-    const auto trough = std::min_element(y.begin(), y.end()) - y.begin();
-    line_hints[static_cast<std::size_t>(peak)] = "Peak";
-    line_hints[static_cast<std::size_t>(trough)] = "Trough";
-
-    constexpr int NZ = 40;
-    std::vector<double> zx(NZ), zy(NZ), zz(NZ);
-    std::mt19937 rng(42);
-    std::uniform_real_distribution<double> dist(0.0, 1.0);
-    for (int i = 0; i < NZ; ++i) {
-        zx[i] = dist(rng) * 10.0;
-        zy[i] = dist(rng) * 10.0;
-        zz[i] = dist(rng);
-    }
-
-    constexpr int ROWS = 8, COLS = 12;
-    std::vector<double> img(ROWS * COLS);
-    for (int r = 0; r < ROWS; ++r)
-        for (int c = 0; c < COLS; ++c)
-            img[r * COLS + c] = static_cast<double>(r * COLS + c) / static_cast<double>(ROWS * COLS);
-
-    // Every point here has its own label (only two do on the line above).
-    const std::vector<double> store_x = {1, 2, 3, 4, 5, 6, 7, 8};
-    const std::vector<double> store_y = {4, 7, 2, 9, 5, 3, 8, 6};
-    const std::vector<std::string> store_hints = {
-        "Store A", "Store B", "Store C", "Store D",
-        "Store E", "Store F", "Store G", "Store H",
-    };
-
-    // The line also has error bars, so its tooltip combines both with a
-    // custom label.
-    std::vector<double> hint_lo(N), hint_hi(N), hint_box(N);
-    for (int i = 0; i < N; ++i) {
-        const auto j = static_cast<std::size_t>(i);
-        hint_lo[j] = 0.05 + 0.002 * i;
-        hint_hi[j] = 0.15 + 0.004 * i;
-        hint_box[j] = 0.04;
-    }
-
-    // 3D cell: a plane cutting through a bar grid. The tooltip must switch
-    // between plane cell and bar exactly where the picture's occlusion does.
-    constexpr int BU = 6, BV = 6;
-    std::vector<double> bx(BU), by(BV), bh(BU * BV);
-    std::vector<std::string> bar_hints(BU * BV);
-    for (int i = 0; i < BU; ++i) bx[i] = 1.0 + i;
-    for (int j = 0; j < BV; ++j) by[j] = 1.0 + j;
-    for (int i = 0; i < BU; ++i)
-        for (int j = 0; j < BV; ++j) {
-            const double a = (i - BU / 2.0) / 1.6, b = (j - BV / 2.0) / 1.6;
-            bh[i * BV + j] = 5.0 * std::exp(-(a * a + b * b));
-        }
-    // Only a few labelled, to check the index.
-    bar_hints[static_cast<std::size_t>(BU / 2 * BV + BV / 2)] = "Peak bar";
-    bar_hints[0] = "Corner bar";
-
-    constexpr int PR = 10, PC = 10;
-    std::vector<double> sheet(PR * PC);
-    for (int r = 0; r < PR; ++r)
-        for (int c = 0; c < PC; ++c)
-            sheet[r * PC + c] = static_cast<double>(r + c) / static_cast<double>(PR + PC);
-
-    auto fig = sextant::Figure::create({.width = 2400, .height = 500, .title = "Mouse hint"});
-    fig->add_subplot(1, 5, 1)
-            ->line(x, y, {.y_cap_lo = hint_lo, .y_cap_hi = hint_hi, .y_box_lo = hint_box}, {
-                       .color = sextant::Color::Blue, .linewidth = 2.0f,
-                       .hint_labels = line_hints
-                   })
-            .set_title("Line").set_xtitle("x").set_ytitle("y");
-    fig->add_subplot(1, 5, 2)
-            ->scatter_z(zx, zy, zz, {.size = 30.0f, .colorbar = true})
-            .set_title("Scatter Z");
-    // A real extent (x 100..400, y -2..2), so the hint must name the cell
-    // under the cursor, not the raw index.
-    fig->add_subplot(1, 5, 3)
-            ->heatmap(img, ROWS, COLS, {100.0, 400.0}, {-2.0, 2.0}, {.colorbar = true})
-            .set_title("Heatmap (x 100..400, y -2..2)");
-    fig->add_subplot(1, 5, 4)
-            ->scatter(store_x, store_y, {.color = sextant::Color::Orange, .size = 24.0f, .hint_labels = store_hints})
-            .set_title("Custom hint").set_xlim(0, 9).set_ylim(0, 10); {
-        auto ax3 = fig->add_subplot3d(1, 5, 5);
-        ax3->bar3d(sextant::PlaneOrientation::XY, bx, by, bh,
-                   {
-                       .color = sextant::Color::Blue, .bottom = 0.0,
-                       .edges = true, .edgecolor = sextant::Color::Black,
-                       .hint_labels = bar_hints
-                   })
-                .set_title("bar3d + a plane through it")
-                .set_xtitle("u").set_ytitle("v").set_ztitle("height");
-        // Vertical, standing among the bars (near/far switch visible).
-        ax3->plane(sextant::PlaneOrientation::YZ, 3.5, {.alpha = 0.85f})
-                ->heatmap(sheet, PR, PC, {0.0, 7.0}, {0.0, 5.5});
-    }
-    fig->show(true);
-}
-
-// 10. Data panel -- editable tables. Interactive; checklist in the test docs.
-static void test_data_panel() {
-    constexpr int N = 400; // enough rows to make clipper virtualization visible
-    std::vector<double> x(N), y(N);
-    for (int i = 0; i < N; ++i) {
-        x[i] = i * 2.0 * M_PI / N;
-        y[i] = std::sin(x[i]);
-    }
-
-    constexpr int NZ = 30;
-    std::vector<double> zx(NZ), zy(NZ), zz(NZ);
-    std::mt19937 rng(7);
-    std::uniform_real_distribution<double> dist(0.0, 1.0);
-    for (int i = 0; i < NZ; ++i) {
-        zx[i] = dist(rng) * 10.0;
-        zy[i] = dist(rng) * 10.0;
-        zz[i] = dist(rng);
-    }
-
-    std::vector<double> samples(300);
-    std::normal_distribution<double> norm(0.0, 1.0);
-    for (auto& s: samples) s = norm(rng);
-
-    // Samples on the same axes as the sine line: both are plot_index 0 in their
-    // own kind, so PlotKind distinguishes their edits.
-    constexpr int NP = 12;
-    std::vector<double> px(NP), py(NP);
-    for (int i = 0; i < NP; ++i) {
-        px[i] = i * 2.0 * M_PI / NP;
-        py[i] = std::sin(px[i]) + 0.15 * norm(rng);
-    }
-
-    constexpr int ROWS = 8, COLS = 6;
-    std::vector<double> img(ROWS * COLS);
-    for (int r = 0; r < ROWS; ++r)
-        for (int c = 0; c < COLS; ++c)
-            img[r * COLS + c] = static_cast<double>(r * COLS + c) / static_cast<double>(ROWS * COLS);
-
-    auto fig = sextant::Figure::create({.width = 1400, .height = 800, .title = "Data panel"});
-    fig->add_subplot(2, 2, 1)
-            ->line(x, y, {.color = sextant::Color::Blue, .linewidth = 2.0f, .name = "Sine"})
-            .scatter(px, py, {.color = sextant::Color::Red, .size = 24.0f, .name = "Samples"})
-            .set_title("Line + scatter").set_xtitle("x").set_ytitle("y").legend();
-    fig->add_subplot(2, 2, 2)
-            ->scatter_z(zx, zy, zz, {.size = 30.0f, .colorbar = true})
-            .set_title("Scatter Z");
-    fig->add_subplot(2, 2, 3)
-            ->hist(samples, 12, {.color = sextant::Color::Orange, .width = 1.0f})
-            .set_title("Hist (a BarPlot)");
-    fig->add_subplot(2, 2, 4)
-            ->imshow(img, ROWS, COLS, {.colorbar = true})
-            .set_title("Heatmap 8x6");
-    fig->show(false);
-
-    // Wider than one table: exercises column paging. Both Data panels are open
-    // at once.
-    constexpr int WROWS = 12, WCOLS = 600;
-    std::vector<double> wide(WROWS * WCOLS);
-    for (int r = 0; r < WROWS; ++r)
-        for (int c = 0; c < WCOLS; ++c)
-            wide[r * WCOLS + c] = static_cast<double>(c) / static_cast<double>(WCOLS);
-
-    auto fig2 = sextant::Figure::create({.width = 1400, .height = 700, .title = "Data panel: wide heatmap"});
-    fig2->axes()->imshow(wide, WROWS, WCOLS, {.colorbar = true}).set_title("Heatmap 12x600");
-    fig2->show(false);
-
-    // A bar3d grid (u/v headers, addressed at the axes, with per-bar bases so
-    // the heights/bases selector is live) beside a plane.
-    constexpr int BU = 7, BV = 5;
-    std::vector<double> bx(BU), by(BV), bh(BU * BV), bb(BU * BV);
-    for (int i = 0; i < BU; ++i) bx[i] = 400.0 + i * 25.0; // wavelength, nm
-    for (int j = 0; j < BV; ++j) by[j] = -1.0 + j * 0.5;
-    for (int i = 0; i < BU; ++i)
-        for (int j = 0; j < BV; ++j) {
-            const double a = (i - BU / 2.0) / 2.0, b = (j - BV / 2.0) / 1.6;
-            bh[i * BV + j] = 12.0 * std::exp(-(a * a + b * b));
-            bb[i * BV + j] = 0.5 * i; // a staircase, so the bases are visibly per bar
-        }
-
-    constexpr int PR = 6, PC = 8;
-    std::vector<double> sheet(PR * PC);
-    for (int r = 0; r < PR; ++r)
-        for (int c = 0; c < PC; ++c)
-            sheet[r * PC + c] = static_cast<double>(r * PC + c) / static_cast<double>(PR * PC);
-
-    auto fig3 = sextant::Figure::create({.width = 1400, .height = 800, .title = "Data panel: bar3d"});
-    auto ax3 = fig3->add_subplot3d(1, 1, 1);
-    ax3->bar3d(sextant::PlaneOrientation::XY, bx, by, bh, bb,
-               {
-                   .color = sextant::Color::Blue,
-                   .edges = true, .edgecolor = sextant::Color::Black
-               })
-            .set_title("bar3d 7x5, per-bar bases")
-            .set_xtitle("wavelength (nm)").set_ytitle("offset").set_ztitle("counts");
-    ax3->plane(sextant::PlaneOrientation::ZX, -1.25)
-            ->heatmap(sheet, PR, PC, {0.0, 14.0}, {390.0, 560.0});
-    fig3->show(true);
-}
-
-// Every cosmetic option rendered all-default and all-non-default, to show each
-// reaches both outputs. Headless.
-static void test_style_options() {
-    constexpr int N = 60;
-    std::vector<double> x(N), y(N);
-    for (int i = 0; i < N; ++i) {
-        x[i] = i * 2.0 * M_PI / N;
-        y[i] = std::sin(x[i]);
-    }
-    constexpr int R = 16, C = 16;
-    std::vector<double> heat(R * C);
-    for (int r = 0; r < R; ++r)
-        for (int c = 0; c < C; ++c)
-            heat[r * C + c] = static_cast<double>(r + c) / static_cast<double>(R + C - 2);
-
-    auto render = [&](bool styled, const std::string& stem) {
-        // Supersample=1, so the raster output isn't box-filtered.
-        auto fig = sextant::Figure::create({
-            .width = 900, .height = 500,
-            .title = "Style options", .supersample = 1
-        });
-        fig->suptitle("Suptitle text");
-
-        auto ax = fig->add_subplot(1, 2, 1);
-        ax->line(x, y, {.color = sextant::Color::Blue, .linewidth = 2.0f, .name = "sin(x)"})
-                .set_title("Titled").set_xtitle("x axis").set_ytitle("y axis")
-                .legend().grid();
-
-        auto ax2 = fig->add_subplot(1, 2, 2);
-        ax2->imshow(heat, R, C, {.vmin = 0.0f, .vmax = 1.0f, .colorbar = true})
-                .set_title("Heat");
-
-        if (styled) {
-            sextant::SuptitleOptions sup;
-            sup.fontsize = 28.0f;
-            sup.color = {0.0f, 0.2f, 0.9f, 1.0f}; // blue
-            sup.align = sextant::HAlign::Right;
-            sup.offset_x = -20.0f;
-            sup.offset_y = 4.0f;
-            fig->set_suptitle_style(sup);
-
-            // Also carries the title font sizes (set_axes_style replaces the
-            // whole struct).
-            sextant::AxesStyle as;
-            as.spine_color = {0.9f, 0.1f, 0.1f, 1.0f};
-            as.spine_linewidth = 3.0f;
-            as.tick_color = {0.1f, 0.6f, 0.1f, 1.0f};
-            as.tick_length = 12.0f;
-            as.label_color = {0.9f, 0.0f, 0.0f, 1.0f}; // per-tick labels
-            as.label_fontsize = 17.0f;
-            as.title_fontsize = 30.0f;
-            as.xtitle_fontsize = 24.0f;
-            as.ytitle_fontsize = 24.0f;
-            ax->set_axes_style(as);
-
-            ax->grid(true, {
-                         .color = {0.0f, 0.6f, 0.6f, 1.0f}, // teal
-                         .linestyle = sextant::LineStyle::Dashed,
-                         .linewidth = 2.0f
-                     });
-
-            sextant::LegendOptions lo;
-            lo.fontsize = 16.0f;
-            lo.text_color = {0.0f, 0.5f, 0.0f, 1.0f}; // green
-            lo.frame_color = {0.1f, 0.1f, 0.1f, 0.9f};
-            lo.border_color = {1.0f, 0.5f, 0.0f, 1.0f};
-            lo.border_linewidth = 3.0f;
-            ax->legend(lo);
-
-            sextant::ColorbarOptions cb;
-            cb.fontsize = 16.0f;
-            cb.text_color = {1.0f, 0.4f, 0.0f, 1.0f}; // orange
-            cb.border_color = {0.5f, 0.0f, 0.5f, 1.0f}; // purple
-            cb.border_linewidth = 3.0f;
-            ax2->set_colorbar_style(cb);
-        }
-
-        fig->savefig(stem + ".png");
-        fig->savefig(stem + ".svg");
-    };
-
-    render(false, "test_style_default");
-    render(true, "test_style_custom");
-    printf("Saved: test_style_{default,custom}.{png,svg}\n");
-}
-
-// Axis position in 2D: placements, origin components and spine flags.
-static void test_axis_position() {
-    constexpr int N = 200;
-    std::vector<double> x(N), y(N);
-    for (int i = 0; i < N; ++i) {
-        x[i] = -4.0 + 8.0 * i / (N - 1);
-        y[i] = std::sin(x[i]) * std::exp(-std::abs(x[i]) / 5.0);
-    }
-    // Data away from zero, for the cell that pins the origin.
-    std::vector<double> fx(N), fy(N);
-    for (int i = 0; i < N; ++i) {
-        fx[i] = 5.0 + 5.0 * i / (N - 1);
-        fy[i] = 20.0 + 6.0 * std::sin(fx[i] * 1.5);
-    }
-
-    auto fig = sextant::Figure::create({
-        .width = 1200, .height = 800,
-        .title = "Axis position (2D)",
-        .subplot_col_gap = 26.0f, .subplot_row_gap = 20.0f
-    });
-    fig->suptitle("AxesStyle: axis position and spines");
-
-    // 1 — the default, as reference.
-    fig->add_subplot(2, 2, 1)
-            ->line(x, y, {.color = sextant::Color::Blue, .linewidth = 2.0f})
-            .set_title("default (Auto = bottom/left)").set_xtitle("x").set_ytitle("y").grid();
-
-    // 2 — High on both: bands, ticks and numbers flip; titles stay.
-    {
-        sextant::AxesStyle st;
-        st.xaxis_y = sextant::AxisPosition::High;
-        st.yaxis_x = sextant::AxisPosition::High;
-        fig->add_subplot(2)
-                ->line(x, y, {.color = sextant::Color::Red, .linewidth = 2.0f})
-                .set_axes_style(st)
-                .set_title("High / High -- bands swap sides")
-                .set_xtitle("x").set_ytitle("y").grid();
-    }
-
-    // 3 — the crosshair: both axes through zero, every spine off.
-    {
-        sextant::AxesStyle st;
-        st.origin_x = 0.0;
-        st.origin_y = 0.0;
-        st.spine_bottom = st.spine_left = st.spine_top = st.spine_right = false;
-        fig->add_subplot(3)
-                ->line(x, y, {.color = sextant::Color::Purple, .linewidth = 2.0f})
-                .set_axes_style(st)
-                .set_title("origin (0,0), no box")
-                .set_xtitle("x").set_ytitle("y");
-    }
-
-    // 4 — the same pin over data far from zero: the limits widen to show it.
-    {
-        sextant::AxesStyle st;
-        st.origin_x = 0.0;
-        st.origin_y = 0.0;
-        st.spine_top = st.spine_right = false;
-        fig->add_subplot(4)
-                ->line(fx, fy, {.color = sextant::Color::Orange, .linewidth = 2.0f})
-                .set_axes_style(st)
-                .set_title("origin (0,0) with data at x 5..10")
-                .set_xtitle("x").set_ytitle("y").grid();
-    }
-
-    fig->savefig("test_axis_position.png");
-    fig->savefig("test_axis_position.svg");
-    printf("Saved: test_axis_position.png/.svg\n");
-
-    fig->show(true);
-}
-
-// -------------------------------------------------------------------------
-// Axis position in 3D. As in 2D, plus: an Auto edge turns with the camera and
-// a Low/High one doesn't (orbit to see).
-static void test_axis_position3d() {
-    constexpr int HN = 120;
-    std::vector<double> hx(HN), hy(HN), hz(HN);
-    for (int i = 0; i < HN; ++i) {
-        const double t = i * 6.2831853 * 2.0 / (HN - 1);
-        hx[i] = 2.2 * std::cos(t);
-        hy[i] = 2.2 * std::sin(t);
-        hz[i] = -2.5 + 5.0 * i / (HN - 1);
-    }
-    // A cloud far from the origin, for the cell whose pin widens the box.
-    std::vector<double> fx, fy, fz;
-    for (int i = 0; i < 60; ++i) {
-        const double t = i * 0.5;
-        fx.push_back(6.0 + 1.5 * std::sin(t));
-        fy.push_back(7.0 + 1.5 * std::cos(t * 1.3));
-        fz.push_back(5.0 + 2.0 * std::sin(t * 0.7));
-    }
-
-    auto fig = sextant::Figure::create({
-        .width = 1280, .height = 860,
-        .title = "Axis position (3D)",
-        .subplot_col_gap = 24.0f, .subplot_row_gap = 20.0f
-    });
-    fig->suptitle("AxesStyle: axis position on the 3D box");
-
-    // 1 — the reference: every axis on its silhouette edge.
-    fig->add_subplot3d(2, 2, 1)
-            ->line3d(hx, hy, hz, {.color = sextant::Color::Blue, .linewidth = 2.0f})
-            .set_title("default (Auto = camera's edge)")
-            .set_xtitle("x").set_ytitle("y").set_ztitle("z")
-            .set_view(-55.0, 22.0);
-
-    // 2 — the crosshair: all three components at the data's middle. Panes,
-    // grid and pane edges don't move.
-    {
-        sextant::AxesStyle st;
-        st.origin_x = 0.0;
-        st.origin_y = 0.0;
-        st.origin_z = 0.0;
-        fig->add_subplot3d(2, 2, 2)
-                ->line3d(hx, hy, hz, {.color = sextant::Color::Purple, .linewidth = 2.0f})
-                .set_axes_style(st)
-                .set_title("origin (0,0,0) -- a crosshair in the box")
-                .set_xtitle("x").set_ytitle("y").set_ztitle("z")
-                .set_view(-55.0, 22.0);
-    }
-
-    // 3 — origin_z only: the x and y axes drop to z = 0; the z axis is pinned
-    // High (orbit to check it doesn't migrate).
-    {
-        sextant::AxesStyle st;
-        st.origin_z = 0.0;
-        st.zaxis_x = sextant::AxisPosition::High;
-        st.zaxis_y = sextant::AxisPosition::High;
-        fig->add_subplot3d(2, 2, 3)
-                ->line3d(hx, hy, hz, {.color = sextant::Color::Green, .linewidth = 2.0f})
-                .set_axes_style(st)
-                .set_title("origin_z only; z axis pinned High/High")
-                .set_xtitle("x").set_ytitle("y").set_ztitle("z")
-                .set_view(-55.0, 22.0);
-    }
-
-    // 4 — the pin over data far from it: the limits widen to reach zero.
-    {
-        sextant::AxesStyle st;
-        st.origin_x = 0.0;
-        st.origin_y = 0.0;
-        st.origin_z = 0.0;
-        fig->add_subplot3d(2, 2, 4)
-                ->scatter3d(fx, fy, fz, {.color = sextant::Color::Orange, .size = 6.0f})
-                .set_axes_style(st)
-                .set_title("origin (0,0,0) with data around (6,7,5)")
-                .set_xtitle("x").set_ytitle("y").set_ztitle("z")
-                .set_view(-55.0, 22.0);
-    }
-
-    fig->savefig("test_axis_position3d.png");
-    fig->savefig("test_axis_position3d.svg");
-    printf("Saved: test_axis_position3d.png/.svg\n");
-
-    fig->show(true);
-}
-
-// -------------------------------------------------------------------------
-// Interactive events. Click, scroll, press keys and resize the window;
-// each event is printed on this thread (the one blocked in wait_closed()). The
-// left figure is 2D, the right one a 3D scene with a Plane2D; Edit > Navigate
-// shows `consumed`, and a click on a line point, bar, marker or heatmap cell adds a
-// `pick` line naming the object and element. Type in a panel field to see keys
-// stay quiet. Close the
-// window to finish.
-static void test_events() {
-    const char* consumed_names[] = {"none", "select", "navigate", "grid-drag"};
-    const char* kinds[] = {"close", "down", "up", "move", "scroll", "key-down", "key-up", "resize", "pick"};
-    const char* pick_names[] = {"none", "line", "scatter", "scatter_z", "bar", "heatmap",
-                                "bar3d", "surface", "surface_tri", "scatter3d", "line3d"};
-
-    auto fig = sextant::Figure::create({.width = 900, .height = 450, .title = "events"});
-    constexpr int N = 60;
-    std::vector<double> x(N), y(N);
-    for (int i = 0; i < N; ++i) {
-        x[i] = i * 0.1;
-        y[i] = std::sin(x[i]);
-    }
-    fig->add_subplot(1, 2, 1)->line(x, y).set_title("2D: click for data coordinates");
-    auto ax3 = fig->add_subplot3d(1, 2, 2);
-    ax3->set_title("3D: data only where a plane is hit");
-    ax3->plane(sextant::PlaneOrientation::XY, 0.0)->line(x, y);
-
-    int moves = 0;
-    for (int k = 0; k <= static_cast<int>(sextant::EventKind::Pick); ++k) {
-        const auto kind = static_cast<sextant::EventKind>(k);
-        fig->connect(kind, [&, kind](const sextant::Event& e) {
-            if (kind == sextant::EventKind::MouseMove && ++moves % 20 != 0) return; // thin the log
-            printf("[event] %-8s", kinds[static_cast<int>(kind)]);
-            switch (kind) {
-                case sextant::EventKind::MouseDown:
-                case sextant::EventKind::MouseUp:
-                case sextant::EventKind::MouseMove:
-                case sextant::EventKind::Scroll:
-                    printf(" px=(%.0f,%.0f) axes=%d", e.x, e.y, e.axes);
-                    if (e.has_data) printf(" data=(%.4g,%.4g,%.4g)", e.xdata, e.ydata, e.zdata);
-                    if (kind == sextant::EventKind::Scroll) printf(" scroll=(%.2g,%.2g)", e.scroll_x, e.scroll_y);
-                    if (kind != sextant::EventKind::MouseMove) printf(" button=%d dbl=%d", e.button, e.double_click);
-                    printf(" consumed=%s mods=%d", consumed_names[static_cast<int>(e.consumed)], e.mods);
-                    break;
-                case sextant::EventKind::KeyDown:
-                case sextant::EventKind::KeyUp:
-                    printf(" key='%s'", e.key.c_str());
-                    break;
-                case sextant::EventKind::Resize:
-                    printf(" %dx%d", e.width, e.height);
-                    break;
-                case sextant::EventKind::Pick:
-                    printf(" %s object=%d index=%d row=%d col=%d plane=%d axes=%d button=%d",
-                           pick_names[static_cast<int>(e.pick_kind)], e.pick_object, e.pick_index,
-                           e.pick_row, e.pick_col, e.pick_plane, e.axes, e.button);
-                    break;
-                default: break;
-            }
-            printf("\n");
-        });
-    }
-    fig->show(false);
-    printf("[main] events are delivered inside wait_closed(); close the window to finish\n");
-    fig->wait_closed();
-    printf("[main] done\n");
 }
 
 // -------------------------------------------------------------------------
@@ -1948,7 +1277,7 @@ static void test_events() {
 // the point under the cursor; the hover readout shows data values; the
 // Cosmetic panel's Ticks section switches each axis' scale (disabled on the
 // heatmap cell), its minor marks and its format (red while not a %f/%e/%g).
-static void test_scales() {
+static void part_scales() {
     constexpr int N = 200;
     std::vector<double> t(N), growth(N), decay(N);
     for (int i = 0; i < N; ++i) {
@@ -2024,7 +1353,7 @@ static void test_scales() {
             ->imshow(cells, 2, 3, {.vmin = 1.0f, .vmax = 6.0f})
             .set_title("heatmap: linear only (scale combo disabled)");
 
-    savefig_and_check_memory(fig, "test_scales");
+    savefig_and_check_memory(fig, "part_scales");
     fig->show(true);
 }
 
@@ -2037,7 +1366,7 @@ static void test_scales() {
 // panel says "X shared with ..." under Limits, its Labels X/Y combos override
 // the hiding, and a scale set on one member is the group's (disabled on the
 // heatmap's group).
-static void test_shared_axes() {
+static void part_shared() {
     constexpr int N = 300;
     std::vector<double> t(N), a(N), b(N), c(N), d(N);
     for (int i = 0; i < N; ++i) {
@@ -2078,7 +1407,7 @@ static void test_shared_axes() {
     s6->line(tx, ty).set_title("shares x with the heatmap").set_xtitle("column");
     s6->sharex(*s4);
 
-    savefig_and_check_memory(fig, "test_shared_axes");
+    savefig_and_check_memory(fig, "part_shared");
     fig->show(true);
 }
 
@@ -2087,7 +1416,7 @@ static void test_shared_axes() {
 // legend lists both layers in call order; drag, wheel and double-click move
 // every layer; the menu bar's Host / Twin selector beside the subplot one; cell 3's
 // twin labels hide toward cell 4's twin, which shares its (log) y.
-static void test_twins() {
+static void part_twins() {
     constexpr int N = 12, M = 200;
     std::vector<double> month(N), rain(N), temp(N);
     for (int i = 0; i < N; ++i) {
@@ -2146,7 +1475,7 @@ static void test_twins() {
     t4->grid(true);
     s4->set_title("its twin's grid draws y lines only");
 
-    savefig_and_check_memory(fig, "test_twins");
+    savefig_and_check_memory(fig, "part_twins");
     fig->show(true);
 }
 
@@ -2157,7 +1486,7 @@ static void test_twins() {
 // Datalim axes sharing x with cell 1, so its y adjusts and its x pans with
 // cell 1's. The Ticks section's Aspect / Ratio / Adjust rows (Datalim greyed
 // when both axes are shared).
-static void test_aspect() {
+static void part_aspect() {
     constexpr int N = 181;
     std::vector<double> cx(N), cy(N), lx(N), ly(N);
     for (int i = 0; i < N; ++i) {
@@ -2194,239 +1523,13 @@ static void test_aspect() {
     s4->set_aspect(1.0, sextant::Adjustable::Datalim);
     s4->set_title("Datalim, x shared with cell 1: y adjusts");
 
-    savefig_and_check_memory(fig, "test_aspect");
-    fig->show(true);
-}
-
-// The 2D layout retrofit, part 1: no shared axis anywhere, so every frame is
-// its own fit (cell = title over legend/colorbars over axis titles over the
-// frame united with its axes' reach). Check: deleting a title, x title or y
-// title in the Cosmetic panel gives its room back in that cell alone; no
-// frame follows a neighbour's; cell 5's labels, poking out of the narrow
-// frame past the origin, stay inside its cell.
-static void test_layout_independent() {
-    constexpr int N = 200;
-    std::vector<double> x(N), y(N), big(N), z(N);
-    for (int i = 0; i < N; ++i) {
-        x[i] = 10.0 * i / (N - 1);
-        y[i] = std::sin(x[i]);
-        big[i] = 4.0e5 * (1.0 + std::sin(0.7 * x[i]));
-        z[i] = std::cos(0.5 * x[i]);
-    }
-
-    auto fig = sextant::Figure::create({.width = 1400, .height = 950, .title = "Layout: independent"});
-    fig->suptitle("no shared axes: every frame is its own fit");
-
-    fig->add_subplot(3, 3, 1)->line(x, y).set_title("reference: title, x and y titles")
-            .set_xtitle("x").set_ytitle("y");
-    fig->add_subplot(2)->line(x, y).set_ytitle("y only: no title, no x title");
-    fig->add_subplot(3)->line(x, big).set_title("wide y labels")
-            .set_ytitle("a long y title").set_xtitle("x");
-
-    auto s4 = fig->add_subplot(4);
-    s4->line(x, y, {.name = "sin"}).line(x, z, {.name = "cos"})
-            .scatter_z(x, z, y, {.colorbar = true, .name = "z"})
-            .legend({.anchor = sextant::LegendAnchor::OutsideRT})
-            .set_colorbar_style({.anchor = sextant::ColorbarAnchor::Bottom})
-            .set_title("legend right, colorbar below").set_xtitle("x");
-
-    {
-        sextant::AxesStyle st;
-        st.origin_x = 0.0;
-        st.origin_y = 0.0;
-        fig->add_subplot(5)->line(x, y).set_axes_style(st).set_xlim(-0.2, 10.0).set_ylim(-0.04, 1.2)
-                .set_title("origin: labels poke out").set_xtitle("x").set_ytitle("y");
-    }
-    {
-        sextant::AxesStyle st;
-        st.xaxis_y = sextant::AxisPosition::High;
-        st.yaxis_x = sextant::AxisPosition::High;
-        fig->add_subplot(6)->line(x, y).set_axes_style(st)
-                .set_title("High / High").set_xtitle("x").set_ytitle("y");
-    }
-    {
-        sextant::AxesStyle st;
-        st.show_xticks = false;
-        st.show_ytick_labels = false;
-        fig->add_subplot(7)->line(x, y).set_axes_style(st)
-                .set_title("x hidden, y labels hidden").set_xtitle("x").set_ytitle("y");
-    }
-
-    auto s8 = fig->add_subplot(8);
-    s8->line(x, y).set_xtitle("x (host)").set_ytitle("y (host)");
-    s8->twinx()->line(x, big).set_ytitle("big (twinx)");
-    s8->twiny()->line(big, y).set_xtitle("big (twiny)");
-    s8->set_title("twinx + twiny: four axis titles");
-
-    auto s9 = fig->add_subplot(9);
-    s9->line(x, y).set_aspect(4.0).set_title("set_aspect(4), Box").set_xtitle("x").set_ytitle("y");
-
-    savefig_and_check_memory(fig, "test_layout_independent");
-    fig->show(true);
-}
-
-// The 2D layout retrofit, part 2: alignment, only where an axis is shared
-// (twins included), on the same grid line, with no set_aspect(). Check:
-// column 1 (sharex) keeps one x span, set by cell 1's wide labels and cell
-// 4's left legend; row 1 (sharey) keeps one y span, set by cell 3's top
-// colorbar, while each title stays on its own frame; cells 5 and 6 align
-// through their twins' shared y; cell 9 shares y with cell 8 but its aspect
-// takes both out of alignment. Deleting cell 3's colorbar (or cell 1's
-// title) moves its whole row back.
-static void test_layout_aligned() {
-    constexpr int N = 200;
-    std::vector<double> x(N), y(N), big(N), z(N), e(N);
-    for (int i = 0; i < N; ++i) {
-        x[i] = 10.0 * i / (N - 1);
-        y[i] = std::sin(x[i]);
-        big[i] = 4.0e5 * (1.0 + std::sin(0.7 * x[i]));
-        z[i] = std::cos(0.5 * x[i]);
-        e[i] = std::exp(0.5 * x[i]);
-    }
-
-    auto fig = sextant::Figure::create({.width = 1400, .height = 950, .title = "Layout: aligned"});
-    fig->suptitle("aligned only along a shared axis");
-
-    auto s1 = fig->add_subplot(3, 3, 1);
-    s1->line(x, big).set_title("sharex col 1, sharey row 1").set_ytitle("big");
-    auto s4 = fig->add_subplot(4);
-    s4->line(x, y, {.name = "sin"}).legend({.anchor = sextant::LegendAnchor::OutsideLT});
-    s4->sharex(*s1);
-    auto s7 = fig->add_subplot(7);
-    s7->line(x, z).set_xtitle("x, shared down the column");
-    s7->sharex(*s1);
-
-    auto s2 = fig->add_subplot(2);
-    s2->line(x, big).set_title("no title above, aligned anyway");
-    s2->sharey(*s1);
-    auto s3 = fig->add_subplot(3);
-    s3->scatter_z(x, big, z, {.colorbar = true, .name = "z"})
-            .set_colorbar_style({.anchor = sextant::ColorbarAnchor::Top});
-    s3->sharey(*s1);
-
-    auto s5 = fig->add_subplot(5);
-    s5->line(x, y).set_ytitle("y");
-    auto t5 = s5->twinx();
-    t5->line(x, e).set_ytitle("e");
-    s5->set_title("twins share y with cell 6's");
-    auto s6 = fig->add_subplot(6);
-    s6->line(x, z);
-    auto t6 = s6->twinx();
-    t6->line(x, e, {.linestyle = sextant::LineStyle::Dashed}).set_ytitle("e, with a longer twin title");
-    t6->sharey(*t5);
-    s6->set_xtitle("x");
-
-    auto s8 = fig->add_subplot(8);
-    s8->line(x, y).set_title("shares y with cell 9").set_xtitle("x");
-    auto s9 = fig->add_subplot(9);
-    s9->line(x, y).set_aspect(3.0).set_title("set_aspect(3): not aligned");
-    s9->sharey(*s8);
-
-    savefig_and_check_memory(fig, "test_layout_aligned");
-    fig->show(true);
-}
-
-// v1.2 steps 36h/36i: per-axis tick and label looks, twinned axes in their
-// series' colors, and a twin's setters reaching its host. Check: cell 1's
-// left axis (marks, labels, title, edge) all blue and the right all orange,
-// one x title ("month", set on the twin), a pale yellow plot area (set on the
-// twin, the cell's); cell 2's bottom edge green, top purple; cell 3's x marks
-// long red over large labels, the y axis small with short minor marks; cell
-// 4's z marks and labels red. The Cosmetic panel's Ticks & labels table
-// (Both | X | Y [| Z]) edits these, an unset axis dimmed; on a twin layer the
-// shared axis' column is greyed and its title row gone.
-static void test_tick_style() {
-    constexpr int N = 12, M = 120;
-    std::vector<double> month(N), rain(N), temp(N), x(M), y(M), d(M);
-    for (int i = 0; i < N; ++i) {
-        month[i] = i + 1;
-        rain[i] = 40.0 + 35.0 * std::sin(0.5 * i) + 10.0 * (i % 3);
-        temp[i] = 12.0 - 10.0 * std::cos(2.0 * 3.14159265 * i / N);
-    }
-    for (int i = 0; i < M; ++i) {
-        x[i] = 0.1 + 9.9 * i / (M - 1);
-        y[i] = std::exp(0.6 * x[i]);
-        d[i] = x[i] * 1.609;
-    }
-    const sextant::Color blue = sextant::Color::Blue, orange = sextant::Color::Orange;
-
-    auto fig = sextant::Figure::create({.width = 1300, .height = 900, .title = "Tick style"});
-    fig->suptitle("Per-axis ticks and labels, twinned axes in their series' colors");
-
-    // matplotlib's twinx look: each y axis in its series' color.
-    auto s1 = fig->add_subplot(2, 2, 1);
-    s1->line(month, rain, {.color = blue, .linewidth = 2.5f}).set_ytitle("rain (mm)");
-    sextant::AxesStyle hs;
-    hs.ytick_color = hs.ylabel_color = hs.yaxis_color = blue;
-    hs.ytitle_color = blue;
-    s1->set_axes_style(hs);
-    s1->set_ytitle("rain (mm)");
-    auto t1 = s1->twinx();
-    t1->line(month, temp, {.color = orange, .linewidth = 2.5f});
-    sextant::AxesStyle ts;
-    ts.ytick_color = ts.ylabel_color = ts.yaxis_color = orange;
-    ts.ytitle_color = orange;
-    ts.background = {1.0f, 0.98f, 0.88f, 1.0f};   // the cell's: reaches the host
-    ts.spine_linewidth = 2.0f;                      // likewise
-    t1->set_axes_style(ts);
-    t1->set_ytitle("temp (C)");
-    t1->set_xtitle("month");                       // the host's x axis
-    t1->set_title("twinx: y axes in their series' colors");
-
-    // twiny: bottom and top edges in their own colors.
-    auto s2 = fig->add_subplot(2, 2, 2);
-    s2->line(x, y).set_xtitle("distance (km)").set_ytitle("height");
-    auto t2 = s2->twiny();
-    t2->line(d, y, {.linestyle = sextant::LineStyle::None}).set_xtitle("distance (miles)");
-    sextant::AxesStyle h2;
-    h2.xaxis_color = h2.xtick_color = h2.xlabel_color = sextant::Color::Green;
-    h2.spine_linewidth = 2.0f;
-    s2->set_axes_style(h2);
-    s2->set_xtitle("distance (km)");
-    sextant::AxesStyle tw2;
-    tw2.xaxis_color = tw2.xtick_color = tw2.xlabel_color = sextant::Color::Purple;
-    tw2.spine_linewidth = 2.0f;
-    t2->set_axes_style(tw2);
-    t2->set_xtitle("distance (miles)");
-    s2->set_title("twiny: bottom green, top purple");
-
-    // One axes, each axis its own look.
-    auto s3 = fig->add_subplot(2, 2, 3);
-    s3->line(x, y).set_yscale(sextant::Scale::Log);
-    sextant::AxesStyle p;
-    p.xtick_color = sextant::Color::Red;
-    p.xtick_length = 10.0f;
-    p.xtick_linewidth = 2.5f;
-    p.xlabel_fontsize = 16.0f;
-    p.ytick_length = 3.0f;
-    p.minor_ytick_length = 1.5f;
-    p.ylabel_fontsize = 9.0f;
-    p.ylabel_color = sextant::Color::Gray;
-    s3->set_axes_style(p);
-    s3->set_title("x: long red marks, big labels; y: small").set_xtitle("x").set_ytitle("exp(0.6 x)");
-
-    // 3D: the z axis alone in red.
-    auto s4 = fig->add_subplot3d(2, 2, 4);
-    std::vector<double> u(20), v(20), hgt(400);
-    for (int i = 0; i < 20; ++i) u[i] = v[i] = -2.0 + 4.0 * i / 19.0;
-    for (int j = 0; j < 20; ++j)
-        for (int i = 0; i < 20; ++i) hgt[j * 20 + i] = std::exp(-(u[i] * u[i] + v[j] * v[j]));
-    s4->surface(sextant::PlaneOrientation::XY, u, v, hgt, {.colormap = true});
-    sextant::AxesStyle z;
-    z.ztick_color = z.zlabel_color = sextant::Color::Red;
-    z.ztick_length = 9.0f;
-    z.ztick_linewidth = 2.0f;
-    z.zlabel_fontsize = 14.0f;
-    s4->set_axes_style(z);
-    s4->set_title("3D: z marks and labels red");
-
-    savefig_and_check_memory(fig, "test_tick_style");
+    savefig_and_check_memory(fig, "part_aspect");
     fig->show(true);
 }
 
 // Step 36c-1: every marker shape, filled / outlined / hollow; the line markers
 // at their default and wider strokes; legend keys; scatter_z, 3D and a plane.
-static void test_marker_shapes() {
+static void part_marker_shapes() {
     using sextant::MarkerStyle;
     const MarkerStyle all[] = {
         MarkerStyle::Circle, MarkerStyle::Square, MarkerStyle::Triangle, MarkerStyle::TriangleDown,
@@ -2508,13 +1611,13 @@ static void test_marker_shapes() {
     }
     a4->legend().set_title("3D: hexagons; plane at z=0 (v < D p X x)");
 
-    savefig_and_check_memory(fig, "test_marker_shapes");
+    savefig_and_check_memory(fig, "part_marker_shapes");
     fig->show(true);
 }
 
 // Step 36c-2: per-point marker sizes -- a bubble chart, hidden points, a
 // plane and a 3D cloud; the Data panel's size column.
-static void test_marker_sizes() {
+static void part_marker_sizes() {
     auto fig = sextant::Figure::create({.width = 1300, .height = 900, .title = "Marker sizes"});
     fig->suptitle("Per-point marker sizes (ScatterOptions::sizes)");
 
@@ -2596,13 +1699,13 @@ static void test_marker_sizes() {
         a4->scatter3d(x, y, z, o).legend().set_title("3D: sizes 5..40 up the helix");
     }
 
-    savefig_and_check_memory(fig, "test_marker_sizes");
+    savefig_and_check_memory(fig, "part_marker_sizes");
     fig->show(true);
 }
 
 // Step drawstyles (LineOptions::drawstyle): the four modes over the same points,
 // a log axis with NaN gaps and error bars, a looped staircase, and a plane.
-static void test_line_steps() {
+static void part_line_steps() {
     using sextant::DrawStyle;
     auto fig = sextant::Figure::create({.width = 1300, .height = 900, .title = "Line steps"});
     fig->suptitle("Step drawstyle (LineOptions::drawstyle)");
@@ -2672,14 +1775,14 @@ static void test_line_steps() {
         a4->set_title("plane: steps_mid");
     }
 
-    savefig_and_check_memory(fig, "test_line_steps");
+    savefig_and_check_memory(fig, "part_line_steps");
     fig->show(true);
 }
 
 // Horizontal bars and bar bases (BarOptions::orientation, BarOptions::bottom):
 // stacked, a waterfall, lying bars with error bars, a horizontal hist, log x,
 // and a plane. The Data panel's Orientation combo flips any of them.
-static void test_bar_orientation() {
+static void part_bar_orientation() {
     using sextant::Orientation;
     auto fig = sextant::Figure::create({.width = 1500, .height = 900, .title = "Bar orientation"});
     fig->suptitle("Horizontal bars and bottom (BarOptions::orientation, BarOptions::bottom)");
@@ -2760,13 +1863,13 @@ static void test_bar_orientation() {
         a6->set_title("plane: stacked, horizontal");
     }
 
-    savefig_and_check_memory(fig, "test_bar_orientation");
+    savefig_and_check_memory(fig, "part_bar_orientation");
     fig->show(true);
 }
 
 // Step 36c-5: Axes::axline()/axspan(), both orientations, frame fractions,
 // dashes, outlines, legend keys, call order, twins, log and live movement.
-static void test_reference_lines() {
+static void part_reference_lines() {
     using sextant::Orientation;
     auto fig = sextant::Figure::create({.width = 1500, .height = 900, .title = "Reference lines and spans"});
     fig->suptitle("Reference lines and spans (Axes::axline, Axes::axspan)");
@@ -2856,44 +1959,1036 @@ static void test_reference_lines() {
         a6->set_title("Data panel: value, ends, orientation, from/to");
     }
 
-    savefig_and_check_memory(fig, "test_reference_lines");
+    savefig_and_check_memory(fig, "part_reference_lines");
     fig->show(true);
 }
 
+// Step 36d-1: Axes::fill_between() and Plane2D::fill_between(): areas under a
+// curve and bands, exclude and interpolate, steps, the Vertical orientation
+// with an outline, log axes and NaN gaps, planes; the Data panel edits them.
+static void part_fill_between() {
+    using sextant::Orientation;
+    using V = std::vector<double>;
+    auto fig = sextant::Figure::create({.width = 1500, .height = 900, .title = "Filled areas"});
+    fig->suptitle("Filled areas (Axes::fill_between, Plane2D::fill_between)");
+
+    V x(200), y(200), lo(200), hi(200);
+    for (std::size_t i = 0; i < x.size(); ++i) {
+        x[i] = static_cast<double>(i) * 0.05;
+        y[i] = std::sin(x[i]) * 2.0 + 0.3 * std::sin(7.0 * x[i]);
+        const double spread = 0.3 + 0.15 * x[i];
+        lo[i] = y[i] - spread;
+        hi[i] = y[i] + spread;
+    }
+
+    // An area under a curve, and an error band under its line.
+    auto a1 = fig->add_subplot(2, 3, 1);
+    {
+        V base(x.size());
+        for (std::size_t i = 0; i < x.size(); ++i) base[i] = 0.5 + 0.4 * std::cos(x[i]);
+        a1->fill(x, base, 0.0, {.color = sextant::Color::Gray, .alpha = 0.4f, .name = "area to 0"});
+        a1->fill(x, lo, hi, {.alpha = 0.3f, .name = "band"});
+        a1->line(x, y, {.name = "signal"});
+        a1->legend();
+        a1->set_title("area to 0; a band under its line (edit in the Data panel)");
+    }
+
+    // Exclude and interpolate: green where y1 > y2 runs on to the crossings,
+    // red where y1 < y2 stops at the last kept point.
+    auto a2 = fig->add_subplot(2, 3, 2);
+    {
+        V y1(x.size()), y2(x.size());
+        std::vector<bool> below(x.size()), above(x.size());
+        for (std::size_t i = 0; i < x.size(); ++i) {
+            y1[i] = std::sin(x[i] * 1.3);
+            y2[i] = 0.4 * std::cos(x[i] * 0.7);
+            below[i] = !(y1[i] > y2[i]);
+            above[i] = !(y1[i] < y2[i]);
+        }
+        // Sparse points, so the steps at the crossings show.
+        V xs, s1, s2;
+        std::vector<bool> ex_b, ex_a;
+        for (std::size_t i = 0; i < x.size(); i += 8) {
+            xs.push_back(x[i]);
+            s1.push_back(y1[i]);
+            s2.push_back(y2[i]);
+            ex_b.push_back(below[i]);
+            ex_a.push_back(above[i]);
+        }
+        a2->fill(xs, s1, s2, {.color = sextant::Color{0.2f, 0.7f, 0.3f, 1.0f}, .alpha = 0.6f,
+                                      .exclude = ex_b, .interpolate = true, .name = "y1 > y2, interpolate"});
+        a2->fill(xs, s1, s2, {.color = sextant::Color::Red, .alpha = 0.6f, .exclude = ex_a,
+                                      .name = "y1 < y2, no interpolate"});
+        a2->line(xs, s1, {.color = sextant::Color::Black, .linewidth = 1.0f});
+        a2->line(xs, s2, {.color = sextant::Color::Black, .linewidth = 1.0f, .linestyle = sextant::LineStyle::Dashed});
+        a2->legend();
+        a2->set_title("exclude (matplotlib's where, inverted) and interpolate");
+    }
+
+    // Steps: the same fill pre, mid and post, each over its step line.
+    auto a3 = fig->add_subplot(2, 3, 3);
+    {
+        const V sx{0, 1, 2, 3, 4, 5};
+        const V sy{1, 3, 2, 4, 3, 5};
+        const sextant::DrawStyle styles[] = {sextant::DrawStyle::StepsPre, sextant::DrawStyle::StepsMid,
+                                             sextant::DrawStyle::StepsPost};
+        const char* names[] = {"steps_pre", "steps_mid", "steps_post"};
+        for (int k = 0; k < 3; ++k) {
+            V shifted(sy);
+            for (double& v : shifted) v += 6.0 * k;
+            a3->fill(sx, shifted, 6.0 * k, {.alpha = 0.4f, .drawstyle = styles[k], .name = names[k]});
+            a3->line(sx, shifted, {.color = sextant::Color::Black, .linewidth = 1.0f, .drawstyle = styles[k]});
+            a3->scatter(sx, shifted, {.color = sextant::Color::Black, .size = 5.0f});
+        }
+        a3->legend();
+        a3->set_title("drawstyle: pre, mid, post");
+    }
+
+    // Vertical: fill_betweenx, outlined and dashed.
+    auto a4 = fig->add_subplot(2, 3, 4);
+    {
+        V depth(60), t1(60), t2(60);
+        for (std::size_t i = 0; i < depth.size(); ++i) {
+            depth[i] = static_cast<double>(i) * 0.5;
+            t1[i] = 10.0 + 6.0 * std::exp(-depth[i] / 8.0);
+            t2[i] = t1[i] - 2.0 - 0.5 * std::sin(depth[i]);
+        }
+        a4->fill(depth, t2, t1, {.orientation = Orientation::Vertical, .alpha = 0.35f,
+                                         .edgecolor = sextant::Color::Black, .linewidth = 1.5f,
+                                         .linestyle = sextant::LineStyle::Dashed, .name = "range at depth"});
+        a4->line(t1, depth, {.name = "max"});
+        a4->set_ylim(30.0, 0.0);
+        a4->legend();
+        a4->set_title("Vertical (fill_betweenx), dashed outline, y reversed");
+    }
+
+    // Log y: the area to 0 runs off the bottom; NaN points leave gaps.
+    auto a5 = fig->add_subplot(2, 3, 5);
+    {
+        V e(x.size());
+        for (std::size_t i = 0; i < x.size(); ++i) e[i] = std::exp(x[i]);
+        V gappy(e);
+        for (std::size_t i = 60; i < 80; ++i) gappy[i] = std::nan("");
+        a5->fill(x, gappy, 0.0, {.alpha = 0.4f, .name = "exp(x) to 0, NaN gap"});
+        a5->line(x, e, {.name = "exp(x)"});
+        a5->set_yscale(sextant::Scale::Log);
+        a5->legend();
+        a5->set_title("log y: y2 = 0 runs off the bottom; a NaN run is a gap");
+    }
+
+    // Planes: a band on the floor, an area on a wall.
+    auto a6 = fig->add_subplot3d(2, 3, 6);
+    {
+        auto floor = a6->plane(sextant::PlaneOrientation::XY, 0.0);
+        floor->fill(x, lo, hi, {.alpha = 0.5f, .name = "band on XY"});
+        floor->line(x, y, {.name = "signal on XY"});
+        auto wall = a6->plane(sextant::PlaneOrientation::ZX, 3.0);
+        V zs(x.size());
+        for (std::size_t i = 0; i < x.size(); ++i) zs[i] = 1.0 + std::sin(x[i]) * 0.8;
+        wall->fill(x, zs, 0.0, {.orientation = Orientation::Vertical,
+                                        .color = sextant::Color{0.9f, 0.5f, 0.1f, 1.0f}, .alpha = 0.6f,
+                                        .linewidth = 1.0f, .name = "area on ZX"});
+        a6->legend();
+        a6->set_title("planes");
+    }
+
+    savefig_and_check_memory(fig, "part_fill_between");
+    fig->show(true);
+}
+
+// Step 36d-2: Axes::stack() and Plane2D::stack(): the four baselines, colors and
+// names, a Vertical stepped stack with outlines, NaN carried up, a plane; each
+// layer is an ordinary fill afterwards, edited alone in the Data panel.
+static void part_stack() {
+    using sextant::StackBaseline;
+    using V = std::vector<double>;
+    auto fig = sextant::Figure::create({.width = 1500, .height = 900, .title = "Stacked areas"});
+    fig->suptitle("Stacked areas (Axes::stack, Plane2D::stack)");
+
+    // Five bumps, each a layer, peaking at different x.
+    const std::size_t n = 120;
+    V x(n);
+    std::vector<V> ys(5, V(n));
+    for (std::size_t i = 0; i < n; ++i) {
+        x[i] = static_cast<double>(i) * 0.1;
+        for (std::size_t k = 0; k < ys.size(); ++k) {
+            const double c = 1.5 + 2.2 * static_cast<double>(k), w = 1.2 + 0.3 * static_cast<double>(k);
+            ys[k][i] = 0.2 + (1.0 + 0.4 * static_cast<double>(k)) * std::exp(-(x[i] - c) * (x[i] - c) / (2.0 * w * w));
+        }
+    }
+    const std::vector<std::string> names{"a", "b", "c", "d", "e"};
+
+    const std::pair<StackBaseline, const char*> baselines[] = {
+        {StackBaseline::Zero, "baseline Zero"},
+        {StackBaseline::Sym, "baseline Sym"},
+        {StackBaseline::Wiggle, "baseline Wiggle"},
+        {StackBaseline::WeightedWiggle, "baseline WeightedWiggle (a streamgraph)"},
+    };
+    for (int b = 0; b < 4; ++b) {
+        auto ax = fig->add_subplot(2, 3, b + 1);
+        ax->stack(x, ys, {.baseline = baselines[b].first, .names = names, .alpha = 0.85f});
+        if (b == 0) ax->legend();
+        ax->set_title(baselines[b].second);
+    }
+
+    // Vertical, stepped, outlined, own colors; a NaN in layer 1 carries up.
+    auto a5 = fig->add_subplot(2, 3, 5);
+    {
+        const V depth{0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+        std::vector<V> w{{1, 2, 2, 3, 2, 1, 1, 2, 3, 2},
+                         {2, 1, 1, 2, 3, 3, 2, 1, 1, 2},
+                         {1, 1, 2, 1, 1, 2, 3, 3, 2, 1}};
+        w[1][4] = std::nan("");
+        a5->stack(depth, w, {.orientation = sextant::Orientation::Vertical,
+                             .colors = {sextant::Color{0.85f, 0.35f, 0.2f, 1.0f}, sextant::Color{0.95f, 0.75f, 0.2f, 1.0f},
+                                        sextant::Color{0.3f, 0.6f, 0.8f, 1.0f}},
+                             .names = {"sand", "clay", "silt"}, .edgecolor = sextant::Color::Black,
+                             .linewidth = 1.0f, .drawstyle = sextant::DrawStyle::StepsMid});
+        a5->set_ylim(9.5, -0.5);
+        a5->legend();
+        a5->set_title("Vertical, steps_mid, outlined; NaN at depth 4 in clay");
+    }
+
+    // A stack on a plane.
+    auto a6 = fig->add_subplot3d(2, 3, 6);
+    {
+        auto wall = a6->plane(sextant::PlaneOrientation::ZX, 0.0);
+        wall->stack(x, std::span(ys).first(3), {.orientation = sextant::Orientation::Vertical, .baseline = StackBaseline::Sym,
+                                                    .names = {"a", "b", "c"}, .alpha = 0.7f});
+        a6->legend();
+        a6->set_title("a Sym stack up z on a ZX plane");
+    }
+
+    savefig_and_check_memory(fig, "part_stack");
+    fig->show(true);
+}
+
+// Steps 36e-1/36e-2: Axes::quiver() and Plane2D::quiver(): the automatic amp,
+// equal aspect against free aspect colored by speed (with a colorbar), the
+// three pivots, explicit amp and shape over a heatmap, a log axis, a plane
+// colored by speed. Hover shows x, y, u, v (and c); the Data panel edits the
+// arrows, their c and their appearance.
+static void test_quiver() {
+    using V = std::vector<double>;
+    auto fig = sextant::Figure::create({.width = 1500, .height = 900, .title = "Arrow fields"});
+    fig->suptitle("Arrow fields (Axes::quiver, Plane2D::quiver)");
+
+    // A vortex around the origin on a 15 x 15 grid.
+    V gx, gy, gu, gv;
+    for (int i = 0; i < 15; ++i)
+        for (int j = 0; j < 15; ++j) {
+            const double x = -2.0 + 4.0 * j / 14.0, y = -2.0 + 4.0 * i / 14.0;
+            gx.push_back(x);
+            gy.push_back(y);
+            gu.push_back(-y);
+            gv.push_back(x);
+        }
+
+    auto a1 = fig->add_subplot(2, 3, 1);
+    a1->quiver(gx, gy, gu, gv, {.name = "(-y, x)"});
+    a1->set_aspect(1.0);
+    a1->legend();
+    a1->set_title("automatic amp, equal aspect: arrows circle the origin");
+
+    // Colored by speed (step 36e-2), at free aspect.
+    V speed;
+    for (std::size_t k = 0; k < gx.size(); ++k) speed.push_back(std::hypot(gu[k], gv[k]));
+    auto a2 = fig->add_subplot(2, 3, 2);
+    a2->quiver(gx, gy, gu, gv, speed,
+               {.cmap = sextant::Colormap::Plasma, .vmax = 2.9f, .colorbar = true, .name = "speed"});
+    a2->set_title("c = speed through plasma, free aspect: arrows follow the data units");
+
+    // Pivots: the same vectors put down by tail, middle and tip, the anchors marked.
+    auto a3 = fig->add_subplot(2, 3, 3);
+    {
+        const V px{0, 1, 2, 3, 4}, pu{0.6, 0.6, 0.0, -0.6, -0.6}, pv{0.0, 0.6, 0.8, 0.6, 0.0};
+        const std::pair<sextant::QuiverPivot, const char*> pivots[] = {
+            {sextant::QuiverPivot::Tail, "Tail"}, {sextant::QuiverPivot::Middle, "Middle"},
+            {sextant::QuiverPivot::Tip, "Tip"}};
+        for (int k = 0; k < 3; ++k) {
+            const V py(px.size(), 2.0 * k);
+            a3->quiver(px, py, pu, pv, {.amp = 1.0, .pivot = pivots[k].first, .name = pivots[k].second});
+            a3->scatter(px, py, {.color = sextant::Color::Black, .size = 6.0f, .show_legend = false});
+        }
+        a3->set_aspect(1.0);
+        a3->legend();
+        a3->set_title("pivot: Tail, Middle, Tip (anchors in black)");
+    }
+
+    // The gradient of a bump over its heatmap: explicit amp, thin arrows.
+    auto a4 = fig->add_subplot(2, 3, 4);
+    {
+        const int n = 40;
+        V z(static_cast<std::size_t>(n * n));
+        for (int r = 0; r < n; ++r)
+            for (int c = 0; c < n; ++c) {
+                const double x = -2.0 + 4.0 * (c + 0.5) / n, y = -2.0 + 4.0 * (r + 0.5) / n;
+                z[static_cast<std::size_t>(r * n + c)] = std::exp(-(x * x + y * y));
+            }
+        a4->heatmap(z, n, n, {-2.0, 2.0}, {-2.0, 2.0}, {.cmap = sextant::Colormap::Viridis, .colorbar = true});
+        V qx, qy, qu, qv;
+        for (std::size_t k = 0; k < gx.size(); ++k) {
+            const double e = std::exp(-(gx[k] * gx[k] + gy[k] * gy[k]));
+            qx.push_back(gx[k]);
+            qy.push_back(gy[k]);
+            qu.push_back(2.0 * gx[k] * e);
+            qv.push_back(2.0 * gy[k] * e);
+        }
+        a4->quiver(qx, qy, qu, qv, {.color = sextant::Color::White, .alpha = 0.9f, .amp = 0.35, .width = 1.2f,
+                                    .head_width = 5.0f, .head_length = 6.0f, .name = "-grad"});
+        a4->set_aspect(1.0);
+        a4->set_title("-grad over the heatmap: amp 0.35, thin arrows");
+    }
+
+    // Log x: arrows placed on the scale; one reaching below 0 is left out.
+    auto a5 = fig->add_subplot(2, 3, 5);
+    {
+        const V lx{1, 3, 10, 30, 100, 300}, ly{1, 2, 3, 4, 5, 6};
+        const V lu{1, 3, 10, 30, -500, 300}, lv{0.5, 0.5, 0.5, 0.5, 0.5, 0.5};
+        a5->quiver(lx, ly, lu, lv, {.amp = 1.0, .name = "u = x (one reaching below 0)"});
+        a5->set_xscale(sextant::Scale::Log);
+        a5->legend();
+        a5->set_title("log x: each arrow doubles x");
+    }
+
+    // A plane: the vortex on the floor.
+    auto a6 = fig->add_subplot3d(2, 3, 6);
+    {
+        auto floor = a6->plane(sextant::PlaneOrientation::XY, 0.0);
+        floor->quiver(gx, gy, gu, gv, speed, {.cmap = sextant::Colormap::Viridis, .vmax = 2.9f, .name = "vortex on XY"});
+        auto wall = a6->plane(sextant::PlaneOrientation::ZX, 2.0);
+        // A ZX plane's u is z and its v is x.
+        wall->quiver(V{0.0, 0.0, 0.0}, V{-1.0, 0.0, 1.0}, V{0.5, 1.0, 1.5}, V{0.0, 0.0, 0.0},
+                     {.amp = 1.0, .name = "up z on ZX"});
+        a6->legend();
+        a6->set_title("planes");
+    }
+
+    savefig_and_check_memory(fig, "test_quiver");
+    fig->show(true);
+}
+
+// -------------------------------------------------------------------------
+// Interactive events. Click, scroll, press keys and resize the window;
+// each event is printed on this thread (the one blocked in wait_closed()). The
+// left figure is 2D, the right one a 3D scene with a Plane2D; Edit > Navigate
+// shows `consumed`, and a click on a line point, bar, marker or heatmap cell adds a
+// `pick` line naming the object and element. Type in a panel field to see keys
+// stay quiet. Close the
+// window to finish.
+static void test_events() {
+    const char* consumed_names[] = {"none", "select", "navigate", "grid-drag"};
+    const char* kinds[] = {"close", "down", "up", "move", "scroll", "key-down", "key-up", "resize", "pick"};
+    const char* pick_names[] = {"none", "line", "scatter", "scatter_z", "bar", "heatmap",
+                                "bar3d", "surface", "surface_tri", "scatter3d", "line3d",
+                                "quiver", "fill"};
+
+    auto fig = sextant::Figure::create({.width = 1350, .height = 450, .title = "events"});
+    constexpr int N = 60;
+    std::vector<double> x(N), y(N);
+    for (int i = 0; i < N; ++i) {
+        x[i] = i * 0.1;
+        y[i] = std::sin(x[i]);
+    }
+    fig->add_subplot(1, 3, 1)->line(x, y).set_title("2D: click for data coordinates");
+
+    // Step 39: bars and fills answer by area, a point within the radius first.
+    auto areas = fig->add_subplot(1, 3, 2);
+    {
+        const std::vector<double> xs{0, 1, 2, 3, 4, 5, 6};
+        const std::vector<std::vector<double>> layers{{1, 2, 1.5, 2.5, 2, 1, 1.5}, {1, 1, 2, 1, 1.5, 2, 1}};
+        areas->stack(xs, layers, {.names = {"low", "high"}, .alpha = 0.6f});
+        areas->bar(std::vector<double>{8, 9, 10}, std::vector<double>{2, 4, 3}, {.name = "bars"});
+        areas->scatter(std::vector<double>{2, 9}, std::vector<double>{3, 4}, {.color = sextant::Color::Black});
+        areas->legend().set_title("Areas: inside a band or bar; the dots first");
+    }
+    auto ax3 = fig->add_subplot3d(1, 3, 3);
+    ax3->set_title("3D: data only where a plane is hit");
+    ax3->plane(sextant::PlaneOrientation::XY, 0.0)->line(x, y);
+
+    int moves = 0;
+    for (int k = 0; k <= static_cast<int>(sextant::EventKind::Pick); ++k) {
+        const auto kind = static_cast<sextant::EventKind>(k);
+        fig->connect(kind, [&, kind](const sextant::Event& e) {
+            if (kind == sextant::EventKind::MouseMove && ++moves % 20 != 0) return; // thin the log
+            printf("[event] %-8s", kinds[static_cast<int>(kind)]);
+            switch (kind) {
+                case sextant::EventKind::MouseDown:
+                case sextant::EventKind::MouseUp:
+                case sextant::EventKind::MouseMove:
+                case sextant::EventKind::Scroll:
+                    printf(" px=(%.0f,%.0f) axes=%d", e.x, e.y, e.axes);
+                    if (e.has_data) printf(" data=(%.4g,%.4g,%.4g)", e.xdata, e.ydata, e.zdata);
+                    if (kind == sextant::EventKind::Scroll) printf(" scroll=(%.2g,%.2g)", e.scroll_x, e.scroll_y);
+                    if (kind != sextant::EventKind::MouseMove) printf(" button=%d dbl=%d", e.button, e.double_click);
+                    printf(" consumed=%s mods=%d", consumed_names[static_cast<int>(e.consumed)], e.mods);
+                    break;
+                case sextant::EventKind::KeyDown:
+                case sextant::EventKind::KeyUp:
+                    printf(" key='%s'", e.key.c_str());
+                    break;
+                case sextant::EventKind::Resize:
+                    printf(" %dx%d", e.width, e.height);
+                    break;
+                case sextant::EventKind::Pick:
+                    printf(" %s object=%d index=%d row=%d col=%d plane=%d axes=%d button=%d",
+                           pick_names[static_cast<int>(e.pick_kind)], e.pick_object, e.pick_index,
+                           e.pick_row, e.pick_col, e.pick_plane, e.axes, e.button);
+                    break;
+                default: break;
+            }
+            printf("\n");
+        });
+    }
+    fig->show(false);
+    printf("[main] events are delivered inside wait_closed(); close the window to finish\n");
+    fig->wait_closed();
+    printf("[main] done\n");
+}
+
+
+// Line styles, widths, transparency, markers drawn over a line, error bars and
+// a plane. (The step drawstyles are `part_line_steps`.)
+static void part_line_styles() {
+    using sextant::LineStyle;
+    auto fig = sextant::Figure::create({.width = 1300, .height = 900, .title = "Line styles"});
+    fig->suptitle("LineOptions: linestyle, linewidth, alpha, loop, error bars");
+
+    std::vector<double> x(120), y(120);
+    for (std::size_t i = 0; i < x.size(); ++i) x[i] = 0.1 * static_cast<double>(i);
+
+    // Every linestyle at two widths.
+    auto a1 = fig->add_subplot(2, 2, 1);
+    {
+        const std::pair<LineStyle, const char*> styles[] = {
+            {LineStyle::Solid, "Solid"}, {LineStyle::Dashed, "Dashed"},
+            {LineStyle::Dotted, "Dotted"}, {LineStyle::DashDot, "DashDot"}};
+        for (int k = 0; k < 4; ++k) {
+            for (std::size_t i = 0; i < x.size(); ++i) y[i] = 2.0 * k + std::sin(x[i]);
+            a1->line(x, y, {.linewidth = k % 2 ? 4.0f : 1.5f, .linestyle = styles[k].first,
+                            .name = styles[k].second});
+        }
+        a1->legend().grid().set_title("linestyle x linewidth (1.5 / 4)");
+    }
+
+    // Transparency: overlapping wide strokes blend, one stroke does not self-overlap.
+    auto a2 = fig->add_subplot(2, 2, 2);
+    {
+        std::vector<double> y2(x.size());
+        for (std::size_t i = 0; i < x.size(); ++i) {
+            y[i] = std::sin(x[i]);
+            y2[i] = std::cos(x[i]);
+        }
+        a2->line(x, y, {.color = sextant::Color::Blue, .linewidth = 14.0f, .name = "alpha 0.4", .alpha = 0.4f});
+        a2->line(x, y2, {.color = sextant::Color::Red, .linewidth = 14.0f, .name = "alpha 0.4", .alpha = 0.4f});
+        a2->line(x, y, {.color = sextant::Color::Black, .linewidth = 1.0f, .name = "opaque"});
+        a2->legend().set_title("alpha: crossings blend, no seams inside one line");
+    }
+
+    // Error bars on a line: symmetric, asymmetric and boxed, in x and y.
+    auto a3 = fig->add_subplot(2, 2, 3);
+    {
+        std::vector<double> xs, ys, lo, hi, bx;
+        for (int i = 0; i < 10; ++i) {
+            xs.push_back(i);
+            ys.push_back(3.0 + std::sin(0.7 * i));
+            lo.push_back(0.2 + 0.03 * i);
+            hi.push_back(0.5 + 0.06 * i);
+            bx.push_back(0.3);
+        }
+        a3->line(xs, ys, {.x_cap_lo = bx, .y_cap_lo = lo, .y_cap_hi = hi},
+                 {.linewidth = 2.0f, .name = "x sym, y asym",
+                  .errorbar = {.capsize = 8.0f}});
+        std::vector<double> ys2(ys);
+        for (double& v: ys2) v -= 3.0;
+        a3->line(xs, ys2, {.y_cap_lo = lo, .y_cap_hi = lo, .y_box_lo = bx},
+                 {.linewidth = 2.0f, .name = "arrow caps + box",
+                  .errorbar = {.capsize = 9.0f, .capstyle = sextant::CapStyle::Arrow}});
+        a3->legend().grid().set_title("error bars: flat and arrow caps, a box");
+    }
+
+    // A plane carries the same line options (it strokes solid).
+    auto a4 = fig->add_subplot3d(2, 2, 4);
+    {
+        auto pl = a4->plane(sextant::PlaneOrientation::XY, 0.0);
+        for (std::size_t i = 0; i < x.size(); ++i) y[i] = std::sin(x[i]);
+        pl->line(x, y, {.color = sextant::Color::Red, .linewidth = 4.0f, .name = "alpha 0.6", .alpha = 0.6f});
+        std::vector<double> y3(y);
+        for (double& v: y3) v *= -0.5;
+        pl->line(x, y3, {.color = sextant::Color::Blue, .linewidth = 2.0f, .name = "looped", .loop = true});
+        a4->legend().set_title("plane: width, alpha, loop");
+    }
+
+    savefig_and_check_memory(fig, "test_line_styles");
+    fig->show(true);
+}
+
+// Heatmaps: colormaps (sequential, diverging, cyclic), origin and extents,
+// contours, a NaN hole, and translucent planes crossing in 3D.
+static void test_heatmap() {
+    constexpr int R = 40, C = 60;
+    std::vector<double> field(R * C), saddle(R * C), phase(R * C), holed;
+    for (int r = 0; r < R; ++r)
+        for (int c = 0; c < C; ++c) {
+            const double x = -3.0 + 6.0 * c / (C - 1), y = -2.0 + 4.0 * r / (R - 1);
+            field[r * C + c] = std::exp(-(x * x + y * y) / 2.0);
+            saddle[r * C + c] = x * y;
+            phase[r * C + c] = std::atan2(y, x);
+        }
+    holed = field;
+    for (int r = 15; r < 25; ++r)
+        for (int c = 25; c < 35; ++c) holed[r * C + c] = std::nan("");
+
+    auto fig = sextant::Figure::create({.width = 1500, .height = 900, .title = "Heatmaps"});
+    fig->suptitle("heatmap / imshow: colormap, origin, extent, contours, NaN; planes");
+
+    fig->add_subplot(2, 3, 1)
+            ->heatmap(field, R, C, {-3.0, 3.0}, {-2.0, 2.0},
+                      {.cmap = sextant::Colormap::Inferno, .colorbar = true, .name = "density"})
+            .set_title("Inferno on a real extent (hover: data coordinates)");
+
+    fig->add_subplot(2)
+            ->heatmap(saddle, R, C, {-3.0, 3.0}, {-2.0, 2.0},
+                      {.cmap = sextant::Colormap::Coolwarm, .vmin = -6.0f, .vmax = 6.0f, .colorbar = true,
+                       .name = "x * y"})
+            .set_title("diverging, symmetric limits");
+
+    fig->add_subplot(3)
+            ->heatmap(phase, R, C, {-3.0, 3.0}, {-2.0, 2.0},
+                      {.cmap = sextant::Colormap::Phase, .vmin = -3.14159f, .vmax = 3.14159f, .colorbar = true,
+                       .name = "angle"})
+            .set_title("a cyclic map: no seam at +-pi");
+
+    fig->add_subplot(4)
+            ->imshow(field, R, C, {.cmap = sextant::Colormap::Gray, .origin = "upper"})
+            .set_title("origin = upper (an image)");
+
+    fig->add_subplot(5)
+            ->heatmap(field, R, C, {-3.0, 3.0}, {-2.0, 2.0},
+                      {.cmap = sextant::Colormap::Viridis, .colorbar = true,
+                       .contours = {0.2, 0.5, 0.8}, .contour_color = {1.0f, 1.0f, 1.0f, 0.9f},
+                       .contour_linewidth = 1.5f, .contour_labels = true})
+            .set_title("labelled contours; NaN-free");
+
+    // Two translucent slices crossing in a 3D scene, different map ends.
+    {
+        auto ax = fig->add_subplot3d(2, 3, 6);
+        ax->set_title("planes: XY x YZ, translucent")
+                .set_xtitle("x").set_ytitle("y").set_ztitle("z").set_view(-50.0, 25.0);
+        ax->plane(sextant::PlaneOrientation::XY, 0.0, {.alpha = 0.6f})
+                ->heatmap(holed, R, C, {-3.0, 3.0}, {-2.0, 2.0},
+                          {.cmap = sextant::Colormap::Viridis, .vmin = 0.0f, .vmax = 1.0f});
+        ax->plane(sextant::PlaneOrientation::YZ, 0.0, {.alpha = 0.6f})
+                ->heatmap(saddle, R, C, {-3.0, 3.0}, {-2.0, 2.0},
+                          {.cmap = sextant::Colormap::Coolwarm, .vmin = -6.0f, .vmax = 6.0f,
+                           .colorbar = true, .name = "x * y"});
+    }
+
+    savefig_and_check_memory(fig, "test_heatmap");
+    fig->show(true);
+}
+
+// Text and annotations in 2D and 3D: anchors, rotation, boxes, coordinates in
+// data and in frame fractions, arrows; reference lines and spans.
+static void part_text() {
+    auto fig = sextant::Figure::create({.width = 1500, .height = 800, .title = "Text and annotations"});
+    fig->suptitle("Axes::text / annotate, Axes3D::text / text2d / annotate");
+
+    std::vector<double> x(100), y(100);
+    for (std::size_t i = 0; i < x.size(); ++i) {
+        x[i] = 0.1 * static_cast<double>(i);
+        y[i] = std::sin(x[i]);
+    }
+    using sextant::Pos;
+    using sextant::HAlign;
+    using sextant::VAlign;
+
+    // Anchors: the marker is the position; each text hangs off it differently.
+    auto a1 = fig->add_subplot(1, 3, 1);
+    {
+        const std::pair<HAlign, const char*> has[] = {{HAlign::Left, "L"}, {HAlign::Center, "C"}, {HAlign::Right, "R"}};
+        const std::pair<VAlign, const char*> vas[] = {{VAlign::Top, "Top"}, {VAlign::Center, "Center"},
+                                                      {VAlign::Baseline, "Base"}, {VAlign::Bottom, "Bottom"}};
+        for (int i = 0; i < 3; ++i)
+            for (int j = 0; j < 4; ++j) {
+                const double px = 2.0 + 3.0 * i, py = 1.0 + 1.6 * j;
+                a1->scatter(std::vector<double>{px}, std::vector<double>{py},
+                            {.color = sextant::Color::Red, .size = 5.0f, .show_legend = false});
+                a1->text(std::string(has[i].second) + "/" + vas[j].second, px, py,
+                         {.fontsize = 11.0f, .ha = has[i].first, .va = vas[j].first});
+            }
+        a1->set_xlim(0, 10).set_ylim(0, 6).set_title("ha x va around the red dot");
+    }
+
+    // Looks: rotation, box, alpha, multi-line, math, a frame-fraction position,
+    // and an arrow in each style.
+    auto a2 = fig->add_subplot(1, 3, 2);
+    {
+        a2->line(x, y);
+        a2->text("rotated 30", 1.0, -0.8, {.rotation = 30.0f});
+        a2->text("boxed", Pos::fraction(0.05), Pos::fraction(0.92),
+                 {.va = VAlign::Top, .background = {1.0f, 1.0f, 0.8f, 1.0f}, .edge_linewidth = 1.0f});
+        a2->text("two\nlines", Pos::fraction(0.95), Pos::fraction(0.08),
+                 {.alpha = 0.5f, .ha = HAlign::Right});
+        a2->text("$\\int_0^\\pi \\sin x\\,dx = 2$", Pos::fraction(0.4), Pos::fraction(0.5),
+                 {.fontsize = 15.0f, .ha = HAlign::Center});
+        a2->annotate(1.57, 1.0, "peak: filled", 3.2, 1.0, {.va = VAlign::Center},
+                     {.head = sextant::ArrowHead::Filled});
+        a2->annotate(4.71, -1.0, "trough: open, bowed", 6.0, -0.4, {.va = VAlign::Center},
+                     {.head = sextant::ArrowHead::Open, .tail = sextant::ArrowHead::Bar, .linestyle = sextant::LineStyle::Dashed, .arc = 0.3f});
+        a2->annotate(3.14, 0.0, "clipped (pan away)", 7.5, 0.7, {.clip_to_frame = true});
+        a2->set_title("rotation, box, alpha, math, arrows");
+    }
+
+    // 3D: a point-anchored text, a fixed frame text and an annotation.
+    auto a3 = fig->add_subplot3d(1, 3, 3);
+    {
+        std::vector<double> t(80), cx(80), cy(80), cz(80);
+        for (int i = 0; i < 80; ++i) {
+            t[i] = i * 0.12;
+            cx[i] = std::cos(t[i]);
+            cy[i] = std::sin(t[i]);
+            cz[i] = 0.1 * t[i];
+        }
+        a3->line3d(cx, cy, cz, {.linewidth = 2.0f}).set_view(-55.0, 22.0)
+                .set_xtitle("x").set_ytitle("y").set_ztitle("z").set_title("text keeps its pixel size when the box turns");
+        a3->text("start", cx[0], cy[0], cz[0], {.va = VAlign::Bottom});
+        a3->text("end", cx[79], cy[79], cz[79], {.color = sextant::Color::Red});
+        a3->text2d("text2d: stays put", 0.03, 0.95, {.va = VAlign::Top,
+                                                    .background = {1.0f, 1.0f, 0.8f, 1.0f}, .edge_linewidth = 1.0f});
+        a3->annotate(cx[40], cy[40], cz[40], "$\\theta = 4.8$", 50.0, 40.0, {}, {.head = sextant::ArrowHead::Open});
+    }
+
+    savefig_and_check_memory(fig, "test_text");
+    fig->show(true);
+}
+
+// Legend: all twelve anchors; colorbar: all four, width / margin / offset,
+// stacking, and a 3D cell.
+static void part_legend() {
+    using sextant::LegendAnchor;
+    auto fig = sextant::Figure::create({.width = 1700, .height = 1000, .title = "Legend anchors"});
+    fig->suptitle("LegendAnchor: Inside*, Outside*; margin and offset");
+
+    std::vector<double> x(80), a(80), b(80);
+    for (std::size_t i = 0; i < x.size(); ++i) {
+        x[i] = 0.1 * static_cast<double>(i);
+        a[i] = std::sin(x[i]);
+        b[i] = 0.5 * std::cos(x[i]);
+    }
+    const std::pair<LegendAnchor, const char*> anchors[] = {
+        {LegendAnchor::InsideTL, "InsideTL"}, {LegendAnchor::InsideTR, "InsideTR"},
+        {LegendAnchor::InsideBL, "InsideBL"}, {LegendAnchor::InsideBR, "InsideBR"},
+        {LegendAnchor::OutsideTL, "OutsideTL"}, {LegendAnchor::OutsideTR, "OutsideTR"},
+        {LegendAnchor::OutsideBL, "OutsideBL"}, {LegendAnchor::OutsideBR, "OutsideBR"},
+        {LegendAnchor::OutsideLT, "OutsideLT"}, {LegendAnchor::OutsideLB, "OutsideLB"},
+        {LegendAnchor::OutsideRT, "OutsideRT"}, {LegendAnchor::OutsideRB, "OutsideRB"},
+    };
+    for (int k = 0; k < 12; ++k) {
+        auto ax = fig->add_subplot(3, 4, k + 1);
+        ax->line(x, a, {.name = "sin"}).line(x, b, {.linestyle = sextant::LineStyle::Dashed, .name = "half cos"})
+                .scatter(x, b, {.size = 5.0f, .name = "samples"});
+        sextant::LegendOptions lo{.anchor = anchors[k].first};
+        if (k == 3) lo.offset_x = -30.0f, lo.offset_y = 20.0f;
+        if (k == 7) lo.margin = 30.0f;
+        if (k == 11) lo.frameon = false;
+        ax->legend(lo).set_title(anchors[k].second);
+    }
+
+    savefig_and_check_memory(fig, "test_legend");
+    fig->show(true);
+}
+
+static void part_colorbar() {
+    using sextant::ColorbarAnchor;
+    auto fig = sextant::Figure::create({.width = 1500, .height = 900, .title = "Colorbar anchors"});
+    fig->suptitle("ColorbarAnchor: Left, Right, Top, Bottom; width, margin, offset; stacking");
+
+    constexpr int R = 20, C = 20;
+    std::vector<double> f(R * C);
+    for (int r = 0; r < R; ++r)
+        for (int c = 0; c < C; ++c) f[r * C + c] = std::sin(0.3 * r) * std::cos(0.25 * c);
+    const std::pair<ColorbarAnchor, const char*> anchors[] = {
+        {ColorbarAnchor::Left, "Left"}, {ColorbarAnchor::Right, "Right"},
+        {ColorbarAnchor::Top, "Top"}, {ColorbarAnchor::Bottom, "Bottom"}};
+    for (int k = 0; k < 4; ++k) {
+        auto ax = fig->add_subplot(2, 3, k + 1);
+        ax->imshow(f, R, C, {.vmin = -1.0f, .vmax = 1.0f, .colorbar = true, .name = "value"});
+        sextant::ColorbarOptions co{.anchor = anchors[k].first};
+        if (k == 1) co.width = 30.0f, co.margin = 25.0f;
+        if (k == 3) co.offset_y = 12.0f;
+        ax->set_colorbar_style(co).set_title(anchors[k].second);
+    }
+
+    // Two bars and a legend on one side: bars stack outboard of the legend.
+    auto a5 = fig->add_subplot(2, 3, 5);
+    {
+        std::vector<double> x(40), y(40), z(40);
+        for (int i = 0; i < 40; ++i) {
+            x[i] = 10.0 * (i % 20) / 19.0;
+            y[i] = 10.0 * (i / 20) + std::sin(x[i]);
+            z[i] = i;
+        }
+        a5->imshow(f, R, C, {.cmap = sextant::Colormap::Gray, .vmin = -1.0f, .vmax = 1.0f, .colorbar = true,
+                             .name = "field"})
+                .scatter_z(x, y, z, {.cmap = sextant::Colormap::Plasma, .size = 14.0f, .colorbar = true,
+                                     .name = "index"})
+                .legend({.anchor = sextant::LegendAnchor::OutsideRT})
+                .set_title("two bars + legend on the right");
+    }
+
+    auto a6 = fig->add_subplot3d(2, 3, 6);
+    {
+        std::vector<double> u(20), v(20), h(400);
+        for (int i = 0; i < 20; ++i) u[i] = v[i] = -2.0 + 4.0 * i / 19.0;
+        for (int j = 0; j < 20; ++j)
+            for (int i = 0; i < 20; ++i) h[j * 20 + i] = std::exp(-(u[i] * u[i] + v[j] * v[j]));
+        a6->surface(sextant::PlaneOrientation::XY, u, v, h,
+                    {.colormap = true, .colorbar = true, .name = "height"})
+                .set_colorbar_style({.anchor = ColorbarAnchor::Bottom})
+                .set_title("3D, bar below");
+    }
+
+    savefig_and_check_memory(fig, "test_colorbar");
+    fig->show(true);
+}
+
+// bar3d: grid footprint (width/depth), bases and negative bars, edges, hints,
+// translucent interleaved grids, and a plane cutting through bars.
+static void test_bar3d() {
+    constexpr int NU = 13, NV = 13;
+    std::vector<double> gx(NU), gy(NV), ripple(NU * NV), bowl(NU * NV);
+    for (int i = 0; i < NU; ++i) gx[i] = -3.0 + 6.0 * i / (NU - 1);
+    for (int j = 0; j < NV; ++j) gy[j] = -3.0 + 6.0 * j / (NV - 1);
+    for (int i = 0; i < NU; ++i)
+        for (int j = 0; j < NV; ++j) {
+            const double r = std::hypot(gx[i], gy[j]);
+            ripple[i * NV + j] = 1.6 * std::exp(-r / 2.0) * std::cos(r * 1.7);
+            bowl[i * NV + j] = 0.22 * (gx[i] * gx[i] - gy[j] * gy[j]);
+        }
+    std::vector<double> gx2(gx), gy2(gy);
+    for (double& v: gx2) v += 0.25;
+    for (double& v: gy2) v += 0.25;
+    constexpr int PR = 40, PC = 40;
+    std::vector<double> sl(PR * PC);
+    for (int r = 0; r < PR; ++r)
+        for (int c = 0; c < PC; ++c)
+            sl[r * PC + c] = std::sin(-3.0 + 6.0 * c / (PC - 1) + 0.6) * std::cos(-3.0 + 6.0 * r / (PR - 1));
+    const sextant::Range ext{-3.0, 3.0};
+
+    auto fig = sextant::Figure::create({.width = 1500, .height = 950, .title = "bar3d", .subplot_col_gap = 0.0f});
+    fig->suptitle("bar3d: footprint, bases, edges, hints, translucency");
+
+    auto c1 = fig->add_subplot3d(2, 3, 1);
+    c1->bar3d(sextant::PlaneOrientation::XY, gx, gy, ripple,
+              {.color = sextant::Color::Blue, .width = 0.8f, .depth = 0.8f, .bottom = -1.5,
+               .edges = true, .edgecolor = sextant::Color::Black, .name = "ripple"})
+            .set_title("bottom -1.5, edges, negative bars hang down")
+            .set_xtitle("x").set_ytitle("y").set_ztitle("z").set_view(-55.0, 25.0).legend();
+
+    auto c2 = fig->add_subplot3d(2, 3, 2);
+    c2->bar3d(sextant::PlaneOrientation::XY, gx, gy, ripple,
+              {.color = sextant::Color::Orange, .alpha = 0.5f, .width = 0.45f, .depth = 0.45f, .bottom = -1.5});
+    c2->bar3d(sextant::PlaneOrientation::XY, gx2, gy2, bowl,
+              {.color = sextant::Color::Blue, .alpha = 0.5f, .width = 0.45f, .depth = 0.45f, .bottom = -1.5});
+    c2->set_title("bar x bar (interleaved, alpha 0.5)").set_xtitle("x").set_ytitle("y").set_ztitle("z");
+
+    auto c3 = fig->add_subplot3d(2, 3, 3);
+    {
+        std::vector<std::string> hints(NU * NV);
+        hints[(NU / 2) * NV + NV / 2] = "centre bar";
+        hints[0] = "corner bar";
+        c3->bar3d(sextant::PlaneOrientation::XY, gx, gy, ripple,
+                  {.color = sextant::Color::Green, .width = 0.8f, .depth = 0.8f, .bottom = -1.5,
+                   .hint_labels = hints});
+        c3->set_title("hover: x, y, height, labels").set_xtitle("x").set_ytitle("y").set_ztitle("z");
+    }
+
+    auto c4 = fig->add_subplot3d(2, 3, 4);
+    c4->bar3d(sextant::PlaneOrientation::XY, gx, gy, ripple,
+              {.color = sextant::Color::Green, .alpha = 0.5f, .width = 0.8f, .depth = 0.8f, .bottom = -1.5});
+    c4->plane(sextant::PlaneOrientation::YZ, 0.0, {.alpha = 0.6f})
+            ->heatmap(sl, PR, PC, ext, ext, {.vmin = -1.0f, .vmax = 1.0f});
+    c4->set_title("plane x bar (a cut through the grid)").set_xtitle("x").set_ytitle("y").set_ztitle("z");
+
+    std::vector<double> midway(NU * NV);
+    for (std::size_t k = 0; k < midway.size(); ++k) midway[k] = -1.5 + 0.5 * ripple[k];
+    auto c5 = fig->add_subplot3d(2, 3, 5);
+    c5->bar3d(sextant::PlaneOrientation::XY, gx, gy, ripple,
+              {.color = sextant::Color::Orange, .alpha = 0.5f, .width = 0.7f, .depth = 0.7f, .bottom = -1.5});
+    c5->surface(sextant::PlaneOrientation::XY, gx, gy, midway,
+                {.colormap = true, .alpha = 0.55f});
+    c5->set_title("bar x surface (sheet inside the bars)").set_xtitle("x").set_ytitle("y").set_ztitle("z");
+
+    // The other two orientations of a grid.
+    auto c6 = fig->add_subplot3d(2, 3, 6);
+    c6->bar3d(sextant::PlaneOrientation::YZ, gx, gy, bowl, {.color = sextant::Color::Purple, .alpha = 0.8f,
+                                                            .width = 0.6f, .depth = 0.6f, .name = "YZ"});
+    c6->set_title("orientation YZ: bars grow along x").set_xtitle("x").set_ytitle("y").set_ztitle("z")
+            .legend().set_view(-35.0, 20.0);
+
+    savefig_and_check_memory(fig, "test_bar3d");
+    fig->show(true);
+}
+
+// surface: colormapped / flat, shading, wireframe, orientation, translucent
+// crossings, perspective.
+static void test_surface() {
+    constexpr int N = 25;
+    std::vector<double> u(N), v(N), ripple(N * N), dome(N * N), saddle(N * N);
+    for (int i = 0; i < N; ++i) u[i] = v[i] = -3.0 + 6.0 * i / (N - 1);
+    for (int i = 0; i < N; ++i)
+        for (int j = 0; j < N; ++j) {
+            const double r = std::hypot(u[i], v[j]);
+            ripple[i * N + j] = 2.0 * std::exp(-r * 0.5) * std::cos(r * 2.2);
+            dome[i * N + j] = 3.0 - 0.3 * r * r;
+            saddle[i * N + j] = 0.22 * (u[i] * u[i] - v[j] * v[j]);
+        }
+    constexpr int PR = 40, PC = 40;
+    std::vector<double> sl(PR * PC);
+    for (int r = 0; r < PR; ++r)
+        for (int c = 0; c < PC; ++c)
+            sl[r * PC + c] = std::sin(-3.0 + 6.0 * c / (PC - 1)) * std::cos(-3.0 + 6.0 * r / (PR - 1));
+    const sextant::Range ext{-3.0, 3.0};
+
+    auto fig = sextant::Figure::create({.width = 1500, .height = 950, .title = "surface"});
+    fig->suptitle("surface: colormap, shading, wireframe, orientation, translucency, perspective");
+
+    fig->add_subplot3d(2, 3, 1)
+            ->surface(sextant::PlaneOrientation::XY, u, v, ripple,
+                      {.colormap = true, .cmap = sextant::Colormap::Coolwarm, .colorbar = true,
+                       .name = "amplitude", .shading = 0.35f})
+            .set_title("colormapped, diverging").set_xtitle("x").set_ytitle("y").set_ztitle("z")
+            .set_view(-50.0, 28.0);
+
+    fig->add_subplot3d(2, 3, 2)
+            ->surface(sextant::PlaneOrientation::XY, u, v, dome,
+                      {.color = sextant::Color::Cyan, .shading = 0.5f, .edges = true, .edge_linewidth = 0.8f})
+            .set_title("flat colour + wireframe").set_xtitle("x").set_ytitle("y").set_ztitle("z")
+            .set_view(-40.0, 22.0);
+
+    fig->add_subplot3d(2, 3, 3)
+            ->surface(sextant::PlaneOrientation::YZ, u, v, ripple,
+                      {.colormap = true, .cmap = sextant::Colormap::Viridis, .shading = 0.0f})
+            .set_title("orientation YZ, shading 0 (flat lighting)").set_xtitle("x").set_ytitle("y").set_ztitle("z")
+            .set_view(-30.0, 20.0);
+
+    auto c4 = fig->add_subplot3d(2, 3, 4);
+    c4->surface(sextant::PlaneOrientation::XY, u, v, ripple,
+                {.color = sextant::Color::from_hex(0xff5533), .alpha = 0.55f});
+    c4->surface(sextant::PlaneOrientation::XY, u, v, saddle,
+                {.color = sextant::Color::from_hex(0x3388ff), .alpha = 0.55f});
+    c4->set_title("surface x surface (two crossings, alpha 0.55)").set_xtitle("x").set_ytitle("y").set_ztitle("z");
+
+    auto c5 = fig->add_subplot3d(2, 3, 5);
+    c5->surface(sextant::PlaneOrientation::XY, u, v, ripple,
+                {.colormap = true, .cmap = sextant::Colormap::Viridis, .alpha = 0.6f});
+    c5->plane(sextant::PlaneOrientation::XY, 0.35, {.alpha = 0.6f})
+            ->heatmap(sl, PR, PC, ext, ext, {.vmin = -1.0f, .vmax = 1.0f});
+    c5->set_title("plane x surface").set_xtitle("x").set_ytitle("y").set_ztitle("z");
+
+    fig->add_subplot3d(2, 3, 6)
+            ->surface(sextant::PlaneOrientation::XY, u, v, ripple,
+                      {.colormap = true, .colorbar = true, .name = "z", .alpha = 0.85f, .shading = 0.35f})
+            .set_projection(sextant::Projection::Perspective).set_fov(38.0).set_view(-48.0, 24.0)
+            .set_title("perspective, alpha 0.85").set_xtitle("x").set_ytitle("y").set_ztitle("z");
+
+    savefig_and_check_memory(fig, "test_surface");
+    fig->show(true);
+}
+
+// scatter3d: every marker shape, per-point sizes, depth shading, a colormapped
+// cloud. (Error bars are `part_errorbar3d`.)
+static void part_scatter3d_markers() {
+    using sextant::MarkerStyle;
+    auto fig = sextant::Figure::create({.width = 1400, .height = 800, .title = "scatter3d markers"});
+    fig->suptitle("scatter3d: marker shapes, sizes, depthshade, colormap");
+
+    const MarkerStyle all[] = {
+        MarkerStyle::Circle, MarkerStyle::Square, MarkerStyle::Triangle, MarkerStyle::Diamond,
+        MarkerStyle::Star, MarkerStyle::Hexagon, MarkerStyle::Cross, MarkerStyle::Plus};
+    auto a1 = fig->add_subplot3d(1, 3, 1);
+    for (int k = 0; k < 8; ++k) {
+        const std::vector<double> x{static_cast<double>(k)}, y{0.0}, z{0.0};
+        a1->scatter3d(x, y, z, {.size = 24.0f, .marker = all[k], .edgecolor = sextant::Color::Black,
+                                .edge_linewidth = 1.0f});
+    }
+    a1->set_title("shapes along x").set_xtitle("x").set_ytitle("y").set_ztitle("z").set_view(-30.0, 20.0);
+
+    auto a2 = fig->add_subplot3d(1, 3, 2);
+    {
+        std::vector<double> x, y, z;
+        sextant::Scatter3DOptions o;
+        o.name = "sized";
+        o.alpha = 0.8f;
+        for (int i = 0; i < 60; ++i) {
+            const double t = 0.35 * i;
+            x.push_back(std::cos(t) * (1.0 + 0.05 * i));
+            y.push_back(std::sin(t) * (1.0 + 0.05 * i));
+            z.push_back(0.1 * i);
+            o.sizes.push_back(5.0 + 0.6 * i);
+        }
+        a2->scatter3d(x, y, z, o).legend().set_title("sizes 5..40, alpha 0.8")
+                .set_xtitle("x").set_ytitle("y").set_ztitle("z").set_view(-50.0, 25.0);
+    }
+
+    auto a3 = fig->add_subplot3d(1, 3, 3);
+    {
+        std::vector<double> x, y, z, c;
+        for (int i = 0; i < 400; ++i) {
+            const double t = i * 0.37;
+            x.push_back(2.5 * std::sin(t * 0.9));
+            y.push_back(2.5 * std::cos(t * 0.6));
+            z.push_back(-2.0 + 4.0 * (i % 40) / 39.0);
+            c.push_back(z.back());
+        }
+        a3->scatter3d(x, y, z, c, {.size = 14.0f, .depthshade = 0.8f, .colorbar = true, .name = "height"})
+                .set_projection(sextant::Projection::Perspective).set_fov(40.0)
+                .set_title("colormapped, depthshade 0.8, perspective")
+                .set_xtitle("x").set_ytitle("y").set_ztitle("z").set_view(-55.0, 20.0);
+    }
+
+    savefig_and_check_memory(fig, "test_scatter3d_markers");
+    fig->show(true);
+}
+
+// Animation and live update: every data kind replaced from the main thread
+// while the window runs, through set_*_data() and refresh(). Pan, zoom and the
+// titles survive; the legend and the colorbar follow.
+static void test_animation() {
+    constexpr int N = 120, R = 30, C = 30, G = 21;
+    std::vector<double> x(N), y(N), px(40), py(40), pz(40), hm(R * C), bx(6), bh(6);
+    std::vector<double> gu(G), gv(G), gh(G * G);
+    for (int i = 0; i < N; ++i) x[i] = i * 2.0 * M_PI / N;
+    for (int i = 0; i < 6; ++i) bx[i] = i + 1;
+    for (int i = 0; i < G; ++i) gu[i] = gv[i] = -3.0 + 6.0 * i / (G - 1);
+
+    auto fig = sextant::Figure::create({.width = 1400, .height = 900, .title = "Animation"});
+    fig->suptitle("set_line_data / scatter_z / heatmap / bar / surface, refresh() at 25 fps");
+    for (int i = 0; i < N; ++i) y[i] = std::sin(x[i]);
+    for (int i = 0; i < 40; ++i) px[i] = py[i] = pz[i] = 0.0;
+    auto a1 = fig->add_subplot(2, 3, 1);
+    a1->line(x, y, {.linewidth = 2.0f, .name = "sin(x - t)"}).set_ylim(-1.5, 1.5).legend().grid()
+            .set_title("line");
+    auto a2 = fig->add_subplot(2, 3, 2);
+    a2->scatter_z(px, py, pz, {.colorbar = true, .name = "t"}).set_xlim(-2, 2).set_ylim(-2, 2)
+            .set_aspect(1.0).set_title("scatter_z: orbiting");
+    auto a3 = fig->add_subplot(2, 3, 3);
+    a3->imshow(hm, R, C, {.vmin = -1.0f, .vmax = 1.0f, .colorbar = true}).set_title("heatmap");
+    auto a4 = fig->add_subplot(2, 3, 4);
+    a4->bar(bx, bh).set_ylim(0, 6).set_title("bar");
+    auto a5 = fig->add_subplot3d(2, 3, 5);
+    a5->surface(sextant::PlaneOrientation::XY, gu, gv, gh, {.colormap = true})
+            .set_zlim(-1.5, 1.5).set_view(-50.0, 25.0).set_title("surface");
+    auto a6 = fig->add_subplot(2, 3, 6);
+    a6->axline(0.0, {.name = "moving level"}).text("label", 1.0, 0.0).set_xlim(0, 6).set_ylim(-1, 1)
+            .set_title("axline + text");
+
+    fig->show(false);
+    for (int f = 0; f < 150; ++f) {
+        pump_for(std::chrono::milliseconds(40));
+        const double t = f * 0.08;
+        for (int i = 0; i < N; ++i) y[i] = std::sin(x[i] - t);
+        a1->set_line_data(0, {x, y});
+        for (int i = 0; i < 40; ++i) {
+            const double a = t + i * 0.157;
+            px[i] = 1.6 * std::cos(a);
+            py[i] = 1.6 * std::sin(a);
+            pz[i] = i + f;
+        }
+        a2->set_scatter_z_data(0, px, py, pz);
+        for (int r = 0; r < R; ++r)
+            for (int c = 0; c < C; ++c) hm[r * C + c] = std::sin(0.4 * c - t) * std::cos(0.3 * r + 0.5 * t);
+        a3->set_heatmap_data(0, hm, R, C, {0.0, 30.0}, {0.0, 30.0});
+        for (int i = 0; i < 6; ++i) bh[i] = 3.0 + 2.0 * std::sin(t + i);
+        a4->set_bar_data(0, bx, bh);
+        for (int i = 0; i < G; ++i)
+            for (int j = 0; j < G; ++j) gh[i * G + j] = std::cos(std::hypot(gu[i], gv[j]) * 2.0 - t);
+        a5->set_surface_data(0, sextant::PlaneOrientation::XY, gu, gv, gh);
+        a6->set_axline_data(0, {.value = std::sin(t)});
+        a6->set_text_data(0, "label", sextant::Pos(1.0 + 4.0 * (0.5 + 0.5 * std::sin(0.5 * t))), sextant::Pos(std::sin(t)));
+        fig->refresh();
+        if (f == 75) savefig_and_check_memory(fig, "test_animation");
+    }
+    fig->close();
+    printf("[main] animation done\n");
+}
+
+// ============================ the tests ============================
+// One topic each; a test that has several figures shows them one after the
+// other (close a window to advance).
+
+static void test_figure_layout() { // spans, shared axes, twins
+    part_spans();
+    part_shared();
+    part_twins();
+}
+
+static void test_aspect_scales() {
+    part_aspect();
+    part_scales();
+}
+
+static void test_decorations() { // text, annotate (2D and 3D), axline, axspan
+    part_text();
+    part_reference_lines();
+}
+
+static void test_legend_colorbar() {
+    part_legend();
+    part_colorbar();
+}
+
+static void test_line() {
+    part_line_styles();
+    part_line_steps();
+}
+
+static void test_scatter() { // scatter, scatter_z
+    part_marker_shapes();
+    part_marker_sizes();
+}
+
+static void test_bar() { // bar, hist
+    part_bar_orientation();
+}
+
+static void test_fill() { // fill, stack
+    part_fill_between();
+    part_stack();
+}
+
+static void test_scatter3d() {
+    part_scatter3d_markers();
+    part_errorbar3d();
+}
+
+static void test_show_nonblocking() {
+    part_refresh_before_show();
+    part_nonblocking();
+    part_wait_and_run();
+}
+
 int main() {
-    test_reference_lines();
-    // test_bar_orientation();
-    // test_line_steps();
-    // test_marker_sizes();
-    // test_marker_shapes();
-    // test_tick_style();
-    // test_layout_independent();
-    // test_layout_aligned();
-    // test_aspect();
-    // test_twins();
-    // test_shared_axes();
-    // test_scales();
-    // test_axis_position3d();
-    // test_axis_position();
-    // test_axes_gallery();
+    test_axes_gallery();
     // test_axes3d_gallery();
-    // test_errorbar3d_gallery();
-    // test_line3d_gallery();
-    // test_surface_tri_gallery();
-    // test_subplot_spans();
-    // test_style_options();
-    // test_suptitle_layout();
-    // test_savefig();
-    // test_translucent3d();
+    // test_figure_layout();
+    // test_aspect_scales();
+    // test_mathtext_gallery();
+    // test_decorations();
+    // test_legend_colorbar();
+    // test_line();
+    // test_scatter();
+    // test_bar();
+    // test_heatmap();
+    // test_fill();
+    // test_quiver();
+    // test_bar3d();
+    // test_surface();
+    // test_surface_tri();
+    // test_line3d();
+    // test_scatter3d();
     // test_show_nonblocking();
-    // test_wait_and_run();
-    // test_refresh_before_show();
-    // test_live_refresh();
-    // test_grid_toggle();
-    // test_widget_panel();
-    // test_theming();
-    // test_frame_resize();
-    // test_mouse_hint();
-    // test_data_panel();
+    // test_animation();
     // test_events();
 }

@@ -513,6 +513,13 @@ namespace lt {
 
     void test_plot_view_two_figures();
 
+    // nav_history.cpp
+    void test_box_zoom();
+
+    void test_nav_history();
+
+    void test_box_zoom_view();
+
     // window_shell.cpp
     void test_panel_imgui_setup();
 
@@ -616,11 +623,27 @@ namespace lt {
     void test_reference_lines();
     void test_reference_lines_rendered();
 
+    // fill_between.cpp
+    void test_fill_between();
+    void test_fill_between_rendered();
+
+    // quiver.cpp
+    void test_quiver();
+    void test_quiver_rendered();
+
+    // pick_area.cpp
+    void test_pick_areas();
+
+    // visible.cpp
+    void test_visible();
+
     // text.cpp
     void test_text();
 
     // rich_text.cpp
     void test_rich_text();
+    // math_layout.cpp
+    void test_math_layout();
 
     // describe.cpp
     void test_describe();

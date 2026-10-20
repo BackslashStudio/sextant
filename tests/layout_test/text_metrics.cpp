@@ -173,8 +173,9 @@ namespace lt {
         // glyph a face lacks is drawn from the font text_width() measures it in.
         std::vector<std::pair<std::string, int>> fallbacks;
         for (const sextant::FontEntry* e: sextant::fallback_fonts()) {
-            const int h = nvgCreateFont(vg, ("fallback:" + e->path).c_str(), e->path.c_str());
-            if (h != -1) fallbacks.emplace_back(e->path, h);
+            const int h = nvgCreateFontAtIndex(vg, ("fallback:" + e->path + "#" + std::to_string(e->index)).c_str(),
+                                               e->path.c_str(), e->index);
+            if (h != -1) fallbacks.emplace_back(e->index == 0 ? e->path : e->path + "#" + std::to_string(e->index), h);
         }
         auto add_fallbacks = [&](int font, const std::string& path) {
             for (const auto& [p, h]: fallbacks)

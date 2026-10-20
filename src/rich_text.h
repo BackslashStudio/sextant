@@ -7,9 +7,13 @@
 
 namespace sextant {
 
+enum class MathFontset;   // sextant/figure.h
+
 // Rich text: a subset of matplotlib's mathtext. A string with
 // an even, nonzero count of `$` not preceded by a backslash holds math spans;
-// inside one, `^`/`_` scripts, `{}` groups, `\name` symbols and TeX spacing.
+// inside one, `^`/`_` scripts, `{}` groups, `\name` symbols and TeX spacing,
+// `\frac`, `\sqrt`, `\overline`/`\underline`, accents, sized delimiters (drawn
+// with rules and paths), big operators with limits, `\overset` and kin.
 // Letters in a span are italic, as TeX's: Latin and lower-case
 // Greek; digits, symbols, Greek capitals, function names, `\mathrm`/`\text`
 // upright; `\mathit` makes letters and digits italic.
@@ -28,17 +32,47 @@ struct RichRun {
     // A math letter: the family's italic face, or the upright one
     // slanted when it has none; measured by text_width_italic().
     bool italic = false;
+    // \mathbf: the family's bold face, upright, or the upright one drawn twice
+    // kFauxBoldEm apart when it has none; measured by text_width_face(Bold).
+    bool bold = false;
+    // The font file the run is drawn in when it is not the line's own: the
+    // math font (FigureOptions::math_fontset) inside a span. "" = the line's.
+    std::string font;
 };
 
 // The slant of an italic run drawn from an upright face: horizontal shift per
 // unit of height (FreeType's oblique, about 11 degrees).
 constexpr float kSyntheticSlant = 0.2f;
 
+// A filled rectangle in a laid-out line (a fraction bar, an overline): x from
+// the line's left end, y its top edge, down from the baseline.
+struct RichRule {
+    float x = 0.0f, y = 0.0f, w = 0.0f, h = 0.0f;
+};
+
+// A filled outline (a radical): a closed polygon, in the rules' coordinates.
+struct RichPath {
+    struct Pt {
+        float x = 0.0f, y = 0.0f;
+    };
+    std::vector<Pt> pts;
+};
+
 struct RichLine {
     std::vector<RichRun> runs;   // in pen order
+    std::vector<RichRule> rules;
+    std::vector<RichPath> paths;
     float width = 0.0f;
     // Over every run, and never inside the plain font's: line_height = ascent - descent.
     FontVMetrics vm;
+    // The glyphs' and rules' extent, y up (the font's ascent and descent for
+    // a line that is not rich).
+    float ink_top = 0.0f, ink_bottom = 0.0f;
+    // Holds a fraction, root, rule, accent, limit or big operator: its runs are not
+    // in pen order (a denominator or an accent steps back over what precedes it) or
+    // reach past a line of text, so the SVG places each
+    // run absolutely, and the rules and paths must be drawn too.
+    bool placed = false;
 };
 
 // matplotlib's test: an even, nonzero count of `$`, less the `\$`s.
@@ -65,21 +99,31 @@ RichLine layout_rich(const std::string& font_path, float size, std::string_view 
 float        label_width(const std::string& font_path, float size, std::string_view s);
 FontVMetrics label_vmetrics(const std::string& font_path, float size, std::string_view s);
 
-// FigureOptions::mathtext for every measure and draw on this thread while it
-// lives. The figure-level entry points (layout, render, export) open one;
-// scopes nest, and with none open math is on.
+// FigureOptions::mathtext and the resolved math font for every measure and
+// draw on this thread while it lives. The figure-level entry points (layout,
+// render, export) open one; scopes nest, and with none open math is on, in the
+// text font.
 // Whether math is on for this thread (the innermost MathTextScope's).
 bool mathtext_on();
+// The math font's file for this thread; "" = each line's own font.
+const std::string& mathtext_font();
 
 class MathTextScope {
 public:
-    explicit MathTextScope(bool on);
+    explicit MathTextScope(bool on, std::string math_font = {});
     ~MathTextScope();
     MathTextScope(const MathTextScope&) = delete;
     MathTextScope& operator=(const MathTextScope&) = delete;
 private:
     bool prev_;
+    std::string prev_font_;
 };
+
+// FigureOptions::math_fontset resolved through discovery: the math font's file,
+// "" for the text font -- Text, or a set none of whose families is installed,
+// or a Custom path that cannot be read; those two also set `message` (one line,
+// for the message handler).
+std::string resolve_math_font(MathFontset set, const std::string& custom_path, std::string& message);
 
 // For a string set through the API: one emit_message() when math is on and
 // the math in `s` does not parse ("<who>: math not parsed at column N: ...;

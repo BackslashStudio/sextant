@@ -1,8 +1,11 @@
 #include "rich_text.h"
 #include "messages.h"
+#include "font_discovery.h"
+#include "sextant/figure.h"
 
 #include <algorithm>
 #include <cmath>
+#include <span>
 #include <string>
 #include <utility>
 
@@ -14,13 +17,44 @@ namespace {
 // TeX's atom classes, which decide the space between neighbours.
 enum class Cls { Ord, Op, Bin, Rel, Open, Close, Punct };
 
+// An accent drawn over its body: a glyph of the font's, or one of the wide ones
+// drawn as a path across the body.
+enum class Wide { None, Hat, Tilde, RightArrow, LeftArrow };
+
 struct Atom {
-    enum class Kind { Glyphs, Group, Space } kind = Kind::Glyphs;
+    enum class Kind {
+        Glyphs, Group, Space, Frac, Radical, Overline, Underline, Accent, Delimited, Sized, Stack, Rows
+    } kind = Kind::Glyphs;
     Cls cls = Cls::Ord;
     std::string text;              // Glyphs
     bool italic = false;           // Glyphs
+    bool bold = false;             // Glyphs, in \mathbf
+    bool text_font = false;        // Glyphs of \text or \mathdefault: the text font, not the math one
+    // Glyphs: a big operator (1.4× at level 0, its ink centred on the math
+    // axis); scripts set above and below it (limits, \sum and \lim), or at its
+    // ink (an integral).
+    bool big = false, limits = false, integral = false;
+    // Stack (\overset, \underset, \stackrel): `group` with these set over and
+    // under it as limits are.
+    std::vector<Atom> over, under;
     float em = 0.0f;               // Space, in ems of the current size
-    std::vector<Atom> group;       // Group
+    // Group; a Frac's numerator; a Radical's radicand; an Over/Underline's body.
+    std::vector<Atom> group;
+    std::vector<Atom> den;         // Frac
+    bool shrink = true;            // Frac: parts one level down (\frac, \tfrac; not \dfrac)
+    std::vector<Atom> index;       // Radical: \sqrt[n]
+    bool has_index = false;
+    std::string accent;            // Accent: the glyph (UTF-8), "" for a wide one
+    float accent_scale = 1.0f;     // Accent: the glyph's size, of the body's
+    Wide wide = Wide::None;        // Accent
+    bool binom = false;            // Frac: \binom, no bar, in parentheses
+    // Delimited (\left ... \middle ... \right): the parts between delimiters,
+    // each a Group, and the delimiters around and between them (one more).
+    // Sized (\big ...): its one delimiter and height in ems. A delimiter is its
+    // character; 0 is `.`, none. Rows (\substack): its rows, each a Group.
+    std::vector<Atom> parts;
+    std::vector<char32_t> delims;
+    float delim_em = 0.0f;
     std::vector<Atom> sub, sup;
     bool has_sub = false, has_sup = false;
 };
@@ -143,10 +177,12 @@ constexpr Symbol kSymbols[] = {
     {"Leftrightarrow", 0x21D4, Cls::Rel}, {"iff", 0x21D4, Cls::Rel}, {"implies", 0x21D2, Cls::Rel},
     {"mapsto", 0x21A6, Cls::Rel}, {"uparrow", 0x2191, Cls::Rel}, {"downarrow", 0x2193, Cls::Rel},
     {"longrightarrow", 0x27F6, Cls::Rel}, {"longleftarrow", 0x27F5, Cls::Rel},
-    // Large operators (side scripts only; limits above/below are deferred)
+    // Large operators: every Op here is big (see Parser::glyph())
     {"sum", 0x2211, Cls::Op}, {"prod", 0x220F, Cls::Op}, {"coprod", 0x2210, Cls::Op},
     {"int", 0x222B, Cls::Op}, {"iint", 0x222C, Cls::Op}, {"oint", 0x222E, Cls::Op},
-    {"bigcup", 0x22C3, Cls::Op}, {"bigcap", 0x22C2, Cls::Op},
+    {"bigcup", 0x22C3, Cls::Op}, {"bigcap", 0x22C2, Cls::Op}, {"bigvee", 0x22C1, Cls::Op},
+    {"bigwedge", 0x22C0, Cls::Op}, {"bigoplus", 0x2A01, Cls::Op}, {"bigotimes", 0x2A02, Cls::Op},
+    {"bigodot", 0x2A00, Cls::Op}, {"biguplus", 0x2A04, Cls::Op}, {"bigsqcup", 0x2A06, Cls::Op},
     // Ordinary symbols
     {"infty", 0x221E, Cls::Ord}, {"partial", 0x2202, Cls::Ord}, {"nabla", 0x2207, Cls::Ord},
     {"forall", 0x2200, Cls::Ord}, {"exists", 0x2203, Cls::Ord}, {"emptyset", 0x2205, Cls::Ord},
@@ -160,6 +196,7 @@ constexpr Symbol kSymbols[] = {
     {"P", 0x00B6, Cls::Ord}, {"copyright", 0x00A9, Cls::Ord}, {"AA", 0x00C5, Cls::Ord},
     {"sqrt", 0x221A, Cls::Ord}, {"surd", 0x221A, Cls::Ord}, {"backslash", 0x005C, Cls::Ord},
     {"top", 0x22A4, Cls::Ord}, {"bot", 0x22A5, Cls::Ord},
+    {"imath", 0x0131, Cls::Ord}, {"jmath", 0x0237, Cls::Ord},   // dotless, for accents
     // Delimiters (their own size; \left/\right are deferred)
     {"langle", 0x27E8, Cls::Open}, {"rangle", 0x27E9, Cls::Close},
     {"lfloor", 0x230A, Cls::Open}, {"rfloor", 0x230B, Cls::Close},
@@ -174,6 +211,9 @@ constexpr std::string_view kFunctions[] = {
     "inf", "det", "dim", "deg", "arg", "ker", "gcd", "hom", "Pr",
 };
 
+// The functions whose scripts are limits, set above and below (matplotlib's).
+constexpr std::string_view kLimitFunctions[] = {"lim", "liminf", "limsup", "sup", "max", "min"};
+
 // Spacing commands, in ems.
 struct SpaceCmd {
     std::string_view name;
@@ -184,13 +224,28 @@ constexpr SpaceCmd kSpaces[] = {
     {"thinspace", 1.0f / 6.0f}, {"medspace", 2.0f / 9.0f}, {"thickspace", 5.0f / 18.0f},
 };
 
+// Accents: the font's spacing accent (a small arrow for \vec), or a wide one
+// drawn across its body.
+struct AccentCmd {
+    std::string_view name;
+    char32_t cp;
+    Wide wide;
+    float scale;
+};
+constexpr AccentCmd kAccents[] = {
+    {"hat", 0x02C6, Wide::None, 1.0f}, {"bar", 0x00AF, Wide::None, 1.0f},
+    {"tilde", 0x02DC, Wide::None, 1.0f}, {"dot", 0x02D9, Wide::None, 1.0f},
+    {"ddot", 0x00A8, Wide::None, 1.0f}, {"acute", 0x00B4, Wide::None, 1.0f},
+    {"grave", 0x0060, Wide::None, 1.0f}, {"breve", 0x02D8, Wide::None, 1.0f},
+    {"check", 0x02C7, Wide::None, 1.0f}, {"mathring", 0x02DA, Wide::None, 1.0f},
+    {"vec", 0x2192, Wide::None, 0.6f},
+    {"widehat", 0, Wide::Hat, 1.0f}, {"widetilde", 0, Wide::Tilde, 1.0f},
+    {"overrightarrow", 0, Wide::RightArrow, 1.0f}, {"overleftarrow", 0, Wide::LeftArrow, 1.0f},
+};
+
 // Commands known from mathtext that this step does not draw yet.
 constexpr std::string_view kDeferred[] = {
-    "frac", "dfrac", "tfrac", "binom", "left", "right", "big", "Big", "bigg", "Bigg",
-    "hat", "widehat", "bar", "vec", "dot", "ddot", "tilde", "widetilde", "acute", "grave",
-    "breve", "check", "overline", "underline", "mathbf", "boldsymbol", "mathcal", "mathbb",
-    "mathfrak", "mathscr", "mathsf", "mathtt", "color", "stackrel", "overset", "underset",
-    "operatorname", "substack",
+    "boldsymbol", "color",
 };
 
 template <class T, std::size_t N>
@@ -237,13 +292,60 @@ public:
     }
 
 private:
-    enum class End { Dollar, Brace };
-    // The font a group sets: math's default (italic letters), \mathrm, \mathit.
-    enum class Font { Math, Roman, Italic };
+    // Right: up to a `\middle` or `\right` (left unconsumed), for `\left`.
+    // Row: a \substack row, up to `\\` or `}` (consumed; row_more_ says which).
+    enum class End { Dollar, Brace, Bracket, Right, Row };
+    // The font a group sets: math's default (italic letters), \mathrm, \mathit,
+    // \mathbf (the bold face), and the alphabets \mathcal/\mathscr, \mathbb,
+    // \mathfrak, \mathsf, \mathtt (Unicode's math alphanumerics, upright).
+    // Default is \mathdefault: upright, in the text font rather than the math one.
+    enum class Font { Math, Roman, Italic, Bold, Script, DoubleStruck, Fraktur, Sans, Mono, Default };
+
+    // A letter or digit of `font`'s alphabet: its code point in Unicode's
+    // Mathematical Alphanumeric Symbols, or the Letterlike Symbols one where
+    // that block has a hole; 0 when the alphabet has none (digits in script and
+    // fraktur) or `font` is not an alphabet.
+    static char32_t alphabet(Font font, char c) {
+        struct Alpha {
+            Font font;
+            char32_t upper, lower, digit;   // the A, a and 0 of the block; digit 0 = none
+        };
+        static constexpr Alpha kAlphas[] = {
+            {Font::Script, 0x1D49C, 0x1D4B6, 0},       {Font::DoubleStruck, 0x1D538, 0x1D552, 0x1D7D8},
+            {Font::Fraktur, 0x1D504, 0x1D51E, 0},      {Font::Sans, 0x1D5A0, 0x1D5BA, 0x1D7E2},
+            {Font::Mono, 0x1D670, 0x1D68A, 0x1D7F6},
+        };
+        struct Hole {
+            Font font;
+            char c;
+            char32_t cp;
+        };
+        static constexpr Hole kHoles[] = {
+            {Font::Script, 'B', 0x212C}, {Font::Script, 'E', 0x2130}, {Font::Script, 'F', 0x2131},
+            {Font::Script, 'H', 0x210B}, {Font::Script, 'I', 0x2110}, {Font::Script, 'L', 0x2112},
+            {Font::Script, 'M', 0x2133}, {Font::Script, 'R', 0x211B}, {Font::Script, 'e', 0x212F},
+            {Font::Script, 'g', 0x210A}, {Font::Script, 'o', 0x2134},
+            {Font::DoubleStruck, 'C', 0x2102}, {Font::DoubleStruck, 'H', 0x210D}, {Font::DoubleStruck, 'N', 0x2115},
+            {Font::DoubleStruck, 'P', 0x2119}, {Font::DoubleStruck, 'Q', 0x211A}, {Font::DoubleStruck, 'R', 0x211D},
+            {Font::DoubleStruck, 'Z', 0x2124},
+            {Font::Fraktur, 'C', 0x212D}, {Font::Fraktur, 'H', 0x210C}, {Font::Fraktur, 'I', 0x2111},
+            {Font::Fraktur, 'R', 0x211C}, {Font::Fraktur, 'Z', 0x2128},
+        };
+        for (const Hole& h: kHoles)
+            if (h.font == font && h.c == c) return h.cp;
+        for (const Alpha& a: kAlphas) {
+            if (a.font != font) continue;
+            if (c >= 'A' && c <= 'Z') return a.upper + static_cast<char32_t>(c - 'A');
+            if (c >= 'a' && c <= 'z') return a.lower + static_cast<char32_t>(c - 'a');
+            if (c >= '0' && c <= '9' && a.digit) return a.digit + static_cast<char32_t>(c - '0');
+        }
+        return 0;
+    }
 
     std::string_view s_;
     std::size_t i_ = 0;
     Font font_ = Font::Math;
+    bool row_more_ = false;   // the last End::Row list ended at `\\`
 
     // Whether a glyph atom's text draws italic in the current font.
     bool italic(std::string_view text) const {
@@ -263,24 +365,49 @@ private:
         while (i_ < s_.size() && (s_[i_] == ' ' || s_[i_] == '\t')) ++i_;
     }
 
-    // Atoms up to the closing `$` or `}` (consumed).
-    MathList list(End end) {
+    [[noreturn]] void fail_unclosed(End end, std::size_t open) const {
+        fail(open, end == End::Brace || end == End::Row ? "'{' is never closed"
+                   : end == End::Bracket ? "'[' is never closed"
+                   : end == End::Right ? "'\\left' is never closed" : "'$' is never closed");
+    }
+
+    // The command name at i_ (which is on a backslash), or "" for a symbol one.
+    std::string_view name_at(std::size_t at) const {
+        std::size_t e = at + 1;
+        while (e < s_.size() && ((s_[e] >= 'a' && s_[e] <= 'z') || (s_[e] >= 'A' && s_[e] <= 'Z'))) ++e;
+        return s_.substr(at + 1, e - at - 1);
+    }
+
+    // Atoms up to the closing `$`, `}` or `]` (consumed), or for End::Right
+    // up to a `\middle` or `\right` (not consumed); `open` is where the
+    // construct began, for the error.
+    MathList list(End end, std::size_t open = std::string_view::npos) {
         MathList out;
-        const std::size_t open = i_ - 1;
+        if (open == std::string_view::npos) open = i_ - 1;
         for (;;) {
-            if (i_ >= s_.size()) {
-                if (end == End::Brace) fail(open, "'{' is never closed");
-                fail(open, "'$' is never closed");
-            }
+            if (i_ >= s_.size()) fail_unclosed(end, open);
             const char c = s_[i_];
+            if (c == '\\' && end == End::Right
+                && (name_at(i_) == "right" || name_at(i_) == "middle")) {
+                break;
+            }
+            if (c == '\\' && end == End::Row && i_ + 1 < s_.size() && s_[i_ + 1] == '\\') {
+                i_ += 2;
+                row_more_ = true;
+                break;
+            }
             if (c == ' ' || c == '\t') {
                 ++i_;   // TeX: a typed space does nothing in math
             } else if (c == '$') {
-                if (end == End::Brace) fail(open, "'{' is never closed");
+                if (end != End::Dollar) fail_unclosed(end, open);
                 ++i_;
                 break;
             } else if (c == '}') {
-                if (end != End::Brace) fail(i_, "'}' without a '{'");
+                if (end != End::Brace && end != End::Row) fail(i_, "'}' without a '{'");
+                ++i_;
+                row_more_ = false;
+                break;
+            } else if (c == ']' && end == End::Bracket) {
                 ++i_;
                 break;
             } else if (c == '^' || c == '_') {
@@ -312,6 +439,19 @@ private:
             fail(at, std::string("'") + s_[at] + "' has nothing to apply to");
         if (s_[i_] == '^' || s_[i_] == '_')
             fail(i_, std::string("'") + s_[i_] + "' cannot start a script");
+        return one_atom();
+    }
+
+    // A command's argument: one atom or group, as TeX takes `\frac12`.
+    MathList required_arg(std::size_t at, std::string_view name) {
+        skip_spaces();
+        if (i_ >= s_.size() || s_[i_] == '$' || s_[i_] == '}' || s_[i_] == '^' || s_[i_] == '_')
+            fail(at, "'\\" + std::string(name) + "' is missing an argument");
+        return one_atom();
+    }
+
+    // The atom at i_, a group's contents unwrapped.
+    MathList one_atom() {
         MathList arg;
         atom(arg);
         if (arg.size() == 1 && arg.front().kind == Atom::Kind::Group && !arg.front().has_sub
@@ -355,8 +495,11 @@ private:
                 case '\'': a.text = utf8(0x2032); break;                    // a prime
                 default: break;
             }
+            if (const char32_t cp = alphabet(font_, c)) a.text = utf8(cp);
         }
         a.italic = italic(a.text);
+        a.bold = font_ == Font::Bold;
+        a.text_font = font_ == Font::Default;
         out.push_back(std::move(a));
     }
 
@@ -372,7 +515,28 @@ private:
         a.text = utf8(cp);
         a.cls = cls;
         a.italic = italic(a.text);
+        a.bold = font_ == Font::Bold && cls != Cls::Op;
+        a.text_font = font_ == Font::Default;
+        if (cls == Cls::Op) {
+            a.big = true;
+            a.integral = cp == 0x222B || cp == 0x222C || cp == 0x222E;
+            a.limits = !a.integral;
+        }
         return a;
+    }
+
+    // `\name{...}`'s group in `font`; `at` is the backslash.
+    Atom font_group(std::size_t at, std::string_view name, Font font) {
+        skip_spaces();
+        if (i_ >= s_.size() || s_[i_] != '{') fail(at, "'\\" + std::string(name) + "' needs '{'");
+        ++i_;
+        const Font outer = font_;
+        font_ = font;
+        Atom g;
+        g.kind = Atom::Kind::Group;
+        g.group = list(End::Brace);
+        font_ = outer;
+        return g;
     }
 
     void command(MathList& out) {
@@ -403,6 +567,90 @@ private:
         const std::string_view name = s_.substr(i_, e - i_);
         i_ = e;
 
+        if (name == "left") {
+            Atom a;
+            a.kind = Atom::Kind::Delimited;
+            a.delims.push_back(delimiter(at, name));
+            for (;;) {
+                Atom part;
+                part.kind = Atom::Kind::Group;
+                part.group = list(End::Right, at);
+                a.parts.push_back(std::move(part));
+                const std::size_t cmd = i_;
+                const std::string_view which = name_at(cmd);
+                i_ = cmd + 1 + which.size();
+                a.delims.push_back(delimiter(cmd, which));
+                if (which == "right") break;
+            }
+            out.push_back(std::move(a));
+            return;
+        }
+        if (name == "right" || name == "middle")
+            fail(at, "'\\" + std::string(name) + "' without a '\\left'");
+        if (const float em = big_em(name); em > 0.0f) {
+            Atom a;
+            a.kind = Atom::Kind::Sized;
+            a.delim_em = em;
+            const char last = name.back();
+            a.cls = last == 'l' ? Cls::Open : last == 'r' ? Cls::Close : last == 'm' ? Cls::Rel : Cls::Ord;
+            a.delims.push_back(delimiter(at, name));
+            out.push_back(std::move(a));
+            return;
+        }
+        if (name == "binom") {
+            Atom a;
+            a.kind = Atom::Kind::Frac;
+            a.binom = true;
+            a.group = required_arg(at, name);
+            a.den = required_arg(at, name);
+            out.push_back(std::move(a));
+            return;
+        }
+        if (name == "frac" || name == "tfrac" || name == "dfrac") {
+            Atom a;
+            a.kind = Atom::Kind::Frac;
+            a.shrink = name != "dfrac";
+            a.group = required_arg(at, name);
+            a.den = required_arg(at, name);
+            out.push_back(std::move(a));
+            return;
+        }
+        if (name == "overline" || name == "underline") {
+            Atom a;
+            a.kind = name == "overline" ? Atom::Kind::Overline : Atom::Kind::Underline;
+            a.group = required_arg(at, name);
+            out.push_back(std::move(a));
+            return;
+        }
+        for (const AccentCmd& acc: kAccents)
+            if (acc.name == name) {
+                Atom a;
+                a.kind = Atom::Kind::Accent;
+                if (acc.cp) a.accent = utf8(acc.cp);
+                a.accent_scale = acc.scale;
+                a.wide = acc.wide;
+                a.group = required_arg(at, name);
+                out.push_back(std::move(a));
+                return;
+            }
+        if (name == "sqrt") {
+            skip_spaces();
+            Atom a;
+            a.kind = Atom::Kind::Radical;
+            if (i_ < s_.size() && s_[i_] == '[') {
+                ++i_;
+                a.index = list(End::Bracket);
+                a.has_index = true;
+            } else if (i_ >= s_.size() || std::string_view("$}^_").find(s_[i_]) != std::string_view::npos) {
+                // Nothing to go under: the sign alone, as before roots were drawn.
+                out.push_back(glyph(0x221A, Cls::Ord));
+                return;
+            }
+            a.group = required_arg(at, name);
+            out.push_back(std::move(a));
+            return;
+        }
+
         for (const Symbol& sym: kSymbols)
             if (sym.name == name) {
                 out.push_back(glyph(sym.cp, sym.cls));
@@ -417,21 +665,63 @@ private:
             Atom a;
             a.text = std::string(name);
             a.cls = Cls::Op;
+            a.limits = contains(kLimitFunctions, name);
             out.push_back(std::move(a));
             return;
         }
         if (name == "mathrm" || name == "mathit" || name == "mathdefault") {
-            // \mathdefault is matplotlib's text font: upright.
-            skip_spaces();
-            if (i_ >= s_.size() || s_[i_] != '{') fail(at, "'\\" + std::string(name) + "' needs '{'");
-            ++i_;
-            const Font outer = font_;
-            font_ = name == "mathit" ? Font::Italic : Font::Roman;
-            Atom g;
-            g.kind = Atom::Kind::Group;
-            g.group = list(End::Brace);
-            font_ = outer;
+            // \mathdefault is matplotlib's text font: upright, never the math font.
+            out.push_back(font_group(at, name, name == "mathit"        ? Font::Italic
+                                               : name == "mathdefault" ? Font::Default
+                                                                       : Font::Roman));
+            return;
+        }
+        {
+            struct Named {
+                std::string_view name;
+                Font font;
+            };
+            static constexpr Named kFonts[] = {
+                {"mathbf", Font::Bold}, {"mathcal", Font::Script}, {"mathscr", Font::Script},
+                {"mathbb", Font::DoubleStruck}, {"mathfrak", Font::Fraktur}, {"mathsf", Font::Sans},
+                {"mathtt", Font::Mono},
+            };
+            for (const Named& f: kFonts)
+                if (f.name == name) {
+                    out.push_back(font_group(at, name, f.font));
+                    return;
+                }
+        }
+        if (name == "operatorname") {
+            // An upright operator, spaced as \sin.
+            Atom g = font_group(at, name, Font::Roman);
+            g.cls = Cls::Op;
             out.push_back(std::move(g));
+            return;
+        }
+        if (name == "overset" || name == "underset" || name == "stackrel") {
+            Atom a;
+            a.kind = Atom::Kind::Stack;
+            a.cls = name == "stackrel" ? Cls::Rel : Cls::Ord;
+            MathList script = required_arg(at, name);
+            (name == "underset" ? a.under : a.over) = std::move(script);
+            a.group = required_arg(at, name);
+            out.push_back(std::move(a));
+            return;
+        }
+        if (name == "substack") {
+            skip_spaces();
+            if (i_ >= s_.size() || s_[i_] != '{') fail(at, "'\\substack' needs '{'");
+            const std::size_t open = i_++;
+            Atom a;
+            a.kind = Atom::Kind::Rows;
+            do {
+                Atom row;
+                row.kind = Atom::Kind::Group;
+                row.group = list(End::Row, open);
+                a.parts.push_back(std::move(row));
+            } while (row_more_);
+            out.push_back(std::move(a));
             return;
         }
         if (name == "text" || name == "textrm") {
@@ -443,6 +733,56 @@ private:
         if (contains(kDeferred, name))
             fail(at, "'\\" + std::string(name) + "' is not supported yet");
         fail(at, "unknown command '\\" + std::string(name) + "'");
+    }
+
+    // The total height, in ems, of `\big` and its kin (`l`/`r`/`m` forms
+    // included): amsmath's 1.2, 1.8, 2.4, 3.0 — plain TeX's 8.5…17.5 pt boxes,
+    // measured as TeX sizes a delimiter, twice their reach from the math axis.
+    // 0 for any other name.
+    static float big_em(std::string_view name) {
+        if (!name.empty() && (name.back() == 'l' || name.back() == 'r' || name.back() == 'm'))
+            name.remove_suffix(1);
+        if (name == "big") return 1.2f;
+        if (name == "Big") return 1.8f;
+        if (name == "bigg") return 2.4f;
+        if (name == "Bigg") return 3.0f;
+        return 0.0f;
+    }
+
+    // The delimiter after `\left`, `\middle`, `\right` or `\big…` (named `cmd`,
+    // at `at`): its character, 0 for `.`.
+    char32_t delimiter(std::size_t at, std::string_view cmd) {
+        skip_spaces();
+        const auto bad = [&] { fail(at, "'\\" + std::string(cmd) + "' needs a delimiter"); };
+        if (i_ >= s_.size()) bad();
+        const char c = s_[i_];
+        if (std::string_view("()[]|/.<>").find(c) != std::string_view::npos) {
+            ++i_;
+            return c == '.' ? 0 : c == '<' ? 0x27E8 : c == '>' ? 0x27E9 : static_cast<char32_t>(c);
+        }
+        if (c != '\\' || i_ + 1 >= s_.size()) bad();
+        const char n = s_[i_ + 1];
+        if (n == '{' || n == '}' || n == '|') {
+            i_ += 2;
+            return n == '|' ? 0x2016 : static_cast<char32_t>(n);
+        }
+        const std::string_view name = name_at(i_);
+        struct Named {
+            std::string_view name;
+            char32_t cp;
+        };
+        static constexpr Named kNamed[] = {
+            {"lbrace", '{'}, {"rbrace", '}'}, {"vert", '|'}, {"Vert", 0x2016},
+            {"langle", 0x27E8}, {"rangle", 0x27E9}, {"lfloor", 0x230A}, {"rfloor", 0x230B},
+            {"lceil", 0x2308}, {"rceil", 0x2309}, {"backslash", '\\'},
+        };
+        for (const Named& d: kNamed)
+            if (d.name == name) {
+                i_ += 1 + name.size();
+                return d.cp;
+            }
+        bad();
+        return 0;
     }
 
     // \text{...}: text kept as typed, spaces included; `\{`, `\}`, `\$` and
@@ -469,6 +809,7 @@ private:
             ++i_;
         }
         if (a.text.empty()) a.kind = Atom::Kind::Group;
+        a.text_font = true;
         return a;
     }
 
@@ -554,24 +895,149 @@ constexpr float kScriptSpace = 0.05f;
 // correction). Its subscript stays at the letter's edge.
 constexpr float kSupItalicKern = 0.06f;
 
+// Fractions, roots and rules, in ems of the size they are set at: the rule
+// thickness θ (matplotlib's, which hardcodes 0.75/12 for TrueType fonts), drawn
+// never thinner than a pixel; 2θ between a fraction's bar and each part, 3θ
+// over or under a body for its rule (TeX), TeX's null delimiter space on each
+// side of a fraction.
+constexpr float kRuleEm = 0.0625f;
+constexpr float kMinRulePx = 1.0f;
+constexpr float kFracGap = 2.0f;        // × θ
+constexpr float kFracSide = 0.12f;
+constexpr float kLineGap = 3.0f;        // × θ, over/underline and the root's bar
+constexpr float kRootPad = 2.0f;        // × θ, each side of a radicand
+
+// Big operators, in ems of the size they are set at: their scale at level 0
+// (matplotlib's), and their limits' ink this far clear of theirs (TeX's
+// big_op_spacing1/2). An integral's scripts: the superscript's baseline
+// kIntSupDrop under its ink top, the subscript's kIntSubDrop under its ink
+// bottom, in ems of the script size (TeX's sup_drop and sub_drop), each
+// kIntKern clear of the glyph beside it. Rows of a \substack: their ink
+// kRowGap apart.
+constexpr float kBigOpScale = 1.4f;
+constexpr float kLimitGap = 0.11f;
+constexpr float kIntSupDrop = 0.386f;
+constexpr float kIntSubDrop = 0.05f;
+constexpr float kIntKern = 0.05f;
+constexpr float kRowGap = 0.1f;
+
 struct Box {
     std::vector<RichRun> runs;
+    std::vector<RichRule> rules;
+    std::vector<RichPath> paths;
     float width = 0.0f;
     float ascent = 0.0f, descent = 0.0f;   // descent <= 0
+    float ink_top = 0.0f, ink_bottom = 0.0f;   // y up, ink_bottom <= 0 <= ink_top
+    // The ink's left and right, from the box's left end; left > right while
+    // the box has no ink (an empty group, a space).
+    float ink_left = 1e30f, ink_right = -1e30f;
+    bool has_ink_x() const { return ink_left <= ink_right; }
+    // Holds a run drawn back over another (an accent), which the SVG must place
+    // absolutely; rules and paths make a line placed by themselves.
+    bool placed = false;
 };
+
+// The outline of a polyline stroked with a width per segment, mitred at each
+// joint (a bevel's midpoint where a mitre would reach past 2 widths), butt
+// ends. y down. Used for the radical.
+RichPath stroke_outline(const std::vector<RichPath::Pt>& c, const std::vector<float>& w) {
+    using Pt = RichPath::Pt;
+    const std::size_t m = c.size() - 1;
+    std::vector<Pt> d(m), n(m);
+    for (std::size_t i = 0; i < m; ++i) {
+        const float dx = c[i + 1].x - c[i].x, dy = c[i + 1].y - c[i].y;
+        const float l = std::max(std::hypot(dx, dy), 1e-6f);
+        d[i] = {dx / l, dy / l};
+        n[i] = {-d[i].y, d[i].x};
+    }
+    const auto side = [&](float sign) {
+        std::vector<Pt> out;
+        out.push_back({c[0].x + sign * n[0].x * w[0] * 0.5f, c[0].y + sign * n[0].y * w[0] * 0.5f});
+        for (std::size_t j = 1; j < m; ++j) {
+            const float h0 = sign * w[j - 1] * 0.5f, h1 = sign * w[j] * 0.5f;
+            const Pt a{c[j].x + n[j - 1].x * h0, c[j].y + n[j - 1].y * h0};
+            const Pt b{c[j].x + n[j].x * h1, c[j].y + n[j].y * h1};
+            // a + d[j-1]·s = b + d[j]·t, solved for s.
+            const float den = d[j - 1].x * d[j].y - d[j - 1].y * d[j].x;
+            Pt p{(a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f};
+            if (std::abs(den) > 1e-6f) {
+                const float s = ((b.x - a.x) * d[j].y - (b.y - a.y) * d[j].x) / den;
+                const Pt q{a.x + d[j - 1].x * s, a.y + d[j - 1].y * s};
+                if (std::hypot(q.x - c[j].x, q.y - c[j].y) <= 2.0f * std::max(w[j - 1], w[j])) p = q;
+            }
+            out.push_back(p);
+        }
+        const float h = sign * w[m - 1] * 0.5f;
+        out.push_back({c[m].x + n[m - 1].x * h, c[m].y + n[m - 1].y * h});
+        return out;
+    };
+    RichPath path;
+    path.pts = side(1.0f);
+    const std::vector<Pt> right = side(-1.0f);
+    path.pts.insert(path.pts.end(), right.rbegin(), right.rend());
+    return path;
+}
+
+// `s` in Unicode's math italic (or, `bold`, math bold) letters: Latin, Greek
+// and the Greek variants, the italic `h` its Letterlike hole (ℎ); "" when a
+// character has none (a digit in italic, an accented letter).
+std::string math_letters(std::string_view s, bool bold) {
+    std::string out;
+    for (std::size_t i = 0; i < s.size();) {
+        const std::size_t n = std::min(utf8_len(static_cast<unsigned char>(s[i])), s.size() - i);
+        const char32_t c = first_cp(s.substr(i, n));
+        i += n;
+        char32_t m = 0;
+        if (c >= 'A' && c <= 'Z') m = (bold ? 0x1D400 : 0x1D434) + (c - 'A');
+        else if (c >= 'a' && c <= 'z') m = !bold && c == 'h' ? 0x210E : (bold ? 0x1D41A : 0x1D44E) + (c - 'a');
+        else if (bold && c >= '0' && c <= '9') m = 0x1D7CE + (c - '0');
+        else if (c >= 0x0391 && c <= 0x03A9 && c != 0x03A2) m = (bold ? 0x1D6A8 : 0x1D6E2) + (c - 0x0391);
+        else if (c >= 0x03B1 && c <= 0x03C9) m = (bold ? 0x1D6C2 : 0x1D6FC) + (c - 0x03B1);
+        else {
+            // ϵ ϑ ϰ ϕ ϱ ϖ, after ∂ in each alphabet.
+            constexpr char32_t kVariants[] = {0x03F5, 0x03D1, 0x03F0, 0x03D5, 0x03F1, 0x03D6};
+            for (int k = 0; k < 6; ++k)
+                if (c == kVariants[k]) m = (bold ? 0x1D6DC : 0x1D716) + k;
+        }
+        if (!m) return {};
+        append_utf8(out, m);
+    }
+    return out;
+}
 
 class Layout {
 public:
-    Layout(const std::string& font, float base) : font_(font), base_(base) {}
+    // `font` sets the math (FigureOptions::math_fontset's font, else the
+    // text's), `text_font` the text outside spans and \text.
+    Layout(const std::string& font, const std::string& text_font, float base)
+        : font_(font), text_font_(text_font), base_(base) {}
 
-    Box text(const std::string& t, float size, bool italic = false) const {
+    Box text(std::string t, float size, bool italic = false, bool bold = false, bool in_text_font = false) const {
+        const std::string& path = in_text_font ? text_font_ : font_;
         Box b;
-        const FontVMetrics vm = font_vmetrics(font_, size);
+        const FontVMetrics vm = font_vmetrics(path, size);
         b.ascent = vm.ascent;
         b.descent = vm.descent;
         if (t.empty()) return b;
-        b.width = italic ? text_width_italic(font_, size, t) : text_width(font_, size, t);
-        b.runs.push_back({t, 0.0f, 0.0f, size, b.width, italic});
+        // A math font of its own with no italic (bold) face: its math italic
+        // (bold) letters where it has them, else the slant (the double draw).
+        if (path != text_font_ && (italic || bold)
+            && !has_face(path, bold ? FontFace::Bold : FontFace::Italic)) {
+            if (std::string m = math_letters(t, bold); !m.empty() && font_has_glyphs(path, m)) {
+                t = std::move(m);
+                italic = bold = false;
+            }
+        }
+        const FontFace face = bold ? FontFace::Bold : italic ? FontFace::Italic : FontFace::Upright;
+        b.width = face == FontFace::Upright ? text_width(path, size, t) : text_width_face(path, size, t, face);
+        b.runs.push_back({t, 0.0f, 0.0f, size, b.width, italic, bold, path == text_font_ ? std::string() : path});
+        const InkBox ink = ink_box(path, size, t, face);
+        b.ink_top = std::max(0.0f, ink.top);
+        b.ink_bottom = std::min(0.0f, ink.bottom);
+        if (ink.right > ink.left) {
+            b.ink_left = ink.left;
+            b.ink_right = ink.right;
+        }
         return b;
     }
 
@@ -597,6 +1063,7 @@ public:
 
 private:
     const std::string& font_;
+    const std::string& text_font_;
     float base_;
 
     static void append(Box& into, const Box& b, float x, float dy) {
@@ -605,26 +1072,538 @@ private:
             r.dy += dy;
             into.runs.push_back(std::move(r));
         }
+        for (RichRule r: b.rules) {
+            r.x += x;
+            r.y += dy;
+            into.rules.push_back(r);
+        }
+        for (RichPath p: b.paths) {
+            for (RichPath::Pt& q: p.pts) {
+                q.x += x;
+                q.y += dy;
+            }
+            into.paths.push_back(std::move(p));
+        }
         into.ascent = std::max(into.ascent, b.ascent - dy);
         into.descent = std::min(into.descent, b.descent - dy);
+        into.ink_top = std::max(into.ink_top, b.ink_top - dy);
+        into.ink_bottom = std::min(into.ink_bottom, b.ink_bottom - dy);
+        if (b.has_ink_x()) cover(into, b.ink_left + x, b.ink_right + x);
+        into.placed = into.placed || b.placed;
+    }
+
+    // Grows `b`'s extents to reach `top` and `bottom` (y up).
+    static void reach(Box& b, float top, float bottom) {
+        b.ascent = std::max(b.ascent, top);
+        b.descent = std::min(b.descent, bottom);
+        b.ink_top = std::max(b.ink_top, top);
+        b.ink_bottom = std::min(b.ink_bottom, bottom);
+    }
+
+    // Grows `b`'s ink to span x0..x1.
+    static void cover(Box& b, float x0, float x1) {
+        b.ink_left = std::min(b.ink_left, x0);
+        b.ink_right = std::max(b.ink_right, x1);
+    }
+
+    // `b`'s extents grown over a drawn path's points (y down).
+    static void reach_path(Box& b, const RichPath& p) {
+        for (const RichPath::Pt& q: p.pts) {
+            reach(b, -q.y, -q.y);
+            cover(b, q.x, q.x);
+        }
+    }
+
+    // The math axis at `size`, y up: the middle of `=`, where a fraction's bar
+    // sits.
+    float axis(float size) const {
+        const InkBox eq = ink_box(font_, size, "=");
+        return eq.top > eq.bottom ? (eq.top + eq.bottom) * 0.5f : 0.25f * size;
+    }
+
+    // The weight of a stroke drawn to match the font's: its `|`.
+    float stem(float size) const {
+        const InkBox bar = ink_box(font_, size, "|");
+        const float w = bar.right > bar.left ? bar.right - bar.left : 0.08f * size;
+        return std::clamp(w, kMinRulePx, 0.15f * size + kMinRulePx);
+    }
+
+    Box fraction(const Atom& a, int level) const {
+        const float size = base_ * scale_at(level);
+        const int part = a.shrink ? level + 1 : level;
+        const Box num = list(a.group, part);
+        const Box den = list(a.den, part);
+        const float theta = kRuleEm * size;
+        const float bar = a.binom ? 0.0f : std::max(theta, kMinRulePx);
+        const float ax = axis(size);
+        const float side = a.binom ? 0.0f : kFracSide * size;
+        const float w = std::max(num.width, den.width);
+        Box b;
+        // Baselines (y up) that leave 2θ between the bar and each part's ink
+        // (the axis for \binom, which has none).
+        const float num_base = ax + bar * 0.5f + kFracGap * theta - num.ink_bottom;
+        const float den_base = ax - bar * 0.5f - kFracGap * theta - den.ink_top;
+        append(b, num, side + (w - num.width) * 0.5f, -num_base);
+        append(b, den, side + (w - den.width) * 0.5f, -den_base);
+        b.width = w + 2.0f * side;
+        if (a.binom) return enclose(b, '(', ')', size);
+        b.rules.push_back({side, -(ax + bar * 0.5f), w, bar});
+        reach(b, ax + bar * 0.5f, ax - bar * 0.5f);
+        cover(b, side, side + w);
+        return b;
+    }
+
+    // ---- Delimiters ----------------------------------------------------------
+
+    // The height a delimiter around `parts` needs, at `size`: TeX's rule, from
+    // twice their furthest ink from the math axis, h: max(0.901·h, h − 0.5 em)
+    // (\delimiterfactor, \delimitershortfall).
+    float delimiter_height(const std::vector<const Box*>& parts, float size) const {
+        const float ax = axis(size);
+        float reach_ = 0.0f;
+        for (const Box* p: parts) reach_ = std::max({reach_, p->ink_top - ax, ax - p->ink_bottom});
+        const float h = 2.0f * reach_;
+        return std::max(0.901f * h, h - 0.5f * size);
+    }
+
+    // `content` between two delimiters sized to it.
+    Box enclose(const Box& content, char32_t l, char32_t r, float size) const {
+        const float h = delimiter_height({&content}, size);
+        Box b = delimiter(l, h, size);
+        append(b, content, b.width, 0.0f);
+        b.width += content.width;
+        const Box rb = delimiter(r, h, size);
+        append(b, rb, b.width, 0.0f);
+        b.width += rb.width;
+        return b;
+    }
+
+    // One delimiter (0 = none, TeX's null delimiter space) at least `target`
+    // tall, centred on the math axis: the font's glyph while that is tall
+    // enough, else drawn to the height (filled paths and rules, the font's stem
+    // weight), so it stays crisp at any size.
+    Box delimiter(char32_t cp, float target, float size) const {
+        using Pt = RichPath::Pt;
+        Box b;
+        if (cp == 0) {
+            b.width = kFracSide * size;
+            return b;
+        }
+        const float ax = axis(size);
+        const std::string glyph = utf8(cp);
+        const InkBox gi = ink_box(font_, size, glyph);
+        if (gi.top > gi.bottom && target <= gi.top - gi.bottom + 1e-3f) {
+            const Box g = text(glyph, size);
+            append(b, g, 0.0f, -(ax - (gi.top + gi.bottom) * 0.5f));
+            b.width = g.width;
+            return b;
+        }
+
+        const float theta = kRuleEm * size;
+        const float bar = std::max(theta, kMinRulePx);
+        const float s = stem(size);
+        const float pad = 0.08f * size;
+        const float top = ax + target * 0.5f, bot = ax - target * 0.5f;
+        const bool closing = cp == ')' || cp == ']' || cp == '}' || cp == 0x27E9 || cp == 0x230B
+                             || cp == 0x2309 || cp == '\\';
+        // Each shape is built opening (left-hand), y up, then mirrored for a
+        // closing one; `w` is its box width.
+        std::vector<RichRule> rules;   // x, y (top edge, y up), w, h
+        std::vector<RichPath> paths;
+        float w = 0.0f;
+        const auto up = [](float x, float y) { return Pt{x, y}; };
+        switch (cp) {
+            case '(': case ')': {
+                const float te = std::max(bar, 0.4f * s);
+                const float bulge = std::min(0.10f * size + 0.06f * target, 0.45f * size);
+                // A parabola from each end, `hook` tall, straight between: about a
+                // circular arc while short, and as it grows the straight middle of
+                // TeX's built-up parens.
+                const float hook = std::min(0.5f * target, 0.75f * size);
+                const float xin = pad + s * 0.5f;
+                constexpr int kSteps = 32;
+                std::vector<Pt> spine;
+                std::vector<float> widths;
+                for (int i = 0; i <= kSteps; ++i) {
+                    const float t = static_cast<float>(i) / kSteps;
+                    const float d = std::min(t, 1.0f - t) * target;   // from the nearer end
+                    const float f = d >= hook ? 0.0f : (1.0f - d / hook) * (1.0f - d / hook);
+                    spine.push_back(up(xin + bulge * f, top - target * t));
+                    if (i < kSteps) {
+                        const float tm = (static_cast<float>(i) + 0.5f) / kSteps;
+                        widths.push_back(te + (s - te) * std::sin(3.14159265f * tm));
+                    }
+                }
+                paths.push_back(stroke_outline(spine, widths));
+                w = xin + bulge + te * 0.5f + pad;
+                break;
+            }
+            case '[': case ']': case 0x230A: case 0x230B: case 0x2308: case 0x2309: {
+                const float arm = 0.22f * size + 0.03f * target;
+                const float ta = std::max(bar, 0.5f * s);
+                rules.push_back({pad, top, s, target});
+                const bool floor_ = cp == 0x230A || cp == 0x230B, ceil_ = cp == 0x2308 || cp == 0x2309;
+                if (!floor_) rules.push_back({pad, top, arm, ta});
+                if (!ceil_) rules.push_back({pad, bot + ta, arm, ta});
+                w = pad + arm + 0.5f * pad;
+                break;
+            }
+            case '|': case 0x2016: {
+                const float gap = 0.1f * size;
+                rules.push_back({pad, top, s, target});
+                w = pad + s + pad;
+                if (cp == 0x2016) {
+                    rules.push_back({pad + s + gap, top, s, target});
+                    w += s + gap;
+                }
+                break;
+            }
+            case 0x27E8: case 0x27E9: {
+                const float wa = std::max(bar, 0.6f * s);
+                const float dx = std::min(0.10f * size + 0.10f * target, 0.5f * size);
+                const float x0 = pad + wa * 0.5f;
+                paths.push_back(stroke_outline({up(x0 + dx, top), up(x0, ax), up(x0 + dx, bot)}, {wa, wa}));
+                w = x0 + dx + wa * 0.5f + pad;
+                break;
+            }
+            case '/': case '\\': {
+                const float wa = std::max(bar, 0.7f * s);
+                const float dx = std::min(0.3f * target, 0.8f * size);
+                const float x0 = pad + wa * 0.5f;
+                paths.push_back(stroke_outline({up(x0, bot), up(x0 + dx, top)}, {wa}));
+                w = x0 + dx + wa * 0.5f + pad;
+                break;
+            }
+            default: {   // '{', '}': hooks into a stem, a pointed cusp on the axis
+                const float te = std::max(bar, 0.4f * s);
+                const float q = std::min(0.18f * size, target * 0.22f);   // each hook's height
+                const float xl = pad, xm = xl + 0.12f * size + 0.02f * target, xr = xm + 0.16f * size;
+                std::vector<Pt> spine{up(xr, top)};
+                std::vector<float> widths;
+                const auto cubic = [&](Pt p0, Pt p1, Pt p2, Pt p3, float w0, float w1) {
+                    constexpr int n = 10;
+                    for (int i = 1; i <= n; ++i) {
+                        const float t = static_cast<float>(i) / n, u = 1.0f - t;
+                        spine.push_back({u * u * u * p0.x + 3 * u * u * t * p1.x + 3 * u * t * t * p2.x + t * t * t * p3.x,
+                                         u * u * u * p0.y + 3 * u * u * t * p1.y + 3 * u * t * t * p2.y + t * t * t * p3.y});
+                        widths.push_back(w0 + (w1 - w0) * (static_cast<float>(i) - 0.5f) / n);
+                    }
+                };
+                cubic(up(xr, top), up(xm, top), up(xm, top), up(xm, top - q), te, s);
+                spine.push_back(up(xm, ax + q));
+                widths.push_back(s);
+                cubic(up(xm, ax + q), up(xm, ax), up(xm, ax), up(xl, ax), s, te);
+                cubic(up(xl, ax), up(xm, ax), up(xm, ax), up(xm, ax - q), te, s);
+                spine.push_back(up(xm, bot + q));
+                widths.push_back(s);
+                cubic(up(xm, bot + q), up(xm, bot), up(xm, bot), up(xr, bot), s, te);
+                paths.push_back(stroke_outline(spine, widths));
+                w = xr + te * 0.5f + pad;
+                break;
+            }
+        }
+        // Into the box, y down, mirrored for a closing delimiter.
+        const auto mx = [&](float x) { return closing ? w - x : x; };
+        for (RichRule r: rules) {
+            const float x0 = closing ? w - r.x - r.w : r.x;
+            b.rules.push_back({x0, -r.y, r.w, r.h});
+        }
+        for (RichPath p: paths) {
+            for (Pt& q: p.pts) q = {mx(q.x), -q.y};
+            reach_path(b, p);
+            b.paths.push_back(std::move(p));
+        }
+        reach(b, top, bot);
+        cover(b, 0.0f, w);
+        b.width = w;
+        return b;
+    }
+
+    Box delimited(const Atom& a, int level) const {
+        const float size = base_ * scale_at(level);
+        std::vector<Box> parts;
+        for (const Atom& p: a.parts) parts.push_back(list(p.group, level));
+        std::vector<const Box*> ptrs;
+        for (const Box& p: parts) ptrs.push_back(&p);
+        const float h = delimiter_height(ptrs, size);
+        Box b;
+        for (std::size_t i = 0; i < a.delims.size(); ++i) {
+            const Box d = delimiter(a.delims[i], h, size);
+            append(b, d, b.width, 0.0f);
+            b.width += d.width;
+            if (i < parts.size()) {
+                append(b, parts[i], b.width, 0.0f);
+                b.width += parts[i].width;
+            }
+        }
+        return b;
+    }
+
+    Box over_under(const Atom& a, int level) const {
+        const float size = base_ * scale_at(level);
+        Box b = list(a.group, level);
+        const float theta = kRuleEm * size;
+        const float bar = std::max(theta, kMinRulePx);
+        if (a.kind == Atom::Kind::Overline) {
+            const float bottom = b.ink_top + kLineGap * theta;
+            b.rules.push_back({0.0f, -(bottom + bar), b.width, bar});
+            reach(b, bottom + bar + theta, 0.0f);
+        } else {
+            const float top = b.ink_bottom - kLineGap * theta;
+            b.rules.push_back({0.0f, -top, b.width, bar});
+            reach(b, 0.0f, top - bar - theta);
+        }
+        cover(b, 0.0f, b.width);
+        return b;
+    }
+
+    // A radical: the sign drawn as one outline with its bar (TeX's shape: a
+    // thin tick, a thick down-stroke, a thin rise into the bar), so the join is
+    // exact at any height; the index, if any, half size in the sign's notch.
+    Box radical(const Atom& a, int level) const {
+        using Pt = RichPath::Pt;
+        const float size = base_ * scale_at(level);
+        const Box body = list(a.group, level);
+        const float theta = kRuleEm * size;
+        const float bar = std::max(theta, kMinRulePx);
+        const float thick = stem(size);
+        const float top = body.ink_top + kLineGap * theta + bar;      // y up
+        const float foot = std::min(body.ink_bottom, 0.0f) - theta;
+        const float h = top - foot;
+        const float tick_y = foot + std::min(0.5f * h, 0.42f * size);
+        // x positions; the index may push everything right.
+        const float x0 = 0.03f * size;
+        const float x1 = x0 + 0.10f * size;
+        const float xf = x1 + 0.17f * size;
+        const float xc = xf + 0.20f * size + 0.06f * h;
+        float shift = 0.0f;
+        Box ib;
+        float index_base = 0.0f;
+        if (a.has_index) {
+            ib = list(a.index, level + 2);
+            index_base = foot + 0.6f * h;
+            shift = std::max(0.0f, ib.width - (x1 + 0.05f * size));
+        }
+        const float bx = shift + xc + kRootPad * theta;
+        const float end = bx + body.width + kRootPad * theta;
+        Box b;
+        if (a.has_index) append(b, ib, shift + x1 + 0.05f * size - ib.width, -index_base);
+        append(b, body, bx, 0.0f);
+        // y down from here on.
+        const std::vector<Pt> spine = {
+            {shift + x0, -tick_y},
+            {shift + x1, -(tick_y + 0.05f * size)},
+            {shift + xf, -foot},
+            {shift + xc, -(top - bar * 0.5f)},
+            {end, -(top - bar * 0.5f)},
+        };
+        b.paths.push_back(stroke_outline(spine, {bar, thick, bar, bar}));
+        reach(b, top, foot);
+        cover(b, shift + x0, end);
+        b.width = end;
+        return b;
+    }
+
+    // An accent over its body (TeX's and matplotlib's): centred on the body's
+    // ink, 2θ clear of it; over one italic letter, moved right by half the slant
+    // of its height, to sit over the letter's top. The body keeps its width.
+    Box accent(const Atom& a, int level) const {
+        using Pt = RichPath::Pt;
+        const float size = base_ * scale_at(level);
+        Box b = list(a.group, level);
+        const float theta = kRuleEm * size;
+        const float bar = std::max(theta, kMinRulePx);
+        float x0 = 0.0f, x1 = b.width;
+        if (b.has_ink_x()) {
+            x0 = b.ink_left;
+            x1 = b.ink_right;
+        }
+        const bool letter = a.group.size() == 1 && a.group[0].kind == Atom::Kind::Glyphs && a.group[0].italic
+                            && !a.group[0].has_sub && !a.group[0].has_sup;
+        const float skew = letter ? kSyntheticSlant * b.ink_top * 0.5f : 0.0f;
+        const float mid = (x0 + x1) * 0.5f + skew;
+        const float lift = b.ink_top + kFracGap * theta;   // the accent's ink bottom, y up
+
+        if (a.wide == Wide::None) {
+            const float asize = size * a.accent_scale;
+            const InkBox ink = ink_box(font_, asize, a.accent);
+            if (ink.right <= ink.left) return b;
+            Box acc = text(a.accent, asize);
+            // Its extent is its ink: an accent reserves no font ascent above it.
+            acc.ascent = ink.top;
+            acc.descent = ink.bottom;
+            append(b, acc, mid - (ink.left + ink.right) * 0.5f, -(lift - ink.bottom));
+            b.placed = true;
+            return b;
+        }
+
+        // Wide accents span the ink (half an em at least), centred as above.
+        const float half = std::max(x1 - x0, 0.5f * size) * 0.5f;
+        const float l = mid - half, r = mid + half, w = r - l;
+        const float weight = std::max(bar, 0.6f * stem(size));
+        switch (a.wide) {
+            case Wide::Hat: {
+                const float h = std::clamp(0.12f * size + 0.05f * w, 0.0f, 0.3f * size);
+                const float y = -(lift + weight * 0.5f);
+                b.paths.push_back(stroke_outline({{l, y}, {mid, y - h}, {r, y}}, {bar, weight}));
+                break;
+            }
+            case Wide::Tilde: {
+                // Up, down, up: h/2·(1 − cos 3πt), heavier on the slopes.
+                const float h = std::clamp(0.08f * size + 0.03f * w, 0.0f, 0.2f * size);
+                const float y = -(lift + weight * 0.5f);
+                constexpr int kSteps = 24;
+                std::vector<Pt> spine;
+                std::vector<float> widths;
+                for (int k = 0; k <= kSteps; ++k) {
+                    const float t = static_cast<float>(k) / kSteps;
+                    spine.push_back({l + w * t, y - h * 0.5f * (1.0f - std::cos(3.0f * 3.14159265f * t))});
+                    if (k < kSteps) {
+                        const float tm = (static_cast<float>(k) + 0.5f) / kSteps;
+                        widths.push_back(bar + (weight - bar) * std::abs(std::sin(3.0f * 3.14159265f * tm)));
+                    }
+                }
+                b.paths.push_back(stroke_outline(spine, widths));
+                break;
+            }
+            default: {
+                // A shaft with an open head: barbs `head` long and wide.
+                const float head = 0.12f * size;
+                const float yc = -(lift + head);
+                const bool right = a.wide == Wide::RightArrow;
+                const float tip = right ? r : l, back = right ? r - 2.0f * head : l + 2.0f * head;
+                b.paths.push_back(stroke_outline({{right ? l : r, yc}, {tip, yc}}, {bar}));
+                b.paths.push_back(stroke_outline({{back, yc - head}, {tip, yc}, {back, yc + head}}, {weight, weight}));
+                break;
+            }
+        }
+        for (const RichPath& p: b.paths) reach_path(b, p);
+        return b;
+    }
+
+    // A big operator: at level 0 kBigOpScale times the size, its ink centred on
+    // the math axis; in a script as any glyph.
+    Box big_op(const Atom& a, int level) const {
+        const float size = base_ * scale_at(level);
+        if (level > 0) return text(a.text, size, a.italic);
+        const float big = kBigOpScale * size;
+        Box g = text(a.text, big);
+        const InkBox ink = ink_box(font_, big, a.text);
+        if (ink.top <= ink.bottom) return g;
+        g.ink_top = ink.top;
+        g.ink_bottom = ink.bottom;
+        Box b;
+        append(b, g, 0.0f, -(axis(size) - (ink.top + ink.bottom) * 0.5f));
+        b.width = g.width;
+        // Taller than a line of text: the room rules of a placed line.
+        b.placed = true;
+        return b;
+    }
+
+    // TeX's limits: `over` and `under` (either may be empty) one level down,
+    // centred on `n`, their ink kLimitGap clear of its ink; the widest of the
+    // three sets the width.
+    Box stack(const Box& n, const MathList& over, const MathList& under, int level) const {
+        const float gap = kLimitGap * base_ * scale_at(level);
+        const Box o = list(over, level + 1), u = list(under, level + 1);
+        float w = n.width;
+        if (!over.empty()) w = std::max(w, o.width);
+        if (!under.empty()) w = std::max(w, u.width);
+        Box b;
+        append(b, n, (w - n.width) * 0.5f, 0.0f);
+        if (!over.empty()) append(b, o, (w - o.width) * 0.5f, -(n.ink_top + gap - o.ink_bottom));
+        if (!under.empty()) append(b, u, (w - u.width) * 0.5f, -(n.ink_bottom - gap - u.ink_top));
+        b.width = w;
+        b.placed = true;
+        return b;
+    }
+
+    // \substack: the rows centred on each other, their ink kRowGap apart, the
+    // block's ink centred on the math axis.
+    Box rows(const Atom& a, int level) const {
+        const float size = base_ * scale_at(level);
+        std::vector<Box> rs;
+        float w = 0.0f;
+        for (const Atom& p: a.parts) {
+            rs.push_back(list(p.group, level));
+            w = std::max(w, rs.back().width);
+        }
+        Box block;
+        float base = 0.0f, prev_bottom = 0.0f;   // y up
+        for (std::size_t i = 0; i < rs.size(); ++i) {
+            if (i > 0) base = prev_bottom - kRowGap * size - rs[i].ink_top;
+            append(block, rs[i], (w - rs[i].width) * 0.5f, -base);
+            prev_bottom = base + rs[i].ink_bottom;
+        }
+        Box b;
+        append(b, block, 0.0f, -(axis(size) - (block.ink_top + block.ink_bottom) * 0.5f));
+        b.width = w;
+        b.placed = true;
+        return b;
     }
 
     Box nucleus(const Atom& a, int level) const {
-        if (a.kind == Atom::Kind::Group) {
-            Box b = list(a.group, level);
-            // An empty group still stands on the line, for the scripts it carries.
-            const FontVMetrics vm = font_vmetrics(font_, base_ * scale_at(level));
-            b.ascent = std::max(b.ascent, vm.ascent);
-            b.descent = std::min(b.descent, vm.descent);
-            return b;
+        switch (a.kind) {
+            case Atom::Kind::Stack: return stack(list(a.group, level), a.over, a.under, level);
+            case Atom::Kind::Rows: return rows(a, level);
+            case Atom::Kind::Accent: return accent(a, level);
+            case Atom::Kind::Delimited: return delimited(a, level);
+            case Atom::Kind::Sized: {
+                const float size = base_ * scale_at(level);
+                return delimiter(a.delims.front(), a.delim_em * size, size);
+            }
+            case Atom::Kind::Group: {
+                Box b = list(a.group, level);
+                // An empty group still stands on the line, for the scripts it carries.
+                const FontVMetrics vm = font_vmetrics(font_, base_ * scale_at(level));
+                b.ascent = std::max(b.ascent, vm.ascent);
+                b.descent = std::min(b.descent, vm.descent);
+                return b;
+            }
+            case Atom::Kind::Frac: return fraction(a, level);
+            case Atom::Kind::Radical: return radical(a, level);
+            case Atom::Kind::Overline:
+            case Atom::Kind::Underline: return over_under(a, level);
+            default: return a.big ? big_op(a, level) : text(a.text, base_ * scale_at(level), a.italic, a.bold, a.text_font);
         }
-        return text(a.text, base_ * scale_at(level), a.italic);
     }
 
     Box scripted(const Atom& a, int level) const {
         Box n = nucleus(a, level);
         if (!a.has_sub && !a.has_sup) return n;
+        if (a.limits) return stack(n, a.has_sup ? a.sup : MathList{}, a.has_sub ? a.sub : MathList{}, level);
         const float size = base_ * scale_at(level);
+        if (a.integral && !n.runs.empty()) {
+            // At its ink, each script kIntKern clear of the glyph's reach beside
+            // it: a slanted integral's subscript tucks in under its top hook.
+            const float ss = base_ * scale_at(level + 1);
+            const float kern = kIntKern * size;
+            const RichRun glyph = n.runs.front();   // a copy: the scripts grow n.runs
+            const float top = n.ink_top, bottom = n.ink_bottom, x = n.width;
+            // The glyph's reach between two heights of the box (y up).
+            const auto reach_right = [&](float lo, float hi) {
+                const InkBox r = ink_band(font_, glyph.size, glyph.text, lo + glyph.dy, hi + glyph.dy);
+                return r.right > r.left || r.top > r.bottom ? glyph.x + r.right : x - kern;
+            };
+            float end = x;
+            if (a.has_sup) {
+                const Box s = list(a.sup, level + 1);
+                const float base = top - kIntSupDrop * ss;
+                const float sx = std::max(x, reach_right(base + s.ink_bottom, top) + kern);
+                append(n, s, sx, -base);
+                end = std::max(end, sx + s.width);
+            }
+            if (a.has_sub) {
+                const Box s = list(a.sub, level + 1);
+                const float base = bottom - kIntSubDrop * ss;
+                const float sx = reach_right(bottom, base + s.ink_top) + kern;
+                append(n, s, sx, -base);
+                end = std::max(end, sx + s.width);
+            }
+            n.width = end + kScriptSpace * size;
+            n.placed = true;
+            return n;
+        }
         const FontVMetrics vm = font_vmetrics(font_, size);
         // A tall or deep nucleus (a group with scripts of its own) pushes its
         // scripts out by what it adds to the plain font's extent.
@@ -656,7 +1635,7 @@ void merge_runs(std::vector<RichRun>& runs) {
     for (RichRun& r: runs) {
         if (!out.empty()) {
             RichRun& p = out.back();
-            if (p.size == r.size && p.dy == r.dy && p.italic == r.italic
+            if (p.size == r.size && p.dy == r.dy && p.italic == r.italic && p.bold == r.bold && p.font == r.font
                 && std::abs(p.x + p.width - r.x) < 1e-3f) {
                 p.text += r.text;
                 p.width += r.width;
@@ -669,6 +1648,7 @@ void merge_runs(std::vector<RichRun>& runs) {
 }
 
 thread_local bool t_math_on = true;
+thread_local std::string t_math_font;
 
 } // namespace
 
@@ -698,30 +1678,48 @@ RichLine layout_rich(const std::string& font_path, float size, std::string_view 
     line.vm = vm;
     Parsed p;
     if (t_math_on && has_math(s)) p = parse(s);
+    line.ink_top = vm.ascent;
+    line.ink_bottom = vm.descent;
     if (p.segments.empty() || p.error) {
         line.width = text_width(font_path, size, s);
         if (!s.empty()) line.runs.push_back({std::string(s), 0.0f, 0.0f, size, line.width});
         return line;
     }
 
-    const Layout lay(font_path, size);
+    const Layout lay(t_math_font.empty() ? font_path : t_math_font, font_path, size);
     Box all;
     all.ascent = vm.ascent;
     all.descent = vm.descent;
     for (const Segment& seg: p.segments) {
-        const Box b = seg.math ? lay.list(seg.list, 0) : lay.text(seg.text, size);
+        const Box b = seg.math ? lay.list(seg.list, 0) : lay.text(seg.text, size, false, false, true);
         for (RichRun r: b.runs) {
             r.x += all.width;
             all.runs.push_back(std::move(r));
         }
+        for (RichRule r: b.rules) {
+            r.x += all.width;
+            all.rules.push_back(r);
+        }
+        for (RichPath path: b.paths) {
+            for (RichPath::Pt& q: path.pts) q.x += all.width;
+            all.paths.push_back(std::move(path));
+        }
         all.width += b.width;
         all.ascent = std::max(all.ascent, b.ascent);
         all.descent = std::min(all.descent, b.descent);
+        all.ink_top = std::max(all.ink_top, b.ink_top);
+        all.ink_bottom = std::min(all.ink_bottom, b.ink_bottom);
+        all.placed = all.placed || b.placed;
     }
     merge_runs(all.runs);
     line.runs = std::move(all.runs);
+    line.rules = std::move(all.rules);
+    line.paths = std::move(all.paths);
+    line.placed = all.placed || !line.rules.empty() || !line.paths.empty();
     line.width = all.width;
     line.vm = {all.ascent, all.descent, all.ascent - all.descent};
+    line.ink_top = all.ink_top;
+    line.ink_bottom = all.ink_bottom;
     return line;
 }
 
@@ -737,8 +1735,37 @@ FontVMetrics label_vmetrics(const std::string& font_path, float size, std::strin
 
 bool mathtext_on() { return t_math_on; }
 
-MathTextScope::MathTextScope(bool on) : prev_(t_math_on) { t_math_on = on; }
-MathTextScope::~MathTextScope() { t_math_on = prev_; }
+const std::string& mathtext_font() { return t_math_font; }
+
+MathTextScope::MathTextScope(bool on, std::string math_font) : prev_(t_math_on), prev_font_(std::move(t_math_font)) {
+    t_math_on = on;
+    t_math_font = std::move(math_font);
+}
+MathTextScope::~MathTextScope() {
+    t_math_on = prev_;
+    t_math_font = std::move(prev_font_);
+}
+
+std::string resolve_math_font(MathFontset set, const std::string& custom_path, std::string& message) {
+    message.clear();
+    if (set == MathFontset::Custom) {
+        if (!custom_path.empty() && text_metrics_font_loaded(custom_path)) return custom_path;
+        message = "math_font_path '" + custom_path + "' cannot be read as a font; math uses the text font";
+        return {};
+    }
+    if (set != MathFontset::Stix && set != MathFontset::Cm) return {};
+    const bool stix = set == MathFontset::Stix;
+    static constexpr std::string_view kStix[] = {"STIX Two Math", "STIX Two Text", "STIXGeneral"};
+    static constexpr std::string_view kCm[] = {"Latin Modern Math", "CMU Serif", "Latin Modern Roman"};
+    std::string names;
+    for (const std::string_view name: stix ? std::span<const std::string_view>(kStix) : std::span<const std::string_view>(kCm)) {
+        if (const FontEntry* e = find_family(name); e && text_metrics_font_loaded(e->path)) return e->path;
+        names += (names.empty() ? "" : ", ") + std::string(name);
+    }
+    message = std::string("math_fontset ") + (stix ? "Stix" : "Cm") + ": none of " + names
+              + " is installed; math uses the text font";
+    return {};
+}
 
 void warn_math(bool mathtext, std::string_view who, std::string_view s) {
     if (!mathtext || s.find('$') == std::string_view::npos) return;

@@ -96,6 +96,10 @@ void sync_sheet(DataPanelState::SheetStyles& dst, const RenderSnapshot& sn) {
     for (const auto& a : sn.axlines) dst.axlines.push_back(a.opts);
     dst.axspans.clear();
     for (const auto& a : sn.axspans) dst.axspans.push_back(a.opts);
+    dst.fills.clear();
+    for (const auto& f : sn.fills) dst.fills.push_back(f.opts);
+    dst.quivers.clear();
+    for (const auto& q : sn.quivers) dst.quivers.push_back(q.opts);
     dst.ids = object_ids(sn, kPlotKinds2D);
 }
 
@@ -1104,6 +1108,7 @@ PlotNavGate update_plot_selection(Selection& sel, PlotViewState& pv, const Figur
     if (selected < 0) {
         pv.press_slot = -1;
         pv.press_on_selected = false;
+        pv.box.active = false;
         return gate;
     }
 
@@ -1117,9 +1122,24 @@ PlotNavGate update_plot_selection(Selection& sel, PlotViewState& pv, const Figur
         gate.reset = in.double_clicked && pv.press_on_selected
                      && !pv.selected_by_last_click;
         pv.selected_by_last_click = false;
+        // Shift at the press makes the whole drag a box zoom (2D, Navigate on).
+        pv.box.active = pv.navigate_enabled && in.shift && pv.press_on_selected
+                        && !gate.reset && cur->snap2d();
+        pv.box.cancelled = false;
+        pv.box.x0 = pv.box.x1 = in.x;
+        pv.box.y0 = pv.box.y1 = in.y;
+    }
+    // Esc ends the box but not the press: the rest of the drag does nothing.
+    if (pv.box.active && !(in.active || in.released)) pv.box.active = false;
+    if (pv.box.active && in.escape) pv.box.cancelled = true;
+    if (pv.box.active && !pv.box.cancelled) {
+        pv.box.x1 = in.x;
+        pv.box.y1 = in.y;
     }
 
-    gate.drag = in.active && pv.press_on_selected;
+    gate.box = pv.box.active && !pv.box.cancelled && in.active;
+    gate.box_done = pv.box.active && !pv.box.cancelled && in.released;
+    gate.drag = in.active && pv.press_on_selected && !pv.box.active;
     const bool over_selected = in.hovered && under_slot == selected;
     gate.wheel = over_selected;
     gate.keys  = over_selected || gate.drag;
@@ -1133,6 +1153,7 @@ PlotNavGate update_plot_selection(Selection& sel, PlotViewState& pv, const Figur
         }
         pv.press_slot        = -1;
         pv.press_on_selected = false;
+        pv.box.active        = false;
     }
     return gate;
 }

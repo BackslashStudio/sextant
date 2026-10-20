@@ -70,6 +70,66 @@ namespace sextant {
                      HeatmapOptions opts = {});
 
         // ----------------------------------------------------------------
+        // Filled areas
+        // ----------------------------------------------------------------
+        // The area between y1(x) and y2(x) (matplotlib's fill_between); with
+        // FillOptions::orientation Vertical, between x1(y) and x2(y), the spans
+        // then read as y, x1, x2 (fill_betweenx). One value each per point, any
+        // other lengths throw std::invalid_argument; fewer than two points fill
+        // nothing. Each run of points neither excluded (FillOptions::exclude)
+        // nor holding a NaN is one region, its curves straight between the points
+        // (or stepped, FillOptions::drawstyle); where they cross the region
+        // pinches to the crossing. On a log axis a point at or below 0 along the
+        // run breaks it, while a curve at or below 0 reaches past the frame's
+        // low edge. Automatic limits take every point of every region on both
+        // curves. Drawn with the other plot objects in call order; not hovered
+        // or picked.
+        Axes& fill(std::span<const double> x, std::span<const double> y1,
+                           std::span<const double> y2, FillOptions opts = {});
+
+        // The same down to (or across to) one value: 0 by default, the area
+        // under a curve.
+        Axes& fill(std::span<const double> x, std::span<const double> y1,
+                           double y2 = 0.0, FillOptions opts = {});
+
+        // Stacked areas (matplotlib's stackplot): layer k fills from the top of
+        // the layers below it (the baseline, StackOptions::baseline, for the
+        // first) up by ys[k], one value per point of `x` (any other length
+        // throws std::invalid_argument, before anything is added). The curves
+        // are computed here, once, and each layer is added as an ordinary fill,
+        // in order: read back and edited as any other, and editing one does not
+        // restack the rest. A NaN carries up the stack: with Zero it leaves that
+        // point out of its layer and every layer above; the other baselines take
+        // every layer's value, so the point leaves every layer (WeightedWiggle,
+        // as matplotlib's, every later point as well).
+        Axes& stack(std::span<const double> x, std::span<const std::vector<double>> ys,
+                    StackOptions opts = {});
+
+        // ----------------------------------------------------------------
+        // Arrow fields
+        // ----------------------------------------------------------------
+        // An arrow per point (matplotlib's quiver with angles='xy' and
+        // scale_units='xy'): from (x, y) along (u, v) times QuiverOptions::amp,
+        // in data units, shifted by QuiverOptions::pivot. One value each per
+        // arrow, any other lengths throw std::invalid_argument. An arrow with a
+        // NaN, a zero vector, or an end at or below 0 on a log axis is not drawn.
+        // The arrow is sized in pixels across (QuiverOptions::width and the head)
+        // and in data units along, so it points the way the data does only at
+        // equal aspect. Automatic limits take both ends of every arrow drawn.
+        // Hovered at (x, y); drawn with the other plot objects in call order.
+        Axes& quiver(std::span<const double> x, std::span<const double> y,
+                     std::span<const double> u, std::span<const double> v,
+                     QuiverOptions opts = {});
+
+        // The same, each arrow colored by its value in `c` (one per arrow, else
+        // std::invalid_argument) through QuiverOptions::cmap/vmin/vmax, as
+        // matplotlib's quiver(X, Y, U, V, C). An arrow whose c is NaN is not
+        // drawn; QuiverOptions::colorbar explains the colors.
+        Axes& quiver(std::span<const double> x, std::span<const double> y,
+                     std::span<const double> u, std::span<const double> v,
+                     std::span<const double> c, QuiverOptions opts = {});
+
+        // ----------------------------------------------------------------
         // Reference lines and spans
         // ----------------------------------------------------------------
         // A line across the frame at `value`: at y = value by default
@@ -213,8 +273,9 @@ namespace sextant {
         Axes& set_ytick_format(std::string_view fmt);
 
         // The colors an unset `color` takes in turn, one per call that draws in a
-        // flat color: line(), scatter(), bar(), hist(), axline() (scatter_z(),
-        // heatmap() and axspan() take none). Restarts from the first color; empty restores the default,
+        // flat color: line(), scatter(), bar(), hist(), fill(), quiver(), axline()
+        // (scatter_z(), heatmap() and axspan() take none). Restarts from the first
+        // color; empty restores the default,
         // matplotlib's tab10, which starts with Color::Blue. Objects already
         // plotted keep theirs.
         Axes& set_color_cycle(std::vector<Color> colors);
@@ -268,6 +329,12 @@ namespace sextant {
         std::size_t heatmap_count() const;
         HeatmapData heatmap_data(std::size_t i) const;
 
+        std::size_t fill_count() const;
+        FillData fill_data(std::size_t i) const;
+
+        std::size_t quiver_count() const;
+        QuiverData quiver_data(std::size_t i) const;
+
         std::size_t axline_count() const;
         AxLineData axline_data(std::size_t i) const;
 
@@ -316,6 +383,20 @@ namespace sextant {
         Axes& set_heatmap_data(std::size_t i, std::span<const double> data, int rows, int cols,
                                Range xrange, Range yrange);
 
+        // A fill's points, validated as fill(). The exclude mask
+        // follows FillData::exclude.
+        Axes& set_fill_data(std::size_t i, const FillData& data);
+
+        Axes& set_fill_data(std::size_t i, std::span<const double> x, std::span<const double> y1,
+                            std::span<const double> y2);
+
+        // A quiver's arrows, validated as quiver(). The amp stays; `c` follows
+        // QuiverData::c (the span overload keeps it while the count holds).
+        Axes& set_quiver_data(std::size_t i, const QuiverData& data);
+
+        Axes& set_quiver_data(std::size_t i, std::span<const double> x, std::span<const double> y,
+                              std::span<const double> u, std::span<const double> v);
+
         // Move a reference line or span (validated as axline()/axspan(); a span's
         // ends are stored swapped when lo > hi).
         Axes& set_axline_data(std::size_t i, const AxLineData& data);
@@ -328,6 +409,46 @@ namespace sextant {
 
         // The string and position only; an annotation keeps its arrow and point.
         Axes& set_text_data(std::size_t i, std::string_view s, Pos x, Pos y);
+
+        // ----------------------------------------------------------------
+        // Hiding plot objects
+        // ----------------------------------------------------------------
+        // Show or hide object i (its options' `visible`, see
+        // LineOptions::visible), keeping its data, options and place; with
+        // Figure::refresh() after. A hidden object leaves the auto limits, the
+        // legend and the colorbars. Wins over a Data-panel Visible toggle made
+        // before the call. Throws std::out_of_range for i >= `*_count()`.
+        Axes& set_line_visible(std::size_t i, bool visible);
+        bool line_visible(std::size_t i) const;
+
+        Axes& set_scatter_visible(std::size_t i, bool visible);
+        bool scatter_visible(std::size_t i) const;
+
+        Axes& set_scatter_z_visible(std::size_t i, bool visible);
+        bool scatter_z_visible(std::size_t i) const;
+
+        Axes& set_bar_visible(std::size_t i, bool visible);
+        bool bar_visible(std::size_t i) const;
+
+        Axes& set_heatmap_visible(std::size_t i, bool visible);
+        bool heatmap_visible(std::size_t i) const;
+
+        // A stack()'s layers are fills of their own.
+        Axes& set_fill_visible(std::size_t i, bool visible);
+        bool fill_visible(std::size_t i) const;
+
+        Axes& set_quiver_visible(std::size_t i, bool visible);
+        bool quiver_visible(std::size_t i) const;
+
+        Axes& set_axline_visible(std::size_t i, bool visible);
+        bool axline_visible(std::size_t i) const;
+
+        Axes& set_axspan_visible(std::size_t i, bool visible);
+        bool axspan_visible(std::size_t i) const;
+
+        // An annotation's arrow goes with its text.
+        Axes& set_text_visible(std::size_t i, bool visible);
+        bool text_visible(std::size_t i) const;
 
     private:
         struct Impl;

@@ -216,6 +216,11 @@ int main() {
     test_plot_view_draw();
     test_plot_view_two_figures();
 
+    // nav_history.cpp
+    test_box_zoom();
+    test_nav_history();
+    test_box_zoom_view();
+
     // window_shell.cpp
     test_panel_imgui_setup();
     test_figure_window_shell();
@@ -311,12 +316,24 @@ int main() {
     // reference_lines.cpp
     test_reference_lines();
     test_reference_lines_rendered();
+    // fill_between.cpp
+    test_fill_between();
+    test_fill_between_rendered();
+    // quiver.cpp
+    test_quiver();
+    test_quiver_rendered();
+    // pick_area.cpp
+    test_pick_areas();
+    // visible.cpp
+    test_visible();
 
     // text.cpp
     test_text();
 
     // rich_text.cpp
     test_rich_text();
+    // math_layout.cpp
+    test_math_layout();
 
     // describe.cpp
     test_describe();

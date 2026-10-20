@@ -182,8 +182,10 @@ namespace sextant {
                                                     const std::vector<Scatter3DPlot>& points,
                                                     const std::vector<Line3DPlot>& lines) {
         std::vector<ErrorBar3DPiece> all;
-        for (std::size_t i = 0; i < points.size(); ++i) errorbar3d_pieces(proj, points[i], i, all);
-        for (std::size_t i = 0; i < lines.size(); ++i) errorbar3d_pieces(proj, lines[i], i, all);
+        for (std::size_t i = 0; i < points.size(); ++i)
+            if (object_shown(points[i])) errorbar3d_pieces(proj, points[i], i, all);
+        for (std::size_t i = 0; i < lines.size(); ++i)
+            if (object_shown(lines[i])) errorbar3d_pieces(proj, lines[i], i, all);
 
         std::vector<ErrorBar3DPolygon> out;
         if (all.empty()) return out;

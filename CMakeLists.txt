@@ -383,6 +383,7 @@ set(SEXTANT_SOURCES
     src/widgets/imgui_impl_sextant.cpp
     src/widgets/panel.cpp
     src/widgets/plot_view.cpp
+    src/widgets/nav_history.cpp
     src/widgets/figure_window_shell.cpp
     src/widgets/data_panel.cpp
 )
@@ -787,6 +788,7 @@ if(SEXTANT_BUILD_TESTS)
             tests/layout_test/dialogs.cpp
             tests/layout_test/render_device.cpp
             tests/layout_test/plot_view.cpp
+            tests/layout_test/nav_history.cpp
             tests/layout_test/window_shell.cpp
             tests/layout_test/headless_export.cpp
             tests/layout_test/memory_export.cpp
@@ -811,7 +813,12 @@ if(SEXTANT_BUILD_TESTS)
             tests/layout_test/line_steps.cpp
             tests/layout_test/bar_orient.cpp
             tests/layout_test/reference_lines.cpp
+            tests/layout_test/fill_between.cpp
+            tests/layout_test/quiver.cpp
+            tests/layout_test/pick_area.cpp
+            tests/layout_test/visible.cpp
             tests/layout_test/rich_text.cpp
+            tests/layout_test/math_layout.cpp
             tests/layout_test/text.cpp
             tests/layout_test/window_wait.cpp
             tests/layout_test/events.cpp)

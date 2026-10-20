@@ -706,6 +706,15 @@ namespace sextant {
             else box.update(idx, [&](AxesEdit& e) { merge(e.plot_styles); });
         }
 
+        // The object's `visible`, first in its Appearance block. Unlike a plane's,
+        // it takes the object out of the limits and the keys too, so say so.
+        template<class Push>
+        void visible_toggle(bool& visible, Push&& push) {
+            if (ImGui::Checkbox("Visible##objvis", &visible)) push();
+            if (!visible)
+                ImGui::TextDisabled("Hidden: not drawn, keyed or hovered, and out of the auto limits.");
+        }
+
         // The name (legend key and colorbar title), and the legend-key switch for
         // kinds that have one. One shared name buffer, see text_field().
         template<class Opts, class Push>
@@ -978,6 +987,94 @@ namespace sextant {
             }
         }
 
+        template<class Push>
+        void fill_style(DataPanelState& st, FillOptions& o, Push&& push) {
+            name_and_key(st, o, push);
+            if (ImGui::Checkbox("Run on to crossings##fillinterp", &o.interpolate)) push();
+            if (begin_field_table("fill")) {
+                field_row("Orientation");
+                if (orientation_combo("##forient", o.orientation)) push();
+                field_row("Color");
+                if (color_swatch("##fcol", *o.color)) push();
+                field_row("Alpha");
+                if (drag_float("##falpha", &o.alpha, 0.0f, 1.0f, 0.005f, "%.2f")) push();
+                field_row("Draw style");
+                if (drawstyle_combo("##fdraw", o.drawstyle)) push();
+                end_field_table();
+            }
+            ImGui::TextDisabled("Crossings: a region ending at an excluded point runs on to where the curves cross.");
+            ImGui::SeparatorText("Outline");
+            if (begin_field_table("filledge")) {
+                field_row("Width");
+                if (drag_float("##few", &o.linewidth, 0.0f, 10.0f, 0.05f, "%.2f px")) push();
+                end_field_table();
+            }
+            if (o.linewidth <= 0.0f) return;
+            bool own = o.edgecolor.has_value();
+            if (ImGui::Checkbox("Own colour##feown", &own)) {
+                o.edgecolor = own ? std::optional<Color>(*o.color) : std::nullopt;
+                push();
+            }
+            if (begin_field_table("filledge2")) {
+                if (o.edgecolor) {
+                    field_row("Color");
+                    if (color_swatch("##fecol", *o.edgecolor)) push();
+                }
+                field_row("Style");
+                if (linestyle_combo("##festyle", o.linestyle)) push();
+                end_field_table();
+            }
+        }
+
+        // A quiver's amp is always set (resolved at the call); kept > 0. A
+        // colormapped one (`p` has c) shows its map instead of the color.
+        template<class Push>
+        void quiver_style(DataPanelState& st, QuiverOptions& o, const QuiverPlot& p, Push&& push) {
+            name_and_key(st, o, push);
+            if (p.colormapped() && ImGui::Checkbox("Colorbar##qcb", &o.colorbar)) push();
+            if (begin_field_table("quiver")) {
+                if (p.colormapped()) {
+                    field_row("Colormap");
+                    if (colormap_combo("##qcmap", o.cmap)) push();
+                    field_row("vmin");
+                    if (drag_float("##qvmin", &o.vmin, -FLT_MAX, FLT_MAX, 0.01f, "%.4g")) push();
+                    field_row("vmax");
+                    if (drag_float("##qvmax", &o.vmax, -FLT_MAX, FLT_MAX, 0.01f, "%.4g")) push();
+                } else {
+                    field_row("Color");
+                    if (color_swatch("##qcol", *o.color)) push();
+                }
+                field_row("Alpha");
+                if (drag_float("##qalpha", &o.alpha, 0.0f, 1.0f, 0.005f, "%.2f")) push();
+                field_row("Amp");
+                double s = o.amp.value_or(1.0);
+                if (drag_double("##qamp", &s, static_cast<float>(s * 0.005), "%.4g") && s > 0.0
+                    && std::isfinite(s)) {
+                    o.amp = s;
+                    push();
+                }
+                field_row("Pivot");
+                static const char* kPivots[] = {"Tail", "Middle", "Tip"};
+                int pivot = static_cast<int>(o.pivot);
+                if (ImGui::Combo("##qpivot", &pivot, kPivots, IM_ARRAYSIZE(kPivots))) {
+                    o.pivot = static_cast<QuiverPivot>(pivot);
+                    push();
+                }
+                end_field_table();
+            }
+            ImGui::TextDisabled("Amp: data units of arrow per unit of vector.");
+            ImGui::SeparatorText("Shape");
+            if (begin_field_table("quivershape")) {
+                field_row("Width");
+                if (drag_float("##qw", &o.width, 0.0f, 20.0f, 0.05f, "%.2f px")) push();
+                field_row("Head width");
+                if (drag_float("##qhw", &o.head_width, 0.0f, 50.0f, 0.1f, "%.1f px")) push();
+                field_row("Head length");
+                if (drag_float("##qhl", &o.head_length, 0.0f, 50.0f, 0.1f, "%.1f px")) push();
+                end_field_table();
+            }
+        }
+
         // Contour levels, kept sorted and unique as the heatmap's ingest leaves
         // them. Each commits on Enter or focus loss (edit_cell()).
         template<class Push>
@@ -1093,6 +1190,8 @@ namespace sextant {
                 case PlotKind::ScatterZ: if (!both(ss->scatter_z, sheet.scatter_z)) return; break;
                 case PlotKind::AxLine:   if (!both(ss->axlines, sheet.axlines)) return; break;
                 case PlotKind::AxSpan:   if (!both(ss->axspans, sheet.axspans)) return; break;
+                case PlotKind::Fill:     if (!both(ss->fills, sheet.fills)) return; break;
+                case PlotKind::Quiver:   if (!both(ss->quivers, sheet.quivers)) return; break;
                 default: return; // the 3D kinds have blocks of their own
             }
             if (!section("Appearance", true)) return;
@@ -1100,6 +1199,10 @@ namespace sextant {
             auto push_of = [&](const auto& o) {
                 return [&, p = &o] { push_plot_style(edit_box, idx, is3d, t.plane_index, pi, *p); };
             };
+            with_kind(*ss, t.kind, [&](auto& v) {
+                visible_toggle(visible_flag(v[i]), push_of(v[i]));
+                return true;
+            }, false);
             switch (t.kind) {
                 case PlotKind::Line:
                     line_style(st, ss->lines[i], sheet.lines[i], on_plane, push_of(ss->lines[i]));
@@ -1121,6 +1224,12 @@ namespace sextant {
                     break;
                 case PlotKind::AxSpan:
                     axspan_style(st, ss->axspans[i], push_of(ss->axspans[i]));
+                    break;
+                case PlotKind::Fill:
+                    fill_style(st, ss->fills[i], push_of(ss->fills[i]));
+                    break;
+                case PlotKind::Quiver:
+                    quiver_style(st, ss->quivers[i], sheet.quivers[i], push_of(ss->quivers[i]));
                     break;
                 default: break;
             }
@@ -1145,6 +1254,7 @@ namespace sextant {
                     e.bars3d.push_back({bi, o});
                 });
             };
+            visible_toggle(o.visible, push_bar);
             if (begin_field_table("bar3dname")) {
                 field_row("Name");
                 if (text_field("##b3dname", o.name, st.name_buf, sizeof st.name_buf)) push_bar();
@@ -1207,6 +1317,7 @@ namespace sextant {
                     e.surfaces.push_back({si, o});
                 });
             };
+            visible_toggle(o.visible, push_surf);
             // One name: the colorbar title with `colormap`, else the legend key.
             if (begin_field_table("surfname")) {
                 field_row("Name");
@@ -1274,6 +1385,7 @@ namespace sextant {
                     e.scatter3d.push_back({ci, o});
                 });
             };
+            visible_toggle(o.visible, push_cloud);
             // One name for the colorbar and the legend key.
             if (begin_field_table("cloudname")) {
                 field_row("Name");
@@ -1335,6 +1447,7 @@ namespace sextant {
                     e.lines3d.push_back({li, o});
                 });
             };
+            visible_toggle(o.visible, push_path);
             if (begin_field_table("pathname")) {
                 field_row("Name");
                 if (text_field("##pathname", o.name, st.name_buf, sizeof st.name_buf))
@@ -1393,6 +1506,7 @@ namespace sextant {
                     e.surface_tri.push_back({mi, o});
                 });
             };
+            visible_toggle(o.visible, push_mesh);
             // One name: the colorbar title when colormapped, else the legend key.
             if (begin_field_table("meshname")) {
                 field_row("Name");
@@ -1622,6 +1736,7 @@ namespace sextant {
             };
             static const char* kVAligns[] = {"Top", "Center", "Baseline", "Bottom"};
             TextOptions& o = s.text;
+            if (ImGui::Checkbox("Visible##textvis", &o.visible)) push_style();
             if (begin_field_table("textstyle")) {
                 field_row("Font");
                 ImGui::SetNextItemWidth(-FLT_MIN);

@@ -34,7 +34,7 @@ void render_frame(RenderDevice& dev, DataRenderer& data,
                   const FigureLayout* given)
 {
     // FigureOptions::mathtext for every label measured and drawn below.
-    const MathTextScope math(fsnap.mathtext);
+    const MathTextScope math(fsnap.mathtext, fsnap.math_font);
     NvgRenderer& nvg = dev.renderer();
     const int iw = std::max(1, target_w);
     const int ih = std::max(1, target_h);

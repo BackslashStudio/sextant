@@ -18,6 +18,8 @@ namespace sextant::platform {
 
     bool console_input_ready() { return false; }
 
+    void set_app_icon(const unsigned char*, int) {}
+
 #if !defined(__linux__)   // Linux's are in linux/offscreen_egl.cpp
     OffscreenGL* create_offscreen_gl() { return nullptr; }
 

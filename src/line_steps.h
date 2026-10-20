@@ -3,6 +3,7 @@
 // the SVG writer and plane geometry, so every output strokes the same path.
 #include "sextant/style.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <limits>
@@ -89,5 +90,29 @@ struct StrokePath {
         return loop ? n : n - 1;
     }
 };
+
+// The stroke shader's miter limit, which is SVG's default stroke-miterlimit.
+inline constexpr float k_stroke_miter_limit = 4.0f;
+
+// True where the stroke shader bevels the joint at j of segments a->j and j->b
+// (pixels) although the turn is within the miter limit: the inner corner would
+// slide past half of the shorter segment and fold its quad over. An SVG viewer
+// miters there, so svg_writer bevels such joints itself. Mirrors the shader's
+// miter_joint() (data_renderer.cpp); keep the two in step.
+inline bool stroke_short_bevel(float ax, float ay, float jx, float jy, float bx, float by,
+                               float half_width) {
+    const float dax = jx - ax, day = jy - ay, dbx = bx - jx, dby = by - jy;
+    const float la = std::sqrt(dax * dax + day * day), lb = std::sqrt(dbx * dbx + dby * dby);
+    if (!(la > 1e-6f) || !(lb > 1e-6f)) return false;
+    const float nbx = -dby / lb, nby = dbx / lb;
+    float mx = -day / la + nbx, my = dax / la + nby;
+    const float ml = std::sqrt(mx * mx + my * my);
+    if (ml < 1e-3f) return false;
+    mx /= ml;
+    my /= ml;
+    const float den = mx * nbx + my * nby;
+    if (den <= 1.0f / k_stroke_miter_limit) return false;
+    return half_width * std::sqrt(std::max(1.0f - den * den, 0.0f)) > 0.5f * std::min(la, lb) * den;
+}
 
 } // namespace sextant

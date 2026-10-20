@@ -15,6 +15,10 @@ namespace sextant {
     // Color preset for the panel chrome only (not plot rendering); fixed at create().
     enum class PanelTheme { Dark, Light, Classic };
 
+    // The font math draws in (FigureOptions::math_fontset): matplotlib's
+    // mathtext.fontset, from the fonts installed.
+    enum class MathFontset { Text, Stix, Cm, Custom };
+
     struct FigureOptions {
         int width = 800;
         int height = 600;
@@ -42,6 +46,12 @@ namespace sextant {
         // set_background().
         Color background = {0.93f, 0.93f, 0.93f, 1.0f};
 
+        // How near, in pixels, the cursor must come to a point, marker, arrow or
+        // path vertex for the hover hint and a Pick to find it. Bars, fills and
+        // heatmaps answer where the cursor is inside them instead. Must be
+        // finite and >= 0. Also set_pick_radius().
+        float pick_radius = 12.0f;
+
         // Math in text: a string with an even, nonzero count of `$` not preceded
         // by a backslash draws its $...$ spans as math, a subset of matplotlib's
         // mathtext (x^2, x_i, \alpha, \pm, ...). Titles, tick labels, legend and
@@ -50,6 +60,17 @@ namespace sextant {
         // set_message_handler() from the call that set it. false draws every
         // string as written.
         bool mathtext = true;
+
+        // The font $...$ spans draw in, as matplotlib's mathtext.fontset, from
+        // installed fonts (none is bundled): Text, the text's own font (the
+        // default); Stix, the first installed of STIX Two Math, STIX Two Text,
+        // STIXGeneral; Cm, of Latin Modern Math, CMU Serif, Latin Modern Roman;
+        // Custom, the font file at math_font_path. None installed, or the file
+        // unreadable: the text font, and creating the figure sends one message
+        // through set_message_handler(). \text{} and \mathdefault{} stay in the
+        // text font. Fixed at create().
+        MathFontset math_fontset = MathFontset::Text;
+        std::string math_font_path;
 
         // Initial width of the docked Cosmetic panel (show() only, never exported).
         float panel_width = 240.0f;
@@ -309,6 +330,12 @@ namespace sextant {
 
         // The fill behind the whole figure; see FigureOptions::background.
         void set_background(Color color);
+
+        // See FigureOptions::pick_radius; shown at the next refresh(). Throws
+        // std::invalid_argument for a negative or non-finite radius.
+        void set_pick_radius(float px);
+
+        float pick_radius() const;
 
         // Relative column widths / row heights of the subplot grid, e.g. {2, 1};
         // a span gets the sum of its weights. Empty = equal (default). Throws

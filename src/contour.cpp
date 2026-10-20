@@ -279,7 +279,7 @@ std::vector<PlaneContourDraw> plan_plane_contours(
         if (!plane_drawn(pl)) continue;
         for (std::size_t hi = 0; hi < pl.sheet.heatmaps.size(); ++hi) {
             const HeatmapPlot& hp = pl.sheet.heatmaps[hi];
-            if (hp.opts.contours.empty() || hp.rows <= 0 || hp.cols <= 0) continue;
+            if (!object_shown(hp) || hp.opts.contours.empty() || hp.rows <= 0 || hp.cols <= 0) continue;
 
             // Cached in data space, so an orbit only re-projects.
             ContourSet traced;

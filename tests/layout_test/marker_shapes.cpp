@@ -93,6 +93,22 @@ namespace lt {
             return s;
         }
 
+        // Width + height of the box around every pixel at least a quarter blue
+        // (by blue_coverage()'s measure); 0 when there is none.
+        int blue_extent(const RgbaImage& img) {
+            int x0 = img.width, x1 = -1, y0 = img.height, y1 = -1;
+            for (int y = 0; y < img.height; ++y)
+                for (int x = 0; x < img.width; ++x) {
+                    const std::uint8_t* p = &img.pixels[(static_cast<std::size_t>(y) * img.width + x) * 4];
+                    if (p[2] - std::max(p[0], p[1]) < 64) continue;
+                    x0 = std::min(x0, x);
+                    x1 = std::max(x1, x);
+                    y0 = std::min(y0, y);
+                    y1 = std::max(y1, y);
+                }
+            return x1 < 0 ? 0 : (x1 - x0 + 1) + (y1 - y0 + 1);
+        }
+
         const std::vector<double> kX{5.0}, kY{5.0}, kZ{0.5};
 
         // One marker in the middle of a 400x300 figure with no frame clutter
@@ -237,19 +253,27 @@ namespace lt {
         }
 
         // Line markers: the stroke's thickness stays put as the marker grows, so
-        // the ink grows with the length alone. Measured as summed coverage: a
-        // 1.5 px stroke's edge rows are partly covered, and a pixel count over a
-        // threshold keeps one row or two depending on the rasterizer (llvmpipe
-        // kept 1 row at 20 px and 2 at 60, reading 6x).
+        // the ink grows with the length alone. Checked as the two things apart:
+        // the extent (bounding box w + h) grows 3x, and the thickness (summed
+        // coverage over that extent) stays within a pixel. The ink ratio alone
+        // is not stable: rendered aliased (llvmpipe, no MSAA) a 1.5 px stroke
+        // whose edge falls on a pixel centre keeps 1 row or 2 by float rounding
+        // (1 row at 20 px and 2 at 60, reading 6x), where a filled shape would
+        // read 9x on both counts.
         for (const MarkerStyle m: kLines) {
-            const double small = blue_coverage(one(base(m, 20.0f))->render_rgba());
-            const double big = blue_coverage(one(base(m, 60.0f))->render_rgba());
-            check(small > 10 && big > small * 2.2 && big < small * 3.8,
-                  name_of(m) + ": 3x the size is ~3x the ink (" + std::to_string(small) + " -> " +
-                      std::to_string(big) + "), not 9x");
+            const RgbaImage si = one(base(m, 20.0f))->render_rgba();
+            const RgbaImage bi = one(base(m, 60.0f))->render_rgba();
+            const double sext = blue_extent(si), bext = blue_extent(bi);
+            const double sthick = sext > 0 ? blue_coverage(si) / sext : 0.0;
+            const double bthick = bext > 0 ? blue_coverage(bi) / bext : 0.0;
+            check(sext > 10 && bext > sext * 2.6 && bext < sext * 3.4 && sthick > 0.4 &&
+                      std::fabs(bthick - sthick) < 1.2,
+                  name_of(m) + ": 3x the size is 3x the length at the same thickness (extent " +
+                      std::to_string(sext) + " -> " + std::to_string(bext) + ", thickness " +
+                      std::to_string(sthick) + " -> " + std::to_string(bthick) + "), not 9x the ink");
             ScatterOptions w = base(m, 60.0f);
             w.edge_linewidth = 6.0f;
-            const std::size_t wide = ink(one(w)->render_rgba(), 0, 0, 255, 60).n;
+            const double big = blue_coverage(bi), wide = blue_coverage(one(w)->render_rgba());
             check(wide > big * 2.5, name_of(m) + ": edge_linewidth 6 is its stroke width (" +
                                         std::to_string(big) + " -> " + std::to_string(wide) + ")");
         }

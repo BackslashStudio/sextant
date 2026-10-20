@@ -45,6 +45,9 @@ struct Figure::Impl {
     };
 
     FigureOptions                 opts;
+    // opts.math_fontset resolved at construction: the math font's file, ""
+    // for the text font.
+    std::string                   math_font;
     std::vector<Slot>             slots;
     // Declared before window_thread, so it outlives it.
     FrameCounters                 frame_counters;

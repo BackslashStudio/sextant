@@ -46,6 +46,11 @@ namespace sextant::platform {
     // clipboard call is not. False elsewhere, where the caller should ask GLFW.
     bool read_clipboard(std::string& out);
 
+    // The process-wide Dock icon, from straight RGBA8 (size x size). macOS has no
+    // per-window icon, so this is its only icon; it is left alone when the host
+    // is an app bundle declaring its own. Main thread only; a no-op elsewhere.
+    void set_app_icon(const unsigned char* rgba, int size);
+
     // Whether reading stdin now would not block: a line is waiting, or it is at
     // EOF. What lets show(true) wait for ENTER on the thread that also has to
     // pump the window. Only called where that thread pumps (macOS); false

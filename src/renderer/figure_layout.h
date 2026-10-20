@@ -23,7 +23,7 @@ namespace sextant {
     // ---------------------------------------------------------------------------
     // Which series get a legend key, in order (determines box size and contents).
 
-    enum class LegendKind { Line, Marker, Bar };
+    enum class LegendKind { Line, Marker, Bar, Arrow };
 
     struct LegendEntry {
         Color color;
@@ -32,8 +32,9 @@ namespace sextant {
         LineStyle style = LineStyle::Solid; // Line entries only
         MarkerStyle marker = MarkerStyle::Circle; // Marker entries only
 
-        // Marker entries only; alpha 0 (default) = no edge. scatter_z keys are
-        // white with a black edge. Edged Cross/Plus are stroked in `edge`.
+        // Marker, Bar and Arrow entries only; alpha 0 (default) = no edge.
+        // scatter_z keys are white with a black edge. Edged Cross/Plus are
+        // stroked in `edge`; a Bar entry's edge is a fill's outline.
         Color edge = {0.0f, 0.0f, 0.0f, 0.0f};
 
         // Line entries only: draw the swatch with `cmap` swept along it (the key
@@ -108,6 +109,9 @@ namespace sextant {
         // The box as one column (the shape at every anchor except Outside
         // top/bottom, which wrap; see layout_legend_rows()).
         float legend_box_w = 0.0f, legend_box_h = 0.0f;
+        // Every row's height: legend_row_height(), or more for a name with a
+        // fraction or root (0 = no legend).
+        float legend_row_h = 0.0f;
         // margin + legend_box_w: what a side-anchored legend reserves.
         float legend_block = 0.0f;
     };

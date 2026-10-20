@@ -22,7 +22,7 @@ void fill_id(ObjectId& id, const Holder& h, PlotKind kind, int index) {
 }
 
 // PlotStyleEdit's alternatives are in PlotKind's 2D order, then a text's, a
-// reference line's and a span's.
+// reference line's, a span's, a fill's and a quiver's.
 inline PlotKind style_kind(const PlotStyleEdit& p) {
     using Opts = decltype(PlotStyleEdit::opts);
     static_assert(static_cast<int>(PlotKind::Heatmap) == 3
@@ -31,11 +31,15 @@ inline PlotKind style_kind(const PlotStyleEdit& p) {
                   && std::is_same_v<std::variant_alternative_t<4, Opts>, ScatterZOptions>
                   && std::is_same_v<std::variant_alternative_t<5, Opts>, TextStyle>
                   && std::is_same_v<std::variant_alternative_t<6, Opts>, AxLineOptions>
-                  && std::is_same_v<std::variant_alternative_t<7, Opts>, AxSpanOptions>);
+                  && std::is_same_v<std::variant_alternative_t<7, Opts>, AxSpanOptions>
+                  && std::is_same_v<std::variant_alternative_t<8, Opts>, FillOptions>
+                  && std::is_same_v<std::variant_alternative_t<9, Opts>, QuiverOptions>);
     switch (p.opts.index()) {
         case 5: return PlotKind::Text;
         case 6: return PlotKind::AxLine;
         case 7: return PlotKind::AxSpan;
+        case 8: return PlotKind::Fill;
+        case 9: return PlotKind::Quiver;
         default: return static_cast<PlotKind>(p.opts.index());
     }
 }
@@ -47,8 +51,10 @@ inline void stamp_edit(AxesEdit& e, const RenderSnapshot& s) {
     e.style_seen = s.style_stamps;
     for (PlotDataOp& op : e.plot_ops)
         std::visit([&s](auto& o) { fill_id(o.id, s, o.kind, o.plot_index); }, op);
-    for (PlotStyleEdit& p : e.plot_styles)
+    for (PlotStyleEdit& p : e.plot_styles) {
         fill_id(p.id, s, stamp_detail::style_kind(p), p.plot_index);
+        p.visible_seen = visible_stamp_at(s, stamp_detail::style_kind(p), p.plot_index);
+    }
 }
 
 inline void stamp_edit(AxesEdit3D& e, const RenderSnapshot3D& s) {
@@ -73,15 +79,21 @@ inline void stamp_edit(AxesEdit3D& e, const RenderSnapshot3D& s) {
         } else if (pe.id == 0) {
             pe.id = kNoObject;
         }
-    for (PlotStyleEdit& ps : e.plot_styles)
+    for (PlotStyleEdit& ps : e.plot_styles) {
         on_plane(ps.id, ps.plane_id, ps.plane_index, stamp_detail::style_kind(ps), ps.plot_index);
+        if (const PlaneSnapshot* p = plane(ps.plane_index))
+            ps.visible_seen = visible_stamp_at(p->sheet, stamp_detail::style_kind(ps), ps.plot_index);
+    }
     for (PlotDataOp& op : e.plot_ops)
         std::visit([&](auto& o) {
             if (o.plane_index < 0) fill_id(o.id, s, o.kind, o.plot_index);
             else on_plane(o.id, o.plane_id, o.plane_index, o.kind, o.plot_index);
         }, op);
     const auto objects = [&s](auto& edits, PlotKind kind) {
-        for (auto& o : edits) fill_id(o.id, s, kind, o.plot_index);
+        for (auto& o : edits) {
+            fill_id(o.id, s, kind, o.plot_index);
+            o.visible_seen = visible_stamp_at(s, kind, o.plot_index);
+        }
     };
     objects(e.bars3d, PlotKind::Bar3D);
     objects(e.surfaces, PlotKind::Surface);

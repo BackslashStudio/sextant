@@ -180,7 +180,9 @@ FigureSnapshot Figure::Impl::build_figure_snapshot() const {
     fs.row_gap = opts.subplot_row_gap;
     fs.margins       = opts.margins;
     fs.mathtext      = opts.mathtext;
+    fs.math_font     = math_font;
     fs.background    = opts.background;
+    fs.pick_radius   = opts.pick_radius;
     fs.col_ratios    = col_ratios;
     fs.row_ratios    = row_ratios;
     fs.suptitle      = suptitle_text;
@@ -436,9 +438,14 @@ Figure::Figure(FigureOptions opts) : d(std::make_unique<Impl>()) {
     d->window_state.figure_id = s_next_figure_id.fetch_add(1, std::memory_order_relaxed);
     if (!std::isfinite(opts.dpi) || opts.dpi <= 0.0f)
         throw std::invalid_argument("Figure: FigureOptions::dpi must be finite and positive");
+    if (!std::isfinite(opts.pick_radius) || opts.pick_radius < 0.0f)
+        throw std::invalid_argument("Figure: FigureOptions::pick_radius must be finite and >= 0");
     d->opts = std::move(opts);
         // Normalize supersample once here.
     d->opts.supersample = std::clamp(d->opts.supersample, 1, kMaxSupersample);
+    std::string message;
+    d->math_font = resolve_math_font(d->opts.math_fontset, d->opts.math_font_path, message);
+    if (!message.empty()) emit_message("Figure: " + message);
 }
 
 Figure::~Figure() {
@@ -742,6 +749,14 @@ void Figure::set_background(Color c) {
     d->opts.background = c;
     d->stamps.background = next_snapshot_generation();
 }
+
+void Figure::set_pick_radius(float px) {
+    if (!std::isfinite(px) || px < 0.0f)
+        throw std::invalid_argument("Figure::set_pick_radius: the radius must be finite and >= 0");
+    d->opts.pick_radius = px;
+}
+
+float Figure::pick_radius() const { return d->opts.pick_radius; }
 
 void Figure::set_col_ratios(std::vector<float> ratios) {
     Impl::check_ratios("Figure::set_col_ratios", ratios, d->grid_shape().cols, "columns");

@@ -13,7 +13,8 @@
 //
 // Leaf types: bool, int, float, double, std::size_t, std::string, Color,
 // std::optional<Color>, std::optional<double>, std::optional<float>,
-// std::optional<bool>, std::vector<double>, std::vector<std::string>, Colormap
+// std::optional<bool>, std::vector<double>, std::vector<bool>,
+// std::vector<std::string>, Colormap
 // (named by its name() and from_name(), since registered maps make it
 // open-ended), and the enums below, whose names enum_name() and
 // enum_from_name() give.
@@ -48,28 +49,34 @@ namespace sextant {
     SEXTANT_DESCRIBE(ErrorBarOptions,
                      F(color) F(linewidth) F(capsize) F(capstyle) F(boxwidth) F(box_alpha))
     SEXTANT_DESCRIBE(LineOptions,
-                     F(color) F(linewidth) F(linestyle) F(name) F(show_legend) F(alpha) F(loop) F(drawstyle)
+                     F(color) F(linewidth) F(linestyle) F(name) F(show_legend) F(visible) F(alpha) F(loop) F(drawstyle)
                      F(errorbar) F(hint_labels))
     SEXTANT_DESCRIBE(ScatterOptions,
-                     F(color) F(size) F(sizes) F(marker) F(name) F(show_legend) F(alpha)
+                     F(color) F(size) F(sizes) F(marker) F(name) F(show_legend) F(visible) F(alpha)
                      F(edgecolor) F(edge_alpha) F(edge_linewidth) F(errorbar) F(hint_labels))
     SEXTANT_DESCRIBE(ScatterZOptions,
                      F(cmap) F(size) F(sizes) F(marker) F(alpha) F(edgecolor) F(edge_alpha)
                      F(edge_linewidth)
                      F(vmin) F(vmax) F(colorbar) F(name)
-                     F(show_legend) F(errorbar) F(hint_labels))
+                     F(show_legend) F(visible) F(errorbar) F(hint_labels))
     SEXTANT_DESCRIBE(BarOptions,
-                     F(color) F(orientation) F(bottom) F(width) F(alpha) F(name) F(show_legend) F(edgecolor) F(linewidth)
+                     F(color) F(orientation) F(bottom) F(width) F(alpha) F(name) F(show_legend) F(visible) F(edgecolor) F(linewidth)
                      F(errorbar) F(hint_labels))
     SEXTANT_DESCRIBE(HistOptions, F(density) F(cumulative))
     SEXTANT_DESCRIBE(AxLineOptions,
                      F(orientation) F(color) F(linewidth) F(linestyle) F(alpha) F(from) F(to) F(name)
-                     F(show_legend))
+                     F(show_legend) F(visible))
     SEXTANT_DESCRIBE(AxSpanOptions,
                      F(orientation) F(color) F(alpha) F(edgecolor) F(linewidth) F(from) F(to) F(name)
-                     F(show_legend))
+                     F(show_legend) F(visible))
+    SEXTANT_DESCRIBE(FillOptions,
+                     F(orientation) F(color) F(alpha) F(edgecolor) F(linewidth) F(linestyle)
+                     F(drawstyle) F(exclude) F(interpolate) F(name) F(show_legend) F(visible))
+    SEXTANT_DESCRIBE(QuiverOptions,
+                     F(color) F(alpha) F(cmap) F(vmin) F(vmax) F(colorbar) F(amp) F(pivot) F(width) F(head_width) F(head_length) F(name)
+                     F(show_legend) F(visible) F(hint_labels))
     SEXTANT_DESCRIBE(HeatmapOptions,
-                     F(cmap) F(vmin) F(vmax) F(colorbar) F(name) F(origin) F(contours)
+                     F(cmap) F(vmin) F(vmax) F(colorbar) F(name) F(visible) F(origin) F(contours)
                      F(contour_color) F(contour_linewidth) F(contour_labels) F(contour_fontsize)
                      F(hint_labels))
     SEXTANT_DESCRIBE(GridOptions, F(color) F(linestyle) F(linewidth) F(minor) F(minor_color))
@@ -102,7 +109,7 @@ namespace sextant {
     SEXTANT_DESCRIBE(TextOptions,
                      F(fontsize) F(color) F(alpha) F(font_path) F(ha) F(va) F(rotation) F(dx) F(dy)
                      F(linespacing) F(background) F(edgecolor) F(edge_linewidth) F(pad)
-                     F(clip_to_frame) F(parse_math))
+                     F(clip_to_frame) F(parse_math) F(visible))
     SEXTANT_DESCRIBE(ArrowOptions,
                      F(head) F(tail) F(head_length) F(head_width) F(linewidth) F(color) F(linestyle)
                      F(gap_text) F(gap_point) F(arc))
@@ -110,7 +117,8 @@ namespace sextant {
     // figure.h
     SEXTANT_DESCRIBE(FigureOptions,
                      F(width) F(height) F(title) F(resizable) F(dpi) F(subplot_col_gap)
-                     F(subplot_row_gap) F(margins) F(background) F(mathtext) F(panel_width) F(supersample) F(vsync)
+                     F(subplot_row_gap) F(margins) F(background) F(pick_radius) F(mathtext) F(math_fontset) F(math_font_path)
+                     F(panel_width) F(supersample) F(vsync)
                      F(theme))
     SEXTANT_DESCRIBE(SvgExportOptions, F(max_splits) F(max_tests))
     SEXTANT_DESCRIBE(PngExportOptions, F(peel_layers) F(dpi))
@@ -121,14 +129,14 @@ namespace sextant {
     SEXTANT_DESCRIBE(Plane2DOptions, F(alpha) F(visible))
     SEXTANT_DESCRIBE(Bar3DOptions,
                      F(color) F(alpha) F(width) F(depth) F(bottom) F(shading) F(edges)
-                     F(edgecolor) F(edge_alpha) F(edge_linewidth) F(name) F(show_legend)
+                     F(edgecolor) F(edge_alpha) F(edge_linewidth) F(name) F(show_legend) F(visible)
                      F(hint_labels))
     SEXTANT_DESCRIBE(SurfaceOptions,
                      F(color) F(colormap) F(cmap) F(vmin) F(vmax) F(colorbar) F(name)
-                     F(show_legend) F(alpha) F(shading) F(edges) F(edgecolor) F(edge_alpha)
+                     F(show_legend) F(visible) F(alpha) F(shading) F(edges) F(edgecolor) F(edge_alpha)
                      F(edge_linewidth) F(hint_labels))
     SEXTANT_DESCRIBE(SurfaceTriOptions,
-                     F(color) F(cmap) F(vmin) F(vmax) F(colorbar) F(name) F(show_legend) F(alpha)
+                     F(color) F(cmap) F(vmin) F(vmax) F(colorbar) F(name) F(show_legend) F(visible) F(alpha)
                      F(shading) F(edges) F(edgecolor) F(edge_alpha) F(edge_linewidth)
                      F(hint_labels))
     SEXTANT_DESCRIBE(ErrorBar3DOptions,
@@ -138,10 +146,10 @@ namespace sextant {
                      F(color) F(size) F(sizes) F(marker) F(alpha) F(edgecolor) F(edge_alpha)
                      F(edge_linewidth)
                      F(depthshade) F(cmap) F(vmin) F(vmax)
-                     F(colorbar) F(name) F(show_legend) F(errorbar) F(hint_labels))
+                     F(colorbar) F(name) F(show_legend) F(visible) F(errorbar) F(hint_labels))
     SEXTANT_DESCRIBE(Line3DOptions,
                      F(color) F(linewidth) F(alpha) F(loop) F(depthshade) F(cmap) F(vmin) F(vmax)
-                     F(colorbar) F(name) F(show_legend) F(errorbar) F(hint_labels))
+                     F(colorbar) F(name) F(show_legend) F(visible) F(errorbar) F(hint_labels))
     SEXTANT_DESCRIBE(Box3DStyle, F(panes) F(pane_color) F(pane_edge_color) F(margin))
 
 #undef F
@@ -214,6 +222,9 @@ namespace sextant {
                        {"steps_mid", DrawStyle::StepsMid}, {"steps_post", DrawStyle::StepsPost})
     SEXTANT_ENUM_NAMES(Orientation,
                        {"vertical", Orientation::Vertical}, {"horizontal", Orientation::Horizontal})
+    SEXTANT_ENUM_NAMES(QuiverPivot,
+                       {"tail", QuiverPivot::Tail}, {"middle", QuiverPivot::Middle},
+                       {"tip", QuiverPivot::Tip})
     SEXTANT_ENUM_NAMES(MarkerStyle,
                        {"none", MarkerStyle::None}, {"circle", MarkerStyle::Circle},
                        {"square", MarkerStyle::Square}, {"triangle", MarkerStyle::Triangle},
@@ -256,6 +267,9 @@ namespace sextant {
     SEXTANT_ENUM_NAMES(PanelTheme,
                        {"dark", PanelTheme::Dark}, {"light", PanelTheme::Light},
                        {"classic", PanelTheme::Classic})
+    SEXTANT_ENUM_NAMES(MathFontset,
+                       {"text", MathFontset::Text}, {"stix", MathFontset::Stix}, {"cm", MathFontset::Cm},
+                       {"custom", MathFontset::Custom})
     SEXTANT_ENUM_NAMES(Projection,
                        {"orthographic", Projection::Orthographic},
                        {"perspective", Projection::Perspective})

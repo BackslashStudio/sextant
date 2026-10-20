@@ -157,10 +157,10 @@ namespace sextant {
         double xmin = snap.xmin, xmax = snap.xmax;
         double ymin = snap.ymin, ymax = snap.ymax;
         double zmin = snap.zmin, zmax = snap.zmax;
-        // Only with data: an empty axes keeps its declared 0..1.
-        bool has_data = !snap.bars3d.empty() || !snap.surfaces.empty() ||
-                        !snap.scatter3d.empty() || !snap.lines3d.empty() ||
-                        !snap.surface_tri.empty();
+        // Only with shown data: an empty axes keeps its declared 0..1.
+        bool has_data = any_shown(snap.bars3d) || any_shown(snap.surfaces) ||
+                        any_shown(snap.scatter3d) || any_shown(snap.lines3d) ||
+                        any_shown(snap.surface_tri);
         for (const auto& pl: snap.planes) has_data = has_data || plane_has_data(pl);
         // Origin pins on automatic axes are folded in before padding, as data
         // (as in 2D).

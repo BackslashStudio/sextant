@@ -69,7 +69,7 @@ void ensure_layout(ImGuiID dockspace_id, float panel_width, FigureWindowState& s
 // The main menu bar: shell code, over the window's own states. Must run before
 // ensure_layout()/DockSpaceOverViewport(), so the dockspace sees the work area
 // shrunk by the menu bar.
-void draw_menu_bar(const FigureContext& fig, FigureWindowState& st) {
+void draw_menu_bar(FigureContext& fig, FigureWindowState& st) {
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("File")) {
             if (ImGui::MenuItem("Save"))
@@ -95,10 +95,22 @@ void draw_menu_bar(const FigureContext& fig, FigureWindowState& st) {
             ImGui::MenuItem("Navigate", nullptr, &st.plot.navigate_enabled);
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Left-drag pans, scroll zooms at the cursor,\n"
-                                  "double-click resets — on the selected subplot.");
+                                  "Shift-drag zooms to a box, double-click goes Home —\n"
+                                  "on the selected subplot.");
             ImGui::MenuItem("Hints", nullptr, &st.plot.hints_enabled);
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Show a tooltip for the data point under the cursor.");
+            // The whole figure's views, whether or not Navigate is on.
+            ImGui::Separator();
+            if (ImGui::MenuItem("Back", nullptr, false, can_back(st.plot.nav)))
+                nav_back(st.plot.nav, fig);
+            if (ImGui::MenuItem("Forward", nullptr, false, can_forward(st.plot.nav)))
+                nav_forward(st.plot.nav, fig);
+            if (ImGui::MenuItem("Home", nullptr, false, !at_home(st.plot.nav, fig.snap)))
+                nav_home(st.plot.nav, fig);
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                ImGui::SetTooltip("The limits and cameras the program set\n"
+                                  "(automatic where it set none).");
             ImGui::EndMenu();
         }
         // The subplot every panel edits (clicking a subplot also sets it).

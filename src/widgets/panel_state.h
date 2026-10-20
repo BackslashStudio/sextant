@@ -5,6 +5,7 @@
 #include "../plot_data_view.h"
 #include "../plot_events.h"
 #include "cell_shading.h"
+#include "nav_history.h"
 #include "../tick.h"
 #include "../renderer/figure_layout.h"
 #include <atomic>
@@ -122,6 +123,19 @@ namespace sextant {
         // Set by a selecting release, so the double-click completing it doesn't
         // also reset that cell's view.
         bool selected_by_last_click = false;
+
+        // A box zoom being dragged: from the press (x0, y0) to the cursor (x1,
+        // y1), plot pixels. `active` from a Shift press on the selected 2D cell
+        // to its release or Esc.
+        struct BoxDrag {
+            bool active = false;
+            bool cancelled = false; // Esc: the rest of the press does nothing
+            float x0 = 0.0f, y0 = 0.0f, x1 = 0.0f, y1 = 0.0f;
+        };
+        BoxDrag box;
+
+        // Back, Forward and Home (Edit menu; the double-click is Home for its cell).
+        NavHistory nav;
 
         // Dragging a grid boundary. Captured at the press (`cols`: between columns;
         // `k`: the track after it), so each frame is computed from the press state.
@@ -316,6 +330,8 @@ namespace sextant {
             std::vector<TextStyle> texts;
             std::vector<AxLineOptions> axlines;
             std::vector<AxSpanOptions> axspans;
+            std::vector<FillOptions> fills;
+            std::vector<QuiverOptions> quivers;
             std::vector<ObjectId> ids;   // seeded from, kind by kind
         };
 

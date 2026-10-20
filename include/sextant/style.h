@@ -33,7 +33,8 @@ namespace sextant {
     };
 
     // Honored for data lines, grid lines and legend swatches in every output.
-    // `None` draws no stroke, and drops a data series from the legend.
+    // `None` draws no stroke, and drops a data series from the legend; its error
+    // bars, limits and hover stay (to hide a whole series, LineOptions::visible).
     enum class LineStyle { Solid, Dashed, Dotted, DashDot, None };
 
     // How a 2D line runs between its points (matplotlib's drawstyle): Default
@@ -47,7 +48,9 @@ namespace sextant {
     // The direction an object runs: a bar stands (Vertical) or lies along x
     // (Horizontal, matplotlib's barh); a reference line or span runs across the
     // frame along x (Horizontal, matplotlib's axhline/axhspan) or along y
-    // (Vertical, axvline/axvspan).
+    // (Vertical, axvline/axvspan); a fill runs along x between two curves of y
+    // (Horizontal, matplotlib's fill_between) or along y (Vertical,
+    // fill_betweenx).
     enum class Orientation { Vertical, Horizontal };
 
     // `size` is the marker's outer diameter. Triangle points up; Star has five
@@ -225,6 +228,12 @@ namespace sextant {
         LineStyle linestyle = LineStyle::Solid;
         std::string name;
         bool show_legend = true;
+        // false hides the object as if it were absent: not drawn or exported,
+        // no legend key or colorbar, no hover or pick, and the auto limits leave
+        // it out. Its data stays (read back and replaced as usual), and so do its
+        // color, its place in the draw order and its index. Axes::set_line_visible()
+        // and the like change it after the call; the Data panel has a checkbox.
+        bool visible = true;
         float alpha = 1.0f;
 
         // Add a closing segment from the last point to the first. No point is
@@ -258,6 +267,7 @@ namespace sextant {
         MarkerStyle marker = MarkerStyle::Circle;
         std::string name;
         bool show_legend = true; // see LineOptions::show_legend
+        bool visible = true;     // see LineOptions::visible
 
         // Opacity of the marker's fill (on top of `color`'s own alpha). 0 leaves a
         // hollow marker: only its outline, if `edge_linewidth` > 0, is drawn.
@@ -305,6 +315,7 @@ namespace sextant {
         // as the marker shape filled white with a black edge.
         std::string name;
         bool show_legend = true; // see LineOptions::show_legend
+        bool visible = true;     // see LineOptions::visible
 
         // Style of the error bars passed as an ErrorBar; unset color = black.
         ErrorBarOptions errorbar;
@@ -332,6 +343,7 @@ namespace sextant {
         float alpha = 1.0f;
         std::string name;
         bool show_legend = true; // see LineOptions::show_legend
+        bool visible = true;     // see LineOptions::visible
         Color edgecolor = Color::Black;
         float linewidth = 0.5f;
 
@@ -365,6 +377,7 @@ namespace sextant {
 
         std::string name;
         bool show_legend = true; // see LineOptions::show_legend
+        bool visible = true;     // see LineOptions::visible
     };
 
     // A band across the frame between two values (Axes::axspan()).
@@ -386,6 +399,114 @@ namespace sextant {
 
         std::string name;
         bool show_legend = true; // see LineOptions::show_legend
+        bool visible = true;     // see LineOptions::visible
+    };
+
+    // The area between two curves (Axes::fill()).
+    struct FillOptions {
+        // Horizontal: the band runs along x, between y1(x) and y2(x)
+        // (matplotlib's fill_between); Vertical: along y, between x1(y) and
+        // x2(y) (fill_betweenx).
+        Orientation orientation = Orientation::Horizontal;
+        std::optional<Color> color; // see LineOptions::color
+        float alpha = 1.0f;
+
+        // The outline of each filled region, `linewidth` pixels wide (0, the
+        // default, draws none) in `edgecolor` (unset = `color`) at that color's
+        // own alpha, dashed by `linestyle`.
+        std::optional<Color> edgecolor;
+        float linewidth = 0.0f;
+        LineStyle linestyle = LineStyle::Solid;
+
+        // Steps both curves, as a line's drawstyle steps its points.
+        DrawStyle drawstyle = DrawStyle::Default;
+
+        // Points left out of the fill (the inverse of matplotlib's `where`):
+        // empty = none, else one per point (any other length throws
+        // std::invalid_argument). The filled regions are the runs of points
+        // neither excluded nor holding a NaN. Kept as the object's data: read
+        // back and replaced through FillData::exclude, not through these options.
+        std::vector<bool> exclude;
+
+        // Where a region ends at an excluded point and the curves cross between
+        // that point and the region, the region runs on to the crossing.
+        bool interpolate = false;
+
+        std::string name;
+        bool show_legend = true; // see LineOptions::show_legend
+        bool visible = true;     // see LineOptions::visible
+    };
+
+    // Where the bottom layer of a stack() starts, as matplotlib's stackplot
+    // baselines: Zero at 0; Sym centres the stack on 0; Wiggle minimises the
+    // sum of the layers' squared slopes; WeightedWiggle weights those slopes
+    // by layer size (a streamgraph).
+    enum class StackBaseline { Zero, Sym, Wiggle, WeightedWiggle };
+
+    struct StackOptions {
+        // Horizontal: the layers stack up along y over x; Vertical: along x
+        // over y (the spans then read as y and the layers' widths).
+        Orientation orientation = Orientation::Horizontal;
+        StackBaseline baseline = StackBaseline::Zero;
+
+        // Empty = one color from the cycle per layer, else one per layer (any
+        // other length throws std::invalid_argument).
+        std::vector<Color> colors;
+        // Empty = none, else one legend name per layer (likewise).
+        std::vector<std::string> names;
+
+        // As FillOptions, for every layer.
+        float alpha = 1.0f;
+        std::optional<Color> edgecolor;
+        float linewidth = 0.0f;
+        LineStyle linestyle = LineStyle::Solid;
+        DrawStyle drawstyle = DrawStyle::Default;
+        bool show_legend = true;
+        bool visible = true;     // every layer's FillOptions::visible
+    };
+
+    // Which part of a quiver arrow sits on its (x, y): the tail, the middle or
+    // the tip.
+    enum class QuiverPivot { Tail, Middle, Tip };
+
+    // An arrow field (Axes::quiver()).
+    struct QuiverOptions {
+        // Unset = the next cycle color. With a `c` per arrow (quiver(x, y, u, v,
+        // c)) each arrow is its c through cmap/vmin/vmax instead (a cyclic map
+        // wraps), `color` is unused, and the cycle is not advanced.
+        std::optional<Color> color;
+        float alpha = 1.0f; // multiplies either color's own alpha
+        Colormap cmap = Colormap::Viridis;
+        float vmin = 0.0f;
+        float vmax = 1.0f;
+        // A colorbar for the mapped colors (only with `c`); `name` labels it.
+        bool colorbar = false;
+
+        // Data units of arrow per unit of vector: an arrow runs from (x, y) to
+        // (x + amp*u, y + amp*v), so it points along (u, v) only where one
+        // unit is as long on both axes (Axes::set_aspect). Unset = chosen at the
+        // call from the data, as matplotlib does: the mean arrow becomes the x
+        // extent of the points / (1.8 * max(10, sqrt(N))). The chosen value is
+        // kept (read back through the panel; set_quiver_data() leaves it), so the
+        // frames of an animation stay comparable. matplotlib's `scale` is this
+        // one's inverse (named apart from it, so pyplot keeps `scale`).
+        std::optional<double> amp;
+        QuiverPivot pivot = QuiverPivot::Tail;
+
+        // The arrow's shape in pixels: a shaft `width` wide, then a triangular
+        // head `head_length` long and `head_width` across. An arrow shorter than
+        // its head is all head, scaled down to the arrow's length.
+        float width = 2.0f;
+        float head_width = 7.0f;
+        float head_length = 8.0f;
+
+        std::string name;
+        bool show_legend = true; // see LineOptions::show_legend
+        bool visible = true;     // see LineOptions::visible
+
+        // See LineOptions::hint_labels. Default hover text is "x=.., y=..,
+        // u=.., v=.." (plus ", c=.." with `c`), at the arrow's (x, y).
+        std::vector<std::string> hint_labels;
     };
 
     // An axis span in data coordinates. For a heatmap, `lo`/`hi` are the outer
@@ -403,6 +524,7 @@ namespace sextant {
 
         // Names the color scale on this heatmap's colorbar (see ScatterZOptions::name).
         std::string name;
+        bool visible = true; // see LineOptions::visible
 
         // Where row 0 is drawn: "lower" (bottom, the default) or "upper" (top, as
         // an image). Anything else throws std::invalid_argument.
@@ -705,6 +827,10 @@ namespace sextant {
         // when the figure's is on too). false draws this text as written, as
         // matplotlib's parse_math=False.
         bool parse_math = true;
+
+        // false hides the text, an annotate()'s arrow with it: not drawn or
+        // exported. Axes::set_text_visible() changes it after the call.
+        bool visible = true;
     };
 
     // The arrow annotate() draws from its text to the point.
@@ -802,6 +928,24 @@ namespace sextant {
     // Axes::axspan(): the band's ends, lo <= hi as axspan() stored them.
     struct AxSpanData {
         double lo = 0.0, hi = 1.0;
+    };
+
+    // Axes::fill(): `x` is the run coordinate (y when the fill is
+    // Vertical), `y1` and `y2` the curves, one value each per point (a scalar
+    // y2 comes back repeated). `exclude` as FillOptions::exclude;
+    // set_fill_data(i, FillData) takes it as given (empty clears it), the span
+    // overload keeps it while the point count is unchanged.
+    struct FillData {
+        std::vector<double> x, y1, y2;
+        std::vector<bool> exclude;
+    };
+
+    // Axes::quiver(): each arrow's position and vector, one value each per
+    // arrow, and `c`, the values its colors map (empty = one flat color).
+    // set_quiver_data(i, QuiverData) takes `c` as given (empty or one per
+    // arrow); the span overload keeps it while the arrow count is unchanged.
+    struct QuiverData {
+        std::vector<double> x, y, u, v, c;
     };
 
     // Axes::text() and annotate(): the string and where it is. `arrow` is set

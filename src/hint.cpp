@@ -2,6 +2,7 @@
 #include "renderer/surface_tri.h"
 #include "renderer/bar3d.h"
 #include "renderer/surface.h"
+#include "fill_geometry.h"
 #include <algorithm>
 #include <cstdio>
 
@@ -216,33 +217,122 @@ const AxesLayout* find_hint_cell(const std::vector<AxesLayout>& layout,
     return nullptr;
 }
 
+namespace {
+
+// The topmost bar, fill or heatmap cell under the cursor (call order, last
+// first), at the cursor; nullopt if none, or the cursor misses the surface.
+std::optional<PickHit> find_area(const RenderSnapshot& snap, const HintProjector& tr,
+                                 const std::vector<ObjectRef>& order,
+                                 float cursor_x, float cursor_y) {
+    double cx = 0.0, cy = 0.0;
+    if (!tr.at_pixel(cursor_x, cursor_y, cx, cy)) return std::nullopt;
+    // A bar's margin, as the data box around the cursor; with a corner off the
+    // plane, none.
+    double bx_lo = cx, bx_hi = cx, by_lo = cy, by_hi = cy;
+    if (!tr.data_box(cursor_x, cursor_y, kBarHitMarginPx, bx_lo, bx_hi, by_lo, by_hi)) {
+        bx_lo = bx_hi = cx;
+        by_lo = by_hi = cy;
+    }
+    const AxisScale xs = tr.x_scale(), ys = tr.y_scale();
+
+    PickHit hit;
+    hit.anchor_x = cursor_x;
+    hit.anchor_y = cursor_y;
+    hit.data_x = cx;
+    hit.data_y = cy;
+    for (std::size_t rank = order.size(); rank-- > 0;) {
+        const std::size_t o = order[rank].index;
+        switch (order[rank].kind) {
+            case PlotKind::Bar: {
+                // In data space: a scale keeps the rectangle's corners in order,
+                // and a base at 0 on a log axis reaches below any view, as drawn.
+                const BarPlot& bp = snap.bars[o];
+                const bool lying = bp.horizontal();
+                const double a_lo = lying ? by_lo : bx_lo, a_hi = lying ? by_hi : bx_hi;
+                const double v_lo = lying ? bx_lo : by_lo, v_hi = lying ? bx_hi : by_hi;
+                const double half = std::abs(bp.bar_width) * 0.5;
+                const std::size_t n = std::min(bp.centers.size(), bp.heights.size());
+                for (std::size_t i = n; i-- > 0;) {
+                    const double c = bp.centers[i], b = bp.base_at(i), t = bp.tip_at(i);
+                    if (!std::isfinite(c) || !std::isfinite(b) || !std::isfinite(t)) continue;
+                    if (c + half < a_lo || c - half > a_hi) continue;
+                    if (std::max(b, t) < v_lo || std::min(b, t) > v_hi) continue;
+                    hit.kind = PickKind::Bar;
+                    hit.object = o;
+                    hit.element = i;
+                    return hit;
+                }
+                break;
+            }
+            case PlotKind::Fill: {
+                // In scale space, where the outputs draw it (fill_geometry.h).
+                const FillPlot& fp = snap.fills[o];
+                const bool vert = fp.vertical();
+                const AxisScale& rs = vert ? ys : xs;
+                const AxisScale& vs = vert ? xs : ys;
+                const long seg = fill_segment_at(fp, rs, vs, rs.fwd(vert ? cy : cx),
+                                                 vs.fwd(vert ? cx : cy));
+                if (seg < 0) break;
+                hit.kind = PickKind::Fill;
+                hit.object = o;
+                hit.element = static_cast<std::size_t>(seg);
+                return hit;
+            }
+            case PlotKind::Heatmap: {
+                // The cell, in cell-index space via col_at()/row_at(). Storage
+                // is row 0 first regardless of origin, so undo the
+                // origin=="lower" flip to find the displayed row.
+                const auto& hp = snap.heatmaps[o];
+                if (hp.rows <= 0 || hp.cols <= 0) break;
+                const double fc = hp.col_at(cx), fr = hp.row_at(cy);
+                if (fc < 0.0 || fc >= hp.cols || fr < 0.0 || fr >= hp.rows) break;
+                const int col = std::clamp(static_cast<int>(fc), 0, hp.cols - 1);
+                const int row_from_bottom = std::clamp(static_cast<int>(fr), 0, hp.rows - 1);
+                const int row = (hp.opts.origin == "lower") ? row_from_bottom
+                                                            : (hp.rows - 1 - row_from_bottom);
+                hit.kind = PickKind::Heatmap;
+                hit.object = o;
+                hit.row = row;
+                hit.col = col;
+                hit.element = static_cast<std::size_t>(row) * static_cast<std::size_t>(hp.cols)
+                              + static_cast<std::size_t>(col);
+                return hit;
+            }
+            default: break;
+        }
+    }
+    return std::nullopt;
+}
+
+} // namespace
+
 std::optional<PickHit> find_pick(const RenderSnapshot& snap, const HintProjector& tr,
                                  float cursor_x, float cursor_y,
-                                 HintIndexCache* index) {
-    // Runs every hovered frame, in two phases: find the nearest point without
-    // any string work, then format only the winner. Candidates come from the
-    // data-space bucket grid (hint_index.h). A surface with no candidate box
-    // (a plane seen edge-on) has nothing to find. Objects are visited in call
-    // order, so of equal distances the one drawn on top wins.
-    double x_lo = 0.0, x_hi = 0.0, y_lo = 0.0, y_hi = 0.0;
-    if (!tr.data_box(cursor_x, cursor_y, kHintHitRadiusPx, x_lo, x_hi, y_lo, y_hi))
-        return std::nullopt;
-
+                                 HintIndexCache* index, float radius) {
+    // Runs every hovered frame. Points first, without any string work (only
+    // the winner is worded, by the caller); candidates come from the data-space
+    // bucket grid (hint_index.h). Objects are visited in call order, so of
+    // equal distances the one drawn on top wins. A point found beats any area,
+    // whatever the draw order; only without one do the areas answer.
     const std::vector<ObjectRef> order = call_order(snap);
 
-    float best_d2 = kHintHitRadiusPx * kHintHitRadiusPx;
-    int         best_kind = -1;          // 0 line, 1 scatter, 2 scatter_z, 3 bar
-    std::size_t best_obj  = 0, best_i = 0, best_rank = 0;
+    // A surface with no candidate box (a plane seen edge-on) has no point to find.
+    double x_lo = 0.0, x_hi = 0.0, y_lo = 0.0, y_hi = 0.0;
+    if (!tr.data_box(cursor_x, cursor_y, radius, x_lo, x_hi, y_lo, y_hi))
+        return find_area(snap, tr, order, cursor_x, cursor_y);
+
+    float best_d2 = radius * radius;
+    int         best_kind = -1;          // 0 line, 1 scatter, 2 scatter_z, 3 quiver
+    std::size_t best_obj  = 0, best_i = 0;
     float       best_px   = 0.0f, best_py = 0.0f;
 
     // The exact pixel-space circle test; candidates were only conservative.
-    auto consider = [&](float px, float py, int kind, std::size_t obj, std::size_t i,
-                        std::size_t rank) {
+    auto consider = [&](float px, float py, int kind, std::size_t obj, std::size_t i) {
         const float dx = px - cursor_x, dy = py - cursor_y;
         const float d2 = dx * dx + dy * dy;
         if (d2 <= best_d2) {
             best_d2 = d2;
-            best_kind = kind; best_obj = obj; best_i = i; best_rank = rank;
+            best_kind = kind; best_obj = obj; best_i = i;
             best_px = px; best_py = py;
         }
     };
@@ -251,7 +341,7 @@ std::optional<PickHit> find_pick(const RenderSnapshot& snap, const HintProjector
     static const PointGrid kScan{};
 
     // `hidden`: a scatter whose point i its own size hides (null = none).
-    auto sweep = [&](PlotKind kind, std::size_t o, int kind_id, std::size_t rank,
+    auto sweep = [&](PlotKind kind, std::size_t o, int kind_id,
                      const CowVec<double>& xs, const CowVec<double>& ys,
                      const auto* hidden) {
         const PointGrid& g = index ? index->grid(kind, o, xs, ys) : kScan;
@@ -260,95 +350,44 @@ std::optional<PickHit> find_pick(const RenderSnapshot& snap, const HintProjector
                           if (hidden && marker_hidden(*hidden, i)) return;
                           // Behind a perspective eye: not a candidate.
                           const HintProjector::Pt p = tr.at(xs[i], ys[i]);
-                          if (p.in_front) consider(p.x, p.y, kind_id, o, i, rank);
+                          if (p.in_front) consider(p.x, p.y, kind_id, o, i);
                       });
     };
     const ScatterPlot* const no_hiding = nullptr;
 
-    for (std::size_t rank = 0; rank < order.size(); ++rank) {
-        const std::size_t o = order[rank].index;
-        switch (order[rank].kind) {
+    for (const ObjectRef& r : order) {
+        const std::size_t o = r.index;
+        switch (r.kind) {
             case PlotKind::Line:
-                sweep(PlotKind::Line, o, 0, rank, snap.lines[o].x, snap.lines[o].y, no_hiding);
+                sweep(PlotKind::Line, o, 0, snap.lines[o].x, snap.lines[o].y, no_hiding);
                 break;
             case PlotKind::Scatter:
-                sweep(PlotKind::Scatter, o, 1, rank, snap.scatters[o].x, snap.scatters[o].y,
+                sweep(PlotKind::Scatter, o, 1, snap.scatters[o].x, snap.scatters[o].y,
                       &snap.scatters[o]);
                 break;
             case PlotKind::ScatterZ:
-                sweep(PlotKind::ScatterZ, o, 2, rank, snap.scatter_z[o].x, snap.scatter_z[o].y,
+                sweep(PlotKind::ScatterZ, o, 2, snap.scatter_z[o].x, snap.scatter_z[o].y,
                       &snap.scatter_z[o]);
                 break;
-            case PlotKind::Bar: {
-                // At the tip. The grid holds (center, tip) in either orientation,
-                // since an orientation edit leaves the data generation alone; a
-                // lying bar swaps the box and the point instead.
-                const BarPlot& bp = snap.bars[o];
-                const CowVec<double> tips = bar_tips(bp);
-                const bool lying = bp.horizontal();
-                const PointGrid& g = index ? index->grid(PlotKind::Bar, o, bp.centers, tips) : kScan;
-                g.for_each_in(bp.centers, tips, lying ? y_lo : x_lo, lying ? y_hi : x_hi,
-                              lying ? x_lo : y_lo, lying ? x_hi : y_hi,
-                              [&](std::size_t i) {
-                                  const HintProjector::Pt p = lying ? tr.at(tips[i], bp.centers[i])
-                                                                    : tr.at(bp.centers[i], tips[i]);
-                                  if (p.in_front) consider(p.x, p.y, 3, o, i, rank);
-                              });
+            case PlotKind::Quiver:
+                // At the arrow's (x, y), whatever its pivot.
+                sweep(PlotKind::Quiver, o, 3, snap.quivers[o].x, snap.quivers[o].y, no_hiding);
                 break;
-            }
             default: break;
         }
     }
 
-    // The topmost heatmap under the cursor: the cell, in cell-index space via
-    // col_at()/row_at(). Storage is row 0 first regardless of origin, so undo
-    // the origin=="lower" flip to find the displayed row.
-    std::optional<PickHit> cell;
-    std::size_t cell_rank = 0;
-    double dx = 0.0, dy = 0.0;
-    if (tr.at_pixel(cursor_x, cursor_y, dx, dy)) {
-        for (std::size_t rank = order.size(); rank-- > 0;) {
-            if (order[rank].kind != PlotKind::Heatmap) continue;
-            const std::size_t o = order[rank].index;
-            const auto& hp = snap.heatmaps[o];
-            if (hp.rows <= 0 || hp.cols <= 0) continue;
-            const double fc = hp.col_at(dx), fr = hp.row_at(dy);
-            if (fc < 0.0 || fc >= hp.cols || fr < 0.0 || fr >= hp.rows) continue;
+    if (best_kind < 0) return find_area(snap, tr, order, cursor_x, cursor_y);
 
-            const int col = std::clamp(static_cast<int>(fc), 0, hp.cols - 1);
-            const int row_from_bottom = std::clamp(static_cast<int>(fr), 0, hp.rows - 1);
-            const int row = (hp.opts.origin == "lower") ? row_from_bottom
-                                                        : (hp.rows - 1 - row_from_bottom);
-            PickHit hit;
-            hit.kind = PickKind::Heatmap;
-            hit.object = o;
-            hit.row = row;
-            hit.col = col;
-            hit.element = static_cast<std::size_t>(row) * static_cast<std::size_t>(hp.cols)
-                          + static_cast<std::size_t>(col);
-            hit.anchor_x = cursor_x;
-            hit.anchor_y = cursor_y;
-            cell = hit;
-            cell_rank = rank;
-            break;
-        }
-    }
-
-    // Phase 2: the winning point, identified but not yet worded; a heatmap
-    // drawn over it hides it, so the cell wins then.
-    if (best_kind >= 0 && !(cell && cell_rank > best_rank)) {
-        static const PickKind kKinds[4] = { PickKind::Line, PickKind::Scatter,
-                                            PickKind::ScatterZ, PickKind::Bar };
-        PickHit hit;
-        hit.kind = kKinds[best_kind];
-        hit.object = best_obj;
-        hit.element = best_i;
-        hit.anchor_x = best_px;
-        hit.anchor_y = best_py;
-        return hit;
-    }
-
-    return cell;
+    static const PickKind kKinds[4] = { PickKind::Line, PickKind::Scatter,
+                                        PickKind::ScatterZ, PickKind::Quiver };
+    PickHit hit;
+    hit.kind = kKinds[best_kind];
+    hit.object = best_obj;
+    hit.element = best_i;
+    hit.anchor_x = best_px;
+    hit.anchor_y = best_py;
+    return hit;
 }
 
 CellLayers cell_layers(const FigureAxesSnapshot& fa, const AxesLayout& cell) {
@@ -371,13 +410,14 @@ CellLayers cell_layers(const FigureAxesSnapshot& fa, const AxesLayout& cell) {
 
 std::optional<PickHit> find_pick_layers(const CellLayers& l, float cursor_x, float cursor_y,
                                         std::size_t& layer, HintIndexCache* index,
-                                        unsigned long long data_generation) {
+                                        unsigned long long data_generation, float radius) {
     std::optional<PickHit> best;
     ObjectId best_id = 0;
     float best_d2 = 0.0f;
     for (std::size_t k = 0; k < l.snaps.size(); ++k) {
         if (index) index->set_frame_key(data_generation, l.keys[k]);
-        const auto hit = find_pick(*l.snaps[k], HintProjector(*l.trs[k]), cursor_x, cursor_y, index);
+        const auto hit = find_pick(*l.snaps[k], HintProjector(*l.trs[k]), cursor_x, cursor_y, index,
+                                   radius);
         if (!hit) continue;
         const RenderSnapshot& s = *l.snaps[k];
         ObjectId id = 0;
@@ -387,12 +427,20 @@ std::optional<PickHit> find_pick_layers(const CellLayers& l, float cursor_x, flo
             case PickKind::ScatterZ: id = s.scatter_z[hit->object].id; break;
             case PickKind::Bar:      id = s.bars[hit->object].id; break;
             case PickKind::Heatmap:  id = s.heatmaps[hit->object].id; break;
+            case PickKind::Quiver:   id = s.quivers[hit->object].id; break;
+            case PickKind::Fill:     id = s.fills[hit->object].id; break;
             default: break;
         }
         const float dx = hit->anchor_x - cursor_x, dy = hit->anchor_y - cursor_y;
         const float d2 = dx * dx + dy * dy;
-        const bool cells = hit->kind == PickKind::Heatmap || (best && best->kind == PickKind::Heatmap);
-        const bool wins = !best || (cells ? id >= best_id : (d2 < best_d2 || (d2 == best_d2 && id >= best_id)));
+        const bool area = pick_is_area(hit->kind);
+        bool wins = true;
+        if (best) {
+            const bool best_area = pick_is_area(best->kind);
+            if (area != best_area) wins = !area;   // a point beats an area
+            else if (area) wins = id >= best_id;
+            else wins = d2 < best_d2 || (d2 == best_d2 && id >= best_id);
+        }
         if (wins) {
             best = hit;
             best_id = id;
@@ -428,6 +476,24 @@ std::string format_pick(const RenderSnapshot& snap, const PickHit& hit) {
             const float value = i < hp.data.size() ? hp.data[i] : 0.0f;
             return append_label(fmt_heatmap(hit.row, hit.col, value), hp.opts.hint_labels, i);
         }
+        case PickKind::Quiver: {
+            const auto& qp = snap.quivers[hit.object];
+            char buf[160];
+            if (qp.colormapped() && i < qp.c.size())
+                std::snprintf(buf, sizeof(buf), "x=%.4g, y=%.4g, u=%.4g, v=%.4g, c=%.4g", qp.x[i], qp.y[i],
+                              qp.u[i], qp.v[i], qp.c[i]);
+            else
+                std::snprintf(buf, sizeof(buf), "x=%.4g, y=%.4g, u=%.4g, v=%.4g", qp.x[i], qp.y[i],
+                              qp.u[i], qp.v[i]);
+            return append_label(buf, qp.opts.hint_labels, i);
+        }
+        case PickKind::Fill: {
+            // Where the cursor is, then the fill's name (a stack's layer).
+            std::string s = fmt_point(hit.data_x, hit.data_y);
+            const std::string& name = snap.fills[hit.object].opts.name;
+            if (!name.empty()) s += '\n' + name;
+            return s;
+        }
         default:
             return {};
     }
@@ -435,15 +501,15 @@ std::string format_pick(const RenderSnapshot& snap, const PickHit& hit) {
 
 std::optional<HintResult> find_hint(const RenderSnapshot& snap, const HintProjector& tr,
                                     float cursor_x, float cursor_y,
-                                    HintIndexCache* index) {
-    const auto hit = find_pick(snap, tr, cursor_x, cursor_y, index);
+                                    HintIndexCache* index, float radius) {
+    const auto hit = find_pick(snap, tr, cursor_x, cursor_y, index, radius);
     if (!hit) return std::nullopt;
     return HintResult{ format_pick(snap, *hit), hit->anchor_x, hit->anchor_y };
 }
 
 std::optional<PickHit> find_pick3d(const RenderSnapshot3D& snap, const Projector3D& proj,
                                    float cursor_x, float cursor_y,
-                                   HintIndexCache* index) {
+                                   HintIndexCache* index, float radius) {
     // Nearest surface first, by the depth of the cursor ray's own hit; misses
     // drop out here. `what` says which vector `object` indexes; `element` is
     // the bar index or nearest surface sample (unused for planes).
@@ -465,6 +531,7 @@ std::optional<PickHit> find_pick3d(const RenderSnapshot3D& snap, const Projector
     // Every bar, tested individually (cheap slab tests; no index).
     for (std::size_t o = 0; o < snap.bars3d.size(); ++o) {
         const Bar3DPlot& b = snap.bars3d[o];
+        if (!object_shown(b)) continue;
         for (std::size_t k = 0; k < b.count(); ++k) {
             float depth = 0.0f;
             if (bar3d_ray_hit(b, k, proj, cursor_x, cursor_y, depth))
@@ -475,6 +542,7 @@ std::optional<PickHit> find_pick3d(const RenderSnapshot3D& snap, const Projector
     // Every surface cell (two triangle tests each).
     for (std::size_t o = 0; o < snap.surfaces.size(); ++o) {
         const SurfacePlot& s = snap.surfaces[o];
+        if (!object_shown(s)) continue;
         if (s.heights.size() < s.count()) continue;
         for (std::size_t k = 0; k < s.cell_count(); ++k) {
             float depth = 0.0f;
@@ -487,6 +555,7 @@ std::optional<PickHit> find_pick3d(const RenderSnapshot3D& snap, const Projector
     // Every mesh face (one triangle test each; no acceleration structure).
     for (std::size_t o = 0; o < snap.surface_tri.size(); ++o) {
         const SurfaceTriPlot& s = snap.surface_tri[o];
+        if (!object_shown(s)) continue;
         for (std::size_t f = 0; f < s.face_count(); ++f) {
             float depth = 0.0f;
             std::size_t vertex = 0;
@@ -497,15 +566,16 @@ std::optional<PickHit> find_pick3d(const RenderSnapshot3D& snap, const Projector
 
     // Every cloud marker, tested in screen space (markers have no surface) at
     // the point's depth, so occlusion matches the picture. Radius: the
-    // marker's own half size (per point with `sizes`), at least kHintHitRadiusPx;
+    // marker's own half size (per point with `sizes`), at least `radius`;
     // a point hidden by its size is not hit.
     for (std::size_t o = 0; o < snap.scatter3d.size(); ++o) {
         const Scatter3DPlot& s = snap.scatter3d[o];
+        if (!object_shown(s)) continue;
         if (s.opts.marker == MarkerStyle::None) continue;
         const Transform3D& tf = proj.transform();
         for (std::size_t i = 0; i < s.count(); ++i) {
             if (marker_hidden(s, i)) continue;
-            const float r = std::max(marker_size_at(s, i) * 0.5f, kHintHitRadiusPx);
+            const float r = std::max(marker_size_at(s, i) * 0.5f, radius);
             const Vec3 b = tf.to_box(s.x[i], s.y[i], s.z[i]);
             if (!proj.in_front(b)) continue;
             const Px3 q = proj.project_box(b);
@@ -516,11 +586,12 @@ std::optional<PickHit> find_pick3d(const RenderSnapshot3D& snap, const Projector
     }
 
     // Every path vertex, in screen space. Radius: the drawn half width at the
-    // box centre, at least kHintHitRadiusPx.
+    // box centre, at least `radius`.
     for (std::size_t o = 0; o < snap.lines3d.size(); ++o) {
         const Line3DPlot& l = snap.lines3d[o];
+        if (!object_shown(l)) continue;
         if (l.opts.linewidth <= 0.0f) continue;
-        const float r = std::max(l.opts.linewidth * 0.5f, kHintHitRadiusPx);
+        const float r = std::max(l.opts.linewidth * 0.5f, radius);
         const Transform3D& tf = proj.transform();
         for (std::size_t i = 0; i < l.count(); ++i) {
             const Vec3 b = tf.to_box(l.x[i], l.y[i], l.z[i]);
@@ -566,7 +637,7 @@ std::optional<PickHit> find_pick3d(const RenderSnapshot3D& snap, const Projector
         const PlaneSnapshot& pl = snap.planes[c.object];
         if (index) index->set_plane(static_cast<int>(c.object));
         if (auto r = find_pick(pl.sheet, HintProjector(proj, pl.orient, pl.offset),
-                               cursor_x, cursor_y, index)) {
+                               cursor_x, cursor_y, index, radius)) {
             r->plane = static_cast<int>(c.object);
             return r;
         }
@@ -605,8 +676,8 @@ std::string format_pick3d(const RenderSnapshot3D& snap, const PickHit& hit) {
 
 std::optional<HintResult> find_hint3d(const RenderSnapshot3D& snap, const Projector3D& proj,
                                       float cursor_x, float cursor_y,
-                                      HintIndexCache* index) {
-    const auto hit = find_pick3d(snap, proj, cursor_x, cursor_y, index);
+                                      HintIndexCache* index, float radius) {
+    const auto hit = find_pick3d(snap, proj, cursor_x, cursor_y, index, radius);
     if (!hit) return std::nullopt;
     return HintResult{ format_pick3d(snap, *hit), hit->anchor_x, hit->anchor_y };
 }

@@ -7,6 +7,8 @@
 #include "../rich_text.h"
 #include "../tick_style.h"
 #include "../contour.h"
+#include "../fill_geometry.h"
+#include "../quiver_geometry.h"
 #include "../renderer/marker_shape.h"
 #include "../renderer/error_bar_shape.h"
 #include "png_writer.h"
@@ -73,7 +75,8 @@ static std::string svg_font_family(const AxesStyle& style) {
 // (rich_text.h) one <tspan> per run. Each run moves by dx/dy from where the
 // previous one ended rather than to an absolute x, so text-anchor still places
 // the whole line; a run in a script carries its own font-size, a math letter
-// font-style="italic" (a viewer slants the family when it has no italic face).
+// font-style="italic" (a viewer slants the family when it has no italic face),
+// a \mathbf run font-weight="bold".
 // `size` is the size the enclosing element sets.
 static std::string text_body(const std::string& text, const std::string& font_path, float size) {
     if (!is_rich(text)) return xml_escape(text);
@@ -86,11 +89,55 @@ static std::string text_body(const std::string& text, const std::string& font_pa
         if (r.dy != dy) o << " dy=\"" << r.dy - dy << "\"";
         if (r.size != size) o << " font-size=\"" << r.size << "\"";
         if (r.italic) o << " font-style=\"italic\"";
+        if (r.bold) o << " font-weight=\"bold\"";
+        if (!r.font.empty()) o << " font-family=\"" << svg_font_family_for(r.font) << "\"";
         o << ">" << xml_escape(r.text) << "</tspan>";
         pen = r.x + r.width;
         dy = r.dy;
     }
     return o.str();
+}
+
+// One label: `<text x y[ text-anchor] attrs>body</text>` (text_body()), or, for a
+// line with fractions or roots (RichLine::placed), a <g> carrying `attrs`
+// around a <text> whose runs sit at absolute positions from its left end, and
+// the line's bars and radicals as <rect>/<path>: a denominator steps back under
+// its numerator, and text-anchor over such a line is each viewer's guess.
+// `anchor` null = no attribute (start). `attrs` begins with a space.
+static void emit_text(std::ostringstream& o, const char* indent, float x, float y, const char* anchor,
+                      const std::string& attrs, const std::string& text, const std::string& font_path,
+                      float size) {
+    RichLine line;
+    if (is_rich(text)) line = layout_rich(font_path, size, text);
+    if (!line.placed) {
+        o << indent << "<text x=\"" << x << "\" y=\"" << y << "\"";
+        if (anchor) o << " text-anchor=\"" << anchor << "\"";
+        o << attrs << ">" << text_body(text, font_path, size) << "</text>\n";
+        return;
+    }
+    float x0 = x;
+    if (anchor && std::string_view(anchor) == "middle") x0 -= line.width * 0.5f;
+    else if (anchor && std::string_view(anchor) == "end") x0 -= line.width;
+    o << indent << "<g" << attrs << "><text x=\"" << x0 << "\" y=\"" << y << "\" text-anchor=\"start\">";
+    for (const RichRun& r : line.runs) {
+        o << "<tspan x=\"" << x0 + r.x << "\" y=\"" << y + r.dy << "\"";
+        if (r.size != size) o << " font-size=\"" << r.size << "\"";
+        if (r.italic) o << " font-style=\"italic\"";
+        if (r.bold) o << " font-weight=\"bold\"";
+        if (!r.font.empty()) o << " font-family=\"" << svg_font_family_for(r.font) << "\"";
+        o << ">" << xml_escape(r.text) << "</tspan>";
+    }
+    o << "</text>";
+    for (const RichRule& r : line.rules)
+        o << "<rect x=\"" << x0 + r.x << "\" y=\"" << y + r.y << "\" width=\"" << r.w << "\" height=\"" << r.h
+          << "\"/>";
+    for (const RichPath& p : line.paths) {
+        o << "<path d=\"";
+        for (std::size_t k = 0; k < p.pts.size(); ++k)
+            o << (k == 0 ? "M" : " L") << x0 + p.pts[k].x << " " << y + p.pts[k].y;
+        o << " Z\"/>";
+    }
+    o << "</g>\n";
 }
 
 // ` fill="..."` for a background rect, plus its opacity when not opaque. Opaque
@@ -206,24 +253,126 @@ static void emit_grid(std::ostringstream& o, const SvgAxesData& d) {
     o << "  </g>\n";
 }
 
+// A stroke path in pixels, as the stroke shader draws it.
+struct PixelPath {
+    std::vector<float> x, y;
+    bool loop = false;
+};
+
+// The joints of `p` the stroke shader bevels and an SVG viewer would miter
+// (stroke_short_bevel()), ascending.
+static std::vector<std::size_t> short_bevels(const PixelPath& p, float width) {
+    std::vector<std::size_t> out;
+    const std::size_t n = p.x.size();
+    if (n < 3) return out;
+    for (std::size_t j = p.loop ? 0 : 1; j < (p.loop ? n : n - 1); ++j) {
+        const std::size_t a = j == 0 ? n - 1 : j - 1, b = j + 1 == n ? 0 : j + 1;
+        if (stroke_short_bevel(p.x[a], p.y[a], p.x[j], p.y[j], p.x[b], p.y[b], 0.5f * width))
+            out.push_back(j);
+    }
+    return out;
+}
+
+// `p` stroked in `color` at `opacity` and `width`, with the joints in `bevels`
+// beveled: polylines from cut to cut (a loop is also cut at its first point),
+// each cut's corner a polyline of its own with 0.05 px arms carrying the join,
+// beveled or SVG's default miter. The dash phase follows the shader's arc
+// length from the first point, which a loop's closing segment continues. The
+// pieces overlap, so a translucent stroke is an opaque one in a <g> carrying
+// the opacity: composited once, as one path is (and the shader's PaintOnce).
+static void emit_beveled_stroke(std::ostringstream& o, const PixelPath& p,
+                                const std::vector<std::size_t>& bevels,
+                                const std::string& color, float opacity, float width,
+                                LineStyle ls) {
+    std::ostringstream st;
+    st << " stroke=\"" << color << "\" stroke-width=\"" << width << "\"";
+    const std::string stroke = st.str();
+    if (opacity < 1.0f) o << "  <g opacity=\"" << opacity << "\">\n";
+    const std::size_t n = p.x.size();
+    auto len = [&](std::size_t a, std::size_t b) {
+        return std::hypot(static_cast<double>(p.x[b]) - p.x[a], static_cast<double>(p.y[b]) - p.y[a]);
+    };
+    std::vector<double> arc(n, 0.0);
+    for (std::size_t i = 1; i < n; ++i) arc[i] = arc[i - 1] + len(i - 1, i);
+    const std::string dash = dash_attr(ls);
+
+    auto open = [&](double offset) {
+        o << "  <polyline fill=\"none\"" << stroke << dash;
+        if (!dash.empty()) o << " stroke-dashoffset=\"" << offset << "\"";
+    };
+    auto piece = [&](std::size_t from, std::size_t points) {
+        open(arc[from]);
+        o << " points=\"";
+        for (std::size_t k = 0; k < points; ++k) {
+            const std::size_t i = (from + k) % n;
+            o << p.x[i] << "," << p.y[i] << " ";
+        }
+        o << "\"/>\n";
+    };
+
+    std::vector<std::size_t> cuts = bevels;
+    if (p.loop && (cuts.empty() || cuts.front() != 0)) cuts.insert(cuts.begin(), 0);
+    if (p.loop) {
+        for (std::size_t c = 0; c < cuts.size(); ++c) {
+            const std::size_t from = cuts[c], to = cuts[(c + 1) % cuts.size()];
+            piece(from, (to + n - from - 1) % n + 2);
+        }
+    } else {
+        std::size_t from = 0;
+        for (const std::size_t j : cuts) {
+            piece(from, j - from + 1);
+            from = j;
+        }
+        piece(from, n - from);
+    }
+
+    constexpr float arm = 0.05f;
+    for (const std::size_t j : cuts) {
+        const std::size_t a = j == 0 ? n - 1 : j - 1, b = j + 1 == n ? 0 : j + 1;
+        const double la = len(a, j), lb = len(j, b);
+        if (!(la > 1e-6) || !(lb > 1e-6)) continue;
+        const double at = j == 0 ? arc[n - 1] + la : arc[j];
+        open(at - arm);
+        if (std::binary_search(bevels.begin(), bevels.end(), j)) o << " stroke-linejoin=\"bevel\"";
+        o << " points=\""
+          << p.x[j] - arm * (p.x[j] - p.x[a]) / la << "," << p.y[j] - arm * (p.y[j] - p.y[a]) / la << " "
+          << p.x[j] << "," << p.y[j] << " "
+          << p.x[j] + arm * (p.x[b] - p.x[j]) / lb << "," << p.y[j] + arm * (p.y[b] - p.y[j]) / lb
+          << "\"/>\n";
+    }
+    if (opacity < 1.0f) o << "  </g>\n";
+}
+
 static void emit_lines(std::ostringstream& o, const SvgAxesData& d,
                        std::span<const std::size_t> which) {
     for (const std::size_t k : which) {
         const auto& lp = d.lines[k];
         if (lp.x.empty() || lp.opts.linestyle == LineStyle::None) continue;
 
-        // A closed path is a <polygon> (fill="none") so the seam gets a join;
-        // SVG's default miterlimit 4 matches the stroke shader.
-        const char* tag = lp.opts.loop && lp.x.size() >= 2 ? "polygon" : "polyline";
-        o << "  <" << tag << " fill=\"none\" stroke=\"" << rgb(*lp.opts.color)
-          << "\" stroke-opacity=\"" << lp.opts.alpha
-          << "\" stroke-width=\"" << lp.opts.linewidth << "\""
-          << dash_attr(lp.opts.linestyle)
-          << " points=\"";
+        PixelPath path;
+        path.loop = lp.opts.loop && lp.x.size() >= 2;
         StrokePath sp;
         sp.build(lp.x.data(), lp.y.data(), lp.x.size(), lp.opts.drawstyle, lp.opts.loop);
-        for (std::size_t i = 0; i < sp.n; ++i)
-            o << d.layout.tr.to_px(sp.x[i]) << "," << d.layout.tr.to_py(sp.y[i]) << " ";
+        for (std::size_t i = 0; i < sp.n; ++i) {
+            path.x.push_back(d.layout.tr.to_px(sp.x[i]));
+            path.y.push_back(d.layout.tr.to_py(sp.y[i]));
+        }
+        std::ostringstream stroke;
+        stroke << " stroke=\"" << rgb(*lp.opts.color) << "\" stroke-opacity=\"" << lp.opts.alpha
+               << "\" stroke-width=\"" << lp.opts.linewidth << "\"";
+
+        // Where the shader bevels a joint SVG would miter, the path is cut there.
+        const std::vector<std::size_t> bevels = short_bevels(path, lp.opts.linewidth);
+        if (!bevels.empty()) {
+            emit_beveled_stroke(o, path, bevels, rgb(*lp.opts.color), lp.opts.alpha, lp.opts.linewidth,
+                                lp.opts.linestyle);
+            continue;
+        }
+        // A closed path is a <polygon> (fill="none") so the seam gets a join;
+        // SVG's default miterlimit 4 matches the stroke shader.
+        o << "  <" << (path.loop ? "polygon" : "polyline") << " fill=\"none\"" << stroke.str()
+          << dash_attr(lp.opts.linestyle) << " points=\"";
+        for (std::size_t i = 0; i < path.x.size(); ++i) o << path.x[i] << "," << path.y[i] << " ";
         o << "\"/>\n";
     }
 }
@@ -541,6 +690,100 @@ static void emit_axspan(std::ostringstream& o, const SvgAxesData& d, const AxSpa
     o << "/>\n";
 }
 
+// A fill as one <polygon> per region (fill_geometry.h, as the raster path),
+// its outline the polygon's stroke. A region whose curves cross pinches
+// there; the nonzero rule fills both lobes, as the raster's triangles do.
+static void emit_fill(std::ostringstream& o, const SvgAxesData& d, const FillPlot& p) {
+    const CoordTransform& tr = d.layout.tr;
+    const bool vert = p.vertical();
+    const std::vector<FillRun> runs = fill_runs(p, vert ? tr.ys : tr.xs, vert ? tr.xs : tr.ys);
+    const Color& c = *p.opts.color;
+    const float a = c.a * p.opts.alpha;
+    const bool edged = p.opts.linewidth > 0.0f && p.opts.linestyle != LineStyle::None;
+    std::string stroke;
+    if (edged) {
+        const Color ec = fill_edge(p);
+        std::ostringstream s;
+        s << " stroke=\"" << rgb(ec) << "\" stroke-opacity=\"" << ec.a << "\" stroke-width=\""
+          << p.opts.linewidth << "\"";
+        stroke = s.str();
+    }
+    for (const FillRun& run : runs) {
+        PixelPath ring;
+        ring.loop = true;
+        fill_outline(run, [&](double r, double v) {
+            ring.x.push_back(tr.scale_to_px(vert ? v : r));
+            ring.y.push_back(tr.scale_to_py(vert ? r : v));
+        });
+        // The outline as the raster strokes it (draw_fill): repeated points
+        // dropped. Where it bevels a joint SVG would miter, the polygon is fill
+        // only and the outline is drawn cut at those joints.
+        std::vector<std::size_t> bevels;
+        PixelPath outline;
+        if (edged) {
+            outline.loop = true;
+            for (std::size_t i = 0; i < ring.x.size(); ++i) {
+                if (!outline.x.empty() && outline.x.back() == ring.x[i] && outline.y.back() == ring.y[i])
+                    continue;
+                outline.x.push_back(ring.x[i]);
+                outline.y.push_back(ring.y[i]);
+            }
+            while (outline.x.size() >= 2 && outline.x.front() == outline.x.back()
+                   && outline.y.front() == outline.y.back()) {
+                outline.x.pop_back();
+                outline.y.pop_back();
+            }
+            bevels = short_bevels(outline, p.opts.linewidth);
+        }
+
+        o << "    <polygon fill=\"" << rgb(c) << "\"";
+        if (a < 1.0f) o << " fill-opacity=\"" << a << "\"";
+        if (edged && bevels.empty()) o << stroke << dash_attr(p.opts.linestyle);
+        o << " points=\"";
+        for (std::size_t i = 0; i < ring.x.size(); ++i) o << ring.x[i] << "," << ring.y[i] << " ";
+        o << "\"/>\n";
+        if (!bevels.empty()) {
+            const Color ec = fill_edge(p);
+            emit_beveled_stroke(o, outline, bevels, rgb(ec), ec.a, p.opts.linewidth, p.opts.linestyle);
+        }
+    }
+}
+
+// A quiver as one <polygon> per arrow (quiver_geometry.h, as the raster path),
+// in a <g> carrying the fill; a colormapped quiver's fill is on each polygon,
+// the group keeping the quiver's opacity.
+static void emit_quiver(std::ostringstream& o, const SvgAxesData& d, const QuiverPlot& p) {
+    const CoordTransform& tr = d.layout.tr;
+    const bool mapped = p.colormapped();
+    const Color& c = *p.opts.color;
+    const float a = mapped ? p.opts.alpha : c.a * p.opts.alpha;
+    bool open = false;
+    for_each_quiver_arrow(p, tr.xs, tr.ys, [&](std::size_t i, double tx, double ty, double hx, double hy) {
+        float pts[14];
+        const int n = arrow_outline(tr.scale_to_px(tx), tr.scale_to_py(ty), tr.scale_to_px(hx),
+                                    tr.scale_to_py(hy), p.opts, pts);
+        if (n == 0) return;
+        if (!open) {
+            o << "    <g";
+            if (!mapped) o << " fill=\"" << rgb(c) << "\"";
+            if (a < 1.0f) o << " fill-opacity=\"" << a << "\"";
+            o << ">\n";
+            open = true;
+        }
+        o << "      <polygon ";
+        if (mapped) {
+            // A map's own alpha (all 1 for the built-ins) overrides the group's.
+            const Color ci = quiver_arrow_color(p, i);
+            o << "fill=\"" << rgb(ci) << "\" ";
+            if (ci.a < 1.0f) o << "fill-opacity=\"" << ci.a * p.opts.alpha << "\" ";
+        }
+        o << "points=\"";
+        for (int k = 0; k < n; ++k) o << pts[2 * k] << "," << pts[2 * k + 1] << " ";
+        o << "\"/>\n";
+    });
+    if (open) o << "    </g>\n";
+}
+
 // The plot objects in call order, each with its error bars, as
 // DataRenderer::draw_plots().
 static void emit_object(std::ostringstream& o, const SvgAxesData& d, const ObjectRef& r) {
@@ -571,6 +814,12 @@ static void emit_object(std::ostringstream& o, const SvgAxesData& d, const Objec
         case PlotKind::AxSpan:
             emit_axspan(o, d, d.axspans[r.index]);
             break;
+        case PlotKind::Fill:
+            emit_fill(o, d, d.fills[r.index]);
+            break;
+        case PlotKind::Quiver:
+            emit_quiver(o, d, d.quivers[r.index]);
+            break;
         default: break;
     }
 }
@@ -593,7 +842,7 @@ static void emit_plots(std::ostringstream& o, const SvgAxesData& d) {
 // border and grid, as in render_frame().
 static bool has_contours(const SvgAxesData& d) {
     for (const auto& hp : d.heatmaps)
-        if (!hp.opts.contours.empty() && hp.rows > 0 && hp.cols > 0) return true;
+        if (object_shown(hp) && !hp.opts.contours.empty() && hp.rows > 0 && hp.cols > 0) return true;
     return false;
 }
 
@@ -633,7 +882,7 @@ static void emit_contour_draw(std::ostringstream& o, const SvgAxesData& d,
 
 static void emit_contours(std::ostringstream& o, const SvgAxesData& d) {
     for (const auto& hp : d.heatmaps) {
-        if (hp.opts.contours.empty() || hp.rows <= 0 || hp.cols <= 0) continue;
+        if (!object_shown(hp) || hp.opts.contours.empty() || hp.rows <= 0 || hp.cols <= 0) continue;
         const ContourSet  set = trace_contours(hp);
         const ContourDraw cd  = plan_contours(set, d.layout.tr, hp.opts,
                                               d.axes_style.font_path);
@@ -777,8 +1026,8 @@ static void emit_ticks_and_labels(std::ostringstream& o, const SvgAxesData& d) {
         for (const auto& t : d.layout.xticks) {
             if (!st.show_xticks || !d.layout.xlabels) break;
             float px = d.layout.tr.to_px(t.value);
-            o << "    <text x=\"" << px << "\" y=\"" << d.layout.xlabel_top + top_baseline_offset(fp, fsz, t.label)
-              << "\" text-anchor=\"middle\">" << text_body(t.label, fp, fsz) << "</text>\n";
+            emit_text(o, "    ", px, d.layout.xlabel_top + top_baseline_offset(fp, fsz, t.label), "middle", "",
+                      t.label, fp, fsz);
         }
     };
     const auto y_labels = [&] {
@@ -787,9 +1036,8 @@ static void emit_ticks_and_labels(std::ostringstream& o, const SvgAxesData& d) {
         for (const auto& t : d.layout.yticks) {
             if (!st.show_yticks || !d.layout.ylabels) break;
             float py = d.layout.tr.to_py(t.value);
-            o << "    <text x=\"" << d.layout.ylabel_x
-              << "\" y=\"" << py + middle_baseline_offset(fp, fsz, t.label)
-              << "\" text-anchor=\"" << y_anchor << "\">" << text_body(t.label, fp, fsz) << "</text>\n";
+            emit_text(o, "    ", d.layout.ylabel_x, py + middle_baseline_offset(fp, fsz, t.label), y_anchor, "",
+                      t.label, fp, fsz);
         }
     };
     if (same_labels(xk, yk)) {
@@ -811,21 +1059,21 @@ static void emit_ticks_and_labels(std::ostringstream& o, const SvgAxesData& d) {
 static void emit_titles(std::ostringstream& o, const SvgAxesData& d) {
     const std::string& fp = d.axes_style.font_path;
 
+    const auto font_attrs = [&](float fsz, const Color& c) {
+        std::ostringstream a;
+        a << " font-family=\"" << svg_font_family(d.axes_style) << "\""
+          << " font-size=\"" << fsz << "\" fill=\"" << rgb(c) << "\"";
+        return a.str();
+    };
     if (!d.title.empty()) {
         const float fsz = d.axes_style.title_fontsize;
-        o << "  <text x=\"" << d.layout.title_x
-          << "\" y=\"" << d.layout.title_y + middle_baseline_offset(fp, fsz, d.title)
-          << "\" text-anchor=\"middle\" font-family=\"" << svg_font_family(d.axes_style) << "\""
-          << " font-size=\"" << fsz << "\" fill=\"" << rgb(d.axes_style.title_color) << "\">"
-          << text_body(d.title, fp, fsz) << "</text>\n";
+        emit_text(o, "  ", d.layout.title_x, d.layout.title_y + middle_baseline_offset(fp, fsz, d.title), "middle",
+                  font_attrs(fsz, d.axes_style.title_color), d.title, fp, fsz);
     }
     if (!d.xtitle.empty()) {
         const float fsz = d.axes_style.xtitle_fontsize;
-        o << "  <text x=\"" << d.layout.xtitle_x
-          << "\" y=\"" << d.layout.xtitle_y + middle_baseline_offset(fp, fsz, d.xtitle)
-          << "\" text-anchor=\"middle\" font-family=\"" << svg_font_family(d.axes_style) << "\""
-          << " font-size=\"" << fsz << "\" fill=\"" << rgb(d.axes_style.xtitle_color) << "\">"
-          << text_body(d.xtitle, fp, fsz) << "</text>\n";
+        emit_text(o, "  ", d.layout.xtitle_x, d.layout.xtitle_y + middle_baseline_offset(fp, fsz, d.xtitle),
+                  "middle", font_attrs(fsz, d.axes_style.xtitle_color), d.xtitle, fp, fsz);
     }
     if (!d.ytitle.empty()) {
         const float fsz = d.axes_style.ytitle_fontsize;
@@ -833,12 +1081,10 @@ static void emit_titles(std::ostringstream& o, const SvgAxesData& d) {
         const float cy = d.layout.ytitle_y;
         // Baseline shift in the rotated frame (as NanoVG does after
         // nvgRotate): under rotate(-90) local +y is global +x.
-        o << "  <text x=\"0\" y=\"" << middle_baseline_offset(fp, fsz, d.ytitle) << "\""
-          << " text-anchor=\"middle\" font-family=\"" << svg_font_family(d.axes_style) << "\""
-          << " font-size=\"" << fsz << "\" fill=\"" << rgb(d.axes_style.ytitle_color) << "\""
-          << " transform=\"rotate(-90," << cx << "," << cy << ")"
-          <<   " translate(" << cx << "," << cy << ")\">"
-          << text_body(d.ytitle, fp, fsz) << "</text>\n";
+        std::ostringstream a;
+        a << font_attrs(fsz, d.axes_style.ytitle_color) << " transform=\"rotate(-90," << cx << "," << cy << ")"
+          << " translate(" << cx << "," << cy << ")\"";
+        emit_text(o, "  ", 0.0f, middle_baseline_offset(fp, fsz, d.ytitle), "middle", a.str(), d.ytitle, fp, fsz);
     }
 }
 
@@ -846,7 +1092,7 @@ static void emit_titles(std::ostringstream& o, const SvgAxesData& d) {
 // render_frame()'s order: over the frame furniture, under the legend.
 static void emit_texts(std::ostringstream& o, const SvgAxesData& d, std::size_t idx) {
     for (const TextDraw& t : d.texts) {
-        const MathTextScope math(t.math);
+        const MathTextScope math(t.math, mathtext_font());
         o << (t.clip ? "  <g clip-path=\"url(#plotArea" + std::to_string(idx) + ")\">\n" : "  <g>\n");
         if (t.shaft.size() >= 4 && t.linewidth > 0.0f) {
             o << "    <polyline fill=\"none\" stroke=\"" << rgb(t.arrow_color)
@@ -884,10 +1130,10 @@ static void emit_texts(std::ostringstream& o, const SvgAxesData& d, std::size_t 
         const char* anchor = t.ha == HAlign::Left ? "start" : t.ha == HAlign::Right ? "end" : "middle";
         for (const TextDraw::Line& l : t.lines) {
             if (l.text.empty()) continue;
-            o << "      <text x=\"" << l.x << "\" y=\"" << l.y << "\" text-anchor=\"" << anchor
-              << "\" font-family=\"" << svg_font_family_for(t.font_path) << "\" font-size=\"" << t.fontsize
-              << "\" fill=\"" << rgb(t.color) << "\" fill-opacity=\"" << t.color.a << "\">"
-              << text_body(l.text, t.font_path, t.fontsize) << "</text>\n";
+            std::ostringstream a;
+            a << " font-family=\"" << svg_font_family_for(t.font_path) << "\" font-size=\"" << t.fontsize
+              << "\" fill=\"" << rgb(t.color) << "\" fill-opacity=\"" << t.color.a << "\"";
+            emit_text(o, "      ", l.x, l.y, anchor, a.str(), l.text, t.font_path, t.fontsize);
         }
         o << "    </g>\n  </g>\n";
     }
@@ -946,6 +1192,18 @@ static void emit_legend(std::ostringstream& o, const SvgAxesData& d, std::size_t
               << "\" x2=\"" << sx1 << "\" y2=\"" << cy
               << "\" stroke=\"" << fill << "\" stroke-width=\"2\""
               << dash_attr(e.style) << "/>\n";
+        } else if (e.kind == LegendKind::Arrow) {
+            // A quiver's key, as the raster's (legend_arrow_outline()).
+            float pts[14];
+            const int n = legend_arrow_outline(sx0, sx1, cy, pts);
+            o << "    <polygon fill=\"" << fill << "\"";
+            if (e.color.a < 1.0f) o << " fill-opacity=\"" << e.color.a << "\"";
+            if (e.edge.a > 0.0f)
+                o << " stroke=\"" << rgb(e.edge) << "\" stroke-opacity=\"" << e.edge.a
+                  << "\" stroke-width=\"1\"";
+            o << " points=\"";
+            for (int k = 0; k < n; ++k) o << pts[2 * k] << "," << pts[2 * k + 1] << " ";
+            o << "\"/>\n";
         } else if (e.kind == LegendKind::Marker) {
             // Same emitter as the data markers. Alpha 0 edge = none (all but
             // scatter_z).
@@ -956,16 +1214,20 @@ static void emit_legend(std::ostringstream& o, const SvgAxesData& d, std::size_t
             o << "    <rect x=\"" << sx0 << "\" y=\"" << cy - 5.f
               << "\" width=\"" << kLegendSwatchW << "\" height=\"10\" fill=\"" << fill << "\"";
             if (e.color.a < 1.0f) o << " fill-opacity=\"" << e.color.a << "\"";
+            // A fill's outline (alpha 0 = none), 1 px as a marker key's.
+            if (e.edge.a > 0.0f)
+                o << " stroke=\"" << rgb(e.edge) << "\" stroke-opacity=\"" << e.edge.a
+                  << "\" stroke-width=\"1\"";
             o << "/>\n";
         }
 
-        o << "    <text x=\"" << sx1 + kLegendGap
-          << "\" y=\"" << cy + middle_baseline_offset(opts.font_path, fsz, e.name)
-          << "\" font-family=\"" << svg_font_family_for(opts.font_path)
+        std::ostringstream a;
+        a << " font-family=\"" << svg_font_family_for(opts.font_path)
           << "\" font-size=\"" << fsz
           << "\" fill=\"" << rgb(opts.text_color)
-          << "\" fill-opacity=\"" << opts.text_color.a << "\">"
-          << text_body(e.name, opts.font_path, fsz) << "</text>\n";
+          << "\" fill-opacity=\"" << opts.text_color.a << "\"";
+        emit_text(o, "    ", sx1 + kLegendGap, cy + middle_baseline_offset(opts.font_path, fsz, e.name), nullptr,
+                  a.str(), e.name, opts.font_path, fsz);
     }
 }
 
@@ -1008,13 +1270,13 @@ static void emit_colorbar(std::ostringstream& o, const SvgAxesData& d, std::size
         // one (baseline shift in the rotated frame, as for the y title).
         const float name_base = middle_baseline_offset(cb.font_path, cb.fontsize, cbx.name);
         if (!cbx.name.empty() && cbx.horizontal) {
-            o << "    <text x=\"" << cbx.name_x << "\" y=\"" << cbx.name_y + name_base
-              << "\" text-anchor=\"middle\">" << text_body(cbx.name, cb.font_path, cb.fontsize) << "</text>\n";
+            emit_text(o, "    ", cbx.name_x, cbx.name_y + name_base, "middle", "", cbx.name, cb.font_path,
+                      cb.fontsize);
         } else if (!cbx.name.empty()) {
-            o << "    <text x=\"0\" y=\"" << name_base << "\" text-anchor=\"middle\""
-              << " transform=\"rotate(-90," << cbx.name_x << "," << cbx.name_y << ")"
-              <<   " translate(" << cbx.name_x << "," << cbx.name_y << ")\">"
-              << text_body(cbx.name, cb.font_path, cb.fontsize) << "</text>\n";
+            std::ostringstream a;
+            a << " transform=\"rotate(-90," << cbx.name_x << "," << cbx.name_y << ")"
+              << " translate(" << cbx.name_x << "," << cbx.name_y << ")\"";
+            emit_text(o, "    ", 0.0f, name_base, "middle", a.str(), cbx.name, cb.font_path, cb.fontsize);
         }
         o << "  </g>\n";
     }
@@ -1080,12 +1342,12 @@ static void emit_box3d_labels(std::ostringstream& o,
     for (const auto& l : labels) {
         if (l.text.empty()) continue;
         // Centred on the anchor in both outputs.
-        o << "  <text x=\"" << l.x
-          << "\" y=\"" << l.y + middle_baseline_offset(l.font_path, l.fontsize, l.text)
-          << "\" text-anchor=\"middle\" font-family=\"" << svg_font_family_for(l.font_path)
+        std::ostringstream a;
+        a << " font-family=\"" << svg_font_family_for(l.font_path)
           << "\" font-size=\"" << l.fontsize << "\" fill=\"" << rgb(l.color)
-          << "\" fill-opacity=\"" << l.color.a << "\">"
-          << text_body(l.text, l.font_path, l.fontsize) << "</text>\n";
+          << "\" fill-opacity=\"" << l.color.a << "\"";
+        emit_text(o, "  ", l.x, l.y + middle_baseline_offset(l.font_path, l.fontsize, l.text), "middle", a.str(),
+                  l.text, l.font_path, l.fontsize);
     }
 }
 
@@ -1511,12 +1773,13 @@ std::string svg_document(const SvgFigureData& fd) {
         const char* anchor = so.align == HAlign::Left  ? "start"
                            : so.align == HAlign::Right ? "end"
                                                        : "middle";
-        o << "  <text x=\"" << suptitle_anchor_x(static_cast<float>(fd.width), so)
-          << "\" y=\"" << cy + middle_baseline_offset(so.font_path, fsz, fd.suptitle)
-          << "\" text-anchor=\"" << anchor << "\" font-family=\"" << svg_font_family_for(so.font_path) << "\""
+        std::ostringstream a;
+        a << " font-family=\"" << svg_font_family_for(so.font_path) << "\""
           << " font-size=\"" << fsz << "\" fill=\"" << rgb(so.color)
-          << "\" fill-opacity=\"" << so.color.a << "\">"
-          << text_body(fd.suptitle, so.font_path, fsz) << "</text>\n";
+          << "\" fill-opacity=\"" << so.color.a << "\"";
+        emit_text(o, "  ", suptitle_anchor_x(static_cast<float>(fd.width), so),
+                  cy + middle_baseline_offset(so.font_path, fsz, fd.suptitle), anchor, a.str(), fd.suptitle,
+                  so.font_path, fsz);
     }
 
     for (std::size_t i = 0; i < fd.axes.size(); ++i)

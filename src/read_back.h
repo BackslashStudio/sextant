@@ -30,6 +30,18 @@ namespace sextant::read_back {
         return v[i];
     }
 
+    // set_<kind>_visible(): the flag, with a fresh visible_stamp so a Data-panel
+    // style edit made before it keeps it (assign_plot_opts()).
+    template <typename V>
+    void set_visible(V& v, std::size_t i, bool visible, const char* who) {
+        auto& p = at(v, i, who);
+        visible_flag(p.opts) = visible;
+        p.visible_stamp = next_snapshot_generation();
+    }
+
+    template <typename V>
+    bool visible(const V& v, std::size_t i, const char* who) { return object_shown(at(v, i, who)); }
+
     // For set_*_data(): error bars, hint_labels, marker sizes and bar bases stay while the
     // point count (a grid's shape) is unchanged and are dropped otherwise, as
     // they would no longer line up. Then takes a fresh data_stamp.
@@ -98,6 +110,49 @@ namespace sextant::read_back {
 
     inline Line3DData to_data(const Line3DPlot& p) {
         return { p.x.get(), p.y.get(), p.z.get(), p.colors.get() };
+    }
+
+    // A fill's three columns, one value each per point.
+    inline void check_fill(std::size_t nx, std::size_t n1, std::size_t n2, const char* who) {
+        if (n1 != nx || n2 != nx)
+            throw std::invalid_argument(std::string(who) + ": x, y1 and y2 must have the same length");
+    }
+
+    // FillOptions::exclude for `n` points, as the column the plot keeps (1 =
+    // excluded): empty, or one per point.
+    inline std::vector<double> take_exclude(const std::vector<bool>& exclude, std::size_t n,
+                                            const char* who) {
+        if (!exclude.empty() && exclude.size() != n)
+            throw std::invalid_argument(std::string(who) + ": exclude must be empty or one per point (got "
+                                        + std::to_string(exclude.size()) + " for "
+                                        + std::to_string(n) + " points)");
+        std::vector<double> out(exclude.size());
+        for (std::size_t i = 0; i < out.size(); ++i) out[i] = exclude[i] ? 1.0 : 0.0;
+        return out;
+    }
+
+    inline FillData to_data(const FillPlot& p) {
+        std::vector<bool> exclude(p.exclude.size());
+        for (std::size_t i = 0; i < exclude.size(); ++i) exclude[i] = p.excluded(i);
+        return { p.x.get(), p.y1.get(), p.y2.get(), std::move(exclude) };
+    }
+
+    // A quiver's four columns, one value each per arrow.
+    inline void check_quiver(std::size_t nx, std::size_t ny, std::size_t nu, std::size_t nv,
+                             const char* who) {
+        if (ny != nx || nu != nx || nv != nx)
+            throw std::invalid_argument(std::string(who) + ": x, y, u and v must have the same length");
+    }
+
+    // A quiver's colour values: none, or one per arrow.
+    inline void check_quiver_c(std::size_t nc, std::size_t n, const char* who) {
+        if (nc != 0 && nc != n)
+            throw std::invalid_argument(std::string(who) + ": c must be empty or one per arrow (got "
+                                        + std::to_string(nc) + " for " + std::to_string(n) + " arrows)");
+    }
+
+    inline QuiverData to_data(const QuiverPlot& p) {
+        return { p.x.get(), p.y.get(), p.u.get(), p.v.get(), p.c.get() };
     }
 
     inline AxLineData to_data(const AxLinePlot& p) { return { p.value }; }

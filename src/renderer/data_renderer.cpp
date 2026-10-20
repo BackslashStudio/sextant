@@ -10,6 +10,8 @@
 #include "plane2d.h"
 #include "../line_dash.h"
 #include "../line_steps.h"
+#include "../fill_geometry.h"
+#include "../quiver_geometry.h"
 #include "../reference_lines.h"
 #include "error_bar_shape.h"
 #include <glad/glad.h>
@@ -19,6 +21,7 @@
 #include <cstdint>
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
@@ -62,11 +65,18 @@ void main() { FragColor = uColor; }
     // prev/p0/p1/next from the same buffer at four offsets; the buffer is padded
     // with the first and last point, so the ends degenerate to butt caps.
     //
-    // Joins are mitered. The `den > 1/kMiterLimit` guard handles near-180-degree
-    // reversals, where `na + nb` cancels and its direction is noise.
+    // Joins are mitered up to kMiterLimit (SVG's default stroke-miterlimit, which
+    // svg_writer relies on), and beveled past it or where the inner miter corner
+    // would run past half of either segment (a short segment between sharp turns,
+    // whose quad would otherwise fold over). A bevel ends both segments square
+    // on their own normals and the segment before the joint also draws the
+    // outer triangle between the two ends. Both segments decide the joint from
+    // the same three points, so they agree. (Before, past the limit both took the
+    // next segment's normal, which skewed the earlier segment into a wedge.)
     static constexpr char k_lineseg_vert[] = R"(
 #version 410 core
-layout(location = 0) in vec2 aCorner;   // x: 0 at p0, 1 at p1;  y: -1/+1 across
+layout(location = 0) in vec2 aCorner;   // quad: x 0 at p0, 1 at p1, y -1/+1 across;
+                                        // x = 2: the bevel at p1, y picks the vertex
 layout(location = 1) in vec2 aPrev;     // instance: the four consecutive points
 layout(location = 2) in vec2 aP0;
 layout(location = 3) in vec2 aP1;
@@ -80,16 +90,27 @@ uniform float uHalfWidth;   // logical pixels
 uniform float uDistScale;   // aDist was measured at a different zoom; rescale
 const float kMiterLimit = 4.0;
 
-// Offset at the joint of segments with left normals na and nb; falls back to
-// nb when the bisector is unusable.
-vec2 joint_offset(vec2 na, vec2 nb) {
-    vec2 m = na + nb;
+// The joint at j of segments a->j and j->b: true for a miter, with `off` the
+// offset of the left corners (1/cos(theta/2) along the bisector); false for a
+// bevel or a path end (a zero-length neighbour), where each side keeps its own
+// normal.
+bool miter_joint(vec2 a, vec2 j, vec2 b, out vec2 off) {
+    off = vec2(0.0);
+    vec2 da = j - a, db = b - j;
+    float la = length(da), lb = length(db);
+    if (la <= 1e-6 || lb <= 1e-6) return false;
+    vec2 nb = vec2(-db.y, db.x) / lb;
+    vec2 m = vec2(-da.y, da.x) / la + nb;
     float ml = length(m);
-    if (ml < 1e-3) return nb;              // ~180 degree reversal
+    if (ml < 1e-3) return false;           // ~180 degree reversal
     m /= ml;
     float den = dot(m, nb);
-    if (den <= 1.0 / kMiterLimit) return nb;   // too sharp, or den gone negative
-    return m / den;                            // 1/cos(theta/2)
+    if (den <= 1.0 / kMiterLimit) return false;   // too sharp, or den gone negative
+    // The inner corner slides tan(theta/2) half widths along both segments; past
+    // half the shorter one a quad would fold over itself.
+    if (uHalfWidth * sqrt(max(1.0 - den * den, 0.0)) > 0.5 * min(la, lb) * den) return false;
+    off = m / den;                                // 1/cos(theta/2)
+    return true;
 }
 
 void main() {
@@ -100,32 +121,39 @@ void main() {
 
     vec2  d  = p1 - p0;
     float dl = length(d);
-    if (dl < 1e-6) {                        // zero-length segment: cull the quad
-        gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
-        return;
-    }
-    vec2 nb = vec2(-d.y, d.x) / dl;         // this segment's left normal
+    vec2 nb = vec2(-d.y, d.x) / max(dl, 1e-6);   // this segment's left normal
 
-    vec2 o0 = nb;
-    vec2 dp = p0 - pp;
-    float dpl = length(dp);
-    if (dpl > 1e-6) o0 = joint_offset(vec2(-dp.y, dp.x) / dpl, nb);
+    vec2 o0, o1;
+    if (!miter_joint(pp, p0, p1, o0)) o0 = nb;
+    bool bevel = !miter_joint(p0, p1, pn, o1);
+    if (bevel) o1 = nb;
 
-    vec2 o1 = nb;
+    float t = min(aCorner.x, 1.0);
+    vec2 quad = mix(p0, p1, t) + mix(o0, o1, t) * (aCorner.y * uHalfWidth);
+
+    // The bevel: p1 and the two segments' corners on the outer side. None for
+    // a miter, at the end of the path, or at an exact reversal (no area).
     vec2 dn = pn - p1;
     float dnl = length(dn);
-    if (dnl > 1e-6) o1 = joint_offset(nb, vec2(-dn.y, dn.x) / dnl);
+    float turn = (d.x * dn.y - d.y * dn.x) / (max(dl, 1e-6) * max(dnl, 1e-6));   // sin of the turn
+    float side = turn > 0.0 ? -1.0 : 1.0;
+    bool beveled = bevel && dnl > 1e-6 && abs(turn) > 1e-4;
+    float open = aCorner.y > 0.5 ? side * uHalfWidth : 0.0;
+    vec2 n = aCorner.y < 1.5 ? nb : vec2(-dn.y, dn.x) / max(dnl, 1e-6);
+    vec2 px = aCorner.x > 1.5 ? p1 + n * open : quad;
 
-    vec2 px = mix(p0, p1, aCorner.x)
-            + mix(o0, o1, aCorner.x) * (aCorner.y * uHalfWidth);
     vec2 ndc = (px / uResolution) * 2.0 - 1.0;
     ndc.y = -ndc.y;
-    gl_Position = vec4(ndc, 0.0, 1.0);
+    // A zero-length segment is culled (its quad would have no direction), and
+    // so is a bevel that is not drawn: left as a triangle collapsed onto p1,
+    // Mesa's llvmpipe dropped the whole draw (no line at all; CI, 2026-10-19).
+    bool cull = dl < 1e-6 || (aCorner.x > 1.5 && !beveled);
+    gl_Position = cull ? vec4(2.0, 2.0, 2.0, 1.0) : vec4(ndc, 0.0, 1.0);
 
     // Distance along the centreline (so dashes don't shear across the width);
     // only the accumulated prefix needs the uDistScale correction.
     float d0 = aDist * uDistScale;
-    vDist = d0 + dl * aCorner.x;
+    vDist = d0 + dl * min(aCorner.x, 1.0);   // the bevel sits at p1
 }
 )";
 
@@ -147,6 +175,84 @@ void main() {
     }
     FragColor = uColor;
 }
+)";
+
+    // k_lineseg_vert's aCorner per instance, drawn as GL_TRIANGLES: the
+    // segment's quad, then the bevel at p1.
+    static constexpr float k_lineseg_corners[] = {
+        0.f, -1.f, 0.f, 1.f, 1.f, -1.f,
+        0.f, 1.f, 1.f, -1.f, 1.f, 1.f,
+        2.f, 0.f, 2.f, 1.f, 2.f, 2.f};
+    static constexpr int k_lineseg_vertices = sizeof(k_lineseg_corners) / (2 * sizeof(float));
+
+    // Quiver arrows: one instance per arrow, its tail and tip in scale space
+    // minus an anchor (uScale/uOffset map them to pixels, so pan/zoom reuse the
+    // buffer; at extreme zoom they are pixels with an identity map). The shape
+    // is built here in pixels, as quiver_geometry.h's arrow_outline(): outline
+    // points 0..6 (the shaft's corners at the tail, the shaft's and the head's at
+    // the head's base, the tip, then back down the other side), drawn as the
+    // head (2,3,4) and the shaft (0,1,5), (0,5,6). An arrow shorter than its
+    // head is the head alone, scaled to its length; the shaft's six vertices
+    // collapse off screen. The color is per instance for a colormapped quiver,
+    // else a constant attribute (the attribute array disabled).
+    static constexpr char k_quiver_vert[] = R"(
+#version 410 core
+layout(location = 0) in float aVertex;   // 0..8: which corner of the three triangles
+layout(location = 1) in vec2 aTail;      // instance
+layout(location = 2) in vec2 aTip;       // instance
+layout(location = 3) in vec4 aColor;     // instance (colormapped), else constant
+out vec4 vColor;
+uniform float uAlpha;        // the quiver's alpha, on top of the color's own
+uniform vec2  uResolution;
+uniform vec2  uScale;
+uniform vec2  uOffset;
+uniform float uWidth;        // logical pixels
+uniform float uHeadWidth;
+uniform float uHeadLength;
+const int kCorner[9] = int[9](2, 3, 4, 0, 1, 5, 0, 5, 6);
+void main() {
+    vec2 t = uScale * aTail + uOffset;
+    vec2 h = uScale * aTip + uOffset;
+    vec2 d = h - t;
+    float len = length(d);
+    int v = int(aVertex + 0.5);
+    float hl = max(uHeadLength, 0.0);
+    bool head_only = len < hl;
+    if (!(len > 0.01) || (head_only && v >= 3)) {
+        gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+        return;
+    }
+    vec2 u = d / len;
+    vec2 n = vec2(-u.y, u.x);
+    float hw = 0.5 * max(uHeadWidth, 0.0);
+    float sw = 0.5 * max(uWidth, 0.0);
+    if (head_only) {
+        hw *= len / hl;
+        hl = len;
+    }
+    vec2 b = h - u * hl;
+    int k = kCorner[v];
+    vec2 px;
+    if (k == 3) {
+        px = h;
+    } else {
+        float side = k < 3 ? 1.0 : -1.0;
+        vec2 base = (k == 0 || k == 6) ? t : b;
+        float w = (k == 2 || k == 4) ? hw : sw;
+        px = base + n * (side * w);
+    }
+    vec2 ndc = (px / uResolution) * 2.0 - 1.0;
+    ndc.y = -ndc.y;
+    gl_Position = vec4(ndc, 0.0, 1.0);
+    vColor = vec4(aColor.rgb, aColor.a * uAlpha);
+}
+)";
+
+    static constexpr char k_quiver_frag[] = R"(
+#version 410 core
+in vec4 vColor;
+out vec4 FragColor;
+void main() { FragColor = vColor; }
 )";
 
     // The marker shapes as one signed distance in quad units (negative inside; the
@@ -1098,6 +1204,58 @@ void main() {
         glDisable(GL_SCISSOR_TEST);
     }
 
+    namespace {
+        // Translucent strokes paint each pixel once, as an SVG path does: a
+        // stroke's own quads overlap inside a beveled turn and where it crosses
+        // itself, and would blend twice there. Each translucent stroke tests and
+        // writes a stencil value of its own, so it skips what it already painted
+        // while other strokes still blend over it. The (scissored) stencil is
+        // cleared before the first value and after the last, since NanoVG expects
+        // zeros, and again when the 255 values run out. A target without a stencil
+        // passes every test: the overlaps then blend twice, as before.
+        class PaintOnce {
+        public:
+            PaintOnce() = default;
+            PaintOnce(const PaintOnce&) = delete;
+            PaintOnce& operator=(const PaintOnce&) = delete;
+
+            // Before each stroke's draw.
+            void stroke(bool translucent) {
+                if (!translucent) {
+                    glDisable(GL_STENCIL_TEST);
+                    return;
+                }
+                if (ref_ == 0 || ref_ == 255) {
+                    clear();
+                    ref_ = 0;
+                }
+                ++ref_;
+                glEnable(GL_STENCIL_TEST);
+                glStencilFunc(GL_NOTEQUAL, ref_, 0xFF);
+                glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+            }
+
+            // Before end_pass(), while the scissor still holds the plot rect.
+            void finish() {
+                if (ref_ == 0) return;
+                clear();
+                glDisable(GL_STENCIL_TEST);
+                glStencilFunc(GL_ALWAYS, 0, 0xFF);
+                glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+                ref_ = 0;
+            }
+
+        private:
+            static void clear() {
+                glStencilMask(0xFF);
+                glClearStencil(0);
+                glClear(GL_STENCIL_BUFFER_BIT);
+            }
+
+            int ref_ = 0;
+        };
+    } // namespace
+
     // Exact equality: the transform is recomputed deterministically, so it is
     // bit-identical unless the view really moved.
     namespace {
@@ -1310,10 +1468,9 @@ void main() {
         glGenVertexArrays(1, &lineseg_vao_);
         glGenBuffers(1, &lineseg_corner_vbo_);
         glBindVertexArray(lineseg_vao_);
-        // Unit quad as a triangle strip: x picks the segment end, y the side.
-        static const float corners[8] = {0.f, -1.f, 0.f, 1.f, 1.f, -1.f, 1.f, 1.f};
         glBindBuffer(GL_ARRAY_BUFFER, lineseg_corner_vbo_);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(corners), corners, GL_STATIC_DRAW);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(k_lineseg_corners), k_lineseg_corners,
+                     GL_STATIC_DRAW);
         glEnableVertexAttribArray(0);
         glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), nullptr);
         glVertexAttribDivisor(0, 0);
@@ -1382,6 +1539,21 @@ void main() {
                               reinterpret_cast<void *>(3 * sizeof(float)));
         glVertexAttribDivisor(3, 1);
 
+        glBindVertexArray(0);
+
+        // --- quiver (instanced arrows) ---
+        quiver_program_ = build_program(k_quiver_vert, k_quiver_frag);
+        glGenVertexArrays(1, &quiver_vao_);
+        glGenBuffers(1, &quiver_corner_vbo_);
+        glBindVertexArray(quiver_vao_);
+        static const float corners9[9] = {0.f, 1.f, 2.f, 3.f, 4.f, 5.f, 6.f, 7.f, 8.f};
+        glBindBuffer(GL_ARRAY_BUFFER, quiver_corner_vbo_);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(corners9), corners9, GL_STATIC_DRAW);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 1, GL_FLOAT, GL_FALSE, sizeof(float), nullptr);
+        glVertexAttribDivisor(0, 0);
+        // Attributes 1 (tail) and 2 (tip) are pointed at each quiver's buffer at
+        // draw time.
         glBindVertexArray(0);
 
         // --- heatmap ---
@@ -1484,6 +1656,8 @@ void main() {
         glBindVertexArray(0);
 
         // --- 3D bar edges (world-space ribbons) ---
+        // Unit quad as a triangle strip: x picks the segment end, y the side.
+        static const float corners[8] = {0.f, -1.f, 0.f, 1.f, 1.f, -1.f, 1.f, 1.f};
         bar3d_edge_program_ = build_program(
             expand_shader(k_bar3d_edge_vert, "RIBBON", k_ribbon_expand).c_str(),
             k_flat_frag);
@@ -1595,6 +1769,12 @@ void main() {
             loc(lineseg_program_, "uScale"), loc(lineseg_program_, "uOffset"),
             loc(lineseg_program_, "uHalfWidth"), loc(lineseg_program_, "uDash"),
             loc(lineseg_program_, "uDashPeriod"), loc(lineseg_program_, "uDistScale")
+        };
+        quiver_u_ = {
+            loc(quiver_program_, "uResolution"), loc(quiver_program_, "uAlpha"),
+            loc(quiver_program_, "uScale"), loc(quiver_program_, "uOffset"),
+            loc(quiver_program_, "uWidth"), loc(quiver_program_, "uHeadWidth"),
+            loc(quiver_program_, "uHeadLength")
         };
         scatter_u_ = {
             loc(scatter_program_, "uResolution"), loc(scatter_program_, "uColor"),
@@ -1735,8 +1915,14 @@ void main() {
 
         if (lineseg_corner_vbo_) glDeleteBuffers(1, &lineseg_corner_vbo_);
         if (ref_vbo_) glDeleteBuffers(1, &ref_vbo_);
+        if (fill_edge_vbo_) glDeleteBuffers(1, &fill_edge_vbo_);
+        if (fill_dist_vbo_) glDeleteBuffers(1, &fill_dist_vbo_);
         if (lineseg_vao_) glDeleteVertexArrays(1, &lineseg_vao_);
         if (lineseg_program_) glDeleteProgram(lineseg_program_);
+
+        if (quiver_corner_vbo_) glDeleteBuffers(1, &quiver_corner_vbo_);
+        if (quiver_vao_) glDeleteVertexArrays(1, &quiver_vao_);
+        if (quiver_program_) glDeleteProgram(quiver_program_);
 
         if (scatter_inst_vbo_) glDeleteBuffers(1, &scatter_inst_vbo_);
         if (scatter_quad_vbo_) glDeleteBuffers(1, &scatter_quad_vbo_);
@@ -1847,6 +2033,8 @@ void main() {
             if (e.fill_vbo) glDeleteBuffers(1, &e.fill_vbo);
             if (e.edge_vbo) glDeleteBuffers(1, &e.edge_vbo);
         }
+        for (auto& [k, e]: fill_cache_) if (e.vbo) glDeleteBuffers(1, &e.vbo);
+        for (auto& [k, e]: quiver_cache_) if (e.vbo) glDeleteBuffers(1, &e.vbo);
         for (auto* m: {
                  &line_err_cache_, &bar_err_cache_,
                  &scatter_err_cache_, &scatterz_err_cache_
@@ -1874,6 +2062,7 @@ void main() {
 
         std::vector<float> pts, dists;
         StrokePath path;
+        PaintOnce once;
         for (const std::size_t li : which) {
             const auto& lp = lines[li];
             if (lp.x.size() < 2) continue;
@@ -2058,8 +2247,10 @@ void main() {
             const auto& c = *lp.opts.color;
             glUniform4f(lineseg_u_.color,
                         c.r, c.g, c.b, c.a * lp.opts.alpha);
-            glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, e.segments);
+            once.stroke(c.a * lp.opts.alpha < 1.0f);
+            glDrawArraysInstanced(GL_TRIANGLES, 0, k_lineseg_vertices, e.segments);
         }
+        once.finish();
 
         glBindVertexArray(0);
         glUseProgram(0);
@@ -2534,6 +2725,12 @@ void main() {
             case PlotKind::AxSpan:
                 draw_axspan(snap.axspans[r.index], tr, pr);
                 break;
+            case PlotKind::Fill:
+                draw_fill(snap.fills[r.index], static_cast<int>(r.index), tr, pr);
+                break;
+            case PlotKind::Quiver:
+                draw_quiver(snap.quivers[r.index], static_cast<int>(r.index), tr, pr);
+                break;
             default: break;
         }
     }
@@ -2581,7 +2778,7 @@ void main() {
 
         const Color& c = *p.opts.color;
         glUniform4f(lineseg_u_.color, c.r, c.g, c.b, c.a * p.opts.alpha);
-        glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, 1);
+        glDrawArraysInstanced(GL_TRIANGLES, 0, k_lineseg_vertices, 1);
 
         glBindVertexArray(0);
         glUseProgram(0);
@@ -2622,6 +2819,320 @@ void main() {
             draw(v, ec, ec.a);
         }
 
+        glBindVertexArray(0);
+        glUseProgram(0);
+        end_pass();
+    }
+
+    // -------------------------------------------------------------------------
+    // draw_fill
+    // -------------------------------------------------------------------------
+    void DataRenderer::draw_fill(const FillPlot& p, int index, const CoordTransform& tr,
+                                 const PlotRect& pr) {
+        const bool vert = p.vertical();
+        // The regions in scale space (built at most once per draw).
+        std::vector<FillRun> runs;
+        bool have_runs = false;
+        auto regions = [&]() -> const std::vector<FillRun>& {
+            if (!have_runs) runs = fill_runs(p, vert ? tr.ys : tr.xs, vert ? tr.xs : tr.ys);
+            have_runs = true;
+            return runs;
+        };
+        // A region point (run, curve) in scale space as (x, y).
+        auto xy = [vert](double r, double v) { return vert ? std::array{v, r} : std::array{r, v}; };
+
+        const CacheKey key{axes_index_, plane_index_, index};
+        FillCache& e = fill_cache_[key];
+        const bool precise = float_resolves_view(e.span_x, tr.sxspan(), tr.pw)
+                             && float_resolves_view(e.span_y, tr.syspan(), tr.ph);
+        const bool ok = e.generation != 0
+                        && e.generation == data_generation_
+                        && same_scales(e.tr, tr)
+                        && e.orientation == p.opts.orientation
+                        && e.drawstyle == p.opts.drawstyle
+                        && e.interpolate == p.opts.interpolate
+                        && (e.data_space ? precise : (!precise && same_view(e.tr, tr)));
+        if (!ok) {
+            const std::vector<FillRun>& rs = regions();
+            double xlo = std::numeric_limits<double>::max(), xhi = -xlo, ylo = xlo, yhi = -xlo;
+            for (const FillRun& run : rs)
+                for (std::size_t k = 0; k < run.size(); ++k)
+                    for (double v : {run.a[k], run.b[k]}) {
+                        const auto [x, y] = xy(run.r[k], v);
+                        xlo = std::min(xlo, x);
+                        xhi = std::max(xhi, x);
+                        ylo = std::min(ylo, y);
+                        yhi = std::max(yhi, y);
+                    }
+            if (xlo > xhi) xlo = xhi = ylo = yhi = 0.0;
+            e.anchor_x = 0.5 * (xlo + xhi);
+            e.span_x = xhi - xlo;
+            e.anchor_y = 0.5 * (ylo + yhi);
+            e.span_y = yhi - ylo;
+            e.data_space = float_resolves_view(e.span_x, tr.sxspan(), tr.pw)
+                           && float_resolves_view(e.span_y, tr.syspan(), tr.ph);
+
+            std::vector<float> verts;
+            auto put = [&](double r, double v) {
+                const auto [x, y] = xy(r, v);
+                if (e.data_space) {
+                    verts.push_back(static_cast<float>(x - e.anchor_x));
+                    verts.push_back(static_cast<float>(y - e.anchor_y));
+                } else {
+                    verts.push_back(tr.scale_to_px(x));
+                    verts.push_back(tr.scale_to_py(y));
+                }
+            };
+            for (const FillRun& run : rs)
+                fill_triangles(run, [&](double r0, double v0, double r1, double v1, double r2, double v2) {
+                    put(r0, v0);
+                    put(r1, v1);
+                    put(r2, v2);
+                });
+            if (!verts.empty()) {
+                if (e.vbo == 0) glGenBuffers(1, &e.vbo);
+                glBindBuffer(GL_ARRAY_BUFFER, e.vbo);
+                glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(verts.size() * sizeof(float)),
+                             verts.data(), GL_DYNAMIC_DRAW);
+            }
+            e.verts = static_cast<int>(verts.size() / 2);
+            e.generation = data_generation_;
+            e.orientation = p.opts.orientation;
+            e.drawstyle = p.opts.drawstyle;
+            e.interpolate = p.opts.interpolate;
+            e.tr = tr;
+        }
+
+        const Color& c = *p.opts.color;
+        if (e.verts > 0 && e.vbo != 0) {
+            begin_pass(pr, tr.win_h);
+            glUseProgram(line_program_);
+            const float res[2] = {tr.win_w, tr.win_h};
+            glUniform2fv(line_u_.resolution, 1, res);
+            glBindVertexArray(line_vao_);
+            // Re-point the VAO attribute at the bound buffer (see draw_bars).
+            glBindBuffer(GL_ARRAY_BUFFER, e.vbo);
+            glEnableVertexAttribArray(0);
+            glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), nullptr);
+            const DataToPixel m = e.data_space
+                                      ? data_to_pixel(tr, e.anchor_x, e.anchor_y)
+                                      : DataToPixel{{1.0f, 1.0f}, {0.0f, 0.0f}};
+            glUniform2fv(line_u_.scale, 1, m.scale);
+            glUniform2fv(line_u_.offset, 1, m.offset);
+            glUniform4f(line_u_.color, c.r, c.g, c.b, c.a * p.opts.alpha);
+            glDrawArrays(GL_TRIANGLES, 0, e.verts);
+            glBindVertexArray(0);
+            glUseProgram(0);
+            end_pass();
+        }
+
+        // --- outline: each region's closed ring in pixels, rebuilt per frame ---
+        if (!(p.opts.linewidth > 0.0f) || p.opts.linestyle == LineStyle::None) return;
+        const std::vector<FillRun>& rs = regions();
+        if (rs.empty()) return;
+
+        begin_pass(pr, tr.win_h);
+        glUseProgram(lineseg_program_);
+        const float res[2] = {tr.win_w, tr.win_h};
+        glUniform2fv(lineseg_u_.resolution, 1, res);
+        glBindVertexArray(lineseg_vao_);
+        glUniform2fv(lineseg_u_.scale, 1, k_identity_scale);
+        glUniform2fv(lineseg_u_.offset, 1, k_identity_offset);
+        glUniform1f(lineseg_u_.half_width, p.opts.linewidth * 0.5f);
+        const DashPattern dash = dash_pattern(p.opts.linestyle);
+        if (dash.dashed()) {
+            glUniform4fv(lineseg_u_.dash, 1, dash.seg);
+            glUniform1f(lineseg_u_.dash_period, dash.period);
+            glUniform1f(lineseg_u_.dist_scale, 1.0f);
+        } else {
+            glUniform1f(lineseg_u_.dash_period, 0.0f);
+        }
+        const Color ec = fill_edge(p);
+        glUniform4f(lineseg_u_.color, ec.r, ec.g, ec.b, ec.a);
+
+        std::vector<float> ring, pts, dists;
+        PaintOnce once; // each region's outline as one stroke, as each SVG polygon
+        for (const FillRun& run : rs) {
+            // The ring in pixels, a point equal to the one before it dropped (a
+            // zero-length segment has no direction to join).
+            ring.clear();
+            fill_outline(run, [&](double r, double v) {
+                const auto [x, y] = xy(r, v);
+                const float px = tr.scale_to_px(x), py = tr.scale_to_py(y);
+                if (ring.size() >= 2 && ring[ring.size() - 2] == px && ring.back() == py) return;
+                ring.push_back(px);
+                ring.push_back(py);
+            });
+            while (ring.size() >= 4 && ring[0] == ring[ring.size() - 2] && ring[1] == ring.back()) {
+                ring.pop_back();
+                ring.pop_back();
+            }
+            const std::size_t m = ring.size() / 2;
+            if (m < 2) continue;
+            // Padded so instance i reads points [i, i+3], across the seam (a
+            // looped line's layout): segment i runs from point i to i+1.
+            pts.clear();
+            auto emit = [&](std::size_t i) {
+                pts.push_back(ring[2 * (i % m)]);
+                pts.push_back(ring[2 * (i % m) + 1]);
+            };
+            emit(m - 1);
+            for (std::size_t i = 0; i < m; ++i) emit(i);
+            emit(0);
+            emit(1);
+            if (fill_edge_vbo_ == 0) glGenBuffers(1, &fill_edge_vbo_);
+            glBindBuffer(GL_ARRAY_BUFFER, fill_edge_vbo_);
+            glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(pts.size() * sizeof(float)), pts.data(),
+                         GL_STREAM_DRAW);
+            for (int a = 1; a <= 4; ++a) {
+                glEnableVertexAttribArray(static_cast<unsigned>(a));
+                glVertexAttribPointer(static_cast<unsigned>(a), 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float),
+                                      reinterpret_cast<void *>((a - 1) * 2 * sizeof(float)));
+                glVertexAttribDivisor(static_cast<unsigned>(a), 1);
+            }
+            if (dash.dashed()) {
+                // Arc length at each segment's start, from the ring's first point.
+                dists.clear();
+                double acc = 0.0;
+                for (std::size_t i = 0; i < m; ++i) {
+                    dists.push_back(static_cast<float>(acc));
+                    const std::size_t j = (i + 1) % m;
+                    const double dx = ring[2 * j] - ring[2 * i], dy = ring[2 * j + 1] - ring[2 * i + 1];
+                    acc += std::sqrt(dx * dx + dy * dy);
+                }
+                if (fill_dist_vbo_ == 0) glGenBuffers(1, &fill_dist_vbo_);
+                glBindBuffer(GL_ARRAY_BUFFER, fill_dist_vbo_);
+                glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(dists.size() * sizeof(float)),
+                             dists.data(), GL_STREAM_DRAW);
+                glEnableVertexAttribArray(5);
+                glVertexAttribPointer(5, 1, GL_FLOAT, GL_FALSE, sizeof(float), nullptr);
+                glVertexAttribDivisor(5, 1);
+            } else {
+                glDisableVertexAttribArray(5);
+                glVertexAttrib1f(5, 0.0f);
+            }
+            once.stroke(ec.a < 1.0f);
+            glDrawArraysInstanced(GL_TRIANGLES, 0, k_lineseg_vertices, static_cast<GLsizei>(m));
+        }
+        once.finish();
+
+        glBindVertexArray(0);
+        glUseProgram(0);
+        end_pass();
+    }
+
+    // -------------------------------------------------------------------------
+    // draw_quiver
+    // -------------------------------------------------------------------------
+    void DataRenderer::draw_quiver(const QuiverPlot& p, int index, const CoordTransform& tr,
+                                   const PlotRect& pr) {
+        const CacheKey key{axes_index_, plane_index_, index};
+        QuiverCache& e = quiver_cache_[key];
+        const bool precise = float_resolves_view(e.span_x, tr.sxspan(), tr.pw)
+                             && float_resolves_view(e.span_y, tr.syspan(), tr.ph);
+        const bool ok = e.generation != 0
+                        && e.generation == data_generation_
+                        && same_scales(e.tr, tr)
+                        && e.amp == p.amp()
+                        && e.pivot == p.opts.pivot
+                        && e.mapped == p.colormapped()
+                        && (!e.mapped || (e.cmap == p.opts.cmap && e.vmin == p.opts.vmin
+                                          && e.vmax == p.opts.vmax))
+                        && (e.data_space ? precise : (!precise && same_view(e.tr, tr)));
+        if (!ok) {
+            // The arrows' ends in scale space, then anchored at their extent's
+            // midpoint (residuals <= half the span), as scatter centres are. A
+            // colormapped quiver's colors are baked in after each arrow's ends.
+            const bool mapped = p.colormapped();
+            std::vector<double> ends;
+            std::vector<Color> colors;
+            for_each_quiver_arrow(p, tr.xs, tr.ys,
+                                  [&](std::size_t i, double tx, double ty, double hx, double hy) {
+                ends.insert(ends.end(), {tx, ty, hx, hy});
+                if (mapped) colors.push_back(quiver_arrow_color(p, i));
+            });
+            double xlo = std::numeric_limits<double>::max(), xhi = -xlo, ylo = xlo, yhi = -xlo;
+            for (std::size_t k = 0; k + 1 < ends.size(); k += 2) {
+                xlo = std::min(xlo, ends[k]);
+                xhi = std::max(xhi, ends[k]);
+                ylo = std::min(ylo, ends[k + 1]);
+                yhi = std::max(yhi, ends[k + 1]);
+            }
+            if (xlo > xhi) xlo = xhi = ylo = yhi = 0.0;
+            e.anchor_x = 0.5 * (xlo + xhi);
+            e.span_x = xhi - xlo;
+            e.anchor_y = 0.5 * (ylo + yhi);
+            e.span_y = yhi - ylo;
+            e.data_space = float_resolves_view(e.span_x, tr.sxspan(), tr.pw)
+                           && float_resolves_view(e.span_y, tr.syspan(), tr.ph);
+
+            std::vector<float> inst;
+            inst.reserve(ends.size() * (mapped ? 2 : 1));
+            for (std::size_t k = 0; k + 1 < ends.size(); k += 2) {
+                if (e.data_space) {
+                    inst.push_back(static_cast<float>(ends[k] - e.anchor_x));
+                    inst.push_back(static_cast<float>(ends[k + 1] - e.anchor_y));
+                } else {
+                    inst.push_back(tr.scale_to_px(ends[k]));
+                    inst.push_back(tr.scale_to_py(ends[k + 1]));
+                }
+                if (mapped && k % 4 == 2) {
+                    const Color& c = colors[k / 4];
+                    inst.insert(inst.end(), {c.r, c.g, c.b, c.a});
+                }
+            }
+            if (!inst.empty()) {
+                if (e.vbo == 0) glGenBuffers(1, &e.vbo);
+                glBindBuffer(GL_ARRAY_BUFFER, e.vbo);
+                glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(inst.size() * sizeof(float)),
+                             inst.data(), GL_DYNAMIC_DRAW);
+            }
+            e.instances = static_cast<int>(ends.size() / 4);
+            e.generation = data_generation_;
+            e.amp = p.amp();
+            e.pivot = p.opts.pivot;
+            e.mapped = mapped;
+            e.cmap = p.opts.cmap;
+            e.vmin = p.opts.vmin;
+            e.vmax = p.opts.vmax;
+            e.tr = tr;
+        }
+        if (e.instances <= 0 || e.vbo == 0) return;
+
+        begin_pass(pr, tr.win_h);
+        glUseProgram(quiver_program_);
+        const float res[2] = {tr.win_w, tr.win_h};
+        glUniform2fv(quiver_u_.resolution, 1, res);
+        glBindVertexArray(quiver_vao_);
+        glBindBuffer(GL_ARRAY_BUFFER, e.vbo);
+        const GLsizei stride = (e.mapped ? 8 : 4) * sizeof(float);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, stride, nullptr);
+        glVertexAttribDivisor(1, 1);
+        glEnableVertexAttribArray(2);
+        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, stride,
+                              reinterpret_cast<void *>(2 * sizeof(float)));
+        glVertexAttribDivisor(2, 1);
+        if (e.mapped) {
+            glEnableVertexAttribArray(3);
+            glVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, stride,
+                                  reinterpret_cast<void *>(4 * sizeof(float)));
+            glVertexAttribDivisor(3, 1);
+        } else {
+            const Color& c = *p.opts.color;
+            glDisableVertexAttribArray(3);
+            glVertexAttrib4f(3, c.r, c.g, c.b, c.a);
+        }
+        const DataToPixel m = e.data_space
+                                  ? data_to_pixel(tr, e.anchor_x, e.anchor_y)
+                                  : DataToPixel{{1.0f, 1.0f}, {0.0f, 0.0f}};
+        glUniform2fv(quiver_u_.scale, 1, m.scale);
+        glUniform2fv(quiver_u_.offset, 1, m.offset);
+        glUniform1f(quiver_u_.width, p.opts.width);
+        glUniform1f(quiver_u_.head_width, p.opts.head_width);
+        glUniform1f(quiver_u_.head_length, p.opts.head_length);
+        glUniform1f(quiver_u_.alpha, p.opts.alpha);
+        glDrawArraysInstanced(GL_TRIANGLES, 0, 9, e.instances);
         glBindVertexArray(0);
         glUseProgram(0);
         end_pass();
@@ -3001,19 +3512,19 @@ void main() {
         for (const PlaneSnapshot& p: snap.planes)
             any_translucent = any_translucent || (plane_translucent(p) && plane_drawn(p));
         for (const Bar3DPlot& b: snap.bars3d)
-            any_translucent = any_translucent || bar3d_translucent(b);
+            any_translucent = any_translucent || (object_shown(b) && bar3d_translucent(b));
         for (const SurfacePlot& sp: snap.surfaces)
-            any_translucent = any_translucent || surface_translucent(sp);
+            any_translucent = any_translucent || (object_shown(sp) && surface_translucent(sp));
         for (const SurfaceTriPlot& sm: snap.surface_tri)
-            any_translucent = any_translucent || surface_tri_translucent(sm);
+            any_translucent = any_translucent || (object_shown(sm) && surface_tri_translucent(sm));
         for (const Scatter3DPlot& sc: snap.scatter3d)
-            any_translucent = any_translucent || scatter3d_translucent(sc);
+            any_translucent = any_translucent || (object_shown(sc) && scatter3d_translucent(sc));
         for (const Line3DPlot& ln: snap.lines3d)
-            any_translucent = any_translucent || line3d_translucent(ln);
+            any_translucent = any_translucent || (object_shown(ln) && line3d_translucent(ln));
         for (const Scatter3DPlot& sc: snap.scatter3d)
-            any_translucent = any_translucent || errorbar3d_translucent(sc);
+            any_translucent = any_translucent || (object_shown(sc) && errorbar3d_translucent(sc));
         for (const Line3DPlot& ln: snap.lines3d)
-            any_translucent = any_translucent || errorbar3d_translucent(ln);
+            any_translucent = any_translucent || (object_shown(ln) && errorbar3d_translucent(ln));
         if (!any_translucent) return;
         if (peel_translucent3d(snap, proj, pr, win_w, win_h)) return;
 
@@ -3031,25 +3542,25 @@ void main() {
             if (plane_translucent(snap.planes[i]) && plane_drawn(snap.planes[i]))
                 list.push_back({Kind::Plane, i, plane_distance(snap.planes[i], proj)});
         for (std::size_t i = 0; i < snap.bars3d.size(); ++i)
-            if (bar3d_translucent(snap.bars3d[i]))
+            if (object_shown(snap.bars3d[i]) && bar3d_translucent(snap.bars3d[i]))
                 list.push_back({Kind::Bar, i, bar3d_plot_distance(snap.bars3d[i], proj)});
         for (std::size_t i = 0; i < snap.surfaces.size(); ++i)
-            if (surface_translucent(snap.surfaces[i]))
+            if (object_shown(snap.surfaces[i]) && surface_translucent(snap.surfaces[i]))
                 list.push_back({Kind::Surface, i, surface_plot_distance(snap.surfaces[i], proj)});
         for (std::size_t i = 0; i < snap.surface_tri.size(); ++i)
-            if (surface_tri_translucent(snap.surface_tri[i]))
+            if (object_shown(snap.surface_tri[i]) && surface_tri_translucent(snap.surface_tri[i]))
                 list.push_back({
                     Kind::Mesh, i,
                     surface_tri_plot_distance(snap.surface_tri[i], proj)
                 });
         for (std::size_t i = 0; i < snap.scatter3d.size(); ++i)
-            if (scatter3d_translucent(snap.scatter3d[i]))
+            if (object_shown(snap.scatter3d[i]) && scatter3d_translucent(snap.scatter3d[i]))
                 list.push_back({
                     Kind::Scatter, i,
                     scatter3d_plot_distance(snap.scatter3d[i], proj)
                 });
         for (std::size_t i = 0; i < snap.lines3d.size(); ++i)
-            if (line3d_translucent(snap.lines3d[i]))
+            if (object_shown(snap.lines3d[i]) && line3d_translucent(snap.lines3d[i]))
                 list.push_back({
                     Kind::Line, i,
                     line3d_plot_distance(snap.lines3d[i], proj)
@@ -3057,13 +3568,13 @@ void main() {
         // A series' error bars at the series' distance, after it (drawn over it on
         // ties).
         for (std::size_t i = 0; i < snap.scatter3d.size(); ++i)
-            if (errorbar3d_translucent(snap.scatter3d[i]))
+            if (object_shown(snap.scatter3d[i]) && errorbar3d_translucent(snap.scatter3d[i]))
                 list.push_back({
                     Kind::ErrorBar, i,
                     scatter3d_plot_distance(snap.scatter3d[i], proj)
                 });
         for (std::size_t i = 0; i < snap.lines3d.size(); ++i)
-            if (errorbar3d_translucent(snap.lines3d[i]))
+            if (object_shown(snap.lines3d[i]) && errorbar3d_translucent(snap.lines3d[i]))
                 list.push_back({
                     Kind::ErrorBar, snap.scatter3d.size() + i,
                     line3d_plot_distance(snap.lines3d[i], proj)
@@ -3619,7 +4130,7 @@ void main() {
         for (const std::size_t bi: plot_order) {
             const Bar3DPlot& b = bars[bi];
             const std::size_t n = b.count();
-            if (n == 0 || b.heights.size() < n) continue;
+            if (!object_shown(b) || n == 0 || b.heights.size() < n) continue;
             const bool translucent = bar3d_translucent(b);
 
             const CacheKey key{axes_index_, -1, static_cast<int>(bi)};
@@ -3865,7 +4376,7 @@ void main() {
         std::vector<std::uint32_t> indices;
         for (const std::size_t si: plot_order) {
             const SurfacePlot& s = surfaces[si];
-            if (s.cell_count() == 0 || s.heights.size() < s.count()) continue;
+            if (!object_shown(s) || s.cell_count() == 0 || s.heights.size() < s.count()) continue;
             const bool translucent = surface_translucent(s);
             const std::size_t nc = s.cell_cols();
 
@@ -4115,7 +4626,7 @@ void main() {
         std::vector<std::uint32_t> indices;
         for (const std::size_t mi: plot_order) {
             const SurfaceTriPlot& s = meshes[mi];
-            if (s.face_count() == 0 || s.count() == 0) continue;
+            if (!object_shown(s) || s.face_count() == 0 || s.count() == 0) continue;
             const bool translucent = surface_tri_translucent(s);
 
             const CacheKey key{axes_index_, -1, static_cast<int>(mi)};
@@ -4388,7 +4899,7 @@ void main() {
         std::vector<float> sorted;
         for (const std::size_t si: plot_order) {
             const Scatter3DPlot& s = points[si];
-            if (s.count() == 0 || s.opts.marker == MarkerStyle::None) continue;
+            if (!object_shown(s) || s.count() == 0 || s.opts.marker == MarkerStyle::None) continue;
             const bool translucent = scatter3d_translucent(s);
 
             const CacheKey key{axes_index_, -1, static_cast<int>(si)};
@@ -4584,7 +5095,7 @@ void main() {
         std::vector<float> sorted;
         for (const std::size_t li: plot_order) {
             const Line3DPlot& l = lines[li];
-            if (l.segment_count() == 0) continue;
+            if (!object_shown(l) || l.segment_count() == 0) continue;
             const bool translucent = line3d_translucent(l);
 
             const CacheKey key{axes_index_, -1, static_cast<int>(li)};
@@ -4806,11 +5317,14 @@ void main() {
         const bool want_translucent = (pass == ScenePass::Translucent);
 
         // Series k is a cloud for k < ns, else a path.
+        // A hidden series hides its error bars too.
         auto drawn = [&](std::size_t k) {
             return k < ns
-                       ? errorbar3d_drawn(snap.scatter3d[k].err, snap.scatter3d[k].opts.errorbar)
-                       : errorbar3d_drawn(snap.lines3d[k - ns].err,
-                                          snap.lines3d[k - ns].opts.errorbar);
+                       ? object_shown(snap.scatter3d[k])
+                             && errorbar3d_drawn(snap.scatter3d[k].err, snap.scatter3d[k].opts.errorbar)
+                       : object_shown(snap.lines3d[k - ns])
+                             && errorbar3d_drawn(snap.lines3d[k - ns].err,
+                                                 snap.lines3d[k - ns].opts.errorbar);
         };
         auto translucent = [&](std::size_t k) {
             return k < ns
