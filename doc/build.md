@@ -45,7 +45,7 @@ depend on it in `vcpkg.json` (`{ "dependencies": ["sextant"] }`), and use it fro
 CMake with the vcpkg toolchain:
 
 ```cmake
-find_package(sextant 1.1 CONFIG REQUIRED)
+find_package(sextant 1.2 CONFIG REQUIRED)
 target_link_libraries(my_app PRIVATE sextant::sextant)
 ```
 
@@ -72,6 +72,8 @@ dynamic triplet if your program also uses GLFW.
 Git must be on the `PATH`, and the **first configure needs the network**: GLFW,
 and on macOS FreeType and libpng, are downloaded and built from source then.
 Later configures reuse the download.
+
+Fonts: sextant finds the system's own. The optional math font sets (`FigureOptions::math_fontset`: STIX, Computer Modern) use the families installed there, none is bundled.
 
 Ninja is recommended on every platform, and is what the recipes here use; any
 CMake generator works.
@@ -175,7 +177,7 @@ Pass any of these to the configure step as `-D<option>=<value>`.
 | `SEXTANT_USE_LIBPNG` | `ON` | Write PNGs with libpng. `OFF`, or libpng not found: stb_image_write |
 | `SEXTANT_FETCH_GLFW` | `ON` | Download and build GLFW. `OFF` uses an installed GLFW 3.3 or newer (without sextant's macOS patches) |
 | `SEXTANT_BUNDLE_DEPS` | `ON` on macOS, else `OFF` | Build FreeType and libpng (and zlib, except on macOS) from source into the library. On macOS, `OFF` links Homebrew's dylibs instead. Was `SEXTANT_MACOS_STATIC_DEPS`, which still sets the macOS default |
-| `SEXTANT_WINDOW_ICON` | `ON` | Give windows the sextant icon in the title bar and taskbar (Windows, Linux X11). `OFF` keeps the platform default |
+| `SEXTANT_WINDOW_ICON` | `ON` | Give windows the sextant icon in the title bar and taskbar (Windows, Linux X11) and in the Dock (macOS; a host app with its own icon keeps it). `OFF` keeps the platform default |
 | `SEXTANT_BUILD_SHARED` | `ON` | Build the shared library. `OFF` builds `sextant_static` alone |
 | `SEXTANT_BUILD_STATIC` | `ON` | Also build and install `sextant_static` |
 | `SEXTANT_BUILD_TESTS` | `ON` at top level | Build the test programs (not installed); off when sextant is a subproject |
@@ -216,7 +218,7 @@ matching one for each configuration of your project.
 
 ```cmake
 list(APPEND CMAKE_PREFIX_PATH "/path/to/sextant/dist")   # or -DCMAKE_PREFIX_PATH=...
-find_package(sextant 1.1 CONFIG REQUIRED)
+find_package(sextant 1.2 CONFIG REQUIRED)
 target_link_libraries(my_app PRIVATE sextant::sextant)
 ```
 

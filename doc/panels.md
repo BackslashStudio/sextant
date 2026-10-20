@@ -41,16 +41,29 @@ fig->show();
 
 1. **Retitle it.** In the Cosmetic panel, open **Axis → Titles** and type into the
    title field. The plot follows every keystroke.
+
+   ![Retitling](images/panels/five-minutes-1.gif)
+
 2. **Change a limit.** Under **Ticks → Limits**, tick off *Auto* for x and drag the
    high value, or click it and type one. Dragging the plot itself does the same
    (**Edit → Navigate**).
+
+   ![Dragging a limit](images/panels/five-minutes-2.gif)
+
 3. **Recolour a curve.** In the Data panel, open the tab of the curve (**model**).
    Click the colour swatch under **Appearance** and pick one.
+
+   ![Recolouring a curve](images/panels/five-minutes-3.gif)
+
 4. **Move a point.** Switch to the **measured** tab, click a *y* cell and type a
    new value. The point jumps to it.
+
+   ![Moving a point](images/panels/five-minutes-4.gif)
+
 5. **Keep the result.** **File → Save** writes a PNG or SVG of exactly what you see.
 
-![Retitling, a limit drag, a recolour and a moved point](images/panels/five_minutes.gif)
+   ![The Save dialog](images/panels/five-minutes-5.gif)
+
 
 ---
 
@@ -113,7 +126,7 @@ Four groups, each opened with its header. Groups share their names between 2D an
 | **Ticks** | **Limits** (with *Auto*, aspect and adjust), **Ticks & labels**, **Scale & format**, and the x and y tick tables |
 | **Legend & colorbar** (closed by default) | Legend: show, text, size, font, the twelve anchors, margin, offset, frame fill and border. Colorbar: text, size, font, border, anchor, bar width and margin |
 
-![The four Cosmetic groups, open](images/panels/cosmetic_groups.png)
+![The four Cosmetic groups, open](images/panels/cosmetic_groups.gif)
 
 **Limits.** While an axis is on *Auto*, its two fields show the limits it
 resolved to, and follow the data. Dragging a field turns *Auto* off for that axis

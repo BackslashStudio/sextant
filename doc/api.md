@@ -15,18 +15,22 @@ own page, **[3d.md](3d.md)**; every option struct and enum is tabulated in
 
 - [The model](#the-model)
 - [2D plot types](#2d-plot-types): [line](#line) · [scatter](#scatter) ·
-  [scatter_z](#scatter_z) · [bar](#bar) · [hist](#hist) · [heatmap and imshow](#heatmap-and-imshow)
+  [scatter_z](#scatter_z) · [bar](#bar) · [hist](#hist) · [heatmap and imshow](#heatmap-and-imshow) ·
+  [fill](#fill) · [stack](#stack) · [quiver](#quiver) · [axline and axspan](#axline-and-axspan)
 - [Error bars](#error-bars)
 - [Contours](#contours)
 - [Colormaps](#colormaps)
 - [Titles, legends, colorbars and ticks](#titles-legends-colorbars-and-ticks)
-- [Text and annotations](#text-and-annotations)
-- [Math in text](#math-in-text)
+- [Scales, shared and twin axes](#scales-shared-and-twin-axes): [log and symlog](#log-and-symlog-axes) ·
+  [tick formats and minor ticks](#tick-formats-and-minor-ticks) · [shared axes](#shared-axes) ·
+  [twin axes](#twin-axes) · [equal aspect](#equal-aspect)
 - [Styling](#styling)
 - [Layout](#layout): [subplots and spans](#subplots-and-spans) · [a 3D cell](#a-3d-cell-in-the-same-grid) ·
   [sizing a figure](#sizing-a-figure)
 - [Saving and exporting](#saving-and-exporting)
 - [The interactive window](#the-interactive-window)
+- [Text and annotations](#text-and-annotations)
+- [Math in text](#math-in-text)
 - [Events and picking](#events-and-picking)
 - [Live updates and threads](#live-updates-and-threads)
 - [Reading back](#reading-back)
@@ -77,6 +81,29 @@ as Armadillo's `arma::vec` all work unchanged. **Nothing is retained by
 reference**: each call copies what it needs, and your buffers are yours again
 immediately.
 
+**Colours cycle.** A series plotted without a `color` takes the axes' next colour
+from matplotlib's tab10 palette (the first is `Color::Blue`), so several lines in
+one axes come out distinct with no styling. `color` is a `std::optional<Color>` in
+every options struct: setting one compiles as before, and reading it back from your
+own options is `opts.color->r`. Colormapped plots use none. `set_color_cycle()` sets
+your own palette (empty restores tab10), `cla()` restarts the cycle, and a 3D axes'
+planes share its cycle.
+
+```cpp
+ax->set_color_cycle({sextant::Color::from_hex(0x264653), sextant::Color::from_hex(0xe76f51)});
+```
+
+**Objects draw in the order you plotted them**, whatever their kinds: a heatmap
+plotted after a line covers it, and a `scatter_z` plotted before a `scatter` is
+under it. The legend and the colorbars list series in the same order, and hover
+answers for whichever is on top.
+
+**Any object can be hidden** without removing it: `visible = false` in its options,
+or later `set_<kind>_visible(i, bool)` / `<kind>_visible(i)` on `Axes`, `Plane2D` and
+`Axes3D`. A hidden object is not drawn or exported, has no legend key or colorbar,
+takes no hover or pick, and **leaves the automatic limits**. Its data and place stay,
+and the Data panel has a Visible checkbox per object.
+
 ---
 
 ## 2D plot types
@@ -105,6 +132,10 @@ honoured in the window, in PNG and in SVG alike.
 adds no point, so limits, hover and the legend are unchanged, and a dash pattern
 carries on across the seam.
 
+`drawstyle` draws the line as steps (matplotlib's `drawstyle` and `step()`):
+`DrawStyle::StepsPre`, `StepsMid` or `StepsPost` put the riser before, between or
+after each point. The vertices, hover and picks are still the data's.
+
 Lines are the type that scales: a million points pans and zooms. There is no
 marker option; use `scatter()` on the same data for a marked series.
 
@@ -122,10 +153,19 @@ ax->scatter(px, py, {.color = sextant::Color::Orange,
                      .alpha = 0.6f});
 ```
 
-![the six marker shapes](images/docs/scatter.png)
+![the marker shapes](images/docs/scatter.png)
 
-`size` is a diameter in pixels and does not change when you zoom. Markers:
-`Circle`, `Square`, `Triangle`, `Diamond`, `Cross`, `Plus`, and `None`.
+`size` is a diameter in pixels and does not change when you zoom. Sixteen
+`MarkerStyle`s, as matplotlib's `o s ^ v < > D * p h X P x + | _`: `Circle`,
+`Square`, `Triangle`, `TriangleDown`, `TriangleLeft`, `TriangleRight`, `Diamond`,
+`Star`, `Pentagon`, `Hexagon`, `Cross`, `Plus`, the line markers `ThinCross`,
+`ThinPlus`, `VLine` and `HLine` (stroked `edge_linewidth` thick), and `None`.
+
+![the sixteen marker shapes](images/docs/marker_shapes.png)
+
+**A size per point** makes a bubble chart: `sizes` holds one diameter in pixels per
+point (empty: all `size`). A NaN or non-positive size hides that point. `scatter_z`
+and `scatter3d` take it too, and `ScatterData::sizes` reads and sets it.
 
 **Outlines and hollow markers.** `edge_linewidth` (pixels, 0 by default) draws an
 outline inside the marker, so `size` stays its full diameter. `edgecolor` sets its
@@ -182,6 +222,20 @@ ax->bar(months, balance, {.color = sextant::Color::Blue,
 Negative heights draw downward from zero. Name the positions with
 [`set_xticks()`](#titles-legends-colorbars-and-ticks).
 
+**Horizontal and stacked bars.** `orientation = Orientation::Horizontal` lays the
+bars along x (matplotlib's `barh`: positions on y, `height` the length), and
+`bottom` sets where each bar starts, one value or one per bar. Stacking is a bar
+call per layer, each with the previous tops as `bottom`; error bars hang off the
+bar's end, and `BarData::bottom` reads and sets the bases.
+
+```cpp
+ax->bar(pos, a, {.color = Color::Blue, .orientation = Orientation::Horizontal, .name = "a"})
+   .bar(pos, b, {.color = Color::Orange, .orientation = Orientation::Horizontal,
+                 .bottom = a, .name = "b"});
+```
+
+![horizontal stacked bars, and step lines](images/docs/bars_steps.png)
+
 ### hist
 
 A histogram is a bar plot whose bars come from binning, so it takes both option
@@ -211,7 +265,7 @@ default of `0.8` back, and gapped bins read as a bar chart. Set `.width = 1.0f`
 yourself whenever you pass bar options to `hist()`.
 
 `hist()` takes no error bars: a bin height is a count sextant derived, not
-something you measured.
+something you measured. `BarOptions::orientation` and `bottom` apply to it too.
 
 ### heatmap and imshow
 
@@ -258,6 +312,118 @@ change either way.
 
 Hovering a cell reports its **row and column** and value, which under a real
 extent are deliberately not the numbers on the axes.
+
+A heatmap keeps linear axes: plotting one on a log or symlog axis, or switching an
+axes that holds one to such a scale, throws.
+
+### fill
+
+The area between two curves, as matplotlib's `fill_between`:
+
+```cpp
+Axes& fill(std::span<const double> x, std::span<const double> y1,
+           std::span<const double> y2, FillOptions opts = {});
+Axes& fill(std::span<const double> x, std::span<const double> y1,
+           double y2 = 0.0, FillOptions opts = {});          // down to a value
+```
+
+```cpp
+ax->fill(x, lo, hi, {.color = Color::Blue, .alpha = 0.3f, .interpolate = true, .name = "±σ"})
+   .line(x, mean, {.color = Color::Blue});
+```
+
+![fills between curves, down to zero with a stretch left out, and across in x](images/docs/fill.png)
+
+`orientation = Orientation::Vertical` fills between two x curves along y
+(`fill_betweenx`; the spans then read as y, x1, x2). `exclude` is one flag per point
+that leaves it out (the inverse of matplotlib's `where`), and a NaN splits the fill;
+each run left is a region of its own. Where the two curves cross, `interpolate =
+true` runs a region on to the crossing instead of stopping at the last point.
+`drawstyle` steps the curves, and `edgecolor` with `linewidth` outlines the region.
+Lengths that disagree throw `std::invalid_argument`.
+
+Automatic limits cover every point of both curves. A fill draws in call order, has a
+legend key, and is picked and hovered anywhere inside it (`PickKind::Fill`, with the
+segment under the cursor in `pick_index`). `fill_data(i)` / `set_fill_data(i, …)`
+read and replace it, and the Data panel edits it. `Plane2D` has `fill()` too.
+
+### stack
+
+Stacked areas, as matplotlib's `stackplot`: one fill per layer, each from the top of
+the layers below it.
+
+```cpp
+Axes& stack(std::span<const double> x, std::span<const std::vector<double>> ys,
+            StackOptions opts = {});
+```
+
+```cpp
+ax->stack(t, layers, {.baseline = StackBaseline::Wiggle, .names = {"a", "b", "c", "d"}});
+```
+
+![a stack on a zero baseline, and a streamgraph](images/docs/stack.png)
+
+`baseline` is `Zero`, `Sym` (centred on zero), `Wiggle` or `WeightedWiggle`
+(streamgraphs). `colors` and `names` take one entry per layer, and `alpha`,
+`edgecolor`, `linewidth`, `linestyle` and `drawstyle` apply to all. The curves are
+computed once: afterwards each layer is an ordinary fill, read back and edited as
+one, and editing a layer does not restack the rest. A NaN carries up the stack.
+`Plane2D` has `stack()` too.
+
+### quiver
+
+An arrow per point, as matplotlib's `quiver` with `angles='xy'` and
+`scale_units='xy'`:
+
+```cpp
+Axes& quiver(std::span<const double> x, std::span<const double> y,
+             std::span<const double> u, std::span<const double> v,
+             QuiverOptions opts = {});
+Axes& quiver(x, y, u, v, std::span<const double> c, QuiverOptions opts = {});   // colored
+```
+
+```cpp
+ax->quiver(x, y, u, v, speed, {.cmap = Colormap::Viridis, .colorbar = true,
+                               .amp = 0.18, .pivot = QuiverPivot::Middle})
+   .set_aspect(1.0);
+```
+
+![a vortex field, each arrow colored by its speed](images/docs/quiver.png)
+
+An arrow runs from `(x, y)` along `(u, v)` times `amp`, **in data units**, so it
+points the way the data does only at [equal aspect](#equal-aspect). `amp` (matplotlib's
+`1/scale`) is chosen from the data when unset and then kept, so the frames of an
+animation stay comparable. `pivot` is `Tail`, `Middle` or `Tip`; `width`,
+`head_width` and `head_length` are in pixels. With `c`, each arrow is colored through
+`cmap`, `vmin` and `vmax`, with an optional colorbar; an arrow with a NaN, a zero
+vector or an end at or below 0 on a log axis is not drawn. Automatic limits cover
+whole arrows. Hover shows the vector (`PickKind::Quiver`), and `quiver_data(i)` /
+`set_quiver_data(i, …)` read and replace it. `Plane2D` has `quiver()` too.
+
+### axline and axspan
+
+Reference lines and bands across the frame:
+
+```cpp
+Axes& axline(double value, AxLineOptions opts = {});
+Axes& axspan(double lo, double hi, AxSpanOptions opts = {});
+```
+
+```cpp
+ax->axspan(0.7, 1.3, {.color = Color::Green, .name = "±0.3"})        // axhspan
+   .axline(1.0, {.linestyle = LineStyle::Dashed, .name = "mean"})     // axhline
+   .axline(6.2, {.orientation = Orientation::Vertical, .name = "event"});  // axvline
+```
+
+![a mean line, a tolerance band, an event line and an excluded span](images/docs/refs.png)
+
+Horizontal by default (at y = value, over y); `orientation = Vertical` puts them on
+x. `from` and `to` (fractions of the frame, 0..1) limit them to part of it, and a
+span can be outlined with `edgecolor` and `linewidth`. They stay put through pan and
+zoom along their length, draw in call order, have legend keys, and are edited in the
+Data panel. Automatic limits include their values (on a log axis only those > 0);
+a non-finite value throws. Read back and moved with `axline_data(i)` /
+`set_axline_data(i, …)` and the `axspan_` equivalents.
 
 ---
 
@@ -341,10 +507,10 @@ data space, so it follows the extent you gave the heatmap. `origin` is honoured.
 
 ## Colormaps
 
-Every colour-mapped kind takes a `Colormap`: `heatmap`, `scatter_z`, and in 3D
-`surface`, `surface_tri`, `scatter3d` and `line3d`.
+Every colour-mapped kind takes a `Colormap`: `heatmap`, `scatter_z`, `quiver` with
+a `c`, and in 3D `surface`, `surface_tri`, `scatter3d` and `line3d`.
 
-![the built-in colormaps](images/docs/colormaps.png)
+![the 26 built-in colormaps](images/docs/colormaps.png)
 
 | | For |
 |---|---|
@@ -353,11 +519,30 @@ Every colour-mapped kind takes a `Colormap`: `heatmap`, `scatter_z`, and in 3D
 | `Inferno`, `Magma` | Dark-to-bright; data that should glow against black |
 | `Cividis` | Designed for colour-vision deficiency |
 | `Turbo` | A rainbow for readers used to jet; not perceptually uniform |
-| `Coolwarm` | Diverging: data with a meaningful centre, such as signed values |
-| `Gray` | Greyscale images |
+| `Gray`, `Greys`, `Hot`, `Jet` | Greyscale images, and the classic heat and rainbow maps |
+| `Blues`, `Greens`, `Reds`, `Oranges`, `Purples`, `YlOrRd`, `YlGnBu` | Sequential, light to dark: counts, densities |
+| `Coolwarm`, `RdBu`, `Spectral`, `BrBG`, `PiYG` | Diverging: data with a meaningful centre, such as signed values |
+| `Twilight`, `TwilightShifted`, `Hsv`, `Phase` | Cyclic: angles and phases, whose ends meet |
 
 The colours match matplotlib's maps of the same names. `vmin` and `vmax` choose
-the data range the map spans; values outside it take the end colours.
+the data range the map spans; values outside it take the end colours, **except with
+a cyclic map, where they wrap round it**, so an angle reads right past ±π.
+
+`Colormap` is a class, not an enum: `Colormap::Viridis` and the other names work as
+before, but a `switch` over it no longer compiles. Beyond the names:
+
+```cpp
+auto r = sextant::Colormap::Viridis.reversed();                  // matplotlib's Viridis_r
+auto m = sextant::Colormap::from_name("magma_r");                // any case, "_r" for reversed
+auto c = sextant::register_colormap("sunset", {Color::Blue, Color::White, Color::Red});
+auto h = sextant::register_colormap("clock", colors, /*cyclic=*/true);
+for (const auto& name : sextant::Colormap::names()) { /* every map, registered ones included */ }
+```
+
+`register_colormap()` builds a map from two or more colours, evenly spaced, for the
+rest of the process; `name()` and `is_cyclic()` read a map back. The panel's
+colormap list shows registered maps, grouped as sequential, diverging and cyclic,
+with a "Reversed" toggle.
 
 ---
 
@@ -394,7 +579,7 @@ ax->legend({.anchor = sextant::LegendAnchor::InsideTL});
 ```
 
 **Colorbars.** A colorbar appears because a plot object asked for one
-(`colorbar = true` on a heatmap or `scatter_z`), and its `name` titles it along
+(`colorbar = true` on a heatmap, `scatter_z` or colored `quiver`), and its `name` titles it along
 the bar's outer side. Several can be asked for on one axes: each gets its own
 bar, measured for its own numbers, stacked outward from the frame in plot order.
 `set_colorbar_style()` styles all of an axes' bars, and chooses the side with
@@ -423,94 +608,106 @@ and ticks. To change the data of a live plot, use
 
 ---
 
-## Text and annotations
+## Scales, shared and twin axes
+
+### Log and symlog axes
 
 ```cpp
-Axes& text(std::string_view s, Pos x, Pos y, TextOptions opts = {});
-Axes& annotate(double px, double py, std::string_view s, Pos tx, Pos ty,
-               TextOptions opts = {}, ArrowOptions arrow = {});
+ax->set_xscale(sextant::Scale::Log)
+   .set_yscale(sextant::Scale::Symlog, {.linthresh = 1.0})
+   .grid(true, {.minor = true});
 ```
 
-`text()` writes a string over the plot; `annotate()` writes one with an arrow to
-the data point `(px, py)`. Each coordinate of the text's position is a **`Pos`**:
-a plain number is a data value, `Pos::fraction(f)` a fraction of the plot frame
-from its left (x) or bottom (y) edge. The two are independent, so a label can
-follow the data on one axis and stay put on the other:
+![log-log with a minor grid, a log y axis, and a symlog y axis](images/docs/scales.png)
+
+`Scale::Linear` (the default), `Log` and `Symlog`, with `ScaleOptions`: `base`
+(10), and for symlog `linthresh` (the linear range around 0) and `linscale`, as
+matplotlib's. `xscale()` / `yscale()` read them back. **Limits stay in data units**;
+pan and zoom move whole decades.
+
+On a log axis values <= 0 are clipped off the frame (a bar stands on its bottom
+edge) and ignored by the automatic limits, and `set_xlim()` / `set_ylim()` with an
+end <= 0 throw. Switching to `Log` drops set limits that reach 0 back to automatic.
+Ticks fall on the decades, labelled `10^3`; symlog adds 0 and the negative decades.
+A [heatmap](#heatmap-and-imshow) keeps its axes linear.
+
+### Tick formats and minor ticks
+
+`set_xtick_format("%.1f")` / `set_ytick_format()` take printf's format for one
+number (`%f`, `%e` or `%g`, with flags, width and precision, plus any text,
+[math](#math-in-text) included): `"%.0f%%"`, `"$%.1f$ ms"`. It labels the generated
+ticks and any `set_xticks()` positions given without a label. Empty restores the
+default; anything else (no conversion, or two) throws.
+
+Minor ticks are unlabelled marks between the major ones, on by default for log and
+symlog axes; `AxesStyle::minor_xticks` / `minor_yticks` turn them on or off, and
+`minor_tick_length` sizes them. `GridOptions::minor` adds grid lines at them, in
+`minor_color`.
+
+`AxesStyle` also has per-axis variants of the tick and label fields (`xtick_color`,
+`ytick_length`, `zlabel_fontsize`, …), unset by default so the shared field applies,
+and `show_xtick_labels` / `show_ytick_labels` to hide an axis' labels while keeping
+its marks.
+
+### Shared axes
 
 ```cpp
-using sextant::Pos;
-ax->text("threshold", 2.5, Pos::fraction(0.95), {.va = sextant::VAlign::Top})
-   .text("n = 120", Pos::fraction(0.02), Pos::fraction(0.04))
-   .annotate(t_peak, x_peak, "first peak", Pos::fraction(0.6), Pos::fraction(0.8),
-             {.fontsize = 14.0f, .background = sextant::Color::White,
-              .edgecolor = sextant::Color::Gray, .edge_linewidth = 1.0f},
-             {.arc = 0.2f});
+top->line(x, a);
+bottom->line(x, b).sharex(*top);        // also sharey()
+top->set_xlim(2.0, 8.0);                // moves both
 ```
 
-![text alignment, rotation, a box, a frame-anchored label and arrow ends](images/docs/text.png)
+Axes that share an axis hold **one set of limits and one scale**: `set_xlim()`,
+`set_xscale()`, pan, zoom and the panel's fields on any of them move them all, and
+automatic limits cover all their data. Tick positions, formats and titles stay per
+axes. Inner subplots hide their tick labels by themselves, as
+`plt.subplots(sharex=True)`, and give the room back; frames along a shared axis stay
+aligned, even with a legend or colorbar beside one. There is no unsharing. Sharing
+an axes of another figure throws, as does putting a heatmap on a log-scaled group.
 
-`TextOptions` sets the look: `fontsize` (pixels), `color`, `alpha`, `font_path`;
-`ha`/`va`, how the block sits against its anchor (`va = Baseline` by default);
-`rotation` in degrees; `dx`/`dy`, a nudge in pixels (y up); multi-line text
-(`'\n'`) with `linespacing`; and a box, `background` filled and `edge_linewidth`
-outlined, `pad` pixels out. `ArrowOptions` sets the arrow: `head` and `tail`
-(`None`, `Open`, `Filled`, `Bar`), their size, `linewidth`, `color` (unset: the
-text's), `linestyle`, the gaps left at the text and the point, and `arc`, which
-bows the arrow (as matplotlib's `arc3`).
-
-Texts are drawn over the data at a fixed pixel size: they never widen the
-automatic limits and reserve no room. A text whose **data** coordinate leaves the
-view is hidden whole; `clip_to_frame = true` cuts it at the frame instead. An
-annotation is hidden while its point is out of view. A non-finite coordinate
-throws `std::invalid_argument`.
-
-Texts appear in the window, PNG and SVG, have a tab in the Data panel, and read
-back like plot objects: `text_count()`, `text_data(i)` (a `TextData`: the string,
-both coordinates and their `Coords`, the arrow and its point) and
-`set_text_data(i, …)`. 3D has `text()`, `text2d()` and `annotate()` of its own;
-see [3d.md](3d.md#text-and-annotations).
-
----
-
-## Math in text
-
-Every string sextant draws can hold math: titles, axis titles, the suptitle,
-legend and colorbar names, custom tick labels and texts, in 2D and 3D. Write it
-between dollars, as in matplotlib:
+### Twin axes
 
 ```cpp
-ax->set_xtitle(R"($\theta$ [rad])")
-   .set_title(R"(Damped oscillator: $x(t) = e^{-\gamma t}\sin(\omega t)$)");
+auto host = fig->axes();
+host->line(t, temperature).set_ytitle("temperature [°C]");
+auto twin = host->twinx();                 // shares x, its own y on the right
+twin->line(t, rain).set_ytitle("rain [mm/h]");
+host->set_axes_style({.yaxis_color = Color::Red});
+twin->set_axes_style({.yaxis_color = Color::Blue});
 ```
 
-![strings as written beside how they draw](images/docs/mathtext.png)
+![twinx() with a second y axis, and two sharex() subplots](images/docs/twin_share.png)
 
-It is a subset of matplotlib's mathtext:
+`twinx()` returns a second axes over the same frame that shares the x axis and has
+its own y axis on the right; `twiny()` the same with the axes swapped. Plot into it
+as into any axes; the objects of both draw in the order they were plotted, the twin
+continues the host's colour cycle, and pan, zoom and reset move both.
 
-- superscripts and subscripts, `x^2`, `x_i`, `x_{i,j}^{2}`, nestable;
-- Greek letters and about 150 symbols by name: `\alpha`, `\Delta`, `\pm`,
-  `\times`, `\leq`, `\neq`, `\approx`, `\infty`, `\sum`, `\int`, `\nabla`,
-  `\rightarrow`, …;
-- function names set upright, `\sin`, `\cos`, `\log`, `\exp`, `\max`, …;
-- TeX spacing (`\,`, `\;`, `\quad`, …) and the spacing around operators;
-- fonts: `\mathrm{}` (upright), `\mathit{}` (italic), `\text{}` (upright, spaces
-  kept).
+The cell's title, legend (which lists both axes' series), colorbars and shared axis
+stay the host's: on a `twinx()`, `set_title()`, `legend()`, `set_xtitle()`,
+`set_xticks()` and `set_xtick_format()` act on the host. `AxesStyle::yaxis_color`
+colours each y axis' frame edge, so an axis can take its series' colour. Events
+report the twin's coordinate as `Event::y2data` (`x2data` for a `twiny()`), and a
+pick names whose object it found in `Event::pick_twin`. In the window, a menu-bar
+selector next to the subplot selector picks which layer the panels edit.
 
-Letters draw italic, as in TeX; digits, symbols, Greek capitals and function names
-stay upright. The italic is the font's own italic face, or its regular face
-slanted when it has none. Symbols the font lacks come from a system symbol font
-(Segoe UI Symbol on Windows, STIX Two Math on macOS, DejaVu Sans on Linux). The
-SVG writes math as `<tspan>`s, so it stays text.
+### Equal aspect
 
-**When a string is math.** As in matplotlib: when it has an even, nonzero number
-of `$` not preceded by a backslash. `\$` is a literal dollar, and a string with
-one `$` or none draws as written. Math that does not parse (an unknown command, an
-unclosed brace) is drawn as written, and the call that set it sends a warning
-through [`set_message_handler()`](#errors).
+`set_aspect(ratio, adjustable)` draws one y unit `ratio` x units long, as
+matplotlib's: `1.0` keeps a circle round, `0` (the default) fills the frame. Units
+are the scales', so on log-log a decade is as long on both axes.
 
-Turn it off for a whole figure with `FigureOptions::mathtext = false`, or for one
-text with `TextOptions::parse_math = false`. Not supported: fractions, roots,
-accents, sized delimiters, `\mathbf` and the calligraphic fonts, and `usetex`.
+```cpp
+ax->line(cx, cy, {.loop = true}).set_aspect(1.0);
+```
+
+`Adjustable::Box` (the default) shrinks the frame, centred, with its ticks, titles,
+legend and colorbars; `Adjustable::Datalim` keeps the frame and widens one axis'
+limits. Pan and zoom keep the ratio. `aspect()` and `adjustable()` read them back;
+`cla()` resets them. A negative or non-finite ratio throws, as does `set_aspect()`
+on a twin (its host's aspect sets the cell).
+
+![a circle in a frame that fills, and at set_aspect(1.0)](images/docs/aspect.png)
 
 ---
 
@@ -763,7 +960,8 @@ docked beside the plot. It always runs on its own thread.
 | **File → Resize to plot frame** | Resize the live window so a plot area hits a target |
 | **File → Refit layout** | Re-measure tick labels after panning has widened them |
 | **View → Cosmetic Panel / Data Panel** | Show or hide either panel |
-| **Edit → Navigate** | Pan, zoom and orbit with the mouse |
+| **Edit → Navigate** | Pan, zoom, box-zoom and orbit with the mouse |
+| **Edit → Back / Forward / Home** | Step through the views: pans, zooms, boxes and 3D camera moves |
 | **Edit → Hints** | Hover for values (on by default) |
 | **Subplot selector** | Which subplot the panels edit (with more than one) |
 
@@ -771,9 +969,16 @@ docked beside the plot. It always runs on its own thread.
 in the menu bar. The panels edit the selected subplot, and navigation acts on it.
 
 **Navigating** (Edit → Navigate). In 2D, left-drag pans, the wheel zooms at the
-cursor, and a double-click resets to the automatic limits. In 3D, left-drag
-orbits, the wheel zooms, W/A/S/D/Q/E fly, and a double-click returns to the
-default camera; see [3d.md](3d.md#camera).
+cursor, and Shift+drag draws a box to zoom to (a thin box zooms one axis, Esc
+cancels; with an aspect ratio the box keeps the frame's shape). On a log axis pan and
+zoom move whole decades. In 3D, left-drag orbits, the wheel zooms and W/A/S/D/Q/E
+fly; see [3d.md](3d.md#camera).
+
+**Back, Forward and Home** step through the views. Home is
+the limits and camera *your program set* (automatic where it set none), and a
+**double-click goes Home** for its subplot, so it returns to your `set_xlim()` or
+`set_view()` rather than to automatic limits; a 3D axes with `set_default_camera()`
+still returns to that camera.
 
 **Hints** work over any subplot and read out the values under the cursor: `x` and
 `y`, plus `z` for `scatter_z`, row, column and value for a heatmap, and the
@@ -805,6 +1010,116 @@ The panels' look is set once at creation, and they follow the monitor's DPI:
 sextant::Figure::create({.theme = sextant::PanelTheme::Dark,   // or Light,
                          .panel_width = 300.0f});              // Classic
 ```
+
+---
+
+## Text and annotations
+
+```cpp
+Axes& text(std::string_view s, Pos x, Pos y, TextOptions opts = {});
+Axes& annotate(double px, double py, std::string_view s, Pos tx, Pos ty,
+               TextOptions opts = {}, ArrowOptions arrow = {});
+```
+
+`text()` writes a string over the plot; `annotate()` writes one with an arrow to
+the data point `(px, py)`. Each coordinate of the text's position is a **`Pos`**:
+a plain number is a data value, `Pos::fraction(f)` a fraction of the plot frame
+from its left (x) or bottom (y) edge. The two are independent, so a label can
+follow the data on one axis and stay put on the other:
+
+```cpp
+using sextant::Pos;
+ax->text("threshold", 2.5, Pos::fraction(0.95), {.va = sextant::VAlign::Top})
+   .text("n = 120", Pos::fraction(0.02), Pos::fraction(0.04))
+   .annotate(t_peak, x_peak, "first peak", Pos::fraction(0.6), Pos::fraction(0.8),
+             {.fontsize = 14.0f, .background = sextant::Color::White,
+              .edgecolor = sextant::Color::Gray, .edge_linewidth = 1.0f},
+             {.arc = 0.2f});
+```
+
+![text alignment, rotation, a box, a frame-anchored label and arrow ends](images/docs/text.png)
+
+`TextOptions` sets the look: `fontsize` (pixels), `color`, `alpha`, `font_path`;
+`ha`/`va`, how the block sits against its anchor (`va = Baseline` by default);
+`rotation` in degrees; `dx`/`dy`, a nudge in pixels (y up); multi-line text
+(`'\n'`) with `linespacing`; and a box, `background` filled and `edge_linewidth`
+outlined, `pad` pixels out. `ArrowOptions` sets the arrow: `head` and `tail`
+(`None`, `Open`, `Filled`, `Bar`), their size, `linewidth`, `color` (unset: the
+text's), `linestyle`, the gaps left at the text and the point, and `arc`, which
+bows the arrow (as matplotlib's `arc3`).
+
+Texts are drawn over the data at a fixed pixel size: they never widen the
+automatic limits and reserve no room. A text whose **data** coordinate leaves the
+view is hidden whole; `clip_to_frame = true` cuts it at the frame instead. An
+annotation is hidden while its point is out of view. A non-finite coordinate
+throws `std::invalid_argument`.
+
+Texts appear in the window, PNG and SVG, have a tab in the Data panel, and read
+back like plot objects: `text_count()`, `text_data(i)` (a `TextData`: the string,
+both coordinates and their `Coords`, the arrow and its point) and
+`set_text_data(i, …)`. 3D has `text()`, `text2d()` and `annotate()` of its own;
+see [3d.md](3d.md#text-and-annotations).
+
+---
+
+## Math in text
+
+Every string sextant draws can hold math: titles, axis titles, the suptitle,
+legend and colorbar names, custom tick labels and texts, in 2D and 3D. Write it
+between dollars, as in matplotlib:
+
+```cpp
+ax->set_xtitle(R"($\theta$ [rad])")
+   .set_title(R"(Damped oscillator: $x(t) = e^{-\gamma t}\sin(\omega t)$)");
+```
+
+It is a large subset of matplotlib's mathtext, laid out by sextant itself:
+
+- superscripts and subscripts, `x^2`, `x_i`, `x_{i,j}^{2}`, nestable;
+- Greek letters and about 150 symbols by name: `\alpha`, `\Delta`, `\pm`,
+  `\times`, `\leq`, `\neq`, `\approx`, `\infty`, `\nabla`, `\rightarrow`, …;
+- function names set upright, `\sin`, `\cos`, `\log`, `\exp`, `\max`, …;
+- TeX spacing (`\,`, `\;`, `\quad`, …) and the spacing around operators;
+- **fractions and roots**: `\frac{a}{b}` (also `\tfrac`, `\dfrac`), `\binom{n}{k}`,
+  `\sqrt{x}`, `\sqrt[n]{x}`, `\overline{}`, `\underline{}`;
+- **accents**: `\hat`, `\bar`, `\tilde`, `\dot`, `\ddot`, `\acute`, `\grave`,
+  `\breve`, `\check`, `\mathring`, `\vec`, and across a whole body `\widehat`,
+  `\widetilde`, `\overrightarrow`, `\overleftarrow`;
+- **delimiters sized to their contents**: `\left( … \middle| … \right)` with any of
+  `( ) [ ] \{ \} | \| / \backslash < >` or `.` for none, and `\big`, `\Big`,
+  `\bigg`, `\Bigg` for a fixed size;
+- **big operators and limits**: `\sum`, `\prod`, `\int`, `\iint`, `\oint`,
+  `\bigcup`, … draw larger, with limits above and below (`\lim`, `\max`, `\sup`
+  too), `\overset`, `\underset`, `\stackrel`, `\substack`, `\operatorname`;
+- **fonts and alphabets**: `\mathrm{}` (upright), `\mathit{}` (italic), `\mathbf{}`
+  (bold), `\mathcal{}` and `\mathscr{}`, `\mathbb{}`, `\mathfrak{}`, `\mathsf{}`,
+  `\mathtt{}`, and `\text{}` (upright, spaces kept).
+
+![strings as written beside how they draw](images/docs/mathtext.png)
+
+Letters draw italic, as in TeX; digits, symbols, Greek capitals and function names
+stay upright. The italic is the font's own italic face, or its regular face
+slanted when it has none, and bold likewise. Symbols the font lacks come from a
+system symbol font (Segoe UI Symbol and Cambria Math on Windows, STIX Two Math on
+macOS, DejaVu Sans on Linux). The SVG writes math as `<tspan>`s, so it stays text.
+
+**Math fonts.** `FigureOptions::math_fontset` chooses the font math draws in, as
+matplotlib's `mathtext.fontset`, from the fonts installed (none is bundled):
+`MathFontset::Text` (the default) is the text's own font; `Stix` takes STIX Two
+Math, STIX Two Text or STIXGeneral; `Cm` takes Latin Modern Math, CMU Serif or
+Latin Modern Roman; `Custom` takes the font file at `math_font_path`. With none
+installed the text font is used, and creating the figure sends one message. `\text{}`
+stays in the text font. It is fixed when the figure is created.
+
+**When a string is math.** As in matplotlib: when it has an even, nonzero number
+of `$` not preceded by a backslash. `\$` is a literal dollar, and a string with
+one `$` or none draws as written. Math that does not parse (an unknown command, an
+unclosed brace) is drawn as written, and the call that set it sends a warning
+through [`set_message_handler()`](#errors).
+
+Turn it off for a whole figure with `FigureOptions::mathtext = false`, or for one
+text with `TextOptions::parse_math = false`. Not supported: `\boldsymbol`, `\color`,
+matrices and environments, and `usetex`.
 
 ---
 
@@ -842,20 +1157,28 @@ fig->disconnect(id);
 The **position** `x`, `y` is in the figure's logical pixels from the top left of
 the plot area; `axes` is the subplot under it (the index `add_subplot()` takes, -1
 outside every frame). The **data** `xdata`, `ydata` is the point under the cursor
-in that subplot's coordinates, with `has_data` true. In a 3D subplot it is where
+in that subplot's coordinates, with `has_data` true; on an axes with twins, `y2data`
+is the `twinx()`'s y under the cursor and `x2data` the `twiny()`'s x (NaN without that
+twin). In a 3D subplot it is where
 the cursor meets the nearest visible `Plane2D` (`zdata` too); elsewhere in 3D
 `has_data` is false. `consumed` says what sextant itself did with the input
 (selected a subplot, navigated, dragged a grid boundary): every event is reported
 either way, and a callback cannot suppress sextant's own handling.
 
-**Picking.** A press within 12 pixels of a plot object also sends one `Pick`
-event, for the nearest object: `pick_kind` (`Line`, `Scatter`, `ScatterZ`, `Bar`,
-`Heatmap`; `Bar3D`, `Surface`, `SurfaceTri`, `Scatter3D`, `Line3D`),
+**Picking.** A press on a plot object also sends one `Pick` event. A point, marker,
+arrow or path vertex within the **pick radius** answers first, the nearest
+(`FigureOptions::pick_radius`, 12 pixels by default, or `Figure::set_pick_radius()`);
+otherwise the topmost bar, fill or heatmap cell the press is *inside*, whose
+position is the event's `xdata` / `ydata`. `pick_kind` is `Line`, `Scatter`,
+`ScatterZ`, `Bar`, `Heatmap`, `Quiver`, `Fill`; `Bar3D`, `Surface`, `SurfaceTri`,
+`Scatter3D`, `Line3D`,
 `pick_object` (the object's index in its kind, the `i` of `line_data(i)` and
 friends), `pick_index` (the point, bar or vertex; the flat cell index of a heatmap
-or `bar3d`), `pick_row`/`pick_col` for those grids, and `pick_plane`, the
-`Plane2D`'s index in `Axes3D::plane_at()` for an object on a plane (-1 otherwise).
-It finds what the hover hints find. The indices refer to the data the window drew.
+or `bar3d`; a fill's segment *i*, between its points *i* and *i* + 1), `pick_row`/`pick_col` for those grids, and `pick_plane`, the
+`Plane2D`'s index in `Axes3D::plane_at()` for an object on a plane (-1 otherwise),
+and `pick_twin` (0 the axes' own, 1 its `twinx()`, 2 its `twiny()`). Reference
+lines, spans and texts are decorations and are never picked. It finds what the hover
+hints find. The indices refer to the data the window drew.
 
 **Where callbacks run.** The window never calls them. It queues events, and they
 run **on your thread**, inside `wait_closed()`, `Figure::run()`,
@@ -900,7 +1223,8 @@ while (!fig->wait_closed(1.0 / 60)) {   // until the user closes the window
 **`set_<kind>_data(i, …)` replaces object `i`'s data in place** and keeps its
 options, the axes' titles, limits and styles, and anything edited in the window.
 It exists for every kind (`set_line_data`, `set_scatter_data`,
-`set_scatter_z_data`, `set_bar_data`, `set_heatmap_data`, and the 3D ones), in two
+`set_scatter_z_data`, `set_bar_data`, `set_heatmap_data`, `set_fill_data`,
+`set_quiver_data`, `set_axline_data`, `set_axspan_data`, and the 3D ones), in two
 forms: the plotting call's own arguments as spans, or the struct `<kind>_data(i)`
 returns. It checks the data as the plotting call would and throws without
 changing anything if it is bad. Error bars and `hint_labels` stay while the point
@@ -971,15 +1295,17 @@ the window once `refresh()` has folded them in:
 ```cpp
 std::string t = ax->title();          // also xtitle(), ytitle()
 sextant::Range xr = ax->xlim();        // as drawn: set, panned, or automatic
+sextant::Scale sc = ax->yscale();      // also aspect(), adjustable()
 std::size_t n = ax->line_count();
 sextant::LineData d = ax->line_data(0);   // a copy: d.x, d.y
 ```
 
 Every kind has a `<kind>_count()` and a `<kind>_data(i)` returning a copy in a
 struct named after the kind (`LineData`, `ScatterData`, `ScatterZData`,
-`BarData`, `HeatmapData`; in 3D `Bar3DData`, `SurfaceData`, `SurfaceTriData`,
-`Scatter3DData`, `Line3DData`), with fields named after the plotting call's
-arguments. `bar_data` covers `hist()` too (bin centres and heights), and
+`BarData`, `HeatmapData`, `FillData`, `QuiverData`, `AxLineData`, `AxSpanData`; in
+3D `Bar3DData`, `SurfaceData`, `SurfaceTriData`, `Scatter3DData`, `Line3DData`), with
+fields named after the plotting call's arguments. A `stack()` reads back as its
+layers, each a fill. `bar_data` covers `hist()` too (bin centres and heights), and
 `heatmap_data` covers `imshow()`. Texts and annotations read back the same way:
 `text_count()`, `text_data(i)` (`TextData`; in 3D `Text3DData`) and
 `set_text_data(i, …)`. An index past the count throws `std::out_of_range`.
@@ -1003,7 +1329,7 @@ draw a misleading plot is an exception rather than a best guess.
 
 | Thrown | When |
 |---|---|
-| `std::invalid_argument` | Mismatched lengths (`x`/`y`, `x`/`y`/`z`, `x`/`height`). An error-bar span that is not one entry per point. Heatmap `rows`/`cols` not positive, data too small, or a degenerate or non-finite range; an `origin` other than `"lower"`/`"upper"`. A non-finite contour level. A non-finite text or annotation coordinate. An invalid subplot index, a different grid shape, a cell already taken, a shape-less `add_subplot()` before any shape. Invalid grid weights. A non-positive size or dpi. An unknown `savefig` extension. A bad colour name or hex string. An empty event callback. In 3D, see [3d.md](3d.md#errors) |
+| `std::invalid_argument` | Mismatched lengths (`x`/`y`, `x`/`y`/`z`, `x`/`height`). An error-bar span that is not one entry per point. Heatmap `rows`/`cols` not positive, data too small, or a degenerate or non-finite range; an `origin` other than `"lower"`/`"upper"`. A non-finite contour level. A non-finite text or annotation coordinate. `fill()`, `stack()` and `quiver()` spans of different lengths. A non-finite `axline()` / `axspan()` value, `from` or `to`. `set_xlim()` / `set_ylim()` with an end <= 0 on a log axis; a heatmap on a log or symlog axis. A tick format without exactly one numeric conversion. `sharex()` / `sharey()` with an axes of another figure; `twinx()` on a twin; a negative or non-finite aspect ratio or pick radius. An invalid subplot index, a different grid shape, a cell already taken, a shape-less `add_subplot()` before any shape. Invalid grid weights. A non-positive size or dpi. An unknown `savefig` extension. A bad colour name or hex string. An empty event callback. In 3D, see [3d.md](3d.md#errors) |
 | `std::out_of_range` | A read-back or `set_*_data()` index past the count |
 | `std::logic_error` | `refresh()` before `show()` or after the window closed; `poll_events()` off the main thread on macOS |
 | `std::runtime_error` | The window or OpenGL context could not be created |
@@ -1030,7 +1356,7 @@ An empty handler restores the default; an exception it throws is ignored.
 
 ```cmake
 list(APPEND CMAKE_PREFIX_PATH "/path/to/sextant/dist")   # where you installed it
-find_package(sextant 1.1 CONFIG REQUIRED)
+find_package(sextant 1.2 CONFIG REQUIRED)
 target_link_libraries(my_app PRIVATE sextant::sextant)
 ```
 

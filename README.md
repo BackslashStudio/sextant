@@ -91,76 +91,34 @@ int main() {
 
 ![A damped sine curve with its dashed envelope](doc/images/readme/quickstart.png)
 
-## Watch it run
-
-Plot once, then replace the data in place and publish it. The window keeps up on
-its own thread; closing it ends the loop.
-
-```cpp
-auto fig = sextant::Figure::create();
-auto ax  = fig->axes();
-ax->line(x, y);
-fig->show(false);
-
-while (!fig->wait_closed(1.0 / 60)) {   // until the window is closed
-    simulate_step(y);
-    ax->set_line_data(0, x, y);         // keeps titles, limits and styles
-    fig->refresh();
-}
-```
-
-## Text and math
-
-Labels over the plot, with or without an arrow, and matplotlib-style math in any
-string: titles, axis titles, legends, colorbars, tick labels and texts.
-
-![A damped oscillator whose title, axis titles and legend are math, with an annotated first peak, beside a 3D surface with its maximum labelled and its minimum annotated](doc/images/readme/text_math.png)
-
-```cpp
-using sextant::Pos;
-ax->set_title(R"(Damped oscillator: $x(t) = e^{-\gamma t}\sin(\omega t)$)")
-   .text("threshold", 2.5, Pos::fraction(0.95))     // data x, top of the frame
-   .annotate(t_peak, x_peak, "first peak",          // an arrow to the data point
-             Pos::fraction(0.6), Pos::fraction(0.8));
-```
-
-Each coordinate is a data value or a fraction of the frame, so a label can follow
-the data on one axis and stay put on the other. The math is a subset of
-matplotlib's mathtext: sub- and superscripts, Greek letters and about 150 symbols,
-`\sin`-style names, italic letters as in TeX. Texts work in 3D too (`text`,
-`text2d`, `annotate`), keep their pixel size under zoom, and render the same in
-the window, the PNG and the SVG.
-
-## React to the user
-
-Callbacks get the mouse, the keyboard and what was clicked. They run on your
-thread, inside `run()`, `wait_closed()`, `poll_events()` or `dispatch_events()`,
-so they can change the figure freely.
-
-```cpp
-fig->connect(sextant::EventKind::MouseDown, [](const sextant::Event& e) {
-    if (e.has_data) std::printf("clicked at (%g, %g)\n", e.xdata, e.ydata);
-});
-fig->connect(sextant::EventKind::Pick, [&](const sextant::Event& e) {
-    std::printf("picked line %d, point %d\n", e.pick_object, e.pick_index);
-});
-fig->show(false);
-sextant::Figure::run();   // deliver events until every window is closed
-```
-
 ## 2D plots
 
 ![Six subplots: styled lines with a legend, a series with error bars, a heatmap with labelled contours, a histogram, a bar chart, and a colour-mapped scatter](doc/images/readme/gallery_2d.png)
 
 |                     |                                                                                                                           |
 |---------------------|---------------------------------------------------------------------------------------------------------------------------|
-| `line`              | Polylines, solid, dashed, dotted or dash-dot, any width, open or closed. Millions of points.                              |
-| `scatter`           | Six marker shapes, per-series colour and size.                                                                            |
+| `line`              | Polylines, solid, dashed, dotted or dash-dot, any width, open or closed, optionally stepped. Millions of points.          |
+| `scatter`           | Sixteen marker shapes, per-series colour and size, or a size per point (bubble charts).                                   |
 | `scatter_z`         | Scatter whose colour comes from a third value, with a colorbar.                                                           |
-| `bar`               | Bar charts, positive or diverging, with edges.                                                                            |
+| `bar`               | Bar charts, vertical or horizontal, positive or diverging, stacked with `bottom`.                                         |
 | `hist`              | Histograms: binning on top of the same bar plot, with `density` and `cumulative`.                                         |
 | `heatmap`, `imshow` | Colour-mapped matrices over real coordinates or indices, with traced and labelled **contour lines**.                      |
+| `fill`              | The area between two curves, or down to a value; `Orientation::Vertical` fills across. Gaps, steps and crossings handled. |
+| `stack`             | Stacked areas with a zero, symmetric or streamgraph baseline.                                                             |
+| `quiver`            | An arrow per point, optionally coloured through a colormap with a colorbar.                                               |
+| `axline`, `axspan`  | Reference lines and bands across the frame, horizontal or vertical.                                                       |
 | error bars          | A capped whisker for an observed range plus a box for a spread, one- or two-sided, on lines, bars and both scatter kinds. |
+
+Drawn in one figure: a confidence band with a reference line and span, a
+streamgraph, an arrow field, a log-log plot with minor ticks, a second y axis, and
+stacked horizontal bars.
+
+![Six subplots: fill with a line and a span, a streamgraph, a quiver field, a log-log plot, twin y axes, and stacked horizontal bars](doc/images/readme/gallery_2d_more.png)
+
+Series without a colour take the next one from a ten-colour cycle, so several
+lines in one axes come out distinct with no styling at all. Objects draw in the
+order you plot them, whatever their kind, and any of them can be hidden with
+`visible = false` (a hidden object also leaves the automatic limits).
 
 ## 3D plots
 
@@ -181,23 +139,33 @@ ax3->plane(sextant::PlaneOrientation::XY, -10.0) // a 2D plane inside the scene
 | `surface_tri` | A sheet on a triangle mesh: give the triangles, or let sextant triangulate scattered points. |
 | `scatter3d`   | Markers in space, flat or colour-mapped, with depth shading.                                 |
 | `line3d`      | A path through space, flat or colour-mapped along its length, open or closed.                |
-| `Plane2D`     | A plane in the scene carrying any 2D plot: heatmaps, lines, scatter and bars.                |
+| `Plane2D`     | A plane in the scene carrying any 2D plot: heatmaps, lines, scatter, bars, fills, arrows.    |
 | error bars    | Whiskers and boxes on `scatter3d` and `line3d`, along any axis.                              |
 | camera        | Orthographic or perspective, orbit, pan and zoom, a box of any aspect.                       |
 
 Anything can be translucent: bars through a sheet through a plane are ordered
 correctly per pixel in the PNG and per polygon in the SVG.
 
-## And the rest
+## Axes, layout and style
 
+![Three axes: log-log with a minor grid, a log y axis, and a symlog y axis](doc/images/docs/scales.png)
+
+- **Scales.** `set_xscale()` / `set_yscale()` take `Scale::Log` or `Scale::Symlog`;
+  ticks fall on decades, minor ticks and a minor grid are one switch, and pan and
+  zoom move whole decades. `set_xtick_format("%.1f")` formats every tick label.
+- **Several axes in one frame.** `twinx()` / `twiny()` add a second y (x) axis
+  over the same frame, `sharex()` / `sharey()` tie limits and scales across subplots,
+  and `set_aspect(1.0)` keeps a circle round.
 - **Layout.** `add_subplot(rows, cols, index)` grids, cells spanning several
   columns or rows, adjustable column and row ratios, and a figure sized by the
-  whole *or* by the plot frame you want.
+  whole *or* by the plot frame you want. Each subplot's frame fits its own
+  titles, labels and legend.
 - **Decoration.** Titles, axis titles, legends inside or outside the frame,
   colorbars on any side, grids, a figure-wide suptitle, explicit ticks and tick
-  labels, axes that cross at any point, per-element fonts and colours.
-- **Colormaps.** Viridis, Plasma, Inferno, Magma, Cividis, Turbo, Coolwarm and Gray,
-  matching matplotlib's.
+  labels, axes that cross at any point, per-axis fonts, colours and tick lengths.
+- **Colormaps.** 26 of them: perceptual (Viridis, Plasma,
+  Inferno, Magma, Cividis, Turbo), sequential, diverging and cyclic ones that wrap.
+  `.reversed()` flips any, and `register_colormap()` adds your own.
 - **Styling.** Figure and plot-area backgrounds (transparent if you like),
   hidden ticks per axis, marker outlines and hollow markers.
 - **Read-back.** Every plot's data, the titles and the limits as drawn can be read
@@ -205,10 +173,79 @@ correctly per pixel in the PNG and per polygon in the SVG.
 - **Diagnostics.** `Figure::set_message_handler()` routes sextant's warnings to
   your logger instead of stderr.
 
+## Text and math
+
+Labels over the plot, with or without an arrow, and math in any
+string: titles, axis titles, legends, colorbars, tick labels and texts.
+
+![A damped oscillator whose title, axis titles and legend are math, with annotations holding a fraction, a root and an integral, beside a 3D surface with its maximum labelled and its minimum annotated](doc/images/readme/text_math.png)
+
+```cpp
+using sextant::Pos;
+ax->set_title(R"(Damped oscillator: $x(t) = e^{-\gamma t}\sin(\omega t)$)")
+   .text(R"($\omega_d = \sqrt{\omega^2 - \gamma^2}$)", 8.5, Pos::fraction(0.7))
+   .annotate(t_peak, x_peak, "first peak",          // an arrow to the data point
+             Pos::fraction(0.6), Pos::fraction(0.8));
+```
+
+Each coordinate is a data value or a fraction of the frame, so a label can follow
+the data on one axis and stay put on the other. Texts work in 3D too (`text`,
+`text2d`, `annotate`), keep their pixel size under zoom, and render the same in
+the window, the PNG and the SVG.
+
+Math is written between dollars, TeX style, and laid out by sextant itself:
+
+![Each math string as written beside how it draws: scripts, fractions, roots, accents, sized delimiters, sums and integrals with limits, bold and blackboard letters](doc/images/docs/mathtext.png)
+
+Sub- and superscripts, Greek letters and about 150 symbols, `\frac` and `\binom`,
+`\sqrt[n]{}`, accents (`\hat`, `\vec`, `\widehat`), `\left( \right)` and `\big`
+delimiters sized to their contents, `\sum \int \lim` with limits, `\mathbf`,
+`\mathbb`, `\mathcal`, and italic letters as in TeX. `FigureOptions::math_fontset`
+draws it in STIX or Computer Modern when installed.
+
+## React to the user
+
+Callbacks get the mouse, the keyboard and what was clicked. They run on your
+thread, inside `run()`, `wait_closed()`, `poll_events()` or `dispatch_events()`,
+so they can change the figure freely.
+
+```cpp
+fig->connect(sextant::EventKind::MouseDown, [](const sextant::Event& e) {
+    if (e.has_data) std::printf("clicked at (%g, %g)\n", e.xdata, e.ydata);
+});
+fig->connect(sextant::EventKind::Pick, [&](const sextant::Event& e) {
+    std::printf("picked line %d, point %d\n", e.pick_object, e.pick_index);
+});
+fig->show(false);
+sextant::Figure::run();   // deliver events until every window is closed
+```
+
+A pick finds a point, marker or arrow within `pick_radius` pixels, or the bar,
+fill or heatmap cell the cursor is inside.
+
+## Watch it run
+
+Plot once, then replace the data in place and publish it. The window keeps up on
+its own thread; closing it ends the loop.
+
+```cpp
+auto fig = sextant::Figure::create();
+auto ax  = fig->axes();
+ax->line(x, y);
+fig->show(false);
+
+while (!fig->wait_closed(1.0 / 60)) {   // until the window is closed
+    simulate_step(y);
+    ax->set_line_data(0, x, y);         // keeps titles, limits and styles
+    fig->refresh();
+}
+```
+
 ## Output
 
-- **A live window: `fig->show()`.** Pan, zoom, orbit, hover for values, edit the
-  plot and its data, save from the File menu.
+- **A live window: `fig->show()`.** Pan, zoom, box-zoom with Shift+drag, orbit,
+  hover for values, step back and forward through views, edit the plot and its
+  data, save from the File menu.
 - **PNG: `fig->savefig("out.png")`.** Supersampled, at any DPI: `{.dpi = 192}`
   writes the same layout at twice the pixels.
 - **SVG: `fig->savefig("out.svg")`.** Vector, resolution-independent, 3D
@@ -290,7 +327,7 @@ Then use it from your project (with vcpkg, skip the first line):
 
 ```cmake
 list(APPEND CMAKE_PREFIX_PATH "/path/to/sextant/dist")
-find_package(sextant 1.1 CONFIG REQUIRED)
+find_package(sextant CONFIG REQUIRED)
 target_link_libraries(my_app PRIVATE sextant::sextant)
 ```
 
@@ -306,6 +343,9 @@ handling.
 
 **[doc/panels.md](doc/panels.md)** is the guide to the Cosmetic and Data panels:
 a five-minute tour, every group, editing data, and how edits meet your program.
+
+**[doc/3d.md](doc/3d.md)** covers the 3D plot kinds, the camera and planes, and
+**[doc/reference.md](doc/reference.md)** tabulates every option struct and enum.
 
 ## Dependencies
 
