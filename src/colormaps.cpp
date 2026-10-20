@@ -20,7 +20,7 @@ namespace sextant::colormaps {
 // i/255), rounded to nearest. Alpha is always 255 and is added in to_rgba().
 // Gray needs no table.
 //
-// The maps v1.2 added are in colormap_tables.h, generated the same way from
+// The later maps are in colormap_tables.h, generated the same way from
 // matplotlib (ColorBrewer's maps, jet, hot, hsv, twilight) and cmocean (phase): a
 // source table of 256 entries copied as is, a longer one (twilight's 510)
 // interpolated linearly at i/255. THIRD_PARTY_NOTICES.md credits them all.
@@ -322,7 +322,6 @@ constexpr std::array k_builtins = {
     builtin("turbo",            S, to_rgba(k_turbo)),
     builtin("coolwarm",         D, to_rgba(k_coolwarm)),
     builtin("gray",             S, build_gray()),
-    // v1.2 step 33c
     builtin("Blues",            S, to_rgba(k_blues)),
     builtin("Greens",           S, to_rgba(k_greens)),
     builtin("Reds",             S, to_rgba(k_reds)),

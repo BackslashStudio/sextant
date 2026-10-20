@@ -1,4 +1,4 @@
-// Box zoom and navigation history (v1.2 step 36f): box_pixels()/box_limits()
+// Box zoom and navigation history: box_pixels()/box_limits()
 // on linear, log, reversed, thin and clipped boxes and the aspect growth; the
 // history's gestures, Back/Forward/Home, stale stamps, Home re-taken, the cap,
 // twins and a 3D camera; and the whole path through PlotView::draw() with

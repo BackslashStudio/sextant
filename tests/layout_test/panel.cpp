@@ -373,7 +373,7 @@ namespace lt {
             std::printf("    2D: %d of %d cursor positions reported a conflict, first id %u\n",
                         s2.conflicts, s2.probes, static_cast<unsigned>(s2.first));
 
-        // Every per-axis override set (v1.2 step 36h), so each swatch and drag
+        // Every per-axis override set, so each swatch and drag
         // submits its "Follow ..." menu, in a cell twinned both ways, so the
         // axis color rows show too.
         {

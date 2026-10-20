@@ -1,9 +1,9 @@
-// Arrow fields (step 36e-1): Axes::quiver() and Plane2D::quiver(). The call,
+// Arrow fields: Axes::quiver() and Plane2D::quiver(). The call,
 // read-back, set_quiver_data(), the automatic amp and cla(); the arrows
 // (pivots, what is left out, log), their outline and triangles, automatic
 // limits; the Data panel, its cell, row and style edits with undo, the
 // journal's replay; legend keys; hover and pick; planes; GL against SVG.
-// Colored arrows (step 36e-2): c, the map, the colorbar and key, the panel.
+// Colored arrows: c, the map, the colorbar and key, the panel.
 // Part of sextant_layout_test; see layout_test.h.
 #include "layout_test.h"
 #include "axis_limits.h"
@@ -481,7 +481,7 @@ namespace lt {
         }
     }
 
-    // --- Colored arrows (step 36e-2): c, the map, colorbar, legend, panel ------
+    // --- Colored arrows: c, the map, colorbar, legend, panel ------
     static void quiver_color_checks() {
         const V x{0.0, 1.0, 2.0}, y{0.0, 0.0, 0.0}, u{1.0, 1.0, 1.0}, v{0.0, 0.0, 0.0}, c{0.0, 0.5, 1.0};
         // The call: c stored and read back; a c of another length throws.
@@ -715,7 +715,7 @@ namespace lt {
         check(png.is(bx, ly - 1.0f, 0, 0, 0) || png.is(bx, ly, 0, 0, 0) || png.is(bx, ly + 1.0f, 0, 0, 0),
               "gl: the line drawn after the arrow shows over it");
 
-        // Colored arrows (step 36e-2), a scene of their own: three thick arrows
+        // Colored arrows, a scene of their own: three thick arrows
         // along +x at y = 2, 5, 8 with c = 0, 0.5, 1 through Viridis, and a fourth
         // at y = 9.5 whose c is NaN; a colorbar.
         FigureSnapshot cfs;

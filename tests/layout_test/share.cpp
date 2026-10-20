@@ -1,4 +1,4 @@
-// Share groups (v1.2 step 36b): Axes::sharex()/sharey() -- one set of limits
+// Share groups: Axes::sharex()/sharey() -- one set of limits
 // and one scale for every member, through the setters, the panel's edits (the
 // snapshot patch and the caller's replay), undo and cla(); automatic limits
 // over the whole group; the refusals; and the inner tick labels that hide by

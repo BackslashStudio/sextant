@@ -1,4 +1,4 @@
-// Axis scales on a 2D Axes (v1.2 step 36a): the AxisScale map, the log and
+// Axis scales on a 2D Axes: the AxisScale map, the log and
 // symlog locators, minor ticks, the tick format, limits in scale space, pan
 // and zoom, the refusals, and a log/symlog render whose GL pixels sit where the
 // layout's transform (and so the SVG) puts them. Part of sextant_layout_test.

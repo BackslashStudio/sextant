@@ -492,7 +492,7 @@ namespace lt {
         fi.apply_edits_and_publish();
         check(ax->text_data(0).text == "program", "text edits: an op over an older copy is dropped");
 
-        // Removal and restore through the R9/R10 machinery.
+        // Removal and restore.
         AxesImpl* a2 = fi.find_slot_impl(1);
         const ObjectId id = a2->texts[1].id;
         auto removed = a2->remove_object(id);

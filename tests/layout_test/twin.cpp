@@ -1,4 +1,4 @@
-// Twins (v1.2 step 36b-2): Axes::twinx()/twiny() -- a second axes over the
+// Twins: Axes::twinx()/twiny() -- a second axes over the
 // same frame sharing one axis, its own on the opposite edge; the cell's one
 // title, legend and colorbars; the shared color cycle; layout of both layers;
 // and drawing in call order across them, raster and SVG. Part of

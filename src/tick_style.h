@@ -1,5 +1,5 @@
 #pragma once
-// One axis' tick and label look (v1.2 step 36h): AxesStyle's per-axis fields
+// One axis' tick and label look: AxesStyle's per-axis fields
 // over its shared ones. Layout, both outputs and the 3D box read ticks only
 // through tick_look(), so an unset field draws exactly as before.
 #include "sextant/style.h"

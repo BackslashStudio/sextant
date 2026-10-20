@@ -1,4 +1,4 @@
-// Horizontal bars and bar bases (step 36c-4): BarOptions::orientation and
+// Horizontal bars and bar bases: BarOptions::orientation and
 // BarOptions::bottom. The call's length check, read-back and set_bar_data,
 // limits (stacked, lying, negative, error bars at the tip, log), hist, hover,
 // the Data panel's columns and its row, cell and orientation edits, GL

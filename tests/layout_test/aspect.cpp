@@ -1,4 +1,4 @@
-// Equal aspect (v1.2 step 36b-3): Axes::set_aspect() -- Box shrinks the frame
+// Equal aspect: Axes::set_aspect() -- Box shrinks the frame
 // to the ratio, centred, with its furniture; Datalim widens one axis' limits
 // instead; scale units on log axes; the setters' and edits' refusals; pan
 // and zoom keep the ratio. Part of sextant_layout_test.

@@ -25,7 +25,7 @@ if(APPLE AND NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version")
 endif()
 
-project(sextant VERSION 1.1.0 LANGUAGES CXX C)
+project(sextant VERSION 1.2.0 LANGUAGES CXX C)
 if(APPLE)
     # OBJCXX for src/platform/macos/. OBJC first: enabled alone, OBJCXX claims
     # .m files too and compiles GLFW's Cocoa sources as Objective-C++, which
@@ -134,7 +134,7 @@ endif()
 # linked into a library that claims CMAKE_OSX_DEPLOYMENT_TARGET, they would not
 # honour it. Built here they follow the deployment target and the
 # architectures, universal2 included. zlib comes from the SDK, as every Mac has
-# it. (v1.0 steps 21.6, 22.6)
+# it.
 # Elsewhere (default OFF; the Python binding turns it on): zlib as well, since
 # a manylinux wheel may not depend on the system's libz. FreeType's optional
 # codecs (zlib, brotli, bzip2, png, harfbuzz) are off everywhere -- the fonts

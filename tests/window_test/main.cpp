@@ -338,7 +338,7 @@ static void test_axes_gallery() {
             .set_xtitle("$\\hat{\\theta}$ [rad]").set_ytitle("$\\left(\\frac{\\sqrt{2}}{2}\\right)\\overline{y}$")
             .set_title("Line").legend().grid();
 
-    // C starts hidden (step 40): tick Visible on its Data-panel tab and the
+    // C starts hidden: tick Visible on its Data-panel tab and the
     // limits widen to x = 4, and the legend gains its key.
     std::vector<double> xc(xb);
     for (double& v : xc) v += 5.0;
@@ -1272,7 +1272,7 @@ static void part_spans() {
 }
 
 // -------------------------------------------------------------------------
-// Axis scales (v1.2 step 36a): log, log-log, symlog, minor ticks and grid, tick
+// Axis scales: log, log-log, symlog, minor ticks and grid, tick
 // formats. Interactive: pan and zoom move whole decades on a log axis and keep
 // the point under the cursor; the hover readout shows data values; the
 // Cosmetic panel's Ticks section switches each axis' scale (disabled on the
@@ -1358,7 +1358,7 @@ static void part_scales() {
 }
 
 // -------------------------------------------------------------------------
-// Shared axes (v1.2 step 36b): sharex down the left column, sharey across the
+// Shared axes: sharex down the left column, sharey across the
 // top row, and a heatmap sharing x below. Interactive: pan or zoom one cell of
 // a group and the others follow on that axis only; the inner cells' tick labels
 // are hidden (their room given back), the bottom row's shown; cell 1's legend
@@ -1411,7 +1411,7 @@ static void part_shared() {
     fig->show(true);
 }
 
-// v1.2 step 36b-2: twinx()/twiny(). Check: each twin's axis on its own edge
+// twinx()/twiny(). Check: each twin's axis on its own edge
 // (cell 1's host asks for its y axis on the right and is ignored); the
 // legend lists both layers in call order; drag, wheel and double-click move
 // every layer; the menu bar's Host / Twin selector beside the subplot one; cell 3's
@@ -1479,7 +1479,7 @@ static void part_twins() {
     fig->show(true);
 }
 
-// v1.2 step 36b-3: set_aspect(). Check: each circle stays round while the
+// set_aspect(). Check: each circle stays round while the
 // window resizes, pans and zooms; cell 1's frame shrinks and re-centres with
 // its title, ticks and legend (leaving its column's alignment); cell 2 keeps
 // its frame and widens its limits; cell 3 is log-log in decades; cell 4 is a
@@ -2190,7 +2190,7 @@ static void test_quiver() {
     a1->legend();
     a1->set_title("automatic amp, equal aspect: arrows circle the origin");
 
-    // Colored by speed (step 36e-2), at free aspect.
+    // Colored by speed, at free aspect.
     V speed;
     for (std::size_t k = 0; k < gx.size(); ++k) speed.push_back(std::hypot(gu[k], gv[k]));
     auto a2 = fig->add_subplot(2, 3, 2);

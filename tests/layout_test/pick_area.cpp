@@ -1,4 +1,4 @@
-// Picking by area (step 39): a bar by its body, a fill (and so a stack) by the
+// Picking by area: a bar by its body, a fill (and so a stack) by the
 // region it covers, a heatmap by its cell, at the cursor's data position; a
 // point within the pick radius before any area, whatever the draw order; the
 // topmost area among areas, across twins too; a fill on a plane; the radius

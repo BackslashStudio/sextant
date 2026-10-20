@@ -1,4 +1,4 @@
-// Reference lines and spans (step 36c-5): Axes::axline() and axspan(). The
+// Reference lines and spans: Axes::axline() and axspan(). The
 // call, read-back, set_*_data() and cla(); automatic limits (the data side
 // only, both orientations, an orientation edit, a twin, a share group, log);
 // the pixel geometry (frame fractions, log, clipping); the Data panel, its

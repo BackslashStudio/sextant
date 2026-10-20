@@ -1,4 +1,4 @@
-// Hiding plot objects (step 40): a hidden object is as if absent from the
+// Hiding plot objects: a hidden object is as if absent from the
 // picture (raster and SVG, 2D, 3D and on planes), from the auto limits (shared
 // axes too), the legend and the colorbars, and from hover and pick, while its
 // data and index stay; the setters and getters; stack() layers; a Data-panel

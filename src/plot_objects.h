@@ -775,7 +775,7 @@ struct RenderSnapshot3D {
     // set_fov() take a fresh stamp, cla() resets it to 0.
     unsigned long long camera_stamp = 0;
     // set_default_camera()'s camera; when `default_camera_set`, Home's camera (the
-    // double-click and Edit > Home, step 36f), else Home is the program's camera.
+    // double-click and Edit > Home), else Home is the program's camera.
     Camera3D    default_camera;
     bool        default_camera_set = false;
 

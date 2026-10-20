@@ -1,4 +1,4 @@
-// The marker shapes of step 36c-1: the side triangles, Star, Pentagon and
+// The marker shapes: the side triangles, Star, Pentagon and
 // Hexagon (filled, outlined as the others), and the line markers ThinCross,
 // ThinPlus, VLine and HLine (a stroke in the fill's color, `edge_linewidth`
 // thick). marker_shape() geometry, GPU pixels against the SVG polygon (area and

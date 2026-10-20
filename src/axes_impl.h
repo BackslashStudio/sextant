@@ -64,7 +64,7 @@ struct Axes::Impl {
     // a plane's sheet, which never shares.
     std::uint64_t owner = 0;
 
-    // sharex()/sharey() (v1.2 step 36b). A group owns one axis' value domain:
+    // sharex()/sharey(). A group owns one axis' value domain:
     // its limits (lo, hi, auto), their LimitStamps part and its scale. Every
     // member holds the same copy of those fields, so readers stay per-axes;
     // whatever writes them on one member copies them to the rest
@@ -93,7 +93,7 @@ struct Axes::Impl {
     // group can't take), then the group follows. Defined in figure.cpp.
     void apply_shared_edit(const AxesEdit& e);
 
-    // twinx()/twiny() (v1.2 step 36b-2). The host owns its twins; a twin points
+    // twinx()/twiny(). The host owns its twins; a twin points
     // back at it (null once the host is gone, see ~Axes()) and is its layer
     // (kLayerTwinX/Y) of the cell. A twin shares the host's color cycle, and
     // its title, legend and colorbar setters write the host's (cell()).
@@ -106,7 +106,7 @@ struct Axes::Impl {
     std::shared_ptr<Axes> make_twin(bool x, const char* who);
     // What a twin starts with: its shared axis hidden.
     void twin_defaults();
-    // Whose x (y) axis this axes' x (y) calls address (v1.2 step 36i): the
+    // Whose x (y) axis this axes' x (y) calls address: the
     // host's for a twin's shared axis (a twinx's x), else its own.
     bool shares_host_axis(bool x) const { return host && layer == (x ? kLayerTwinX : kLayerTwinY); }
     Impl& axis_owner(bool x) { return shares_host_axis(x) ? *host : *this; }
@@ -115,7 +115,7 @@ struct Axes::Impl {
     void set_twin_style(const AxesStyle& s);
     // set_xtick_format()/set_ytick_format(); empty = the scale's default.
     std::string xtick_format, ytick_format;
-    // set_aspect() (v1.2 step 36b-3).
+    // set_aspect().
     AxesAspect aspect;
 
     // Explicit tick override set via Axes::set_xticks/set_yticks (or the

@@ -259,7 +259,7 @@ namespace lt {
         }
 
         // Hover: of two points at one spot, the later object's; a point beats a
-        // heatmap whenever either was made (step 39).
+        // heatmap whenever either was made.
         const CoordTransform tr{0.0, 10.0, 0.0, 10.0, 0.0f, 0.0f, 400.0f, 400.0f, 400.0f, 400.0f};
         auto pick = [&](ObjectId line_id, ObjectId scatter_id, ObjectId heat_id) {
             RenderSnapshot s = snap_0_10();

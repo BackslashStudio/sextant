@@ -242,7 +242,7 @@ namespace lt {
               "a reversed or registered map changes the drawing");
     }
 
-    // The v1.2 built-ins, their groups, and cyclic maps wrapping on every path.
+    // The newer built-ins, their groups, and cyclic maps wrapping on every path.
     void test_colormap_cyclic() {
         std::printf("\n[colormaps: built-ins and cyclic wrap]\n");
         using namespace sextant;

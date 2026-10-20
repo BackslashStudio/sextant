@@ -1,4 +1,4 @@
-// Filled areas (step 36d-1): Axes::fill_between() and Plane2D::fill_between().
+// Filled areas: Axes::fill_between() and Plane2D::fill_between().
 // The call, read-back, set_fill_data() and cla(); the regions (runs, exclude,
 // NaN, steps, interpolate, log), the triangles (no overlap, crossings), and
 // automatic limits (both orientations, an orientation edit, a twin, log);
@@ -409,7 +409,7 @@ namespace lt {
                   "legend: a patch at the fill's opacity, outlined in the edge color when the fill is");
         }
 
-        // Hovered where it covers (step 39; pick_area.cpp has the rest).
+        // Hovered where it covers.
         {
             const CoordTransform tr{0.0, 2.0, 0.0, 3.0, 0.0f, 0.0f, 400.0f, 400.0f, 400.0f, 400.0f};
             const auto h = find_pick(s, tr, tr.to_px(1.0), tr.to_py(1.0));

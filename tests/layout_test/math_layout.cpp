@@ -1,4 +1,4 @@
-// Math constructs past step 32 (v1.2 step 37): fractions, roots and
+// Math constructs: fractions, roots and
 // over/underlines laid out by ink, the rules and paths they draw with, the SVG's
 // placed form, and the room tall lines get in texts and legends. Part of
 // sextant_layout_test; see layout_test.h.

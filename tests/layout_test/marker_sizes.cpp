@@ -1,4 +1,4 @@
-// Per-point marker sizes (step 36c-2): ScatterOptions / ScatterZOptions /
+// Per-point marker sizes: ScatterOptions / ScatterZOptions /
 // Scatter3DOptions::sizes. The call's length check, read-back and set_*_data,
 // GPU pixels and SVG radii against a uniform size, hidden points (NaN, 0,
 // negative), hover, the Data panel's size column and its row and cell edits,

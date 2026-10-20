@@ -1,4 +1,4 @@
-// Per-axis tick and label styling (v1.2 step 36h): AxesStyle's x/y/z fields
+// Per-axis tick and label styling: AxesStyle's x/y/z fields
 // over the shared ones, in layout, both outputs and the 3D box; a twinned
 // cell's axis colors. And a twin's setters (36i): its shared axis' calls and
 // the cell's half of set_axes_style() reach its host. Part of
