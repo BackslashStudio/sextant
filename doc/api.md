@@ -784,6 +784,8 @@ offsets of a series with error bars. Give each point extra hover text with
 ax->line(x, y, {.hint_labels = {"", "", "Peak", "", "Trough"}});
 ```
 
+The panels have their own guide: [panels.md](panels.md).
+
 **Cosmetic panel.** Titles, limits, ticks and tick labels, grid, frame and axis
 positions, legend, colorbars, the suptitle, margins, gaps and grid weights, and
 every colour and font size, all live. Each plot object's own appearance is in its

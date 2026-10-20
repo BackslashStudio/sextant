@@ -44,7 +44,7 @@ to inspect an array during a debugging session, without leaving the C++ ecosyste
   orbits, pans and zooms with the mouse.
 - **A control panel and a data panel come with the window.** Titles, limits,
   ticks, colours and fonts are editable live; so is the data itself, in shaded
-  tables, with every edit redrawn as you type.
+  tables, with every edit redrawn as you type ([guide](doc/panels.md)).
 - **What you see is what you save.** The window, the PNG and the SVG go through
   one layout pass, so a saved file matches the screen rather than approximating
   it. Overlapping translucent 3D geometry is ordered exactly in both files.
@@ -303,6 +303,9 @@ locations and static linking are in the [build guide](doc/build.md).
 **[doc/api.md](doc/api.md)** is the user guide and full API reference: every
 method, every option struct, the interactive window, threading rules and error
 handling.
+
+**[doc/panels.md](doc/panels.md)** is the guide to the Cosmetic and Data panels:
+a five-minute tour, every group, editing data, and how edits meet your program.
 
 ## Dependencies
 
