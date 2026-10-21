@@ -1,6 +1,7 @@
 #pragma once
 #include "sextant/style.h"
 #include "sextant/axes3d.h"
+#include "sextant/object_id.h"
 #include "axis_scale.h"
 #include "cow_vec.h"
 #include "tick_style.h"
@@ -28,12 +29,12 @@ namespace sextant {
 enum class PlotKind { Line, Scatter, Bar, Heatmap, ScatterZ, Bar3D, Surface, Scatter3D, Line3D,
                       SurfaceTri, Text, AxLine, AxSpan, Fill, Quiver };
 
-// A plot object's (or a plane's) identity: kept by set_*_data(), unchanged by
+// A plot object's (or a plane's) identity, the public ObjectId
+// (sextant/object_id.h): kept by set_*_data(), unchanged by
 // removing or reordering its siblings, never reused in a process. Edits carry
 // it beside their index (figure_edits.h), so an edit follows its object rather
 // than its position. 0 = none: objects of hand-built snapshots, and edits made
 // without a drawn snapshot, which are addressed by index alone.
-using ObjectId = std::uint64_t;
 
 // What an edit carries when the snapshot it was made over had nothing at its
 // index: it matches no object, so the edit drops.
@@ -798,6 +799,29 @@ struct ObjectRef {
     PlotKind    kind  = PlotKind::Line;
     std::size_t index = 0;
 };
+
+// The public name of a location: PickKind has no Text, AxLine or AxSpan, so
+// those give nothing.
+inline std::optional<ObjectLocation> to_location(const std::optional<ObjectRef>& r) {
+    if (!r) return std::nullopt;
+    PickKind k = PickKind::None;
+    switch (r->kind) {
+        case PlotKind::Line:      k = PickKind::Line;      break;
+        case PlotKind::Scatter:   k = PickKind::Scatter;   break;
+        case PlotKind::Bar:       k = PickKind::Bar;       break;
+        case PlotKind::Heatmap:   k = PickKind::Heatmap;   break;
+        case PlotKind::ScatterZ:  k = PickKind::ScatterZ;  break;
+        case PlotKind::Bar3D:     k = PickKind::Bar3D;     break;
+        case PlotKind::Surface:   k = PickKind::Surface;   break;
+        case PlotKind::Scatter3D: k = PickKind::Scatter3D; break;
+        case PlotKind::Line3D:    k = PickKind::Line3D;    break;
+        case PlotKind::SurfaceTri:k = PickKind::SurfaceTri;break;
+        case PlotKind::Fill:      k = PickKind::Fill;      break;
+        case PlotKind::Quiver:    k = PickKind::Quiver;    break;
+        case PlotKind::Text: case PlotKind::AxLine: case PlotKind::AxSpan: return std::nullopt;
+    }
+    return ObjectLocation{ k, r->index };
+}
 
 inline constexpr PlotKind kPlotKinds2D[] = { PlotKind::Line, PlotKind::Scatter, PlotKind::Bar,
                                              PlotKind::Heatmap, PlotKind::ScatterZ, PlotKind::Text,

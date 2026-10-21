@@ -25,7 +25,7 @@ if(APPLE AND NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version")
 endif()
 
-project(sextant VERSION 1.2.0 LANGUAGES CXX C)
+project(sextant VERSION 1.3.0 LANGUAGES CXX C)
 if(APPLE)
     # OBJCXX for src/platform/macos/. OBJC first: enabled alone, OBJCXX claims
     # .m files too and compiles GLFW's Cocoa sources as Objective-C++, which

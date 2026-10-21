@@ -2274,7 +2274,8 @@ static void test_quiver() {
 // left figure is 2D, the right one a 3D scene with a Plane2D; Edit > Navigate
 // shows `consumed`, and a click on a line point, bar, marker or heatmap cell adds a
 // `pick` line naming the object and element. Type in a panel field to see keys
-// stay quiet. Close the
+// stay quiet. Click an object on the first two plots and press x to remove it by its
+// ObjectId; a second x says it was not found. Close the
 // window to finish.
 static void test_events() {
     const char* consumed_names[] = {"none", "select", "navigate", "grid-drag"};
@@ -2290,7 +2291,8 @@ static void test_events() {
         x[i] = i * 0.1;
         y[i] = std::sin(x[i]);
     }
-    fig->add_subplot(1, 3, 1)->line(x, y).set_title("2D: click for data coordinates");
+    auto first = fig->add_subplot(1, 3, 1);
+    first->line(x, y).set_title("2D: click for data coordinates");
 
     // Step 39: bars and fills answer by area, a point within the radius first.
     auto areas = fig->add_subplot(1, 3, 2);
@@ -2306,11 +2308,24 @@ static void test_events() {
     ax3->set_title("3D: data only where a plane is hit");
     ax3->plane(sextant::PlaneOrientation::XY, 0.0)->line(x, y);
 
+    // Click an object, then press x: it is removed by its ObjectId. A second x
+    // finds nothing and says so through the message handler.
+    std::shared_ptr<sextant::Axes> picked_axes;
+    sextant::ObjectId picked_id = 0;
     int moves = 0;
     for (int k = 0; k <= static_cast<int>(sextant::EventKind::Pick); ++k) {
         const auto kind = static_cast<sextant::EventKind>(k);
         fig->connect(kind, [&, kind](const sextant::Event& e) {
             if (kind == sextant::EventKind::MouseMove && ++moves % 20 != 0) return; // thin the log
+            if (kind == sextant::EventKind::Pick) {
+                picked_axes = e.axes == 1 ? first : e.axes == 2 ? areas : nullptr;
+                picked_id = e.pick_object;
+            }
+            if (kind == sextant::EventKind::KeyDown && e.key == "x" && picked_axes) {
+                const bool ok = picked_axes->remove(picked_id);
+                printf("[remove] id=%llu -> %s\n", static_cast<unsigned long long>(picked_id), ok ? "removed" : "not found");
+                fig->refresh();
+            }
             printf("[event] %-8s", kinds[static_cast<int>(kind)]);
             switch (kind) {
                 case sextant::EventKind::MouseDown:
@@ -2331,9 +2346,9 @@ static void test_events() {
                     printf(" %dx%d", e.width, e.height);
                     break;
                 case sextant::EventKind::Pick:
-                    printf(" %s object=%d index=%d row=%d col=%d plane=%d axes=%d button=%d",
-                           pick_names[static_cast<int>(e.pick_kind)], e.pick_object, e.pick_index,
-                           e.pick_row, e.pick_col, e.pick_plane, e.axes, e.button);
+                    printf(" %s object=%llu index=%d row=%d col=%d plane=%llu axes=%d button=%d",
+                           pick_names[static_cast<int>(e.pick_kind)], static_cast<unsigned long long>(e.pick_object), e.pick_index,
+                           e.pick_row, e.pick_col, static_cast<unsigned long long>(e.pick_plane), e.axes, e.button);
                     break;
                 default: break;
             }
@@ -2970,7 +2985,7 @@ static void test_show_nonblocking() {
 }
 
 int main() {
-    test_axes_gallery();
+    // test_axes_gallery();
     // test_axes3d_gallery();
     // test_figure_layout();
     // test_aspect_scales();
@@ -2990,5 +3005,5 @@ int main() {
     // test_scatter3d();
     // test_show_nonblocking();
     // test_animation();
-    // test_events();
+    test_events();
 }

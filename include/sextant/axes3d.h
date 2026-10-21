@@ -1,4 +1,5 @@
 #pragma once
+#include "events.h"
 #include "export.h"
 #include "style.h"
 #include <cstdint>
@@ -509,6 +510,14 @@ namespace sextant {
 
         double offset() const;
 
+        // Identity, as on Axes: id() is the plane's own (Axes3D::remove_plane() takes
+        // it), last_object() the latest object made on it, remove() and
+        // find_object() as Axes's, over the plane's objects.
+        ObjectId id() const;
+        ObjectId last_object() const;
+        bool remove(ObjectId id);
+        std::optional<ObjectLocation> find_object(ObjectId id) const;
+
         // Read-back of the plane's own objects, as on Axes (limits and titles
         // are the parent's).
         // Plot objects of each kind, in the order they were added. `*_data(i)`
@@ -723,12 +732,28 @@ namespace sextant {
         std::shared_ptr<Plane2D> plane(PlaneOrientation orient, double offset,
                                        Plane2DOptions opts = {});
 
-        // The planes made so far, in the order plane() made them -- the index a
-        // Pick event's `pick_plane` names. plane_at() returns the same object
-        // plane() did; throws std::out_of_range for i >= plane_count().
+        // The planes made so far, in the order plane() made them. plane_at() returns
+        // the same object plane() did; throws std::out_of_range for i >= plane_count().
         std::size_t plane_count() const;
 
         std::shared_ptr<Plane2D> plane_at(std::size_t i) const;
+
+        // Planes by identity (Plane2D::id()): last_plane() is what the latest plane()
+        // call made, 0 before any. remove_plane() takes a plane out of the box and
+        // returns true; the Plane2D the caller holds keeps working but is no longer
+        // drawn. An id that is not one of this axes' planes changes nothing, returns
+        // false and sends a message. The later planes move down one in plane_at().
+        // plane_index() is the `i` of plane_at(i) now, nothing for an unknown id --
+        // what a Pick event's `pick_plane` needs.
+        ObjectId last_plane() const;
+        bool remove_plane(ObjectId id);
+        std::optional<std::size_t> plane_index(ObjectId id) const;
+
+        // The axes' own objects (not a plane's), as Axes: last_object(), remove(),
+        // find_object().
+        ObjectId last_object() const;
+        bool remove(ObjectId id);
+        std::optional<ObjectLocation> find_object(ObjectId id) const;
 
         // ----------------------------------------------------------------
         // Text -- as Axes::text(); drawn over the scene at a fixed pixel

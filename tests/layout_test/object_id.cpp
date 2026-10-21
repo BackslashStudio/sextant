@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <set>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -295,6 +296,147 @@ namespace lt {
               "scratch: reordered planes and 3D objects re-seed it");
     }
 
+
+    // The public side: last_object() after each plotting call, remove() with its
+    // warning, find_object(), and the planes' own.
+    static void public_ids() {
+        auto fig = Figure::create();
+        auto ax  = fig->add_subplot(1, 2, 1);
+        auto ax3 = fig->add_subplot3d(1, 2, 2);
+        check(ax->last_object() == 0 && ax3->last_object() == 0 && ax3->last_plane() == 0,
+              "last_object: 0 before any plotting call");
+
+        auto& fi = detail::FigureAccess::impl(*fig);
+        AxesImpl* a2 = fi.find_slot_impl(1);
+        Axes3DImpl* a3 = fi.find_slot_impl3d(2);
+
+        ax->line(kX, kY);
+        const ObjectId l0 = ax->last_object();
+        ax->line(kX, kY);
+        const ObjectId l1 = ax->last_object();
+        ax->scatter(kX, kY);
+        const ObjectId sc = ax->last_object();
+        check(l0 != 0 && l1 > l0 && sc > l1 && l0 == a2->lines[0].id && sc == a2->scatters[0].id,
+              "last_object: the id of the object the latest call made, increasing");
+        ax->axline(1.0);
+        const ObjectId al = ax->last_object();
+        ax->text("t", 0.5, 0.5);
+        const ObjectId tx = ax->last_object();
+        check(al > sc && tx > al && al == a2->axlines[0].id && tx == a2->texts[0].id,
+              "last_object: axline and text count too");
+        const std::vector<std::vector<double>> layers{ kY, kY };
+        ax->stack(kX, layers);
+        check(ax->last_object() == a2->fills.back().id && a2->fills.size() == 2,
+              "last_object: a call that makes several objects gives the last");
+
+        ax3->scatter3d(kX, kY, kY);
+        const ObjectId s0 = ax3->last_object();
+        ax3->line3d(kX, kY, kY);
+        const std::vector<std::uint32_t> tri{ 0, 1, 2 };
+        ax3->surface_tri(kX, kY, kY, tri);
+        check(s0 == a3->scatter3d[0].id && ax3->last_object() == a3->surface_tri[0].id && ax3->last_object() > s0,
+              "last_object (3D): surface_tri included");
+        auto p0 = ax3->plane(PlaneOrientation::XY, 0.0);
+        auto p1 = ax3->plane(PlaneOrientation::YZ, 0.5);
+        check(p0->id() != 0 && p1->id() > p0->id() && ax3->last_plane() == p1->id()
+              && p0->id() == a3->plane_at(0).id,
+              "planes: id(), and last_plane() is the latest plane() call");
+        check(p0->last_object() == 0, "plane: last_object() is 0 on an empty plane");
+        p0->line(kX, kY);
+        check(p0->last_object() == a3->plane_at(0).sheet.lines[0].id && p0->last_object() != 0
+              && ax3->last_object() == a3->surface_tri[0].id,
+              "plane: last_object() is the plane's own; the axes' is untouched");
+    }
+
+    struct Messages {
+        std::vector<std::string> v;
+        MessageHandler           old;
+        Messages() { old = Figure::set_message_handler([this](std::string_view m) { v.emplace_back(m); }); }
+        ~Messages() { Figure::set_message_handler(old); }
+    };
+
+    static void public_remove() {
+        auto fig = Figure::create();
+        auto ax  = fig->add_subplot(1, 2, 1);
+        auto ax3 = fig->add_subplot3d(1, 2, 2);
+        auto fig2  = Figure::create();
+        auto other = fig2->add_subplot(1, 1, 1);
+        std::vector<ObjectId> ls;
+        for (int i = 0; i < 3; ++i) {
+            ax->line(kX, std::vector<double>{ double(i), 2.0, 3.0 });
+            ls.push_back(ax->last_object());
+        }
+        ax->scatter(kX, kY);
+        const ObjectId sc = ax->last_object();
+        other->line(kX, kY);
+        const ObjectId foreign = other->last_object();
+
+        auto loc = ax->find_object(ls[2]);
+        check(loc && loc->kind == PickKind::Line && loc->index == 2
+              && ax->find_object(sc)->kind == PickKind::Scatter,
+              "find_object: the kind and index of an id");
+        check(!ax->find_object(0) && !ax->find_object(foreign) && !ax->find_object(~ObjectId{0}),
+              "find_object: nothing for 0, another axes' id, or an unknown one");
+
+        Messages msgs;
+        check(ax->remove(ls[1]) && ax->line_count() == 2 && ax->line_data(1).y[0] == 2.0
+              && ax->find_object(ls[2])->index == 1 && !ax->find_object(ls[1]) && ax->scatter_count() == 1
+              && msgs.v.empty(),
+              "remove: only that object goes, later indices close up, ids stay, no message");
+        check(!ax->remove(ls[1]) && msgs.v.size() == 1 && msgs.v[0].find("Axes::remove") != std::string::npos
+              && ax->line_count() == 2,
+              "remove: a second removal is false with one message, nothing changed");
+        check(!ax->remove(0) && !ax->remove(foreign) && msgs.v.size() == 3 && other->line_count() == 1,
+              "remove: 0 and another axes' id warn and leave the other axes alone");
+
+        // Decorations and areas go too.
+        ax->axline(1.0);
+        const ObjectId al = ax->last_object();
+        ax->text("t", 0.5, 0.5);
+        const ObjectId tx = ax->last_object();
+        ax->fill(kX, kY, 0.0);
+        const ObjectId fl = ax->last_object();
+        check(ax->remove(al) && ax->remove(tx) && ax->remove(fl) && ax->fill_count() == 0
+              && ax->axline_count() == 0 && ax->text_count() == 0 && msgs.v.size() == 3,
+              "remove: axline, text and fill by id");
+
+        // Everything removed: the axes still publishes and draws nothing of it.
+        auto& fi = detail::FigureAccess::impl(*fig);
+        check(ax->remove(ls[0]) && ax->remove(ls[2]) && ax->remove(sc) && ax->line_count() == 0,
+              "remove: the last object of an axes");
+        fi.apply_edits_and_publish();
+        auto snap = fi.snapshot_box.load();
+        check(snap->axes[0].snap2d() && snap->axes[0].snap2d()->lines.empty()
+              && snap->axes[0].snap2d()->scatters.empty(),
+              "remove: the next snapshot omits the removed objects");
+
+        // 3D.
+        ax3->scatter3d(kX, kY, kY);
+        const ObjectId s0 = ax3->last_object();
+        ax3->scatter3d(kX, kY, kY);
+        const ObjectId s1 = ax3->last_object();
+        auto p0 = ax3->plane(PlaneOrientation::XY, 0.0);
+        const ObjectId pid0 = p0->id();
+        p0->line(kX, kY);
+        const ObjectId pl = p0->last_object();
+        auto p1 = ax3->plane(PlaneOrientation::XY, 1.0);
+        auto p2 = ax3->plane(PlaneOrientation::XY, 2.0);
+        check(ax3->remove(s0) && ax3->find_object(s1)->index == 0 && !ax3->remove(s0),
+              "Axes3D::remove: its own objects, a repeat warns");
+        check(!ax3->remove(pl) && p0->find_object(pl) && !ax3->find_object(pl),
+              "Axes3D::remove: a plane's object is not the axes' to remove");
+        check(p0->remove(pl) && p0->line_count() == 0 && !p0->remove(pl),
+              "Plane2D::remove: an object of the plane by id; a repeat warns");
+        const std::size_t before = msgs.v.size();
+        check(ax3->plane_index(p2->id()) == 2u && ax3->remove_plane(pid0) && ax3->plane_count() == 2
+              && ax3->plane_index(p2->id()) == 1u && ax3->plane_at(0) == p1 && !ax3->plane_index(pid0),
+              "remove_plane: later planes move down, plane_index follows");
+        check(!ax3->remove_plane(pid0) && !ax3->remove_plane(0) && msgs.v.size() == before + 2
+              && msgs.v.back().find("remove_plane") != std::string::npos,
+              "remove_plane: a stale id warns and returns false");
+        p0->line(kX, kY);   // the detached plane keeps working
+        check(p0->line_count() == 1 && ax3->plane_count() == 2, "remove_plane: the caller's handle stays usable");
+    }
     void test_object_ids() {
         std::printf("\n[object ids: identity, removal, reorder]\n");
         ids_assigned();
@@ -303,5 +445,7 @@ namespace lt {
         edits_follow_3d();
         merge_by_id();
         scratch_follows_ids();
+        public_ids();
+        public_remove();
     }
 } // namespace lt

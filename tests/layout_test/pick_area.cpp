@@ -316,6 +316,7 @@ namespace lt {
 
             RenderSnapshot rs = snap_0_10();
             rs.fills.push_back(fill_of(V{0.0, 4.0, 10.0}, V{0.0, 0.0, 0.0}, V{6.0, 6.0, 6.0}));
+            rs.fills.back().id = 7;
             ScatterPlot sp;
             sp.x = V{8.0};
             sp.y = V{8.0};
@@ -327,7 +328,7 @@ namespace lt {
             const CoordTransform& tr = layout[0].tr;
 
             const auto p = press(fs, layout, tr.to_px(6.0), tr.to_py(2.0));
-            check(p && p->pick_kind == PickKind::Fill && p->pick_object == 0 && p->pick_index == 1 &&
+            check(p && p->pick_kind == PickKind::Fill && p->pick_object == 7 && p->pick_index == 1 &&
                       p->pick_row == -1 && p->pick_col == -1 && p->has_data && std::abs(p->xdata - 6.0) < 0.05 &&
                       std::abs(p->ydata - 2.0) < 0.05,
                   "event: a press inside a fill is a Fill pick, its segment, at xdata/ydata");

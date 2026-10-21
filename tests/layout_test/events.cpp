@@ -4,6 +4,7 @@
 // Part of sextant_layout_test; see layout_test.h.
 #include "layout_test.h"
 #include "event_channel.h"
+#include "figure_impl.h"
 #include "plot_events.h"
 #include "key_names.h"
 #include "window_link.h"
@@ -25,6 +26,31 @@ namespace lt {
         // Every kind before Pick, as a mask: the pointer tests below press over data and
         // would otherwise grow a Pick they are not about (test_pick_events() has its own).
         constexpr std::uint32_t kAll = (1u << 8) - 1;
+
+        // Hand-built snapshots carry id 0. Number each kind's objects 1, 2, ...
+        // in order (and a 3D snapshot's planes, and their sheets' objects), so a
+        // pick's `pick_object` / `pick_plane` can be told from the index.
+        void number_objects(RenderSnapshot& s) {
+            for (PlotKind k : kPlotKinds2D)
+                with_kind(s, k, [](auto& v) {
+                    ObjectId n = 0;
+                    for (auto& p : v) p.id = ++n;
+                    return 0;
+                }, 0);
+        }
+        void number_objects(RenderSnapshot3D& s) {
+            for (PlotKind k : kPlotKinds3D)
+                with_kind(s, k, [](auto& v) {
+                    ObjectId n = 0;
+                    for (auto& p : v) p.id = ++n;
+                    return 0;
+                }, 0);
+            ObjectId n = 0;
+            for (PlaneSnapshot& pl : s.planes) {
+                pl.id = ++n;
+                number_objects(pl.sheet);
+            }
+        }
     } // namespace
 
     // -------------------------------------------------------------------------
@@ -497,6 +523,7 @@ namespace lt {
         auto only_2d = [](auto&& fill) {
             RenderSnapshot rs;
             fill(rs);
+            number_objects(rs);
             FigureSnapshot fs;
             fs.axes.push_back({AxesSlot{1, 1, 1}, std::move(rs)});
             fs.generation = fs.data_generation = 1;
@@ -522,9 +549,9 @@ namespace lt {
             auto p = pick_of(evs);
             check(evs.size() >= 2 && evs[0].kind == EventKind::MouseDown,
                   "pick: a press reports its MouseDown first");
-            check(p && p->pick_kind == PickKind::Line && p->pick_object == 1 && p->pick_index == 2 &&
-                  p->pick_plane == -1 && p->pick_row == -1,
-                  "pick: on the second line's third point: Line, object 1, index 2");
+            check(p && p->pick_kind == PickKind::Line && p->pick_object == 2 && p->pick_index == 2 &&
+                  p->pick_plane == 0 && p->pick_row == -1,
+                  "pick: on the second line's third point: Line, id 2 (object 1), index 2");
             check(p && p->x == x && p->y == y && p->axes == 1 && p->button == 0 && p->has_data,
                   "pick: with the press's own pixel, subplot and data");
             check(evs.size() >= 2 && evs[1].kind == EventKind::Pick,
@@ -537,7 +564,7 @@ namespace lt {
                   "pick: and is still a MouseDown");
 
             const auto r = pick_of(press(fs, layout, x, y, (1u << 9) - 1, 1));
-            check(r && r->button == 1 && r->pick_object == 1,
+            check(r && r->button == 1 && r->pick_object == 2,
                   "pick: the right button picks too, and says which");
 
             // What is wanted decides what is produced.
@@ -566,7 +593,7 @@ namespace lt {
             });
             auto layout = layout_of(fs, 600, 400);
             auto p = pick_of(press(fs, layout, layout[0].tr.to_px(1.0), layout[0].tr.to_py(2.0)));
-            check(p && p->pick_kind == PickKind::Scatter && p->pick_object == 0 && p->pick_index == 1,
+            check(p && p->pick_kind == PickKind::Scatter && p->pick_object == 1 && p->pick_index == 1,
                   "pick: a scatter point");
 
             fs = only_2d([](RenderSnapshot& rs) {
@@ -590,8 +617,37 @@ namespace lt {
             });
             layout = layout_of(fs, 600, 400);
             p = pick_of(press(fs, layout, layout[0].tr.to_px(2.0), layout[0].tr.to_py(4.0)));
-            check(p && p->pick_kind == PickKind::Bar && p->pick_object == 0 && p->pick_index == 1,
+            check(p && p->pick_kind == PickKind::Bar && p->pick_object == 1 && p->pick_index == 1,
                   "pick: a bar, by the top of it");
+        }
+
+        // ---- Ids of a real figure, and a pick whose object is gone.
+        {
+            auto fig = Figure::create({.width = 600, .height = 400});
+            auto ax  = fig->add_subplot(1, 1, 1);
+            const std::vector<double> x{0.0, 1.0, 2.0}, up{0.0, 1.0, 2.0}, down{2.0, 1.0, 0.0};
+            ax->line(x, up);
+            const ObjectId a = ax->last_object();
+            ax->line(x, down);
+            const ObjectId b = ax->last_object();
+            auto snap_of = [&] { return detail::FigureAccess::impl(*fig).build_figure_snapshot(); };
+
+            FigureSnapshot fs = snap_of();
+            auto layout = layout_of(fs, 600, 400);
+            const float px = layout[0].tr.to_px(0.0), py = layout[0].tr.to_py(0.0);
+            const auto p = pick_of(press(fs, layout, px, py));
+            check(p && p->pick_object == a && p->pick_plane == 0 && ax->find_object(a)->index == 0
+                  && ax->find_object(b)->index == 1,
+                  "pick: a real figure's pick names the line's ObjectId; find_object() gives its index");
+
+            ax->remove(a);
+            fs = snap_of();
+            layout = layout_of(fs, 600, 400);
+            check(!pick_of(press(fs, layout, px, py)).has_value() && p && !ax->find_object(p->pick_object),
+                  "pick: after remove() the point is gone, and the old event's id finds nothing");
+            const auto q = pick_of(press(fs, layout, layout[0].tr.to_px(0.0), layout[0].tr.to_py(2.0)));
+            check(q && q->pick_object == b && ax->find_object(b)->index == 0,
+                  "pick: the survivor keeps its id while its index closed up to 0");
         }
 
         // ---- A heatmap cell, for both origins.
@@ -629,6 +685,7 @@ namespace lt {
             const Projector3D proj(tf, cam, frame, 0.1f);
 
             auto figure3d = [](RenderSnapshot3D rs) {
+                number_objects(rs);
                 FigureSnapshot fs;
                 fs.axes.push_back({AxesSlot{1, 1, 1}, std::move(rs)});
                 fs.generation = fs.data_generation = 1;
@@ -652,8 +709,8 @@ namespace lt {
                 check(hit && hint && format_pick3d(s, *hit) == hint->text,
                       std::string("pick 3D: ") + what + " -- the hint is the pick's text");
                 auto p = pick_of(press(fs, layout3, q.x, q.y));
-                check(p && p->pick_kind == kind && p->pick_object == object &&
-                      p->pick_index == element && p->pick_plane == plane && p->axes == 1,
+                check(p && p->pick_kind == kind && p->pick_object == static_cast<ObjectId>(object + 1) &&
+                      p->pick_index == element && p->pick_plane == static_cast<ObjectId>(plane + 1) && p->axes == 1,
                       std::string("pick 3D: ") + what + " (event)");
                 return p ? *p : Event{};
             };
@@ -749,6 +806,7 @@ namespace lt {
         FigureWindowShell shell(ctx, opts);
 
         FigureSnapshot fs = one_line_snapshot({0.0, 1.0, 2.0}, {0.0, 1.0, 4.0});
+        fs.axes[0].snap2d()->lines[0].id = 42;
         FigureEditBox edit_box;
         FigureWindowState st;
         auto ch = EventChannel::create();
@@ -861,7 +919,7 @@ namespace lt {
                 auto& got = step();
                 const Event* p = find_pick_event(got);
                 check(got.size() >= 2 && got[0].kind == EventKind::MouseDown && p &&
-                      p->pick_kind == PickKind::Line && p->pick_object == 0 && p->pick_index == 1,
+                      p->pick_kind == PickKind::Line && p->pick_object == 42 && p->pick_index == 1,
                       "panel events: a press on a data point reports MouseDown, then Pick with the object");
             }
             button(0, false);

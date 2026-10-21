@@ -468,7 +468,8 @@ namespace lt {
             std::vector<Event> out;
             collect_plot_events(tr, in, PlotEventInfo{}, fs, layout, event_bit(EventKind::Pick), out);
             check(out.size() == 1 && out[0].kind == EventKind::Pick && out[0].pick_twin == 1
-                      && out[0].pick_object == 0,
+                      && out[0].pick_object == twin->last_object() && twin->find_object(out[0].pick_object)
+                      && !host->find_object(out[0].pick_object),
                   "twin events: a pick on the twin's point says pick_twin = 1");
         }
 

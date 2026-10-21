@@ -122,8 +122,13 @@ struct Axes::Impl {
     // widget panel's tick table). Absent = auto-generated ticks.
     std::optional<std::vector<Tick>> xticks_override, yticks_override;
 
-    // Plot objects by identity (see ObjectId). Internal: the public
-    // API neither removes nor reorders objects. Each is a caller-thread change
+    // Every plotting call takes its object's id here, so last_object() can
+    // answer; a call that makes several objects leaves the last one's.
+    ObjectId last_id = 0;
+    ObjectId new_id() { return last_id = next_object_id(); }
+
+    // Plot objects by identity (see ObjectId). Axes::remove() is the public
+    // removal; reorder and restore stay internal. Each is a caller-thread change
     // like a plotting call, reaching a window at the next publish; panel edits
     // made over the old order follow their objects (or drop with them).
     // Reorder is within a kind; draw and legend order follow the ids

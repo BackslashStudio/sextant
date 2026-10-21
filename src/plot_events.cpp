@@ -74,28 +74,40 @@ static bool fill_pick(Event& e, const FigureSnapshot& fsnap, const std::vector<A
 
     std::optional<PickHit> hit;
     int twin = 0;
+    ObjectId object = 0, plane = 0;   // what the hit names, by identity
     if (fa->snap2d() && !cell->twins.empty()) {
         // Every layer of a twinned cell.
         const CellLayers l = cell_layers(*fa, *cell);
         std::size_t k = 0;
         hit = find_pick_layers(l, e.x, e.y, k, index, fsnap.data_generation, fsnap.pick_radius);
-        if (hit) twin = l.layers[k];
+        if (hit) {
+            twin = l.layers[k];
+            object = pick_object_id(*l.snaps[k], hit->kind, hit->object);
+        }
     } else if (fa->snap2d()) {
         if (index) index->set_frame_key(fsnap.data_generation, cell->slot.index);
         hit = find_pick(*fa->snap2d(), HintProjector(cell->tr), e.x, e.y, index, fsnap.pick_radius);
+        if (hit) object = pick_object_id(*fa->snap2d(), hit->kind, hit->object);
     } else if (fa->snap3d() && cell->proj3d) {
         if (index) index->set_frame_key(fsnap.data_generation, cell->slot.index);
         hit = find_pick3d(*fa->snap3d(), *cell->proj3d, e.x, e.y, index, fsnap.pick_radius);
+        if (hit && hit->plane >= 0) {
+            const PlaneSnapshot& pl = fa->snap3d()->planes[hit->plane];
+            plane  = pl.id;
+            object = pick_object_id(pl.sheet, hit->kind, hit->object);
+        } else if (hit) {
+            object = pick_object_id(*fa->snap3d(), hit->kind, hit->object);
+        }
     }
     if (!hit) return false;
 
     e.kind = EventKind::Pick;
     e.pick_kind = hit->kind;
-    e.pick_object = static_cast<int>(hit->object);
+    e.pick_object = object;
     e.pick_index = static_cast<int>(hit->element);
     e.pick_row = hit->row;
     e.pick_col = hit->col;
-    e.pick_plane = hit->plane;
+    e.pick_plane = plane;
     e.pick_twin = twin;
     return true;
 }

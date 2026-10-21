@@ -1,4 +1,5 @@
 #include "plane2d_impl.h"
+#include "object_remove.h"
 #include "read_back.h"
 #include <algorithm>
 #include <cmath>
@@ -141,6 +142,13 @@ namespace sextant {
         d->sheet.mathtext = mathtext;
         d->sheet.cycle = std::move(cycle);
         return *this;
+    }
+
+    ObjectId Plane2D::id() const { return d->id; }
+    ObjectId Plane2D::last_object() const { return d->sheet.last_id; }
+    bool Plane2D::remove(ObjectId id) { return object_remove::remove(d->sheet, id, "Plane2D::remove"); }
+    std::optional<ObjectLocation> Plane2D::find_object(ObjectId id) const {
+        return to_location(d->sheet.find_object(id));
     }
 
     PlaneOrientation Plane2D::orientation() const { return d->orient; }

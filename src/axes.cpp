@@ -1,4 +1,5 @@
 #include "axes_impl.h"
+#include "object_remove.h"
 #include "axis_limits.h"
 #include "read_back.h"
 #include "rich_text.h"
@@ -324,7 +325,7 @@ void Axes::Impl::ingest_line(std::span<const double> x, std::span<const double> 
         std::move(err),
         std::move(opts),
         next_snapshot_generation(),
-        next_object_id(),
+        new_id(),
     });
 }
 
@@ -344,7 +345,7 @@ void Axes::Impl::ingest_scatter(std::span<const double> x, std::span<const doubl
         std::move(err),
         std::move(opts),
         next_snapshot_generation(),
-        next_object_id(),
+        new_id(),
         std::move(sizes),
     });
 }
@@ -366,7 +367,7 @@ void Axes::Impl::ingest_scatter_z(std::span<const double> x, std::span<const dou
         std::move(err),
         std::move(opts),
         next_snapshot_generation(),
-        next_object_id(),
+        new_id(),
         std::move(sizes),
     });
 }
@@ -396,7 +397,7 @@ void Axes::Impl::push_bars(std::vector<double> centers, std::vector<double> heig
         std::move(err),
         std::move(opts),
         next_snapshot_generation(),
-        next_object_id(),
+        new_id(),
         std::move(bottom),
     });
 }
@@ -524,7 +525,7 @@ void Axes::Impl::ingest_heatmap(std::span<const double> data, int rows, int cols
         xrange, yrange,
         std::move(opts),
         next_snapshot_generation(),
-        next_object_id(),
+        new_id(),
     });
 }
 
@@ -548,7 +549,7 @@ void Axes::Impl::ingest_axline(double value, AxLineOptions opts, const char* who
     read_back::check_reference({value, opts.from, opts.to}, who);
     warn_math(mathtext, who, opts.name);
     cycle->resolve(opts.color);
-    axlines.push_back({ value, std::move(opts), next_snapshot_generation(), next_object_id() });
+    axlines.push_back({ value, std::move(opts), next_snapshot_generation(), new_id() });
 }
 
 // The cycle is not taken (matplotlib's axhspan is the patch default, C0).
@@ -557,7 +558,7 @@ void Axes::Impl::ingest_axspan(double lo, double hi, AxSpanOptions opts, const c
     warn_math(mathtext, who, opts.name);
     if (!opts.color) opts.color = Color::Blue;
     if (lo > hi) std::swap(lo, hi);
-    axspans.push_back({ lo, hi, std::move(opts), next_snapshot_generation(), next_object_id() });
+    axspans.push_back({ lo, hi, std::move(opts), next_snapshot_generation(), new_id() });
 }
 
 // The mask is taken out of the options and kept as data, as bar bases are.
@@ -574,7 +575,7 @@ void Axes::Impl::ingest_fill(std::span<const double> x, std::span<const double> 
         read_back::own(y2),
         std::move(opts),
         next_snapshot_generation(),
-        next_object_id(),
+        new_id(),
         std::move(exclude),
     });
 }
@@ -645,7 +646,7 @@ void Axes::Impl::ingest_quiver(std::span<const double> x, std::span<const double
         read_back::own(v),
         std::move(opts),
         next_snapshot_generation(),
-        next_object_id(),
+        new_id(),
         c ? CowVec<double>(read_back::own(*c)) : CowVec<double>{},
     });
 }
@@ -675,7 +676,7 @@ Axes& Axes::axspan(double lo, double hi, AxSpanOptions opts) {
 void Axes::Impl::ingest_text(TextContent c, TextStyle style, const char* who) {
     read_back::check_text(c, who);
     warn_math(mathtext && style.text.parse_math, who, c.text);
-    texts.push_back({ std::move(c), std::move(style), next_snapshot_generation(), next_object_id() });
+    texts.push_back({ std::move(c), std::move(style), next_snapshot_generation(), new_id() });
 }
 
 Axes& Axes::text(std::string_view s, Pos x, Pos y, TextOptions opts) {
@@ -884,6 +885,12 @@ Scale Axes::yscale() const { return d->yscale.kind; }
 
 double Axes::aspect() const         { return d->aspect.ratio; }
 Adjustable Axes::adjustable() const { return d->aspect.adjustable; }
+
+ObjectId Axes::last_object() const { return d->last_id; }
+bool Axes::remove(ObjectId id) { return object_remove::remove(*d, id, "Axes::remove"); }
+std::optional<ObjectLocation> Axes::find_object(ObjectId id) const {
+    return to_location(d->find_object(id));
+}
 
 std::size_t Axes::line_count() const      { return d->lines.size(); }
 std::size_t Axes::scatter_count() const   { return d->scatters.size(); }

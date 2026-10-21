@@ -408,6 +408,30 @@ CellLayers cell_layers(const FigureAxesSnapshot& fa, const AxesLayout& cell) {
     return l;
 }
 
+ObjectId pick_object_id(const RenderSnapshot& s, PickKind kind, std::size_t i) {
+    switch (kind) {
+        case PickKind::Line:     return s.lines[i].id;
+        case PickKind::Scatter:  return s.scatters[i].id;
+        case PickKind::ScatterZ: return s.scatter_z[i].id;
+        case PickKind::Bar:      return s.bars[i].id;
+        case PickKind::Heatmap:  return s.heatmaps[i].id;
+        case PickKind::Quiver:   return s.quivers[i].id;
+        case PickKind::Fill:     return s.fills[i].id;
+        default: return 0;
+    }
+}
+
+ObjectId pick_object_id(const RenderSnapshot3D& s, PickKind kind, std::size_t i) {
+    switch (kind) {
+        case PickKind::Bar3D:      return s.bars3d[i].id;
+        case PickKind::Surface:    return s.surfaces[i].id;
+        case PickKind::SurfaceTri: return s.surface_tri[i].id;
+        case PickKind::Scatter3D:  return s.scatter3d[i].id;
+        case PickKind::Line3D:     return s.lines3d[i].id;
+        default: return 0;
+    }
+}
+
 std::optional<PickHit> find_pick_layers(const CellLayers& l, float cursor_x, float cursor_y,
                                         std::size_t& layer, HintIndexCache* index,
                                         unsigned long long data_generation, float radius) {
@@ -419,18 +443,7 @@ std::optional<PickHit> find_pick_layers(const CellLayers& l, float cursor_x, flo
         const auto hit = find_pick(*l.snaps[k], HintProjector(*l.trs[k]), cursor_x, cursor_y, index,
                                    radius);
         if (!hit) continue;
-        const RenderSnapshot& s = *l.snaps[k];
-        ObjectId id = 0;
-        switch (hit->kind) {
-            case PickKind::Line:     id = s.lines[hit->object].id; break;
-            case PickKind::Scatter:  id = s.scatters[hit->object].id; break;
-            case PickKind::ScatterZ: id = s.scatter_z[hit->object].id; break;
-            case PickKind::Bar:      id = s.bars[hit->object].id; break;
-            case PickKind::Heatmap:  id = s.heatmaps[hit->object].id; break;
-            case PickKind::Quiver:   id = s.quivers[hit->object].id; break;
-            case PickKind::Fill:     id = s.fills[hit->object].id; break;
-            default: break;
-        }
+        const ObjectId id = pick_object_id(*l.snaps[k], hit->kind, hit->object);
         const float dx = hit->anchor_x - cursor_x, dy = hit->anchor_y - cursor_y;
         const float d2 = dx * dx + dy * dy;
         const bool area = pick_is_area(hit->kind);

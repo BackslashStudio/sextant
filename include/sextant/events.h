@@ -1,4 +1,6 @@
 #pragma once
+#include "object_id.h"
+#include <cstddef>
 #include <functional>
 #include <limits>
 #include <string>
@@ -27,14 +29,22 @@ namespace sextant {
         kModSuper = 1 << 3
     };
 
-    // What a Pick event found. Object indices are in creation order, per kind:
-    // the `i` of the read-back calls (line_data(i), bar3d_data(i), ...).
+    // What a Pick event found. Objects are named by ObjectId; Axes::find_object()
+    // gives the index within the kind -- the `i` of the read-back calls
+    // (line_data(i), bar3d_data(i), ...).
     enum class PickKind : int {
         None,
         Line, Scatter, ScatterZ, Bar, Heatmap,                // 2D kinds, on an Axes or a Plane2D
         Bar3D, Surface, SurfaceTri, Scatter3D, Line3D,         // 3D kinds
         Quiver,                                               // 2D, appended
         Fill                                                  // 2D (fill(), stack()), appended
+    };
+
+    // Where an object is now: its kind and its index within the kind, the `i` of
+    // the read-back calls. Axes::find_object() gives it for an ObjectId.
+    struct ObjectLocation {
+        PickKind    kind  = PickKind::None;
+        std::size_t index = 0;
     };
 
     // What sextant itself did with the input. Informational only: an event is
@@ -102,24 +112,27 @@ namespace sextant {
         // A point, marker, arrow or path vertex within the pick radius
         // (Figure::set_pick_radius(), 12 by default) answers first, the nearest;
         // else the topmost bar, fill or heatmap the press is inside, whose
-        // position is the event's xdata/ydata. `pick_object`: index within its kind
-        // (on the axes, or on the plane when pick_plane >= 0); `pick_index`: the
-        // element -- point, bar, marker or vertex index; a sample of a surface;
+        // position is the event's xdata/ydata. `pick_object`: the object's ObjectId
+        // (0 = none; Axes::find_object() or Plane2D::find_object() maps it to the
+        // index within its kind, nothing if the object was removed since);
+        // `pick_index`: the element -- point, bar, marker or vertex index; a sample of a surface;
         // the flat cell index (row * columns + column) of a heatmap or bar3d; a
         // fill's segment i, between its points i and i + 1;
         // `pick_row`/`pick_col` for those grids, else -1. `pick_plane` is the
-        // plane's index in Axes3D::plane_at(), or -1 for an object of the axes
-        // itself. Indices refer to the data the window drew: a program that
-        // changed the data since may see them out of date.
+        // plane's ObjectId (Axes3D::plane_index() maps it to the index in
+        // plane_at()), or 0 for an object of the axes itself. `pick_index`,
+        // `pick_row` and `pick_col` refer to the data the window drew: a program
+        // that changed the data since may see them out of date.
         PickKind pick_kind = PickKind::None;
-        int pick_object = -1;
+        ObjectId pick_object = 0;
         int pick_index = -1;
         int pick_row = -1;
         int pick_col = -1;
-        int pick_plane = -1;
-        // Whose object `pick_object` indexes in a 2D cell with twins: 0 the
-        // axes' own, 1 its twinx(), 2 its twiny(). Of two equally near points,
-        // or two areas, the later call wins, whichever axes took it.
+        ObjectId pick_plane = 0;
+        // Whose object `pick_object` is in a 2D cell with twins: 0 the axes' own,
+        // 1 its twinx(), 2 its twiny() -- the Axes to ask find_object(). Of two
+        // equally near points, or two areas, the later call wins, whichever axes
+        // took it.
         int pick_twin = 0;
     };
 

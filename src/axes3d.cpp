@@ -1,4 +1,5 @@
 #include "axes3d_impl.h"
+#include "object_remove.h"
 #include "axis_limits.h"
 #include "read_back.h"
 #include "rich_text.h"
@@ -156,7 +157,7 @@ namespace sextant {
         b.u_width = grid_spacing(u) * std::max(0.0f, b.opts.width);
         b.v_width = grid_spacing(v) * std::max(0.0f, b.opts.depth);
         b.data_stamp = next_snapshot_generation();
-        b.id = next_object_id();
+        b.id = d->new_id();
         d->bars3d.push_back(std::move(b));
         return *this;
     }
@@ -177,7 +178,7 @@ namespace sextant {
         s.v = std::vector<double>(v.begin(), v.end());
         s.heights = std::vector<double>(heights.begin(), heights.end());
         s.data_stamp = next_snapshot_generation();
-        s.id = next_object_id();
+        s.id = d->new_id();
         d->surfaces.push_back(std::move(s));
         return *this;
     }
@@ -264,6 +265,7 @@ namespace sextant {
         d->surface_tri.push_back(make_mesh(x, y, z,
                                            std::vector<std::uint32_t>(tri.begin(), tri.end()),
                                            colors, std::move(opts)));
+        d->last_id = d->surface_tri.back().id;
         return *this;
     }
 
@@ -296,6 +298,7 @@ namespace sextant {
         // A concave domain gets its convex hull filled (no masking yet).
         d->surface_tri.push_back(make_mesh(x, y, z, std::move(tri), colors,
                                            std::move(opts)));
+        d->last_id = d->surface_tri.back().id;
         return *this;
     }
 
@@ -337,7 +340,7 @@ namespace sextant {
         s.z = std::vector<double>(z.begin(), z.end());
         s.colors = copy_colors(colors);
         s.data_stamp = next_snapshot_generation();
-        s.id = next_object_id();
+        s.id = d->new_id();
         d->scatter3d.push_back(std::move(s));
         return *this;
     }
@@ -378,7 +381,7 @@ namespace sextant {
         l.z = std::vector<double>(z.begin(), z.end());
         l.colors = copy_colors(colors);
         l.data_stamp = next_snapshot_generation();
-        l.id = next_object_id();
+        l.id = d->new_id();
         d->lines3d.push_back(std::move(l));
         return *this;
     }
@@ -392,13 +395,14 @@ namespace sextant {
         p->d->sheet.mathtext = d->mathtext;
         p->d->sheet.cycle = d->cycle;
         d->planes.push_back(p);
+        d->last_plane_id = p->d->id;
         return p;
     }
 
     void Axes3D::Impl::ingest_text(TextContent c, TextStyle style, const char* who) {
         read_back::check_text(c, who);
         warn_math(mathtext && style.text.parse_math, who, c.text);
-        texts.push_back({std::move(c), std::move(style), next_snapshot_generation(), next_object_id()});
+        texts.push_back({std::move(c), std::move(style), next_snapshot_generation(), new_id()});
     }
 
     Axes3D& Axes3D::text(std::string_view s, double x, double y, double z, TextOptions opts) {
@@ -435,6 +439,19 @@ namespace sextant {
     }
 
     std::size_t Axes3D::plane_count() const { return d->planes.size(); }
+
+    ObjectId Axes3D::last_plane() const { return d->last_plane_id; }
+    bool Axes3D::remove_plane(ObjectId id) {
+        if (d->remove_plane(id)) return true;
+        object_remove::warn_missing("Axes3D::remove_plane", "plane", id);
+        return false;
+    }
+    std::optional<std::size_t> Axes3D::plane_index(ObjectId id) const { return d->find_plane(id); }
+    ObjectId Axes3D::last_object() const { return d->last_id; }
+    bool Axes3D::remove(ObjectId id) { return object_remove::remove(*d, id, "Axes3D::remove"); }
+    std::optional<ObjectLocation> Axes3D::find_object(ObjectId id) const {
+        return to_location(d->find_object(id));
+    }
 
     std::shared_ptr<Plane2D> Axes3D::plane_at(std::size_t i) const {
         if (i >= d->planes.size())

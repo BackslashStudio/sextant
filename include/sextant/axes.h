@@ -1,6 +1,8 @@
 #pragma once
+#include "events.h"
 #include "export.h"
 #include "style.h"
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -309,6 +311,19 @@ namespace sextant {
         double aspect() const;
 
         Adjustable adjustable() const;
+
+        // Identity. Every plot object has an ObjectId (object_id.h), handed out by the
+        // plotting call that makes it: last_object() is the latest call's (the last
+        // one when a call makes several, as stack()), 0 before any. remove() takes the
+        // object out for good and returns true; an id that is not this axes's
+        // (unknown, removed already, another axes') changes nothing, returns false and
+        // sends a message (Figure::set_message_handler()). Removing shifts the indices
+        // of the later objects of its kind, so `*_data(i)` and `set_*_data(i)` follow
+        // the new order; the ids stay. find_object() is where an id is now: nothing for
+        // an unknown id, and for a text, axline or axspan (remove() takes those too).
+        ObjectId last_object() const;
+        bool remove(ObjectId id);
+        std::optional<ObjectLocation> find_object(ObjectId id) const;
 
         // Plot objects of each kind, in the order they were added. `*_data(i)`
         // returns a copy and throws std::out_of_range for i >= `*_count()`.

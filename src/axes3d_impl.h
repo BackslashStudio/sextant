@@ -64,6 +64,10 @@ namespace sextant {
         Plane2D::Impl& plane_at(std::size_t i) { return *planes[i]->d; }
         const Plane2D::Impl& plane_at(std::size_t i) const { return *planes[i]->d; }
 
+        // As Axes::Impl::last_id; last_plane_id is the plane() call's.
+        ObjectId last_id = 0, last_plane_id = 0;
+        ObjectId new_id() { return last_id = next_object_id(); }
+
         // The axes' own objects and its planes by identity, as Axes::Impl's (a
         // plane's objects: through its sheet). A removed plane's Plane2D handle
         // keeps working, detached: nothing it holds is drawn; restore_plane()

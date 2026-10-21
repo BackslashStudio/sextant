@@ -156,6 +156,11 @@ std::optional<PickHit> find_pick3d(const RenderSnapshot3D& snap, const Projector
 
 // The hint text for a hit found in `snap` (2D kinds), or in a 3D snapshot (any
 // kind, planes included). What find_hint()/find_hint3d() return.
+// The ObjectId of the object a hit names, in the snapshot the hit was found in
+// (0 for a kind the snapshot has none of).
+ObjectId pick_object_id(const RenderSnapshot& snap, PickKind kind, std::size_t object);
+ObjectId pick_object_id(const RenderSnapshot3D& snap, PickKind kind, std::size_t object);
+
 std::string format_pick(const RenderSnapshot& snap, const PickHit& hit);
 std::string format_pick3d(const RenderSnapshot3D& snap, const PickHit& hit);
 
