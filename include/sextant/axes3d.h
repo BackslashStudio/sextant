@@ -518,6 +518,10 @@ namespace sextant {
         bool remove(ObjectId id);
         std::optional<ObjectLocation> find_object(ObjectId id) const;
 
+        // Paint order within the plane, as Axes::set_zorder() and zorder().
+        bool set_zorder(ObjectId id, double zorder);
+        std::optional<double> zorder(ObjectId id) const;
+
         // Read-back of the plane's own objects, as on Axes (limits and titles
         // are the parent's).
         // Plot objects of each kind, in the order they were added. `*_data(i)`

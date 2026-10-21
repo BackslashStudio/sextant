@@ -33,13 +33,13 @@ public:
     }
 
     // A 2D sheet's plot objects (an axes', or a plane's into its raster), each
-    // with its error bars, in call_order(): a later call draws over an earlier
+    // with its error bars, in draw_order(): by zorder, a later call over an earlier
     // one whatever their kinds. A bar or line object's error bars go over it, a
     // scatter's under its markers.
     void draw_plots(const RenderSnapshot& snap, const CoordTransform& tr, const PlotRect& pr);
 
-    // A twinned cell (Axes::twinx()): every layer's objects in one call order
-    // (layered_call_order()), each drawn with its own layer's transform and
+    // A twinned cell (Axes::twinx()): every layer's objects in one draw order
+    // (layered_draw_order()), each drawn with its own layer's transform and
     // cache key (`keys[k]`, axes_key() of layer k).
     void draw_layers(std::span<const RenderSnapshot* const> snaps,
                      std::span<const CoordTransform* const> trs, std::span<const int> keys,

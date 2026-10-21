@@ -74,6 +74,8 @@ struct PlotStyleEdit {
     // The object's visible_stamp when the panel drew; filled in by
     // FigureEditBox. A set_<kind>_visible() since keeps its `visible`.
     unsigned long long visible_seen = ~0ull;
+    // Likewise the object's zorder_stamp: a set_zorder() since keeps its `zorder`.
+    unsigned long long zorder_seen = ~0ull;
 };
 
 // Insert or remove a whole row/column of a heatmap (or a bar3d/surface grid,
@@ -1180,16 +1182,22 @@ struct ReplacedOpts {
 // the Data panel, which the options copy may have stale), when the new
 // options leave it unset its `color`, and its `visible` when
 // set_<kind>_visible() ran after the snapshot the edit was made over
-// (`visible_seen`, the object's visible_stamp then). Edits name objects
+// (`visible_seen`, the object's visible_stamp then), and its `zorder` likewise
+// for set_zorder() (`zorder_seen`). Edits name objects
 // as data ops do (find_object()). Nothing when the object is gone.
 template <class Vec, class Opts>
 std::optional<ReplacedOpts<Opts>> assign_plot_opts(Vec& v, int idx, ObjectId id, const Opts& o,
-                                                   unsigned long long visible_seen = ~0ull) {
+                                                   unsigned long long visible_seen = ~0ull,
+                                                   unsigned long long zorder_seen = ~0ull) {
     auto* p = edits_detail::find_object(v, idx, id);
     if (!p) return std::nullopt;
     // The program's `visible`, if it set one since the panel drew.
     const std::optional<bool> kept = p->visible_stamp > visible_seen
                                          ? std::optional(visible_flag(p->opts)) : std::nullopt;
+    // The program's `zorder`, likewise (3D kinds and texts have none).
+    std::optional<double> kept_z;
+    if constexpr (requires { p->zorder_stamp; p->opts.zorder; })
+        if (p->zorder_stamp > zorder_seen || !std::isfinite(o.zorder)) kept_z = p->opts.zorder;
     if constexpr (!requires { p->opts.hint_labels; }) {
         // A text, a reference line or span, a fill: nothing in its style is
         // data (a fill's mask moved out at the call). An unset `color` keeps
@@ -1199,6 +1207,8 @@ std::optional<ReplacedOpts<Opts>> assign_plot_opts(Vec& v, int idx, ObjectId id,
         if constexpr (requires { p->opts.color.has_value(); })
             if (!p->opts.color) p->opts.color = r.old.color;
         if (kept) visible_flag(p->opts) = *kept;
+        if constexpr (requires { p->opts.zorder; })
+            if (kept_z) p->opts.zorder = *kept_z;
         return r;
     } else {
         auto labels = std::move(p->opts.hint_labels);
@@ -1214,6 +1224,8 @@ std::optional<ReplacedOpts<Opts>> assign_plot_opts(Vec& v, int idx, ObjectId id,
         if constexpr (requires { p->opts.amp.has_value(); })
             if (!p->opts.amp) p->opts.amp = r.old.amp;
         if (kept) visible_flag(p->opts) = *kept;
+        if constexpr (requires { p->opts.zorder; })
+            if (kept_z) p->opts.zorder = *kept_z;
         return r;
     }
 }
@@ -1250,7 +1262,7 @@ std::optional<PlotStyleEdit> apply_plot_style_edit(T& t, const PlotStyleEdit& e)
     return std::visit([&](const auto& o) -> std::optional<PlotStyleEdit> {
         using O = std::decay_t<decltype(o)>;
         auto r = assign_plot_opts(edits_detail::styled_vector<O>(t), e.plot_index, e.id, o,
-                                  e.visible_seen);
+                                  e.visible_seen, e.zorder_seen);
         if (!r) return std::nullopt;
         PlotStyleEdit inv = e;
         inv.plot_index = r->index;

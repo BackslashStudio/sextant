@@ -715,6 +715,19 @@ namespace sextant {
                 ImGui::TextDisabled("Hidden: not drawn, keyed or hovered, and out of the auto limits.");
         }
 
+        // The object's `zorder`, beside Visible: higher paints over lower, equal
+        // ones in call order. A text has none.
+        template<class Opts, class Push>
+        void zorder_row(Opts& o, Push&& push) {
+            if constexpr (requires { o.zorder; }) {
+                if (begin_field_table("objz")) {
+                    field_row("Z-order");
+                    if (drag_double("##objz", &o.zorder, 0.1f, "%.4g")) push();
+                    end_field_table();
+                }
+            }
+        }
+
         // The name (legend key and colorbar title), and the legend-key switch for
         // kinds that have one. One shared name buffer, see text_field().
         template<class Opts, class Push>
@@ -1201,6 +1214,7 @@ namespace sextant {
             };
             with_kind(*ss, t.kind, [&](auto& v) {
                 visible_toggle(visible_flag(v[i]), push_of(v[i]));
+                zorder_row(v[i], push_of(v[i]));
                 return true;
             }, false);
             switch (t.kind) {

@@ -116,7 +116,7 @@ namespace sextant {
         bool empty() const { return batches.empty(); }
     };
 
-    // Everything on `p`, in 2D call order (call_order()). Used by the SVG
+    // Everything on `p`, in 2D draw order (draw_order()). Used by the SVG
     // writer only; the raster path draws into the plane's framebuffer instead.
     // Markers are drawn into the plane, so they foreshorten with it; `size` is in
     // raster pixels.

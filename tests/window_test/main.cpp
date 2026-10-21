@@ -2985,7 +2985,7 @@ static void test_show_nonblocking() {
 }
 
 int main() {
-    // test_axes_gallery();
+    test_axes_gallery();
     // test_axes3d_gallery();
     // test_figure_layout();
     // test_aspect_scales();
@@ -3005,5 +3005,5 @@ int main() {
     // test_scatter3d();
     // test_show_nonblocking();
     // test_animation();
-    test_events();
+    // test_events();
 }

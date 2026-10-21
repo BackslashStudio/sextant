@@ -828,12 +828,12 @@ static void emit_object(std::ostringstream& o, const SvgAxesData& d, const Objec
 // DataRenderer::draw_layers().
 static void emit_plots(std::ostringstream& o, const SvgAxesData& d) {
     if (d.twins.empty()) {
-        for (const ObjectRef& r : call_order(d)) emit_object(o, d, r);
+        for (const ObjectRef& r : draw_order(d)) emit_object(o, d, r);
         return;
     }
     std::vector<const SvgAxesData*> layers{&d};
     for (const SvgAxesData& t : d.twins) layers.push_back(&t);
-    for (const LayerRef& r : layered_call_order<SvgAxesData>(layers))
+    for (const LayerRef& r : layered_draw_order<SvgAxesData>(layers))
         emit_object(o, *layers[r.layer], r.ref);
 }
 

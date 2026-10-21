@@ -325,6 +325,16 @@ namespace sextant {
         bool remove(ObjectId id);
         std::optional<ObjectLocation> find_object(ObjectId id) const;
 
+        // Paint order (the `zorder` option of every 2D kind): set_zorder() changes
+        // object `id`'s, zorder() reads it. Objects draw in ascending zorder, those
+        // of an equal one in the order of the calls; hover follows it, while the
+        // legend and colorbars stay in call order. A text, an unknown id or a removed
+        // one changes nothing, sends a message and gives false (nothing from
+        // zorder()), as remove(). A zorder that is not finite throws
+        // std::invalid_argument.
+        bool set_zorder(ObjectId id, double zorder);
+        std::optional<double> zorder(ObjectId id) const;
+
         // Plot objects of each kind, in the order they were added. `*_data(i)`
         // returns a copy and throws std::out_of_range for i >= `*_count()`.
         std::size_t line_count() const;

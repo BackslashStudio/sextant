@@ -219,7 +219,7 @@ const AxesLayout* find_hint_cell(const std::vector<AxesLayout>& layout,
 
 namespace {
 
-// The topmost bar, fill or heatmap cell under the cursor (call order, last
+// The topmost bar, fill or heatmap cell under the cursor (draw order, last
 // first), at the cursor; nullopt if none, or the cursor misses the surface.
 std::optional<PickHit> find_area(const RenderSnapshot& snap, const HintProjector& tr,
                                  const std::vector<ObjectRef>& order,
@@ -311,10 +311,11 @@ std::optional<PickHit> find_pick(const RenderSnapshot& snap, const HintProjector
                                  HintIndexCache* index, float radius) {
     // Runs every hovered frame. Points first, without any string work (only
     // the winner is worded, by the caller); candidates come from the data-space
-    // bucket grid (hint_index.h). Objects are visited in call order, so of
-    // equal distances the one drawn on top wins. A point found beats any area,
+    // bucket grid (hint_index.h). Objects are visited in draw order, so of
+    // equal distances the one drawn on top wins (a higher zorder, else the later
+    // call). A point found beats any area,
     // whatever the draw order; only without one do the areas answer.
-    const std::vector<ObjectRef> order = call_order(snap);
+    const std::vector<ObjectRef> order = draw_order(snap);
 
     // A surface with no candidate box (a plane seen edge-on) has no point to find.
     double x_lo = 0.0, x_hi = 0.0, y_lo = 0.0, y_hi = 0.0;

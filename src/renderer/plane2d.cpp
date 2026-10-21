@@ -294,9 +294,9 @@ namespace sextant {
             b.close();
         };
 
-        // In call order, as the raster (DataRenderer::draw_plots()): a bar or line
+        // In draw order (draw_order()), as the raster (DataRenderer::draw_plots()): a bar or line
         // object's error bars over it, a scatter's under its markers.
-        for (const ObjectRef& r: call_order(s)) {
+        for (const ObjectRef& r: draw_order(s)) {
             switch (r.kind) {
                 case PlotKind::Heatmap:
                     b.heatmap(r.index);

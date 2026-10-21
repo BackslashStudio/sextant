@@ -840,7 +840,7 @@ namespace sextant {
         }
     }
 
-    // In call order (call_order()), as the objects draw.
+    // In call order (call_order(), not draw_order(): zorder does not reorder it).
     std::vector<LegendEntry> collect_legend_entries(const RenderSnapshot& snap) {
         std::vector<LegendEntry> entries;
         for (const ObjectRef& r: call_order(snap)) add_legend_entry(entries, snap, r);

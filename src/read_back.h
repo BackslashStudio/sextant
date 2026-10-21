@@ -2,11 +2,13 @@
 // Plot object <-> public data struct, shared by Axes, Plane2D and Axes3D: the
 // read-back conversions here, the set_*_data() bodies in each source file.
 #include "sextant/axes3d.h"
+#include "object_remove.h"
 #include "plot_objects.h"
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <initializer_list>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -41,6 +43,47 @@ namespace sextant::read_back {
 
     template <typename V>
     bool visible(const V& v, std::size_t i, const char* who) { return object_shown(at(v, i, who)); }
+
+    // opts.zorder at a plotting call: finite, or it could not order anything.
+    inline void check_zorder(double z, const char* who) {
+        if (!std::isfinite(z))
+            throw std::invalid_argument(std::string(who) + ": zorder must be finite");
+    }
+
+    // Axes::set_zorder() / Plane2D::set_zorder(): the object by id, with a fresh
+    // zorder_stamp so a Data-panel style edit made before it keeps it
+    // (assign_plot_opts()). A text, an unknown id or a stale one warns and gives
+    // false. `H` is Axes::Impl or a plane's sheet.
+    template <class H>
+    bool set_zorder(H& holder, ObjectId id, double z, const char* who) {
+        check_zorder(z, who);
+        const auto at = holder.find_object(id);
+        const bool done = at && with_kind(holder, at->kind, [&](auto& v) {
+            if constexpr (requires { v[0].opts.zorder; }) {
+                auto& p = v[at->index];
+                p.opts.zorder = z;
+                p.zorder_stamp = next_snapshot_generation();
+                return true;
+            } else {
+                return false;
+            }
+        }, false);
+        if (!done) object_remove::warn_missing(who, "object", id);
+        return done;
+    }
+
+    template <class H>
+    std::optional<double> zorder(const H& holder, ObjectId id, const char* who) {
+        const auto at = holder.find_object(id);
+        std::optional<double> z;
+        if (at)
+            z = with_kind(holder, at->kind, [&](const auto& v) -> std::optional<double> {
+                if constexpr (requires { v[0].opts.zorder; }) return v[at->index].opts.zorder;
+                else return std::nullopt;
+            }, std::optional<double>{});
+        if (!z) object_remove::warn_missing(who, "object", id);
+        return z;
+    }
 
     // For set_*_data(): error bars, hint_labels, marker sizes and bar bases stay while the
     // point count (a grid's shape) is unchanged and are dropped otherwise, as

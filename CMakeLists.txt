@@ -765,6 +765,7 @@ if(SEXTANT_BUILD_TESTS)
             tests/layout_test/grid_ratios.cpp
             tests/layout_test/errorbar2d.cpp
             tests/layout_test/draw_order.cpp
+            tests/layout_test/zorder.cpp
             tests/layout_test/line2d.cpp
             tests/layout_test/axis_position.cpp
             tests/layout_test/errorbar3d.cpp

@@ -146,6 +146,12 @@ namespace sextant {
 
     ObjectId Plane2D::id() const { return d->id; }
     ObjectId Plane2D::last_object() const { return d->sheet.last_id; }
+    bool Plane2D::set_zorder(ObjectId id, double z) {
+        return read_back::set_zorder(d->sheet, id, z, "Plane2D::set_zorder");
+    }
+    std::optional<double> Plane2D::zorder(ObjectId id) const {
+        return read_back::zorder(d->sheet, id, "Plane2D::zorder");
+    }
     bool Plane2D::remove(ObjectId id) { return object_remove::remove(d->sheet, id, "Plane2D::remove"); }
     std::optional<ObjectLocation> Plane2D::find_object(ObjectId id) const {
         return to_location(d->sheet.find_object(id));

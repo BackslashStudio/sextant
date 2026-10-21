@@ -2684,13 +2684,13 @@ void main() {
                                   const PlotRect& pr) {
         // One object per draw: consecutive objects of one kind can't share a
         // call, since each one's error bars go between them.
-        for (const ObjectRef& r : call_order(snap)) draw_object(snap, r, tr, pr);
+        for (const ObjectRef& r : draw_order(snap)) draw_object(snap, r, tr, pr);
     }
 
     void DataRenderer::draw_layers(std::span<const RenderSnapshot* const> snaps,
                                    std::span<const CoordTransform* const> trs, std::span<const int> keys,
                                    unsigned long long data_generation, const PlotRect& pr) {
-        for (const LayerRef& r : layered_call_order<RenderSnapshot>(snaps)) {
+        for (const LayerRef& r : layered_draw_order<RenderSnapshot>(snaps)) {
             set_frame_key(data_generation, keys[r.layer]);
             draw_object(*snaps[r.layer], r.ref, *trs[r.layer], pr);
         }

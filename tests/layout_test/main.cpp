@@ -83,6 +83,12 @@ int main() {
     test_draw_order_plane();
     test_draw_order_keys_and_hint();
 
+    // zorder.cpp
+    test_zorder_order();
+    test_zorder_render();
+    test_zorder_api();
+    test_zorder_edit();
+
     // line2d.cpp
     test_line_loop_segments();
     test_line_loop_rendered();

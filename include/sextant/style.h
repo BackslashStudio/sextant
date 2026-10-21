@@ -234,6 +234,11 @@ namespace sextant {
         // color, its place in the draw order and its index. Axes::set_line_visible()
         // and the like change it after the call; the Data panel has a checkbox.
         bool visible = true;
+        // Paint order within the axes: objects draw in ascending zorder, those with an equal
+        // zorder in the order of the calls (a later call over an earlier one). Hover follows
+        // it; the legend and colorbars stay in call order. Finite. Axes::set_zorder() changes it
+        // after the call; the Data panel has a field.
+        double zorder = 0.0;
         float alpha = 1.0f;
 
         // Add a closing segment from the last point to the first. No point is
@@ -268,6 +273,7 @@ namespace sextant {
         std::string name;
         bool show_legend = true; // see LineOptions::show_legend
         bool visible = true;     // see LineOptions::visible
+        double zorder = 0.0;     // see LineOptions::zorder
 
         // Opacity of the marker's fill (on top of `color`'s own alpha). 0 leaves a
         // hollow marker: only its outline, if `edge_linewidth` > 0, is drawn.
@@ -316,6 +322,7 @@ namespace sextant {
         std::string name;
         bool show_legend = true; // see LineOptions::show_legend
         bool visible = true;     // see LineOptions::visible
+        double zorder = 0.0;     // see LineOptions::zorder
 
         // Style of the error bars passed as an ErrorBar; unset color = black.
         ErrorBarOptions errorbar;
@@ -344,6 +351,7 @@ namespace sextant {
         std::string name;
         bool show_legend = true; // see LineOptions::show_legend
         bool visible = true;     // see LineOptions::visible
+        double zorder = 0.0;     // see LineOptions::zorder
         Color edgecolor = Color::Black;
         float linewidth = 0.5f;
 
@@ -378,6 +386,7 @@ namespace sextant {
         std::string name;
         bool show_legend = true; // see LineOptions::show_legend
         bool visible = true;     // see LineOptions::visible
+        double zorder = 0.0;     // see LineOptions::zorder
     };
 
     // A band across the frame between two values (Axes::axspan()).
@@ -400,6 +409,7 @@ namespace sextant {
         std::string name;
         bool show_legend = true; // see LineOptions::show_legend
         bool visible = true;     // see LineOptions::visible
+        double zorder = 0.0;     // see LineOptions::zorder
     };
 
     // The area between two curves (Axes::fill()).
@@ -435,6 +445,7 @@ namespace sextant {
         std::string name;
         bool show_legend = true; // see LineOptions::show_legend
         bool visible = true;     // see LineOptions::visible
+        double zorder = 0.0;     // see LineOptions::zorder
     };
 
     // Where the bottom layer of a stack() starts, as matplotlib's stackplot
@@ -463,6 +474,7 @@ namespace sextant {
         DrawStyle drawstyle = DrawStyle::Default;
         bool show_legend = true;
         bool visible = true;     // every layer's FillOptions::visible
+        double zorder = 0.0;       // every layer's FillOptions::zorder
     };
 
     // Which part of a quiver arrow sits on its (x, y): the tail, the middle or
@@ -503,6 +515,7 @@ namespace sextant {
         std::string name;
         bool show_legend = true; // see LineOptions::show_legend
         bool visible = true;     // see LineOptions::visible
+        double zorder = 0.0;     // see LineOptions::zorder
 
         // See LineOptions::hint_labels. Default hover text is "x=.., y=..,
         // u=.., v=.." (plus ", c=.." with `c`), at the arrow's (x, y).
@@ -525,6 +538,7 @@ namespace sextant {
         // Names the color scale on this heatmap's colorbar (see ScatterZOptions::name).
         std::string name;
         bool visible = true; // see LineOptions::visible
+        double zorder = 0.0;     // see LineOptions::zorder
 
         // Where row 0 is drawn: "lower" (bottom, the default) or "upper" (top, as
         // an image). Anything else throws std::invalid_argument.

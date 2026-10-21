@@ -54,6 +54,7 @@ inline void stamp_edit(AxesEdit& e, const RenderSnapshot& s) {
     for (PlotStyleEdit& p : e.plot_styles) {
         fill_id(p.id, s, stamp_detail::style_kind(p), p.plot_index);
         p.visible_seen = visible_stamp_at(s, stamp_detail::style_kind(p), p.plot_index);
+        p.zorder_seen = zorder_stamp_at(s, stamp_detail::style_kind(p), p.plot_index);
     }
 }
 
@@ -81,8 +82,10 @@ inline void stamp_edit(AxesEdit3D& e, const RenderSnapshot3D& s) {
         }
     for (PlotStyleEdit& ps : e.plot_styles) {
         on_plane(ps.id, ps.plane_id, ps.plane_index, stamp_detail::style_kind(ps), ps.plot_index);
-        if (const PlaneSnapshot* p = plane(ps.plane_index))
+        if (const PlaneSnapshot* p = plane(ps.plane_index)) {
             ps.visible_seen = visible_stamp_at(p->sheet, stamp_detail::style_kind(ps), ps.plot_index);
+            ps.zorder_seen = zorder_stamp_at(p->sheet, stamp_detail::style_kind(ps), ps.plot_index);
+        }
     }
     for (PlotDataOp& op : e.plot_ops)
         std::visit([&](auto& o) {

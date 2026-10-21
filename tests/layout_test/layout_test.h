@@ -251,6 +251,12 @@ namespace lt {
 
     void test_draw_order_keys_and_hint();
 
+    // zorder.cpp
+    void test_zorder_order();
+    void test_zorder_render();
+    void test_zorder_api();
+    void test_zorder_edit();
+
     // errorbar2d.cpp
     void test_errorbar_api();
 

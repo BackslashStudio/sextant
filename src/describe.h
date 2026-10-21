@@ -49,34 +49,34 @@ namespace sextant {
     SEXTANT_DESCRIBE(ErrorBarOptions,
                      F(color) F(linewidth) F(capsize) F(capstyle) F(boxwidth) F(box_alpha))
     SEXTANT_DESCRIBE(LineOptions,
-                     F(color) F(linewidth) F(linestyle) F(name) F(show_legend) F(visible) F(alpha) F(loop) F(drawstyle)
+                     F(color) F(linewidth) F(linestyle) F(name) F(show_legend) F(visible) F(zorder) F(alpha) F(loop) F(drawstyle)
                      F(errorbar) F(hint_labels))
     SEXTANT_DESCRIBE(ScatterOptions,
-                     F(color) F(size) F(sizes) F(marker) F(name) F(show_legend) F(visible) F(alpha)
+                     F(color) F(size) F(sizes) F(marker) F(name) F(show_legend) F(visible) F(zorder) F(alpha)
                      F(edgecolor) F(edge_alpha) F(edge_linewidth) F(errorbar) F(hint_labels))
     SEXTANT_DESCRIBE(ScatterZOptions,
                      F(cmap) F(size) F(sizes) F(marker) F(alpha) F(edgecolor) F(edge_alpha)
                      F(edge_linewidth)
                      F(vmin) F(vmax) F(colorbar) F(name)
-                     F(show_legend) F(visible) F(errorbar) F(hint_labels))
+                     F(show_legend) F(visible) F(zorder) F(errorbar) F(hint_labels))
     SEXTANT_DESCRIBE(BarOptions,
-                     F(color) F(orientation) F(bottom) F(width) F(alpha) F(name) F(show_legend) F(visible) F(edgecolor) F(linewidth)
+                     F(color) F(orientation) F(bottom) F(width) F(alpha) F(name) F(show_legend) F(visible) F(zorder) F(edgecolor) F(linewidth)
                      F(errorbar) F(hint_labels))
     SEXTANT_DESCRIBE(HistOptions, F(density) F(cumulative))
     SEXTANT_DESCRIBE(AxLineOptions,
                      F(orientation) F(color) F(linewidth) F(linestyle) F(alpha) F(from) F(to) F(name)
-                     F(show_legend) F(visible))
+                     F(show_legend) F(visible) F(zorder))
     SEXTANT_DESCRIBE(AxSpanOptions,
                      F(orientation) F(color) F(alpha) F(edgecolor) F(linewidth) F(from) F(to) F(name)
-                     F(show_legend) F(visible))
+                     F(show_legend) F(visible) F(zorder))
     SEXTANT_DESCRIBE(FillOptions,
                      F(orientation) F(color) F(alpha) F(edgecolor) F(linewidth) F(linestyle)
-                     F(drawstyle) F(exclude) F(interpolate) F(name) F(show_legend) F(visible))
+                     F(drawstyle) F(exclude) F(interpolate) F(name) F(show_legend) F(visible) F(zorder))
     SEXTANT_DESCRIBE(QuiverOptions,
                      F(color) F(alpha) F(cmap) F(vmin) F(vmax) F(colorbar) F(amp) F(pivot) F(width) F(head_width) F(head_length) F(name)
-                     F(show_legend) F(visible) F(hint_labels))
+                     F(show_legend) F(visible) F(zorder) F(hint_labels))
     SEXTANT_DESCRIBE(HeatmapOptions,
-                     F(cmap) F(vmin) F(vmax) F(colorbar) F(name) F(visible) F(origin) F(contours)
+                     F(cmap) F(vmin) F(vmax) F(colorbar) F(name) F(visible) F(zorder) F(origin) F(contours)
                      F(contour_color) F(contour_linewidth) F(contour_labels) F(contour_fontsize)
                      F(hint_labels))
     SEXTANT_DESCRIBE(GridOptions, F(color) F(linestyle) F(linewidth) F(minor) F(minor_color))

@@ -314,6 +314,7 @@ std::vector<float> heatmap_cells(std::span<const double> data, int rows, int col
 // error messages.
 void Axes::Impl::ingest_line(std::span<const double> x, std::span<const double> y,
                              const ErrorBar& eb, LineOptions opts, const char* who) {
+    read_back::check_zorder(opts.zorder, who);
     if (x.size() != y.size())
         throw std::invalid_argument(std::string(who) + ": x and y must have the same length");
     ErrorBarData err = take_error_bars(eb, x.size(), who);
@@ -331,6 +332,7 @@ void Axes::Impl::ingest_line(std::span<const double> x, std::span<const double> 
 
 void Axes::Impl::ingest_scatter(std::span<const double> x, std::span<const double> y,
                                 const ErrorBar& eb, ScatterOptions opts, const char* who) {
+    read_back::check_zorder(opts.zorder, who);
     if (x.size() != y.size())
         throw std::invalid_argument(std::string(who) + ": x and y must have the same length");
     read_back::check_sizes(opts.sizes, x.size(), who);
@@ -353,6 +355,7 @@ void Axes::Impl::ingest_scatter(std::span<const double> x, std::span<const doubl
 void Axes::Impl::ingest_scatter_z(std::span<const double> x, std::span<const double> y,
                                   std::span<const double> z, const ErrorBar& eb,
                                   ScatterZOptions opts, const char* who) {
+    read_back::check_zorder(opts.zorder, who);
     if (x.size() != y.size() || x.size() != z.size())
         throw std::invalid_argument(std::string(who) + ": x, y, and z must have the same length");
     ErrorBarData err = take_error_bars(eb, x.size(), who);
@@ -386,6 +389,7 @@ void Axes::Impl::ingest_bar(std::span<const double> x, std::span<const double> h
 // bar() and hist(): the bases are taken out of the options and kept as data.
 void Axes::Impl::push_bars(std::vector<double> centers, std::vector<double> heights, double width,
                            ErrorBarData err, BarOptions opts, const char* who) {
+    read_back::check_zorder(opts.zorder, who);
     std::vector<double> bottom = read_back::take_bottom(std::move(opts.bottom), centers.size(), who);
     opts.bottom.clear();
     warn_math(mathtext, who, opts.name);
@@ -497,6 +501,7 @@ Axes& Axes::hist(std::span<const double> data, int bins,
 void Axes::Impl::ingest_heatmap(std::span<const double> data, int rows, int cols,
                                 Range xrange, Range yrange, HeatmapOptions opts,
                                 const char* who) {
+    read_back::check_zorder(opts.zorder, who);
     const std::string w = who;
     // Cells are even in data units, so they cannot follow a scale; a mesh kind
     // with its own cell edges is the way to scaled cells.
@@ -546,6 +551,7 @@ Axes& Axes::imshow(std::span<const double> data, int rows, int cols,
 }
 
 void Axes::Impl::ingest_axline(double value, AxLineOptions opts, const char* who) {
+    read_back::check_zorder(opts.zorder, who);
     read_back::check_reference({value, opts.from, opts.to}, who);
     warn_math(mathtext, who, opts.name);
     cycle->resolve(opts.color);
@@ -554,6 +560,7 @@ void Axes::Impl::ingest_axline(double value, AxLineOptions opts, const char* who
 
 // The cycle is not taken (matplotlib's axhspan is the patch default, C0).
 void Axes::Impl::ingest_axspan(double lo, double hi, AxSpanOptions opts, const char* who) {
+    read_back::check_zorder(opts.zorder, who);
     read_back::check_reference({lo, hi, opts.from, opts.to}, who);
     warn_math(mathtext, who, opts.name);
     if (!opts.color) opts.color = Color::Blue;
@@ -564,6 +571,7 @@ void Axes::Impl::ingest_axspan(double lo, double hi, AxSpanOptions opts, const c
 // The mask is taken out of the options and kept as data, as bar bases are.
 void Axes::Impl::ingest_fill(std::span<const double> x, std::span<const double> y1,
                              std::span<const double> y2, FillOptions opts, const char* who) {
+    read_back::check_zorder(opts.zorder, who);
     read_back::check_fill(x.size(), y1.size(), y2.size(), who);
     std::vector<double> exclude = read_back::take_exclude(opts.exclude, x.size(), who);
     opts.exclude.clear();
@@ -615,6 +623,7 @@ void Axes::Impl::ingest_stack(std::span<const double> x, std::span<const std::ve
         if (!opts.names.empty()) f.name = opts.names[k];
         f.show_legend = opts.show_legend;
         f.visible = opts.visible;
+        f.zorder = opts.zorder;
         ingest_fill(x, curves[k], curves[k + 1], std::move(f), who);
     }
 }
@@ -631,6 +640,7 @@ Axes& Axes::stack(std::span<const double> x, std::span<const std::vector<double>
 void Axes::Impl::ingest_quiver(std::span<const double> x, std::span<const double> y,
                                std::span<const double> u, std::span<const double> v,
                                const std::span<const double>* c, QuiverOptions opts, const char* who) {
+    read_back::check_zorder(opts.zorder, who);
     read_back::check_quiver(x.size(), y.size(), u.size(), v.size(), who);
     if (c && c->size() != x.size())
         throw std::invalid_argument(std::string(who) + ": c must have one value per arrow");
@@ -887,6 +897,12 @@ double Axes::aspect() const         { return d->aspect.ratio; }
 Adjustable Axes::adjustable() const { return d->aspect.adjustable; }
 
 ObjectId Axes::last_object() const { return d->last_id; }
+bool Axes::set_zorder(ObjectId id, double z) {
+    return read_back::set_zorder(*d, id, z, "Axes::set_zorder");
+}
+std::optional<double> Axes::zorder(ObjectId id) const {
+    return read_back::zorder(*d, id, "Axes::zorder");
+}
 bool Axes::remove(ObjectId id) { return object_remove::remove(*d, id, "Axes::remove"); }
 std::optional<ObjectLocation> Axes::find_object(ObjectId id) const {
     return to_location(d->find_object(id));

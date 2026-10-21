@@ -142,6 +142,7 @@ struct LinePlot {
     // assign_plot_opts()). Last, so the plotting calls' positional braces
     // leave it 0.
     unsigned long long visible_stamp = 0;
+    unsigned long long zorder_stamp = 0;
 };
 
 struct ScatterPlot {
@@ -155,6 +156,7 @@ struct ScatterPlot {
     CowVec<double> sizes;
 
     unsigned long long visible_stamp = 0;
+    unsigned long long zorder_stamp = 0;
 };
 
 // bar_width is in data units, already resolved (spacing x width fraction for
@@ -176,6 +178,7 @@ struct BarPlot {
     double tip_at(std::size_t i) const { return base_at(i) + heights[i]; }
 
     unsigned long long visible_stamp = 0;
+    unsigned long long zorder_stamp = 0;
 };
 
 // The bars' tips (base + height), as a column: `heights` itself without bases.
@@ -229,6 +232,7 @@ struct HeatmapPlot {
     }
 
     unsigned long long visible_stamp = 0;
+    unsigned long long zorder_stamp = 0;
 };
 
 // Continuous-color scatter: z is mapped through opts.cmap/vmin/vmax.
@@ -241,6 +245,7 @@ struct ScatterZPlot {
     CowVec<double>  sizes;   // as ScatterPlot::sizes
 
     unsigned long long visible_stamp = 0;
+    unsigned long long zorder_stamp = 0;
 };
 
 // A marker's pixel diameter: its own from `sizes` when the series has them,
@@ -525,6 +530,7 @@ struct AxLinePlot {
     bool on_x() const { return opts.orientation == Orientation::Vertical; }
 
     unsigned long long visible_stamp = 0;
+    unsigned long long zorder_stamp = 0;
 };
 
 // Axes::axspan(): lo..hi on the axis the orientation names, as AxLinePlot.
@@ -537,6 +543,7 @@ struct AxSpanPlot {
     bool on_x() const { return opts.orientation == Orientation::Vertical; }
 
     unsigned long long visible_stamp = 0;
+    unsigned long long zorder_stamp = 0;
 };
 
 // Axes::fill(): the area between y1 and y2 along x, one value of each
@@ -556,6 +563,7 @@ struct FillPlot {
     bool excluded(std::size_t i) const { return i < exclude.size() && exclude[i] != 0.0; }
 
     unsigned long long visible_stamp = 0;
+    unsigned long long zorder_stamp = 0;
 };
 
 // Axes::quiver(): one arrow per point, from (x, y) along (u, v). `opts.amp`
@@ -573,6 +581,7 @@ struct QuiverPlot {
     bool colormapped() const { return !c.empty(); }
 
     unsigned long long visible_stamp = 0;
+    unsigned long long zorder_stamp = 0;
 };
 
 // The reference kinds, fills and quivers are optional so a view built over the
@@ -905,6 +914,19 @@ unsigned long long visible_stamp_at(const S& s, PlotKind kind, int index) {
     }, ~0ull);
 }
 
+// The zorder_stamp of the object at (kind, index); ~0 if there is none, or the
+// kind has no zorder (a text).
+template <class S>
+unsigned long long zorder_stamp_at(const S& s, PlotKind kind, int index) {
+    return with_kind(s, kind, [index](const auto& v) {
+        if constexpr (requires { v[0].zorder_stamp; })
+            return index >= 0 && static_cast<std::size_t>(index) < v.size()
+                       ? v[static_cast<std::size_t>(index)].zorder_stamp : ~0ull;
+        else
+            return ~0ull;
+    }, ~0ull);
+}
+
 // Where object `id` is among `kinds` of a holder, if anywhere.
 template <class S, std::size_t N>
 std::optional<ObjectRef> find_object_in(const S& s, const PlotKind (&kinds)[N], ObjectId id) {
@@ -997,6 +1019,13 @@ std::optional<std::size_t> move_object_in(S& s, const PlotKind (&kinds)[N], Obje
 template <class P> bool object_shown(const P& p) { return p.opts.visible; }
 inline bool object_shown(const TextPlot& t) { return t.opts.text.visible; }
 
+// The paint-order key of an object: its options' `zorder` (3D kinds and texts have
+// none, so 0; only the 2D order functions read it).
+template <class P> double object_zorder(const P& p) {
+    if constexpr (requires { p.opts.zorder; }) return p.opts.zorder;
+    else return 0.0;
+}
+
 // The `visible` field of an object's options (a text's is in its TextOptions).
 template <class O> bool& visible_flag(O& o) {
     if constexpr (requires { o.text.visible; }) return o.text.visible;
@@ -1010,6 +1039,7 @@ template <class V> bool any_shown(const V& v) {
 
 namespace objects_detail {
 struct OrderKey {
+    double    z;
     ObjectId  id;
     ObjectRef ref;
 };
@@ -1017,41 +1047,56 @@ struct OrderKey {
 template <class V>
 void add_order_keys(std::vector<OrderKey>& keys, PlotKind kind, const V& v) {
     for (std::size_t i = 0; i < v.size(); ++i)
-        if (object_shown(v[i])) keys.push_back({ v[i].id, { kind, i } });
+        if (object_shown(v[i])) keys.push_back({ object_zorder(v[i]), v[i].id, { kind, i } });
 }
 
-inline std::vector<ObjectRef> sorted_refs(std::vector<OrderKey>& keys) {
-    std::stable_sort(keys.begin(), keys.end(),
-                     [](const OrderKey& a, const OrderKey& b) { return a.id < b.id; });
+// By zorder first when `by_z`, then by ObjectId; the sort is stable, so equal
+// keys keep the order they were added in.
+inline std::vector<ObjectRef> sorted_refs(std::vector<OrderKey>& keys, bool by_z = false) {
+    std::stable_sort(keys.begin(), keys.end(), [by_z](const OrderKey& a, const OrderKey& b) {
+        if (by_z && a.z != b.z) return a.z < b.z;
+        return a.id < b.id;
+    });
     std::vector<ObjectRef> out;
     out.reserve(keys.size());
     for (const OrderKey& k : keys) out.push_back(k.ref);
     return out;
 }
-} // namespace objects_detail
 
-// 2D: a RenderSnapshot, Axes::Impl, a plane's sheet or the SVG writer's data.
 template <class S>
-    requires requires(const S& s) { s.lines; s.scatters; s.bars; s.heatmaps; s.scatter_z; }
-std::vector<ObjectRef> call_order(const S& s) {
-    std::vector<objects_detail::OrderKey> keys;
+std::vector<ObjectRef> ordered_2d(const S& s, bool by_z) {
+    std::vector<OrderKey> keys;
     keys.reserve(s.heatmaps.size() + s.bars.size() + s.lines.size() + s.scatters.size()
                  + s.scatter_z.size());
     // The fixed per-kind order that preceded call order, for the ties.
-    objects_detail::add_order_keys(keys, PlotKind::Heatmap, s.heatmaps);
-    objects_detail::add_order_keys(keys, PlotKind::Bar, s.bars);
-    objects_detail::add_order_keys(keys, PlotKind::Line, s.lines);
-    objects_detail::add_order_keys(keys, PlotKind::Scatter, s.scatters);
-    objects_detail::add_order_keys(keys, PlotKind::ScatterZ, s.scatter_z);
+    add_order_keys(keys, PlotKind::Heatmap, s.heatmaps);
+    add_order_keys(keys, PlotKind::Bar, s.bars);
+    add_order_keys(keys, PlotKind::Line, s.lines);
+    add_order_keys(keys, PlotKind::Scatter, s.scatters);
+    add_order_keys(keys, PlotKind::ScatterZ, s.scatter_z);
     if constexpr (requires { s.axlines; s.axspans; }) {
-        objects_detail::add_order_keys(keys, PlotKind::AxLine, s.axlines);
-        objects_detail::add_order_keys(keys, PlotKind::AxSpan, s.axspans);
+        add_order_keys(keys, PlotKind::AxLine, s.axlines);
+        add_order_keys(keys, PlotKind::AxSpan, s.axspans);
     }
-    if constexpr (requires { s.fills; })
-        objects_detail::add_order_keys(keys, PlotKind::Fill, s.fills);
-    if constexpr (requires { s.quivers; })
-        objects_detail::add_order_keys(keys, PlotKind::Quiver, s.quivers);
-    return objects_detail::sorted_refs(keys);
+    if constexpr (requires { s.fills; }) add_order_keys(keys, PlotKind::Fill, s.fills);
+    if constexpr (requires { s.quivers; }) add_order_keys(keys, PlotKind::Quiver, s.quivers);
+    return sorted_refs(keys, by_z);
+}
+} // namespace objects_detail
+
+// 2D: a RenderSnapshot, Axes::Impl, a plane's sheet or the SVG writer's data.
+// call_order(): by ObjectId only (what the legend and colorbars list).
+template <class S>
+    requires requires(const S& s) { s.lines; s.scatters; s.bars; s.heatmaps; s.scatter_z; }
+std::vector<ObjectRef> call_order(const S& s) {
+    return objects_detail::ordered_2d(s, false);
+}
+
+// draw_order(): by (opts.zorder, ObjectId), what painting, export and hover follow.
+template <class S>
+    requires requires(const S& s) { s.lines; s.scatters; s.bars; s.heatmaps; s.scatter_z; }
+std::vector<ObjectRef> draw_order(const S& s) {
+    return objects_detail::ordered_2d(s, true);
 }
 
 // One object of a twinned cell (Axes::twinx()): which layer's holder (its
@@ -1061,18 +1106,16 @@ struct LayerRef {
     ObjectRef   ref;
 };
 
-// call_order() across a cell's layers (host first, then its twins): one order by
-// ObjectId, so objects draw in call order whichever axes took them. Equal ids
-// keep the layer order, then call_order()'s.
+namespace objects_detail {
 template <class S>
-std::vector<LayerRef> layered_call_order(std::span<const S* const> layers) {
-    struct Key { ObjectId id; LayerRef ref; };
+std::vector<LayerRef> ordered_layers(std::span<const S* const> layers, bool by_z) {
+    struct Key { double z; ObjectId id; LayerRef ref; };
     std::vector<Key> keys;
     for (std::size_t k = 0; k < layers.size(); ++k) {
         const S& s = *layers[k];
         const auto add = [&](PlotKind kind, const auto& v) {
             for (std::size_t i = 0; i < v.size(); ++i)
-                if (object_shown(v[i])) keys.push_back({ v[i].id, { k, { kind, i } } });
+                if (object_shown(v[i])) keys.push_back({ object_zorder(v[i]), v[i].id, { k, { kind, i } } });
         };
         add(PlotKind::Heatmap, s.heatmaps);
         add(PlotKind::Bar, s.bars);
@@ -1086,11 +1129,29 @@ std::vector<LayerRef> layered_call_order(std::span<const S* const> layers) {
         if constexpr (requires { s.fills; }) add(PlotKind::Fill, s.fills);
         if constexpr (requires { s.quivers; }) add(PlotKind::Quiver, s.quivers);
     }
-    std::stable_sort(keys.begin(), keys.end(), [](const Key& a, const Key& b) { return a.id < b.id; });
+    std::stable_sort(keys.begin(), keys.end(), [by_z](const Key& a, const Key& b) {
+        if (by_z && a.z != b.z) return a.z < b.z;
+        return a.id < b.id;
+    });
     std::vector<LayerRef> out;
     out.reserve(keys.size());
     for (const Key& k : keys) out.push_back(k.ref);
     return out;
+}
+} // namespace objects_detail
+
+// call_order() across a cell's layers (host first, then its twins): one order by
+// ObjectId, so objects draw in call order whichever axes took them. Equal ids
+// keep the layer order, then call_order()'s.
+template <class S>
+std::vector<LayerRef> layered_call_order(std::span<const S* const> layers) {
+    return objects_detail::ordered_layers(layers, false);
+}
+
+// draw_order() across a cell's layers: by (zorder, ObjectId) over all of them.
+template <class S>
+std::vector<LayerRef> layered_draw_order(std::span<const S* const> layers) {
+    return objects_detail::ordered_layers(layers, true);
 }
 
 // 3D: the axes' own kinds (not its planes, which are objects of their own). Only
