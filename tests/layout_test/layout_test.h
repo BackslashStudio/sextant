@@ -628,10 +628,22 @@ namespace lt {
     // reference_lines.cpp
     void test_reference_lines();
     void test_reference_lines_rendered();
+    void test_axline_sloped();
+    void test_axline_sloped_rendered();
+    void test_plane_axspan();
 
     // fill_between.cpp
     void test_fill_between();
     void test_fill_between_rendered();
+
+    // shapes.cpp
+    void test_shape_geometry();
+    void test_shapes_api();
+    void test_shapes_rendered();
+    void test_shapes_plane_rendered();
+    void test_shapes_pick();
+    void test_shapes_panel();
+    void test_shapes_review_fixes();
 
     // quiver.cpp
     void test_quiver();

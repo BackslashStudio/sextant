@@ -13,6 +13,7 @@
 #include "../fill_geometry.h"
 #include "../quiver_geometry.h"
 #include "../reference_lines.h"
+#include "../shape_geometry.h"
 #include "error_bar_shape.h"
 #include <glad/glad.h>
 #include <vector>
@@ -2699,6 +2700,10 @@ void main() {
     void DataRenderer::draw_object(const RenderSnapshot& snap, const ObjectRef& r,
                                    const CoordTransform& tr, const PlotRect& pr) {
         const std::size_t one[1] = {r.index};
+        const auto draw_shape_of = [&](const auto& p, const CoordTransform& t, const PlotRect& rect) {
+            draw_shape(shape_geometry(p, t), *p.opts.color, p.opts.alpha, p.opts.linewidth, p.opts.linestyle,
+                       p.opts.edgecolor.value_or(*p.opts.color), t, rect);
+        };
         switch (r.kind) {
             case PlotKind::Heatmap:
                 draw_heatmap(snap.heatmaps, one, tr, pr);
@@ -2731,6 +2736,9 @@ void main() {
             case PlotKind::Quiver:
                 draw_quiver(snap.quivers[r.index], static_cast<int>(r.index), tr, pr);
                 break;
+            case PlotKind::Poly: draw_shape_of(snap.polys[r.index], tr, pr); break;
+            case PlotKind::Circle: draw_shape_of(snap.circles[r.index], tr, pr); break;
+            case PlotKind::Wedge: draw_shape_of(snap.wedges[r.index], tr, pr); break;
             default: break;
         }
     }
@@ -2740,6 +2748,21 @@ void main() {
     // -------------------------------------------------------------------------
     void DataRenderer::draw_axline(const AxLinePlot& p, const CoordTransform& tr, const PlotRect& pr) {
         if (p.opts.linestyle == LineStyle::None || !(p.opts.linewidth > 0.0f)) return;
+        if (p.sloped()) {
+            std::vector<std::vector<float>> paths;
+            for (const RefPath& run : axline_paths(p, tr)) {
+                std::vector<float> v;
+                for (const RefPt& q : run) {
+                    v.push_back(q.x);
+                    v.push_back(q.y);
+                }
+                paths.push_back(std::move(v));
+            }
+            Color c = *p.opts.color;
+            c.a *= p.opts.alpha;
+            stroke_rings(paths, tr, pr, p.opts.linewidth, p.opts.linestyle, c, false);
+            return;
+        }
         const std::optional<RefSegment> g = axline_segment(p, tr);
         if (!g) return;
 
@@ -2931,31 +2954,11 @@ void main() {
         const std::vector<FillRun>& rs = regions();
         if (rs.empty()) return;
 
-        begin_pass(pr, tr.win_h);
-        glUseProgram(lineseg_program_);
-        const float res[2] = {tr.win_w, tr.win_h};
-        glUniform2fv(lineseg_u_.resolution, 1, res);
-        glBindVertexArray(lineseg_vao_);
-        glUniform2fv(lineseg_u_.scale, 1, k_identity_scale);
-        glUniform2fv(lineseg_u_.offset, 1, k_identity_offset);
-        glUniform1f(lineseg_u_.half_width, p.opts.linewidth * 0.5f);
-        const DashPattern dash = dash_pattern(p.opts.linestyle);
-        if (dash.dashed()) {
-            glUniform4fv(lineseg_u_.dash, 1, dash.seg);
-            glUniform1f(lineseg_u_.dash_period, dash.period);
-            glUniform1f(lineseg_u_.dist_scale, 1.0f);
-        } else {
-            glUniform1f(lineseg_u_.dash_period, 0.0f);
-        }
-        const Color ec = fill_edge(p);
-        glUniform4f(lineseg_u_.color, ec.r, ec.g, ec.b, ec.a);
-
-        std::vector<float> ring, pts, dists;
-        PaintOnce once; // each region's outline as one stroke, as each SVG polygon
+        std::vector<std::vector<float>> rings;
         for (const FillRun& run : rs) {
             // The ring in pixels, a point equal to the one before it dropped (a
             // zero-length segment has no direction to join).
-            ring.clear();
+            std::vector<float> ring;
             fill_outline(run, [&](double r, double v) {
                 const auto [x, y] = xy(r, v);
                 const float px = tr.scale_to_px(x), py = tr.scale_to_py(y);
@@ -2967,6 +2970,38 @@ void main() {
                 ring.pop_back();
                 ring.pop_back();
             }
+            rings.push_back(std::move(ring));
+        }
+        stroke_rings(rings, tr, pr, p.opts.linewidth, p.opts.linestyle, fill_edge(p));
+    }
+
+    // Rings of pixel points (x, y pairs) stroked through the segment program,
+    // each as one stroke (as each SVG polygon is), dashed by `ls`; open paths
+    // (closed = false) have no segment from the last point back to the first.
+    void DataRenderer::stroke_rings(const std::vector<std::vector<float>>& rings, const CoordTransform& tr,
+                                    const PlotRect& pr, float linewidth, LineStyle ls, const Color& ec,
+                                    bool closed) {
+        begin_pass(pr, tr.win_h);
+        glUseProgram(lineseg_program_);
+        const float res[2] = {tr.win_w, tr.win_h};
+        glUniform2fv(lineseg_u_.resolution, 1, res);
+        glBindVertexArray(lineseg_vao_);
+        glUniform2fv(lineseg_u_.scale, 1, k_identity_scale);
+        glUniform2fv(lineseg_u_.offset, 1, k_identity_offset);
+        glUniform1f(lineseg_u_.half_width, linewidth * 0.5f);
+        const DashPattern dash = dash_pattern(ls);
+        if (dash.dashed()) {
+            glUniform4fv(lineseg_u_.dash, 1, dash.seg);
+            glUniform1f(lineseg_u_.dash_period, dash.period);
+            glUniform1f(lineseg_u_.dist_scale, 1.0f);
+        } else {
+            glUniform1f(lineseg_u_.dash_period, 0.0f);
+        }
+        glUniform4f(lineseg_u_.color, ec.r, ec.g, ec.b, ec.a);
+
+        std::vector<float> pts, dists;
+        PaintOnce once;
+        for (const std::vector<float>& ring : rings) {
             const std::size_t m = ring.size() / 2;
             if (m < 2) continue;
             // Padded so instance i reads points [i, i+3], across the seam (a
@@ -2976,10 +3011,18 @@ void main() {
                 pts.push_back(ring[2 * (i % m)]);
                 pts.push_back(ring[2 * (i % m) + 1]);
             };
-            emit(m - 1);
-            for (std::size_t i = 0; i < m; ++i) emit(i);
-            emit(0);
-            emit(1);
+            const std::size_t segs = closed ? m : m - 1;
+            if (closed) {
+                emit(m - 1);
+                for (std::size_t i = 0; i < m; ++i) emit(i);
+                emit(0);
+                emit(1);
+            } else {
+                // An open path repeats its end points instead.
+                emit(0);
+                for (std::size_t i = 0; i < m; ++i) emit(i);
+                emit(m - 1);
+            }
             if (fill_edge_vbo_ == 0) glGenBuffers(1, &fill_edge_vbo_);
             glBindBuffer(GL_ARRAY_BUFFER, fill_edge_vbo_);
             glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(pts.size() * sizeof(float)), pts.data(),
@@ -2994,7 +3037,7 @@ void main() {
                 // Arc length at each segment's start, from the ring's first point.
                 dists.clear();
                 double acc = 0.0;
-                for (std::size_t i = 0; i < m; ++i) {
+                for (std::size_t i = 0; i < segs; ++i) {
                     dists.push_back(static_cast<float>(acc));
                     const std::size_t j = (i + 1) % m;
                     const double dx = ring[2 * j] - ring[2 * i], dy = ring[2 * j + 1] - ring[2 * i + 1];
@@ -3012,13 +3055,67 @@ void main() {
                 glVertexAttrib1f(5, 0.0f);
             }
             once.stroke(ec.a < 1.0f);
-            glDrawArraysInstanced(GL_TRIANGLES, 0, k_lineseg_vertices, static_cast<GLsizei>(m));
+            glDrawArraysInstanced(GL_TRIANGLES, 0, k_lineseg_vertices, static_cast<GLsizei>(segs));
         }
         once.finish();
 
         glBindVertexArray(0);
         glUseProgram(0);
         end_pass();
+    }
+
+    // -------------------------------------------------------------------------
+    // draw_shape
+    // -------------------------------------------------------------------------
+    void DataRenderer::draw_shape(const ShapeGeom& g, const Color& color, float alpha, float linewidth,
+                                  LineStyle linestyle, const Color& edge, const CoordTransform& tr,
+                                  const PlotRect& pr) {
+        if (g.empty()) return;
+        const float a = color.a * alpha;
+        if (a > 0.0f) {
+            std::vector<float> v;
+            v.reserve(g.tris.size() * 2);
+            for (const ShapePt& p : g.tris) {
+                v.push_back(p.x);
+                v.push_back(p.y);
+            }
+            begin_pass(pr, tr.win_h);
+            glUseProgram(line_program_);
+            const float res[2] = {tr.win_w, tr.win_h};
+            glUniform2fv(line_u_.resolution, 1, res);
+            glUniform2fv(line_u_.scale, 1, k_identity_scale);
+            glUniform2fv(line_u_.offset, 1, k_identity_offset);
+            glBindVertexArray(line_vao_);
+            // Re-point the VAO attribute at line_vbo_ (see draw_axspan).
+            glBindBuffer(GL_ARRAY_BUFFER, line_vbo_);
+            glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(v.size() * sizeof(float)), v.data(),
+                         GL_STREAM_DRAW);
+            glEnableVertexAttribArray(0);
+            glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), nullptr);
+            glUniform4f(line_u_.color, color.r, color.g, color.b, a);
+            glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(v.size() / 2));
+            glBindVertexArray(0);
+            glUseProgram(0);
+            end_pass();
+        }
+        if (!(linewidth > 0.0f) || linestyle == LineStyle::None) return;
+        // A point equal to the one before it is dropped (a zero-length segment
+        // has no direction to join), as a fill's ring.
+        std::vector<std::vector<float>> rings;
+        for (const std::vector<ShapePt>& src : g.rings) {
+            std::vector<float> ring;
+            for (const ShapePt& p : src) {
+                if (ring.size() >= 2 && ring[ring.size() - 2] == p.x && ring.back() == p.y) continue;
+                ring.push_back(p.x);
+                ring.push_back(p.y);
+            }
+            while (ring.size() >= 4 && ring[0] == ring[ring.size() - 2] && ring[1] == ring.back()) {
+                ring.pop_back();
+                ring.pop_back();
+            }
+            rings.push_back(std::move(ring));
+        }
+        stroke_rings(rings, tr, pr, linewidth, linestyle, edge);
     }
 
     // -------------------------------------------------------------------------

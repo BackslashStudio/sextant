@@ -89,6 +89,9 @@ public:
     AxisScale x_scale() const { return tr_ ? tr_->xs : AxisScale{}; }
     AxisScale y_scale() const { return tr_ ? tr_->ys : AxisScale{}; }
 
+    // The 2D transform, null on a plane (seen through a projector).
+    const CoordTransform* transform() const { return tr_; }
+
 private:
     const CoordTransform* tr_   = nullptr;
     const Projector3D*    proj_ = nullptr;
@@ -114,7 +117,8 @@ struct PickHit {
 
 // The 2D kinds hit by the area they cover rather than at a point.
 inline bool pick_is_area(PickKind k) {
-    return k == PickKind::Bar || k == PickKind::Fill || k == PickKind::Heatmap;
+    return k == PickKind::Bar || k == PickKind::Fill || k == PickKind::Heatmap
+           || k == PickKind::Poly || k == PickKind::Circle || k == PickKind::Wedge;
 }
 
 // The hit find_hint() words. First the nearest point across line/scatter/

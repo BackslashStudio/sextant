@@ -86,7 +86,10 @@ namespace sextant {
         const AllPlotData all = p.sheet.all();
         return any_shown(all.lines) || any_shown(all.scatters) || any_shown(all.bars)
                || any_shown(all.heatmaps) || any_shown(all.scatter_z)
-               || (all.fills && any_shown(*all.fills)) || (all.quivers && any_shown(*all.quivers));
+               || (all.fills && any_shown(*all.fills)) || (all.quivers && any_shown(*all.quivers))
+               || (all.axspans && any_shown(*all.axspans))
+               || (all.polys && any_shown(*all.polys)) || (all.circles && any_shown(*all.circles))
+               || (all.wedges && any_shown(*all.wedges));
     }
 
     // True when a plane is drawn this frame. Drawing paths check this; layout does

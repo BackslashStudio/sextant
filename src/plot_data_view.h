@@ -63,6 +63,12 @@ struct PlotDataTable {
 
     // Non-null => a text: no table, a form over its string and placement.
     const TextPlot* text = nullptr;
+
+    // Non-null => a circle, a wedge or a sloped reference line: no table, a form
+    // over its numbers (a polygon is a table of vertices).
+    const CirclePlot* circle = nullptr;
+    const WedgePlot*  wedge = nullptr;
+    const AxLinePlot* sloped_axline = nullptr;
 };
 
 // Every plot object in `snap`, in RenderSnapshot member order.

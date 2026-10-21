@@ -332,6 +332,9 @@ namespace sextant {
             std::vector<AxSpanOptions> axspans;
             std::vector<FillOptions> fills;
             std::vector<QuiverOptions> quivers;
+            std::vector<PolyOptions> polys;
+            std::vector<CircleOptions> circles;
+            std::vector<WedgeOptions> wedges;
             std::vector<ObjectId> ids;   // seeded from, kind by kind
         };
 
@@ -347,6 +350,11 @@ namespace sextant {
         // active (the snapshot otherwise), and the string's edit buffer.
         TextContent text_local;
         char text_buf[1024]{};
+
+        // The open circle/wedge tab's numbers and the sloped reference line's, while one
+        // of their fields is active (the snapshot otherwise).
+        WedgeData shape_local;
+        AxLineData axline_local;
 
         // The Selection generation the per-object scratch was seeded at; changed
         // objects re-seed on their own, every frame the panel draws.

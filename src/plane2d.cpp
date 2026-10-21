@@ -100,6 +100,27 @@ namespace sextant {
         return *this;
     }
 
+    Plane2D& Plane2D::axspan(double lo, double hi, AxSpanOptions opts) {
+        d->sheet.ingest_axspan(lo, hi, std::move(opts), "Plane2D::axspan");
+        return *this;
+    }
+
+    Plane2D& Plane2D::shape_poly(std::span<const double> x, std::span<const double> y, PolyOptions opts) {
+        d->sheet.ingest_poly(x, y, std::move(opts), "Plane2D::shape_poly");
+        return *this;
+    }
+
+    Plane2D& Plane2D::shape_circle(Pos cx, Pos cy, Pos r, CircleOptions opts) {
+        d->sheet.ingest_circle(cx, cy, r, std::move(opts), "Plane2D::shape_circle");
+        return *this;
+    }
+
+    Plane2D& Plane2D::shape_wedge(Pos cx, Pos cy, Pos r, double theta1, double theta2,
+                                  WedgeOptions opts) {
+        d->sheet.ingest_wedge(cx, cy, r, theta1, theta2, std::move(opts), "Plane2D::shape_wedge");
+        return *this;
+    }
+
     Plane2D& Plane2D::stack(std::span<const double> x, std::span<const std::vector<double>> ys,
                             StackOptions opts) {
         d->sheet.ingest_stack(x, ys, opts, "Plane2D::stack");
@@ -166,6 +187,83 @@ namespace sextant {
     std::size_t Plane2D::bar_count() const       { return d->sheet.bars.size(); }
     std::size_t Plane2D::heatmap_count() const   { return d->sheet.heatmaps.size(); }
     std::size_t Plane2D::fill_count() const      { return d->sheet.fills.size(); }
+    std::size_t Plane2D::axspan_count() const    { return d->sheet.axspans.size(); }
+
+    AxSpanData Plane2D::axspan_data(std::size_t i) const {
+        return read_back::to_data(read_back::at(d->sheet.axspans, i, "Plane2D::axspan_data"));
+    }
+
+    Plane2D& Plane2D::set_axspan_data(std::size_t i, const AxSpanData& data) {
+        AxSpanPlot& p = read_back::at(d->sheet.axspans, i, "Plane2D::set_axspan_data");
+        read_back::check_reference({data.lo, data.hi}, "Plane2D::set_axspan_data");
+        p.lo = std::min(data.lo, data.hi);
+        p.hi = std::max(data.lo, data.hi);
+        p.data_stamp = next_snapshot_generation();
+        return *this;
+    }
+
+    Plane2D& Plane2D::set_axspan_visible(std::size_t i, bool visible) {
+        read_back::set_visible(d->sheet.axspans, i, visible, "Plane2D::set_axspan_visible");
+        return *this;
+    }
+    bool Plane2D::axspan_visible(std::size_t i) const {
+        return read_back::visible(d->sheet.axspans, i, "Plane2D::axspan_visible");
+    }
+
+    std::size_t Plane2D::shape_poly_count() const   { return d->sheet.polys.size(); }
+    std::size_t Plane2D::shape_circle_count() const { return d->sheet.circles.size(); }
+    std::size_t Plane2D::shape_wedge_count() const  { return d->sheet.wedges.size(); }
+
+    PolyData Plane2D::shape_poly_data(std::size_t i) const {
+        return read_back::to_data(read_back::at(d->sheet.polys, i, "Plane2D::shape_poly_data"));
+    }
+    CircleData Plane2D::shape_circle_data(std::size_t i) const {
+        return read_back::to_data(read_back::at(d->sheet.circles, i, "Plane2D::shape_circle_data"));
+    }
+    WedgeData Plane2D::shape_wedge_data(std::size_t i) const {
+        return read_back::to_data(read_back::at(d->sheet.wedges, i, "Plane2D::shape_wedge_data"));
+    }
+
+    Plane2D& Plane2D::set_shape_poly_data(std::size_t i, const PolyData& data) {
+        d->sheet.set_poly_data(i, data.x, data.y, "Plane2D::set_shape_poly_data");
+        return *this;
+    }
+    Plane2D& Plane2D::set_shape_poly_data(std::size_t i, std::span<const double> x,
+                                          std::span<const double> y) {
+        d->sheet.set_poly_data(i, x, y, "Plane2D::set_shape_poly_data");
+        return *this;
+    }
+    Plane2D& Plane2D::set_shape_circle_data(std::size_t i, const CircleData& data) {
+        d->sheet.set_circle_data(i, data, "Plane2D::set_shape_circle_data");
+        return *this;
+    }
+    Plane2D& Plane2D::set_shape_wedge_data(std::size_t i, const WedgeData& data) {
+        d->sheet.set_wedge_data(i, data, "Plane2D::set_shape_wedge_data");
+        return *this;
+    }
+
+    Plane2D& Plane2D::set_shape_poly_visible(std::size_t i, bool visible) {
+        read_back::set_visible(d->sheet.polys, i, visible, "Plane2D::set_shape_poly_visible");
+        return *this;
+    }
+    Plane2D& Plane2D::set_shape_circle_visible(std::size_t i, bool visible) {
+        read_back::set_visible(d->sheet.circles, i, visible, "Plane2D::set_shape_circle_visible");
+        return *this;
+    }
+    Plane2D& Plane2D::set_shape_wedge_visible(std::size_t i, bool visible) {
+        read_back::set_visible(d->sheet.wedges, i, visible, "Plane2D::set_shape_wedge_visible");
+        return *this;
+    }
+    bool Plane2D::shape_poly_visible(std::size_t i) const {
+        return read_back::visible(d->sheet.polys, i, "Plane2D::shape_poly_visible");
+    }
+    bool Plane2D::shape_circle_visible(std::size_t i) const {
+        return read_back::visible(d->sheet.circles, i, "Plane2D::shape_circle_visible");
+    }
+    bool Plane2D::shape_wedge_visible(std::size_t i) const {
+        return read_back::visible(d->sheet.wedges, i, "Plane2D::shape_wedge_visible");
+    }
+
     std::size_t Plane2D::quiver_count() const    { return d->sheet.quivers.size(); }
 
     LineData Plane2D::line_data(std::size_t i) const {

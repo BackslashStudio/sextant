@@ -72,6 +72,15 @@ namespace sextant {
     SEXTANT_DESCRIBE(FillOptions,
                      F(orientation) F(color) F(alpha) F(edgecolor) F(linewidth) F(linestyle)
                      F(drawstyle) F(exclude) F(interpolate) F(name) F(show_legend) F(visible) F(zorder))
+    SEXTANT_DESCRIBE(PolyOptions,
+                     F(color) F(alpha) F(edgecolor) F(linewidth) F(linestyle) F(space) F(name)
+                     F(show_legend) F(visible) F(zorder))
+    SEXTANT_DESCRIBE(CircleOptions,
+                     F(color) F(alpha) F(edgecolor) F(linewidth) F(linestyle) F(name)
+                     F(show_legend) F(visible) F(zorder))
+    SEXTANT_DESCRIBE(WedgeOptions,
+                     F(color) F(alpha) F(edgecolor) F(linewidth) F(linestyle) F(inner) F(name)
+                     F(show_legend) F(visible) F(zorder))
     SEXTANT_DESCRIBE(QuiverOptions,
                      F(color) F(alpha) F(cmap) F(vmin) F(vmax) F(colorbar) F(amp) F(pivot) F(width) F(head_width) F(head_length) F(name)
                      F(show_legend) F(visible) F(zorder) F(hint_labels))
@@ -260,7 +269,8 @@ namespace sextant {
     SEXTANT_ENUM_NAMES(VAlign,
                        {"top", VAlign::Top}, {"center", VAlign::Center},
                        {"baseline", VAlign::Baseline}, {"bottom", VAlign::Bottom})
-    SEXTANT_ENUM_NAMES(Coords, {"data", Coords::Data}, {"fraction", Coords::Fraction})
+    SEXTANT_ENUM_NAMES(Coords, {"data", Coords::Data}, {"fraction", Coords::Fraction},
+                       {"pixels", Coords::Pixels})
     SEXTANT_ENUM_NAMES(ArrowHead,
                        {"none", ArrowHead::None}, {"open", ArrowHead::Open},
                        {"filled", ArrowHead::Filled}, {"bar", ArrowHead::Bar})

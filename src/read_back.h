@@ -210,8 +210,63 @@ namespace sextant::read_back {
         return { p.x.get(), p.y.get(), p.u.get(), p.v.get(), p.c.get() };
     }
 
-    inline AxLineData to_data(const AxLinePlot& p) { return { p.value }; }
+    inline AxLineData to_data(const AxLinePlot& p) {
+        return { p.value, p.mode, p.x, p.y, p.x2, p.y2, p.slope };
+    }
+
+    // A sloped line's numbers: finite, and for two points not the same point.
+    inline void check_axline_sloped(const AxLineData& d, const char* who) {
+        const bool two = d.mode == AxLineMode::TwoPoints;
+        for (double v : {d.x.v, d.y.v, d.slope}) {
+            if (!std::isfinite(v))
+                throw std::invalid_argument(std::string(who) + ": the point and slope must be finite");
+        }
+        if (two) {
+            if (!std::isfinite(d.x2.v) || !std::isfinite(d.y2.v))
+                throw std::invalid_argument(std::string(who) + ": the points must be finite");
+            if (d.x.space == d.x2.space && d.y.space == d.y2.space && d.x.v == d.x2.v && d.y.v == d.y2.v)
+                throw std::invalid_argument(std::string(who) + ": the two points must differ");
+        }
+    }
     inline AxSpanData to_data(const AxSpanPlot& p) { return { p.lo, p.hi }; }
+
+    // A polygon: one y per x, at least three vertices, all finite.
+    inline void check_poly(std::span<const double> x, std::span<const double> y, const char* who) {
+        if (x.size() != y.size())
+            throw std::invalid_argument(std::string(who) + ": x and y must have the same length");
+        if (x.size() < 3)
+            throw std::invalid_argument(std::string(who) + ": a polygon needs at least 3 vertices");
+        for (std::size_t i = 0; i < x.size(); ++i)
+            if (!std::isfinite(x[i]) || !std::isfinite(y[i]))
+                throw std::invalid_argument(std::string(who) + ": vertices must be finite");
+    }
+
+    // A circle's or wedge's centre and radius: finite, r > 0, and a Data
+    // radius (measured along the axes) needs a Data centre.
+    inline void check_round(const Pos& cx, const Pos& cy, const Pos& r, const char* who) {
+        if (!std::isfinite(cx.v) || !std::isfinite(cy.v) || !std::isfinite(r.v))
+            throw std::invalid_argument(std::string(who) + ": centre and radius must be finite");
+        if (!(r.v > 0.0))
+            throw std::invalid_argument(std::string(who) + ": the radius must be positive");
+        if (r.space == Coords::Data && (cx.space != Coords::Data || cy.space != Coords::Data))
+            throw std::invalid_argument(std::string(who) + ": a radius in data units needs a centre in data units");
+    }
+
+    // A wedge: a round shape, finite angles, and a hole in [0, r) (in r's space).
+    inline void check_wedge(const Pos& cx, const Pos& cy, const Pos& r, double theta1, double theta2,
+                            double inner, const char* who) {
+        check_round(cx, cy, r, who);
+        if (!std::isfinite(theta1) || !std::isfinite(theta2) || !std::isfinite(inner))
+            throw std::invalid_argument(std::string(who) + ": angles and the inner radius must be finite");
+        if (inner < 0.0 || inner >= r.v)
+            throw std::invalid_argument(std::string(who) + ": the inner radius must be in [0, r)");
+    }
+
+    inline PolyData   to_data(const PolyPlot& p)   { return { p.x.get(), p.y.get() }; }
+    inline CircleData to_data(const CirclePlot& p) { return { p.cx, p.cy, p.r }; }
+    inline WedgeData  to_data(const WedgePlot& p)  {
+        return { p.cx, p.cy, p.r, p.theta1, p.theta2, p.inner };
+    }
 
     // A reference line's or span's numbers (value or ends, `from`, `to`) must
     // be finite.

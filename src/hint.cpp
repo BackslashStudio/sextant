@@ -3,6 +3,7 @@
 #include "renderer/bar3d.h"
 #include "renderer/surface.h"
 #include "fill_geometry.h"
+#include "shape_geometry.h"
 #include <algorithm>
 #include <cstdio>
 
@@ -219,6 +220,39 @@ const AxesLayout* find_hint_cell(const std::vector<AxesLayout>& layout,
 
 namespace {
 
+// The geometry of shape (kind, o) in `tr`'s pixels.
+ShapeGeom shape_geom_of(const RenderSnapshot& snap, PlotKind kind, std::size_t o, const CoordTransform& tr) {
+    switch (kind) {
+        case PlotKind::Poly: return shape_geometry(snap.polys[o], tr);
+        case PlotKind::Circle: return shape_geometry(snap.circles[o], tr);
+        default: return shape_geometry(snap.wedges[o], tr);
+    }
+}
+
+// Whether the cursor (pixel, and data (cx, cy)) is inside shape (kind, o). On a
+// plane only a shape in plane units has a place: it is laid out on a stand-in
+// transform fitted to its own box, where the cursor's data position lands.
+bool shape_covers(const RenderSnapshot& snap, const HintProjector& proj, PlotKind kind, std::size_t o,
+                  float px, float py, double cx, double cy) {
+    if (const CoordTransform* tr = proj.transform())
+        return shape_contains(shape_geom_of(snap, kind, o, *tr), px, py);
+    double lo_x = 1e300, hi_x = -1e300, lo_y = 1e300, hi_y = -1e300;
+    const auto grow = [&](double x, double y) {
+        lo_x = std::min(lo_x, x); hi_x = std::max(hi_x, x);
+        lo_y = std::min(lo_y, y); hi_y = std::max(hi_y, y);
+    };
+    switch (kind) {
+        case PlotKind::Poly: shape_limit_points(snap.polys[o], grow); break;
+        case PlotKind::Circle: shape_limit_points(snap.circles[o], grow); break;
+        default: shape_limit_points(snap.wedges[o], grow); break;
+    }
+    if (!(lo_x < hi_x) || !(lo_y < hi_y)) return false;
+    CoordTransform st{};
+    st.xmin = lo_x; st.xmax = hi_x; st.ymin = lo_y; st.ymax = hi_y;
+    st.px = 0.0f; st.py = 0.0f; st.pw = 1000.0f; st.ph = 1000.0f;
+    return shape_contains(shape_geom_of(snap, kind, o, st), st.to_px(cx), st.to_py(cy));
+}
+
 // The topmost bar, fill or heatmap cell under the cursor (draw order, last
 // first), at the cursor; nullopt if none, or the cursor misses the surface.
 std::optional<PickHit> find_area(const RenderSnapshot& snap, const HintProjector& tr,
@@ -276,6 +310,15 @@ std::optional<PickHit> find_area(const RenderSnapshot& snap, const HintProjector
                 hit.kind = PickKind::Fill;
                 hit.object = o;
                 hit.element = static_cast<std::size_t>(seg);
+                return hit;
+            }
+            case PlotKind::Poly: case PlotKind::Circle: case PlotKind::Wedge: {
+                if (!shape_covers(snap, tr, order[rank].kind, o, cursor_x, cursor_y, cx, cy)) break;
+                hit.kind = order[rank].kind == PlotKind::Poly     ? PickKind::Poly
+                           : order[rank].kind == PlotKind::Circle ? PickKind::Circle
+                                                                  : PickKind::Wedge;
+                hit.object = o;
+                hit.element = 0;
                 return hit;
             }
             case PlotKind::Heatmap: {
@@ -418,6 +461,9 @@ ObjectId pick_object_id(const RenderSnapshot& s, PickKind kind, std::size_t i) {
         case PickKind::Heatmap:  return s.heatmaps[i].id;
         case PickKind::Quiver:   return s.quivers[i].id;
         case PickKind::Fill:     return s.fills[i].id;
+        case PickKind::Poly:     return s.polys[i].id;
+        case PickKind::Circle:   return s.circles[i].id;
+        case PickKind::Wedge:    return s.wedges[i].id;
         default: return 0;
     }
 }
@@ -505,6 +551,15 @@ std::string format_pick(const RenderSnapshot& snap, const PickHit& hit) {
             // Where the cursor is, then the fill's name (a stack's layer).
             std::string s = fmt_point(hit.data_x, hit.data_y);
             const std::string& name = snap.fills[hit.object].opts.name;
+            if (!name.empty()) s += '\n' + name;
+            return s;
+        }
+        case PickKind::Poly: case PickKind::Circle: case PickKind::Wedge: {
+            // Where the cursor is, then the shape's name.
+            std::string s = fmt_point(hit.data_x, hit.data_y);
+            const std::string& name = hit.kind == PickKind::Poly     ? snap.polys[hit.object].opts.name
+                                      : hit.kind == PickKind::Circle ? snap.circles[hit.object].opts.name
+                                                                     : snap.wedges[hit.object].opts.name;
             if (!name.empty()) s += '\n' + name;
             return s;
         }

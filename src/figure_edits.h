@@ -1,4 +1,5 @@
 #pragma once
+#include <cmath>
 #include "sextant/style.h"
 #include "plot_objects.h"
 #include "tick.h"
@@ -69,7 +70,8 @@ struct PlotStyleEdit {
     int plane_index = -1;
     std::variant<LineOptions, ScatterOptions, BarOptions,
                  HeatmapOptions, ScatterZOptions, TextStyle,
-                 AxLineOptions, AxSpanOptions, FillOptions, QuiverOptions> opts;
+                 AxLineOptions, AxSpanOptions, FillOptions, QuiverOptions,
+                 PolyOptions, CircleOptions, WedgeOptions> opts;
     ObjectId id = 0, plane_id = 0;   // see PlotCellEdit
     // The object's visible_stamp when the panel drew; filled in by
     // FigureEditBox. A set_<kind>_visible() since keeps its `visible`.
@@ -132,10 +134,34 @@ struct TextDataEdit {
     ObjectId id = 0, plane_id = 0;    // see PlotCellEdit
 };
 
+// A circle's or wedge's numbers (centre, radius, and for a wedge the angles and
+// hole), replaced whole from its Data-panel tab and journaled like other data (a
+// shape is one row, not a table). A circle reads only cx, cy and r.
+struct ShapeDataEdit {
+    int         plot_index  = 0;
+    WedgeData   data;
+    int         plane_index = -1;   // see PlotCellEdit
+    PlotKind    kind        = PlotKind::Circle;   // Circle or Wedge
+    unsigned long long seen = ~0ull;   // see PlotCellEdit
+    ObjectId id = 0, plane_id = 0;    // see PlotCellEdit
+};
+
+// A reference line's numbers, replaced whole: its mode and the sloped line's
+// points and slope (a value line is also a PlotCellEdit). An axes' own object,
+// never a plane's.
+struct AxLineDataEdit {
+    int         plot_index  = 0;
+    AxLineData  data;
+    int         plane_index = -1;   // see PlotCellEdit
+    PlotKind    kind        = PlotKind::AxLine;
+    unsigned long long seen = ~0ull;   // see PlotCellEdit
+    ObjectId id = 0, plane_id = 0;    // see PlotCellEdit
+};
+
 // One op in a plot's edit stream. Order matters: indices refer to the arrays
 // as they were when recorded, so ops must replay in sequence.
 using PlotDataOp = std::variant<PlotCellEdit, PlotRowEdit, MatrixLineEdit, BarWidthEdit,
-                                TextDataEdit>;
+                                TextDataEdit, ShapeDataEdit, AxLineDataEdit>;
 
 // The plane_index every op carries.
 inline int plot_op_plane(const PlotDataOp& op) {
@@ -631,7 +657,7 @@ std::optional<PlotDataOp> apply_plot_data_op(T& t, const PlotCellEdit& e) {
         case PlotKind::AxLine: {
             // One row, one column: the value.
             auto* lp = op_target(t.axlines, e);
-            if (!lp || e.column != 0 || e.element != 0) return std::nullopt;
+            if (!lp || lp->sloped() || e.column != 0 || e.element != 0) return std::nullopt;
             const double old = lp->value;
             lp->value = e.value;
             return cell_undo(e, t.axlines, *lp, old);
@@ -662,6 +688,15 @@ std::optional<PlotDataOp> apply_plot_data_op(T& t, const PlotCellEdit& e) {
                                           : e.column == 2 ? qp->u
                                           : e.column == 3 ? qp->v : qp->c,
                                           e.element, e.value));
+            return std::nullopt;
+        case PlotKind::Poly:
+            // x, then y.
+            if (auto* pp = op_target(t.polys, e))
+                return cell_undo(e, t.polys, *pp, put_cell(e.column == 0 ? pp->x : pp->y, e.element, e.value));
+            return std::nullopt;
+        case PlotKind::Circle:
+        case PlotKind::Wedge:
+            // One row; see ShapeDataEdit.
             return std::nullopt;
     }
     return std::nullopt;
@@ -696,6 +731,69 @@ std::optional<PlotDataOp> apply_plot_data_op(T& t, const BarWidthEdit& e) {
     BarWidthEdit inv = edits_detail::retarget(e, t.bars, *bp);
     inv.width = bp->bar_width;
     bp->bar_width = e.width;
+    return inv;
+}
+
+namespace edits_detail {
+
+// The checks the plotting calls make (read_back::check_round() and friends), for
+// numbers a panel typed: an edit that fails them changes nothing.
+inline bool shape_numbers_ok(const WedgeData& d, bool wedge) {
+    if (!std::isfinite(d.cx.v) || !std::isfinite(d.cy.v) || !std::isfinite(d.r.v)) return false;
+    if (!(d.r.v > 0.0)) return false;
+    if (d.r.space == Coords::Data && (d.cx.space != Coords::Data || d.cy.space != Coords::Data)) return false;
+    if (!wedge) return true;
+    return std::isfinite(d.theta1) && std::isfinite(d.theta2) && std::isfinite(d.inner)
+           && d.inner >= 0.0 && d.inner < d.r.v;
+}
+
+inline bool axline_numbers_ok(const AxLineData& d) {
+    if (d.mode == AxLineMode::Value) return std::isfinite(d.value);
+    if (!std::isfinite(d.x.v) || !std::isfinite(d.y.v) || !std::isfinite(d.slope)) return false;
+    if (d.mode != AxLineMode::TwoPoints) return true;
+    if (!std::isfinite(d.x2.v) || !std::isfinite(d.y2.v)) return false;
+    return !(d.x.space == d.x2.space && d.y.space == d.y2.space && d.x.v == d.x2.v && d.y.v == d.y2.v);
+}
+
+} // namespace edits_detail
+
+template <class T>
+std::optional<PlotDataOp> apply_plot_data_op(T& t, const ShapeDataEdit& e) {
+    if (!edits_detail::shape_numbers_ok(e.data, e.kind == PlotKind::Wedge)) return std::nullopt;
+    using edits_detail::op_target;
+    using edits_detail::retarget;
+    if (e.kind == PlotKind::Circle) {
+        auto* p = op_target(t.circles, e);
+        if (!p) return std::nullopt;
+        ShapeDataEdit inv = retarget(e, t.circles, *p);
+        inv.data = WedgeData{p->cx, p->cy, p->r};
+        p->cx = e.data.cx; p->cy = e.data.cy; p->r = e.data.r;
+        return inv;
+    }
+    if (e.kind == PlotKind::Wedge) {
+        auto* p = op_target(t.wedges, e);
+        if (!p) return std::nullopt;
+        ShapeDataEdit inv = retarget(e, t.wedges, *p);
+        inv.data = WedgeData{p->cx, p->cy, p->r, p->theta1, p->theta2, p->inner};
+        p->cx = e.data.cx; p->cy = e.data.cy; p->r = e.data.r;
+        p->theta1 = e.data.theta1; p->theta2 = e.data.theta2; p->inner = e.data.inner;
+        return inv;
+    }
+    return std::nullopt;
+}
+
+template <class T>
+std::optional<PlotDataOp> apply_plot_data_op(T& t, const AxLineDataEdit& e) {
+    if (e.kind != PlotKind::AxLine) return std::nullopt;
+    if (!edits_detail::axline_numbers_ok(e.data)) return std::nullopt;
+    auto* p = edits_detail::op_target(t.axlines, e);
+    if (!p) return std::nullopt;
+    AxLineDataEdit inv = edits_detail::retarget(e, t.axlines, *p);
+    inv.data = AxLineData{p->value, p->mode, p->x, p->y, p->x2, p->y2, p->slope};
+    p->value = e.data.value;
+    p->mode = e.data.mode;
+    p->x = e.data.x; p->y = e.data.y; p->x2 = e.data.x2; p->y2 = e.data.y2;
+    p->slope = e.data.slope;
     return inv;
 }
 
@@ -835,6 +933,14 @@ std::optional<PlotDataOp> apply_plot_data_op(T& t, const PlotRowEdit& e) {
         case PlotKind::Quiver:
             if (auto* qp = op_target(t.quivers, e))
                 return row_op(e, t.quivers, *qp, qp->x, qp->y, qp->u, qp->v);
+            return std::nullopt;
+        case PlotKind::Poly:
+            if (auto* pp = op_target(t.polys, e))
+                return row_op(e, t.polys, *pp, pp->x, pp->y);
+            return std::nullopt;
+        case PlotKind::Circle:
+        case PlotKind::Wedge:
+            // One row; see ShapeDataEdit.
             return std::nullopt;
         case PlotKind::Heatmap:
         case PlotKind::Bar3D:
@@ -1128,6 +1234,13 @@ std::optional<PlotDataOp> apply_axes3d_data_op(T& t, const TextDataEdit& e) {
     return edits_detail::text_op(t.texts, e);
 }
 
+// Shapes and reference lines are 2D kinds: on a plane, through the sheet.
+template <class T>
+std::optional<PlotDataOp> apply_axes3d_data_op(T&, const ShapeDataEdit&) { return std::nullopt; }
+
+template <class T>
+std::optional<PlotDataOp> apply_axes3d_data_op(T&, const AxLineDataEdit&) { return std::nullopt; }
+
 // Applies an ordered op stream, prepending each op's inverse to `inv` (so it
 // runs last-first). The 2D overload skips plane-addressed ops; the 3D overload
 // (targets with planes) routes plane -1 to the axes' own objects and others to
@@ -1244,6 +1357,9 @@ auto& styled_vector(T& t) {
     else if constexpr (std::is_same_v<O, AxSpanOptions>)  return t.axspans;
     else if constexpr (std::is_same_v<O, FillOptions>)    return t.fills;
     else if constexpr (std::is_same_v<O, QuiverOptions>)  return t.quivers;
+    else if constexpr (std::is_same_v<O, PolyOptions>)    return t.polys;
+    else if constexpr (std::is_same_v<O, CircleOptions>)  return t.circles;
+    else if constexpr (std::is_same_v<O, WedgeOptions>)   return t.wedges;
     else                                                  return t.scatter_z;
 }
 

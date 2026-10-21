@@ -947,12 +947,15 @@ namespace sextant {
             if (drag_double("##rto", &to, 0.005f, "%.3f")) push();
         }
 
+        // `sloped`: a line through points, infinite: no orientation, from or to.
         template<class Push>
-        void axline_style(DataPanelState& st, AxLineOptions& o, Push&& push) {
+        void axline_style(DataPanelState& st, AxLineOptions& o, bool sloped, Push&& push) {
             name_and_key(st, o, push);
             if (begin_field_table("axline")) {
-                field_row("Orientation");
-                if (orientation_combo("##aorient", o.orientation)) push();
+                if (!sloped) {
+                    field_row("Orientation");
+                    if (orientation_combo("##aorient", o.orientation)) push();
+                }
                 field_row("Color");
                 if (color_swatch("##acol", *o.color)) push();
                 field_row("Alpha");
@@ -961,10 +964,54 @@ namespace sextant {
                 if (drag_float("##awidth", &o.linewidth, 0.1f, 20.0f, 0.05f, "%.2f px")) push();
                 field_row("Style");
                 if (linestyle_combo("##astyle", o.linestyle)) push();
-                frame_fractions(o.from, o.to, push);
+                if (!sloped) frame_fractions(o.from, o.to, push);
                 end_field_table();
             }
-            ImGui::TextDisabled("From and to are fractions of the frame (0 = left/bottom).");
+            if (!sloped) ImGui::TextDisabled("From and to are fractions of the frame (0 = left/bottom).");
+        }
+
+        // A filled shape's look: colour and alpha (and a polygon's space), then the
+        // outline as a fill's.
+        template<class Opts, class Push>
+        void patch_style(DataPanelState& st, Opts& o, const char* id, Push&& push) {
+            name_and_key(st, o, push);
+            if (begin_field_table(id)) {
+                if constexpr (requires { o.space; }) {
+                    static const char* kSpaces[] = {"data", "fraction", "pixels"};
+                    field_row("Vertices in");
+                    int cur = static_cast<int>(o.space);
+                    if (ImGui::Combo("##pspace", &cur, kSpaces, 3)) {
+                        o.space = static_cast<Coords>(cur);
+                        push();
+                    }
+                }
+                field_row("Color");
+                if (color_swatch("##pcol", *o.color)) push();
+                field_row("Alpha");
+                if (drag_float("##palpha", &o.alpha, 0.0f, 1.0f, 0.005f, "%.2f")) push();
+                end_field_table();
+            }
+            ImGui::SeparatorText("Outline");
+            if (begin_field_table("patchedge")) {
+                field_row("Width");
+                if (drag_float("##pew", &o.linewidth, 0.0f, 10.0f, 0.05f, "%.2f px")) push();
+                end_field_table();
+            }
+            if (o.linewidth <= 0.0f) return;
+            bool own = o.edgecolor.has_value();
+            if (ImGui::Checkbox("Own colour##peown", &own)) {
+                o.edgecolor = own ? std::optional<Color>(*o.color) : std::nullopt;
+                push();
+            }
+            if (begin_field_table("patchedge2")) {
+                if (o.edgecolor) {
+                    field_row("Color");
+                    if (color_swatch("##pecol", *o.edgecolor)) push();
+                }
+                field_row("Style");
+                if (linestyle_combo("##pestyle", o.linestyle)) push();
+                end_field_table();
+            }
         }
 
         template<class Push>
@@ -1205,6 +1252,9 @@ namespace sextant {
                 case PlotKind::AxSpan:   if (!both(ss->axspans, sheet.axspans)) return; break;
                 case PlotKind::Fill:     if (!both(ss->fills, sheet.fills)) return; break;
                 case PlotKind::Quiver:   if (!both(ss->quivers, sheet.quivers)) return; break;
+                case PlotKind::Poly:     if (!both(ss->polys, sheet.polys)) return; break;
+                case PlotKind::Circle:   if (!both(ss->circles, sheet.circles)) return; break;
+                case PlotKind::Wedge:    if (!both(ss->wedges, sheet.wedges)) return; break;
                 default: return; // the 3D kinds have blocks of their own
             }
             if (!section("Appearance", true)) return;
@@ -1234,7 +1284,7 @@ namespace sextant {
                     scatter_z_style(st, ss->scatter_z[i], sheet.scatter_z[i], push_of(ss->scatter_z[i]));
                     break;
                 case PlotKind::AxLine:
-                    axline_style(st, ss->axlines[i], push_of(ss->axlines[i]));
+                    axline_style(st, ss->axlines[i], sheet.axlines[i].sloped(), push_of(ss->axlines[i]));
                     break;
                 case PlotKind::AxSpan:
                     axspan_style(st, ss->axspans[i], push_of(ss->axspans[i]));
@@ -1244,6 +1294,15 @@ namespace sextant {
                     break;
                 case PlotKind::Quiver:
                     quiver_style(st, ss->quivers[i], sheet.quivers[i], push_of(ss->quivers[i]));
+                    break;
+                case PlotKind::Poly:
+                    patch_style(st, ss->polys[i], "poly", push_of(ss->polys[i]));
+                    break;
+                case PlotKind::Circle:
+                    patch_style(st, ss->circles[i], "circle", push_of(ss->circles[i]));
+                    break;
+                case PlotKind::Wedge:
+                    patch_style(st, ss->wedges[i], "wedge", push_of(ss->wedges[i]));
                     break;
                 default: break;
             }
@@ -1628,10 +1687,10 @@ namespace sextant {
 
         // A position coordinate: its value and, in 2D, what it is measured in.
         bool pos_field(const char* id, Pos& p, bool with_space) {
-            static const char* kSpaces[] = {"data", "fraction"};
-            const float speed = p.space == Coords::Fraction
-                                    ? 0.002f
-                                    : static_cast<float>(std::max(std::abs(p.v), 1.0) * 0.005);
+            static const char* kSpaces[] = {"data", "fraction", "pixels"};
+            const float speed = p.space == Coords::Fraction ? 0.002f
+                                  : p.space == Coords::Pixels   ? 0.5f
+                                  : static_cast<float>(std::max(std::abs(p.v), 1.0) * 0.005);
             bool changed = false;
             if (with_space) split_begin(2);
             ImGui::PushID(id);
@@ -1643,6 +1702,120 @@ namespace sextant {
             }
             ImGui::PopID();
             return changed;
+        }
+
+        // Sends one whole-numbers op for an object that is a form, not a table: a
+        // second change in the same frame replaces the pending op for that object.
+        template<class Edit>
+        void push_form_op(FigureEditBox& edit_box, int idx, bool is3d, const PlotDataTable& t, Edit op) {
+            op.plot_index = t.plot_index;
+            op.plane_index = t.plane_index;
+            op.seen = t.data_stamp;
+            auto merge = [&](std::vector<PlotDataOp>& ops) {
+                if (!ops.empty())
+                    if (auto* last = std::get_if<Edit>(&ops.back()))
+                        if (last->plot_index == op.plot_index && last->plane_index == op.plane_index
+                            && last->kind == op.kind) {
+                            last->data = op.data;
+                            return;
+                        }
+                ops.push_back(op);
+            };
+            if (is3d) edit_box.update3d(idx, [&](AxesEdit3D& e) { merge(e.plot_ops); });
+            else edit_box.update(idx, [&](AxesEdit& e) { merge(e.plot_ops); });
+        }
+
+        // A circle's or wedge's tab: its centre, radius, and a wedge's angles and
+        // hole, each Pos with the space it is measured in. While a field is
+        // active it edits DataPanelState::shape_local; the snapshot is read
+        // otherwise, so a set_shape_*_data() or an undo shows.
+        void draw_shape_form(DataPanelState& st, FigureEditBox& edit_box, int idx, bool is3d,
+                             const PlotDataTable& t) {
+            if (t.plot_index < 0 || (!t.circle && !t.wedge)) return;
+            if (!ImGui::IsAnyItemActive()) {
+                if (t.circle) st.shape_local = WedgeData{t.circle->cx, t.circle->cy, t.circle->r};
+                else st.shape_local = WedgeData{t.wedge->cx, t.wedge->cy, t.wedge->r, t.wedge->theta1,
+                                                t.wedge->theta2, t.wedge->inner};
+            }
+            WedgeData& d = st.shape_local;
+            const auto push = [&] {
+                ShapeDataEdit op;
+                op.data = d;
+                op.kind = t.circle ? PlotKind::Circle : PlotKind::Wedge;
+                push_form_op(edit_box, idx, is3d, t, op);
+            };
+            if (begin_field_table("shapeform")) {
+                field_row("Center X");
+                if (pos_field("scx", d.cx, true)) push();
+                field_row("Center Y");
+                if (pos_field("scy", d.cy, true)) push();
+                field_row("Radius");
+                if (pos_field("sr", d.r, true)) push();
+                if (t.wedge) {
+                    field_row("From");
+                    if (drag_double("##sth1", &d.theta1, 0.5f, "%.1f deg")) push();
+                    field_row("To");
+                    if (drag_double("##sth2", &d.theta2, 0.5f, "%.1f deg")) push();
+                    field_row("Hole");
+                    if (drag_double("##sinner", &d.inner, static_cast<float>(std::max(d.r.v, 1.0) * 0.005), "%.4g"))
+                        push();
+                }
+                end_field_table();
+            }
+            ImGui::TextDisabled("A radius in data units needs a centre in data units; a fraction one is of the shorter side.");
+            if (t.wedge) ImGui::TextDisabled("Angles run counter-clockwise from +x; the hole is in the radius' units, below it.");
+        }
+
+        // A sloped reference line's tab: through a point with a slope, or through
+        // two points; points in data units draw the line of the data (it bends
+        // on a log axis), frame positions a straight line on screen.
+        void draw_axline_form(DataPanelState& st, FigureEditBox& edit_box, int idx, bool is3d,
+                              const PlotDataTable& t) {
+            if (t.plot_index < 0 || !t.sloped_axline) return;
+            if (!ImGui::IsAnyItemActive()) {
+                const AxLinePlot& p = *t.sloped_axline;
+                st.axline_local = AxLineData{p.value, p.mode, p.x, p.y, p.x2, p.y2, p.slope};
+            }
+            AxLineData& d = st.axline_local;
+            const auto push = [&] {
+                AxLineDataEdit op;
+                op.data = d;
+                push_form_op(edit_box, idx, is3d, t, op);
+            };
+            static const char* kModes[] = {"Point and slope", "Two points"};
+            int mode = d.mode == AxLineMode::TwoPoints ? 1 : 0;
+            if (ImGui::Combo("##almode", &mode, kModes, 2)) {
+                if (mode == 1 && d.mode != AxLineMode::TwoPoints) {
+                    // The second point one unit along the slope, in the first's spaces.
+                    d.x2 = d.x; d.y2 = d.y;
+                    d.x2.v += 1.0;
+                    d.y2.v += d.slope;
+                    d.mode = AxLineMode::TwoPoints;
+                } else if (mode == 0 && d.mode != AxLineMode::PointSlope) {
+                    const bool same = d.x.space == d.x2.space && d.y.space == d.y2.space && d.x2.v != d.x.v;
+                    d.slope = same ? (d.y2.v - d.y.v) / (d.x2.v - d.x.v) : 1.0;
+                    d.mode = AxLineMode::PointSlope;
+                }
+                push();
+            }
+            if (begin_field_table("axlineform")) {
+                field_row(d.mode == AxLineMode::TwoPoints ? "Point 1 X" : "Point X");
+                if (pos_field("alx", d.x, true)) push();
+                field_row(d.mode == AxLineMode::TwoPoints ? "Point 1 Y" : "Point Y");
+                if (pos_field("aly", d.y, true)) push();
+                if (d.mode == AxLineMode::TwoPoints) {
+                    field_row("Point 2 X");
+                    if (pos_field("alx2", d.x2, true)) push();
+                    field_row("Point 2 Y");
+                    if (pos_field("aly2", d.y2, true)) push();
+                } else {
+                    field_row("Slope");
+                    if (drag_double("##alslope", &d.slope, static_cast<float>(std::max(std::abs(d.slope), 0.1) * 0.01), "%.4g"))
+                        push();
+                }
+                end_field_table();
+            }
+            ImGui::TextDisabled("Points in data units: the line of the data. Frame positions: a straight line on screen.");
         }
 
         // A text's tab: its string and placement (a data op, journaled), then its
@@ -2042,6 +2215,13 @@ namespace sextant {
                                            ? &cur3d->planes[static_cast<std::size_t>(t.plane_index)].sheet
                                            : nullptr);
                         if (sheet) draw_plot_appearance(st, *sheet, t, edit_box, idx, is3d, sink);
+                    }
+                    if (t.circle || t.wedge || t.sloped_axline) {
+                        // A form over the object's numbers, not a table.
+                        if (t.sloped_axline) draw_axline_form(st, edit_box, idx, is3d, t);
+                        else draw_shape_form(st, edit_box, idx, is3d, t);
+                        ImGui::EndTabItem();
+                        continue;
                     }
                     fmt = draw_table_format(st, fmt_buf, sizeof fmt_buf);
                     if (t.mesh) draw_mesh_topology(t);

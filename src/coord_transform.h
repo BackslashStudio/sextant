@@ -2,6 +2,7 @@
 #include "axis_scale.h"
 #include "fill_geometry.h"
 #include "quiver_geometry.h"
+#include "shape_limits.h"
 #include "plot_objects.h"
 #include "renderer/plot_rect.h"
 #include "tick.h"
@@ -68,6 +69,26 @@ namespace sextant {
             return ys.inv(symin() + static_cast<double>((py + ph - screen_y) / ph) * syspan());
         }
     };
+
+    // A position as a pixel: Data through the transform, Fraction a fraction of
+    // the frame from its left (x) or bottom (y) edge, Pixels pixels from the
+    // same edge (y up).
+    inline float pos_to_px(const Pos& p, const CoordTransform& tr) {
+        switch (p.space) {
+            case Coords::Data: return tr.to_px(p.v);
+            case Coords::Fraction: return tr.px + static_cast<float>(p.v) * tr.pw;
+            case Coords::Pixels: return tr.px + static_cast<float>(p.v);
+        }
+        return tr.px;
+    }
+    inline float pos_to_py(const Pos& p, const CoordTransform& tr) {
+        switch (p.space) {
+            case Coords::Data: return tr.to_py(p.v);
+            case Coords::Fraction: return tr.py + tr.ph - static_cast<float>(p.v) * tr.ph;
+            case Coords::Pixels: return tr.py + tr.ph - static_cast<float>(p.v);
+        }
+        return tr.py;
+    }
 
     // -------------------------------------------------------------------------
     // Pan/zoom: pixel deltas -> new limits (window-free, testable)
@@ -310,6 +331,13 @@ namespace sextant {
             if (all.axlines)
                 for (const auto& lp: *all.axlines) {
                     if (!object_shown(lp)) continue;
+                    if (lp.sloped()) {
+                        axline_limit_points(lp, [&](double x, double y) {
+                            add(fx(x), xlo, xhi);
+                            add(fy(y), ylo, yhi);
+                        });
+                        continue;
+                    }
                     if (lp.on_x()) add(fx(lp.value), xlo, xhi);
                     else add(fy(lp.value), ylo, yhi);
                 }
@@ -329,6 +357,12 @@ namespace sextant {
                         add(c, v ? xlo : ylo, v ? xhi : yhi);
                     });
                 }
+            // A shape in data units: its vertices, or a circle's box.
+            auto add_shape_point = [&](double x, double y) {
+                add(fx(x), xlo, xhi);
+                add(fy(y), ylo, yhi);
+            };
+            all_shape_limit_points(all, add_shape_point);
             // A quiver: both ends of every arrow drawn (quiver_limit_points()).
             if (all.quivers)
                 for (const auto& qp: *all.quivers) {
@@ -444,6 +478,15 @@ namespace sextant {
         if (all.axlines)
             for (const auto& lp: *all.axlines) {
                 if (!object_shown(lp)) continue;
+                if (lp.sloped()) {
+                    axline_limit_points(lp, [&](double x, double y) {
+                        xlo = std::min(xlo, x);
+                        xhi = std::max(xhi, x);
+                        ylo = std::min(ylo, y);
+                        yhi = std::max(yhi, y);
+                    });
+                    continue;
+                }
                 double& lo = lp.on_x() ? xlo : ylo;
                 double& hi = lp.on_x() ? xhi : yhi;
                 lo = std::min(lo, lp.value);
@@ -471,6 +514,12 @@ namespace sextant {
                     vhi = std::max(vhi, c);
                 });
             }
+        all_shape_limit_points(all, [&](double x, double y) {
+            xlo = std::min(xlo, x);
+            xhi = std::max(xhi, x);
+            ylo = std::min(ylo, y);
+            yhi = std::max(yhi, y);
+        });
         if (all.quivers)
             for (const auto& qp: *all.quivers) {
                 if (!object_shown(qp)) continue;

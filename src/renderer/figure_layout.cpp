@@ -820,6 +820,23 @@ namespace sextant {
                     }
                     break;
                 }
+                case PlotKind::Poly: case PlotKind::Circle: case PlotKind::Wedge: {
+                    // A patch at the shape's opacity, as a fill's; outlined when
+                    // the shape is.
+                    const auto key = [&](const auto& o) {
+                        if (!keyed(o)) return;
+                        Color c = *o.color;
+                        c.a *= o.alpha;
+                        LegendEntry e{c, o.name, LegendKind::Bar, LineStyle::Solid};
+                        if (o.linewidth > 0.0f && o.linestyle != LineStyle::None)
+                            e.edge = o.edgecolor.value_or(*o.color);
+                        entries.push_back(std::move(e));
+                    };
+                    if (r.kind == PlotKind::Poly) key(snap.polys[r.index].opts);
+                    else if (r.kind == PlotKind::Circle) key(snap.circles[r.index].opts);
+                    else key(snap.wedges[r.index].opts);
+                    break;
+                }
                 case PlotKind::Quiver: {
                     // An arrow at the quiver's color and opacity; colormapped,
                     // white with a black edge (the colorbar explains the colors),

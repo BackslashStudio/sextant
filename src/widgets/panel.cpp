@@ -82,7 +82,7 @@ void sync_sheet(DataPanelState::SheetStyles& dst, const RenderSnapshot& sn) {
         out.reserve(plots.size());
         for (const auto& p : plots) {
             out.push_back(p.opts);
-            out.back().hint_labels.clear();
+            if constexpr (requires { out.back().hint_labels; }) out.back().hint_labels.clear();
         }
     };
     copy(dst.lines, sn.lines);
@@ -100,6 +100,9 @@ void sync_sheet(DataPanelState::SheetStyles& dst, const RenderSnapshot& sn) {
     for (const auto& f : sn.fills) dst.fills.push_back(f.opts);
     dst.quivers.clear();
     for (const auto& q : sn.quivers) dst.quivers.push_back(q.opts);
+    copy(dst.polys, sn.polys);
+    copy(dst.circles, sn.circles);
+    copy(dst.wedges, sn.wedges);
     dst.ids = object_ids(sn, kPlotKinds2D);
 }
 

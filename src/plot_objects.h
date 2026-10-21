@@ -11,6 +11,8 @@
 #include <cstdint>
 #include <cmath>
 #include <limits>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <type_traits>
@@ -24,10 +26,10 @@ namespace sextant {
 // The first five are 2D (also held by planes); then the native 3D kinds,
 // always addressed at the axes (plane -1). Text is held by both 2D and 3D
 // axes (never by a plane); AxLine and AxSpan by 2D axes only (a plane's sheet
-// holds none); Fill and Quiver by 2D axes and planes. Append new kinds to keep
+// holds none); Fill, Quiver, Poly, Circle and Wedge by 2D axes and planes. Append new kinds to keep
 // values stable.
 enum class PlotKind { Line, Scatter, Bar, Heatmap, ScatterZ, Bar3D, Surface, Scatter3D, Line3D,
-                      SurfaceTri, Text, AxLine, AxSpan, Fill, Quiver };
+                      SurfaceTri, Text, AxLine, AxSpan, Fill, Quiver, Poly, Circle, Wedge };
 
 // A plot object's (or a plane's) identity, the public ObjectId
 // (sextant/object_id.h): kept by set_*_data(), unchanged by
@@ -531,6 +533,13 @@ struct AxLinePlot {
 
     unsigned long long visible_stamp = 0;
     unsigned long long zorder_stamp = 0;
+
+    // A sloped line (mode != Value): `value`, `orientation`, `from` and `to` are
+    // unused. PointSlope reads x, y and slope; TwoPoints x, y, x2 and y2.
+    AxLineMode mode = AxLineMode::Value;
+    Pos x, y, x2, y2;
+    double slope = 0.0;
+    bool sloped() const { return mode != AxLineMode::Value; }
 };
 
 // Axes::axspan(): lo..hi on the axis the orientation names, as AxLinePlot.
@@ -584,6 +593,54 @@ struct QuiverPlot {
     unsigned long long zorder_stamp = 0;
 };
 
+// Axes::shape_poly(): the vertices in `opts.space`; shape_geometry.h turns it
+// into triangles.
+// The last ear clipping of a polygon (shape_geometry.h poly_geometry()), shared
+// by every copy of the plot (snapshots, hover, export). It is trusted only when
+// the vertices and `key` match the call exactly, so it never needs invalidating.
+struct PolyTriCache {
+    std::mutex m;
+    std::vector<double> key;           // the space and view the clipping depends on
+    std::vector<double> raw;           // x then y it was cut from
+    std::vector<std::uint32_t> kept;   // raw index of each vertex after dropping repeats
+    std::vector<std::uint32_t> tris;   // three kept-vertex indices per triangle
+};
+
+struct PolyPlot {
+    CowVec<double> x, y;
+    PolyOptions    opts{.color = Color::Blue};
+    unsigned long long data_stamp = 0;
+    ObjectId id = 0;
+
+    unsigned long long visible_stamp = 0;
+    unsigned long long zorder_stamp = 0;
+    std::shared_ptr<PolyTriCache> tri = std::make_shared<PolyTriCache>();
+};
+
+// Axes::shape_circle(): centre and radius, each with its own space.
+struct CirclePlot {
+    Pos cx, cy, r;
+    CircleOptions opts{.color = Color::Blue};
+    unsigned long long data_stamp = 0;
+    ObjectId id = 0;
+
+    unsigned long long visible_stamp = 0;
+    unsigned long long zorder_stamp = 0;
+};
+
+// Axes::shape_wedge(): a circle's numbers, the sweep (degrees, counter-clockwise
+// from +x) and the hole's radius in r's space.
+struct WedgePlot {
+    Pos cx, cy, r;
+    double theta1 = 0.0, theta2 = 90.0, inner = 0.0;
+    WedgeOptions opts{.color = Color::Blue};
+    unsigned long long data_stamp = 0;
+    ObjectId id = 0;
+
+    unsigned long long visible_stamp = 0;
+    unsigned long long zorder_stamp = 0;
+};
+
 // The reference kinds, fills and quivers are optional so a view built over the
 // first five alone (tests) still reads as before.
 struct AllPlotData {
@@ -596,6 +653,9 @@ struct AllPlotData {
     const std::vector<AxSpanPlot>*   axspans = nullptr;
     const std::vector<FillPlot>*     fills = nullptr;
     const std::vector<QuiverPlot>*   quivers = nullptr;
+    const std::vector<PolyPlot>*     polys = nullptr;
+    const std::vector<CirclePlot>*   circles = nullptr;
+    const std::vector<WedgePlot>*    wedges = nullptr;
 };
 
 // Caller-side stamps of an axes' titles: each set_*title() takes a fresh
@@ -681,6 +741,10 @@ struct RenderSnapshot {
     std::vector<FillPlot>     fills;
     // Axes::quiver(), likewise.
     std::vector<QuiverPlot>   quivers;
+    // Axes::shape_poly(), shape_circle(), shape_wedge(), likewise.
+    std::vector<PolyPlot>     polys;
+    std::vector<CirclePlot>   circles;
+    std::vector<WedgePlot>    wedges;
 
     // Font sizes live in axes_style.
     std::string title, xtitle, ytitle;
@@ -712,7 +776,7 @@ struct RenderSnapshot {
     std::optional<std::vector<Tick>> xticks_override, yticks_override;
 
     AllPlotData all() const {
-        return { lines, scatters, bars, heatmaps, scatter_z, &axlines, &axspans, &fills, &quivers };
+        return { lines, scatters, bars, heatmaps, scatter_z, &axlines, &axspans, &fills, &quivers, &polys, &circles, &wedges };
     }
 };
 
@@ -827,6 +891,9 @@ inline std::optional<ObjectLocation> to_location(const std::optional<ObjectRef>&
         case PlotKind::SurfaceTri:k = PickKind::SurfaceTri;break;
         case PlotKind::Fill:      k = PickKind::Fill;      break;
         case PlotKind::Quiver:    k = PickKind::Quiver;    break;
+        case PlotKind::Poly:      k = PickKind::Poly;      break;
+        case PlotKind::Circle:    k = PickKind::Circle;    break;
+        case PlotKind::Wedge:     k = PickKind::Wedge;     break;
         case PlotKind::Text: case PlotKind::AxLine: case PlotKind::AxSpan: return std::nullopt;
     }
     return ObjectLocation{ k, r->index };
@@ -835,7 +902,8 @@ inline std::optional<ObjectLocation> to_location(const std::optional<ObjectRef>&
 inline constexpr PlotKind kPlotKinds2D[] = { PlotKind::Line, PlotKind::Scatter, PlotKind::Bar,
                                              PlotKind::Heatmap, PlotKind::ScatterZ, PlotKind::Text,
                                              PlotKind::AxLine, PlotKind::AxSpan, PlotKind::Fill,
-                                             PlotKind::Quiver };
+                                             PlotKind::Quiver, PlotKind::Poly, PlotKind::Circle,
+                                             PlotKind::Wedge };
 inline constexpr PlotKind kPlotKinds3D[] = { PlotKind::Bar3D, PlotKind::Surface,
                                              PlotKind::Scatter3D, PlotKind::Line3D,
                                              PlotKind::SurfaceTri, PlotKind::Text };
@@ -857,6 +925,9 @@ R with_kind(S& s, PlotKind kind, F&& f, R none) {
         case PlotKind::AxSpan:   return f(s.axspans);
         case PlotKind::Fill:     return f(s.fills);
         case PlotKind::Quiver:   return f(s.quivers);
+        case PlotKind::Poly:     return f(s.polys);
+        case PlotKind::Circle:   return f(s.circles);
+        case PlotKind::Wedge:    return f(s.wedges);
         default:                 return none;
     }
 }
@@ -952,7 +1023,8 @@ std::optional<ObjectRef> find_object_in(const S& s, const PlotKind (&kinds)[N], 
 // A plot object taken out by remove_object(), for putting back:
 // where it was among its kind, and the whole object, its id included.
 using PlotObject2D = std::variant<LinePlot, ScatterPlot, BarPlot, HeatmapPlot, ScatterZPlot,
-                                  TextPlot, AxLinePlot, AxSpanPlot, FillPlot, QuiverPlot>;
+                                  TextPlot, AxLinePlot, AxSpanPlot, FillPlot, QuiverPlot,
+                                  PolyPlot, CirclePlot, WedgePlot>;
 using PlotObject3D = std::variant<Bar3DPlot, SurfacePlot, Scatter3DPlot, Line3DPlot,
                                   SurfaceTriPlot, TextPlot>;
 template <class Object>
@@ -1089,6 +1161,11 @@ std::vector<ObjectRef> ordered_2d(const S& s, bool by_z) {
     }
     if constexpr (requires { s.fills; }) add_order_keys(keys, PlotKind::Fill, s.fills);
     if constexpr (requires { s.quivers; }) add_order_keys(keys, PlotKind::Quiver, s.quivers);
+    if constexpr (requires { s.polys; }) {
+        add_order_keys(keys, PlotKind::Poly, s.polys);
+        add_order_keys(keys, PlotKind::Circle, s.circles);
+        add_order_keys(keys, PlotKind::Wedge, s.wedges);
+    }
     return sorted_refs(keys, by_z);
 }
 } // namespace objects_detail
@@ -1137,6 +1214,11 @@ std::vector<LayerRef> ordered_layers(std::span<const S* const> layers, bool by_z
         }
         if constexpr (requires { s.fills; }) add(PlotKind::Fill, s.fills);
         if constexpr (requires { s.quivers; }) add(PlotKind::Quiver, s.quivers);
+        if constexpr (requires { s.polys; }) {
+            add(PlotKind::Poly, s.polys);
+            add(PlotKind::Circle, s.circles);
+            add(PlotKind::Wedge, s.wedges);
+        }
     }
     std::stable_sort(keys.begin(), keys.end(), [by_z](const Key& a, const Key& b) {
         if (by_z && a.z != b.z) return a.z < b.z;

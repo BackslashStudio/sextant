@@ -484,6 +484,19 @@ namespace sextant {
         Plane2D& fill(std::span<const double> x, std::span<const double> y1,
                               double y2 = 0.0, FillOptions opts = {});
 
+        // A band across the plane between two values: over the plane's v by default,
+        // its u with Vertical, as Axes::axspan(); the frame it spans is the plane.
+        // Axes::axline() has no counterpart on a plane.
+        Plane2D& axspan(double lo, double hi, AxSpanOptions opts = {});
+
+        // Filled shapes, as Axes::shape_poly(), shape_circle() and shape_wedge();
+        // Pixels and Fraction positions are on the plane's own sheet.
+        Plane2D& shape_poly(std::span<const double> x, std::span<const double> y, PolyOptions opts = {});
+
+        Plane2D& shape_circle(Pos cx, Pos cy, Pos r, CircleOptions opts = {});
+
+        Plane2D& shape_wedge(Pos cx, Pos cy, Pos r, double theta1, double theta2, WedgeOptions opts = {});
+
         // Stacked areas, as Axes::stack().
         Plane2D& stack(std::span<const double> x, std::span<const std::vector<double>> ys,
                        StackOptions opts = {});
@@ -546,6 +559,18 @@ namespace sextant {
         std::size_t fill_count() const;
         FillData fill_data(std::size_t i) const;
 
+        std::size_t axspan_count() const;
+        AxSpanData axspan_data(std::size_t i) const;
+
+        std::size_t shape_poly_count() const;
+        PolyData shape_poly_data(std::size_t i) const;
+
+        std::size_t shape_circle_count() const;
+        CircleData shape_circle_data(std::size_t i) const;
+
+        std::size_t shape_wedge_count() const;
+        WedgeData shape_wedge_data(std::size_t i) const;
+
         std::size_t quiver_count() const;
         QuiverData quiver_data(std::size_t i) const;
 
@@ -578,6 +603,16 @@ namespace sextant {
         Plane2D& set_fill_data(std::size_t i, std::span<const double> x, std::span<const double> y1,
                                std::span<const double> y2);
 
+        Plane2D& set_axspan_data(std::size_t i, const AxSpanData& data);
+
+        Plane2D& set_shape_poly_data(std::size_t i, const PolyData& data);
+
+        Plane2D& set_shape_poly_data(std::size_t i, std::span<const double> x, std::span<const double> y);
+
+        Plane2D& set_shape_circle_data(std::size_t i, const CircleData& data);
+
+        Plane2D& set_shape_wedge_data(std::size_t i, const WedgeData& data);
+
         Plane2D& set_quiver_data(std::size_t i, const QuiverData& data);
 
         Plane2D& set_quiver_data(std::size_t i, std::span<const double> x, std::span<const double> y,
@@ -604,6 +639,18 @@ namespace sextant {
 
         Plane2D& set_fill_visible(std::size_t i, bool visible);
         bool fill_visible(std::size_t i) const;
+
+        Plane2D& set_axspan_visible(std::size_t i, bool visible);
+        bool axspan_visible(std::size_t i) const;
+
+        Plane2D& set_shape_poly_visible(std::size_t i, bool visible);
+        bool shape_poly_visible(std::size_t i) const;
+
+        Plane2D& set_shape_circle_visible(std::size_t i, bool visible);
+        bool shape_circle_visible(std::size_t i) const;
+
+        Plane2D& set_shape_wedge_visible(std::size_t i, bool visible);
+        bool shape_wedge_visible(std::size_t i) const;
 
         Plane2D& set_quiver_visible(std::size_t i, bool visible);
         bool quiver_visible(std::size_t i) const;

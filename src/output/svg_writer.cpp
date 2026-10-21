@@ -9,6 +9,7 @@
 #include "../contour.h"
 #include "../fill_geometry.h"
 #include "../quiver_geometry.h"
+#include "../shape_geometry.h"
 #include "../renderer/marker_shape.h"
 #include "../renderer/error_bar_shape.h"
 #include "png_writer.h"
@@ -667,6 +668,16 @@ static void emit_bars(std::ostringstream& o, const SvgAxesData& d,
 // stroke), from reference_lines.h's geometry, as the raster path.
 static void emit_axline(std::ostringstream& o, const SvgAxesData& d, const AxLinePlot& p) {
     if (p.opts.linestyle == LineStyle::None || !(p.opts.linewidth > 0.0f)) return;
+    if (p.sloped()) {
+        const Color& c = *p.opts.color;
+        for (const RefPath& run : axline_paths(p, d.layout.tr)) {
+            o << "    <polyline fill=\"none\" stroke=\"" << rgb(c) << "\" stroke-opacity=\"" << c.a * p.opts.alpha
+              << "\" stroke-width=\"" << p.opts.linewidth << "\"" << dash_attr(p.opts.linestyle) << " points=\"";
+            for (const RefPt& q : run) o << q.x << "," << q.y << " ";
+            o << "\"/>\n";
+        }
+        return;
+    }
     const std::optional<RefSegment> g = axline_segment(p, d.layout.tr);
     if (!g) return;
     const Color& c = *p.opts.color;
@@ -749,6 +760,57 @@ static void emit_fill(std::ostringstream& o, const SvgAxesData& d, const FillPlo
     }
 }
 
+// A shape (shape_geometry.h, as the raster path): one <path> for the fill, its
+// rings under the even-odd rule so an annulus keeps its hole, then each ring's
+// outline, cut at the joints the raster bevels (as emit_fill).
+static void emit_shape(std::ostringstream& o, const ShapeGeom& g, const Color& c, float alpha, float linewidth,
+                       LineStyle linestyle, const Color& ec) {
+    if (g.empty()) return;
+    const float a = c.a * alpha;
+    if (a > 0.0f) {
+        o << "    <path fill=\"" << rgb(c) << "\"";
+        if (a < 1.0f) o << " fill-opacity=\"" << a << "\"";
+        o << " fill-rule=\"evenodd\" d=\"";
+        for (const std::vector<ShapePt>& ring : g.rings) {
+            for (std::size_t i = 0; i < ring.size(); ++i)
+                o << (i == 0 ? "M" : "L") << ring[i].x << "," << ring[i].y << " ";
+            o << "Z ";
+        }
+        o << "\"/>\n";
+    }
+    if (!(linewidth > 0.0f) || linestyle == LineStyle::None) return;
+    for (const std::vector<ShapePt>& ring : g.rings) {
+        PixelPath outline;
+        outline.loop = true;
+        for (const ShapePt& p : ring) {
+            if (!outline.x.empty() && outline.x.back() == p.x && outline.y.back() == p.y) continue;
+            outline.x.push_back(p.x);
+            outline.y.push_back(p.y);
+        }
+        while (outline.x.size() >= 2 && outline.x.front() == outline.x.back()
+               && outline.y.front() == outline.y.back()) {
+            outline.x.pop_back();
+            outline.y.pop_back();
+        }
+        if (outline.x.size() < 2) continue;
+        const std::vector<std::size_t> bevels = short_bevels(outline, linewidth);
+        if (!bevels.empty()) {
+            emit_beveled_stroke(o, outline, bevels, rgb(ec), ec.a, linewidth, linestyle);
+            continue;
+        }
+        o << "    <polygon fill=\"none\" stroke=\"" << rgb(ec) << "\" stroke-opacity=\"" << ec.a
+          << "\" stroke-width=\"" << linewidth << "\"" << dash_attr(linestyle) << " points=\"";
+        for (std::size_t i = 0; i < outline.x.size(); ++i) o << outline.x[i] << "," << outline.y[i] << " ";
+        o << "\"/>\n";
+    }
+}
+
+template <class Shape>   // PolyPlot, CirclePlot or WedgePlot
+static void emit_shape_of(std::ostringstream& o, const SvgAxesData& d, const Shape& p) {
+    emit_shape(o, shape_geometry(p, d.layout.tr), *p.opts.color, p.opts.alpha, p.opts.linewidth, p.opts.linestyle,
+               p.opts.edgecolor.value_or(*p.opts.color));
+}
+
 // A quiver as one <polygon> per arrow (quiver_geometry.h, as the raster path),
 // in a <g> carrying the fill; a colormapped quiver's fill is on each polygon,
 // the group keeping the quiver's opacity.
@@ -819,6 +881,15 @@ static void emit_object(std::ostringstream& o, const SvgAxesData& d, const Objec
             break;
         case PlotKind::Quiver:
             emit_quiver(o, d, d.quivers[r.index]);
+            break;
+        case PlotKind::Poly:
+            emit_shape_of(o, d, d.polys[r.index]);
+            break;
+        case PlotKind::Circle:
+            emit_shape_of(o, d, d.circles[r.index]);
+            break;
+        case PlotKind::Wedge:
+            emit_shape_of(o, d, d.wedges[r.index]);
             break;
         default: break;
     }

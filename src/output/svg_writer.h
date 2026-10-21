@@ -33,6 +33,9 @@ namespace sextant {
         std::vector<AxSpanPlot> axspans;
         std::vector<FillPlot> fills;
         std::vector<QuiverPlot> quivers;
+        std::vector<PolyPlot> polys;
+        std::vector<CirclePlot> circles;
+        std::vector<WedgePlot> wedges;
         // Font sizes come from axes_style.
         std::string title, xtitle, ytitle;
         bool grid_enabled = false;

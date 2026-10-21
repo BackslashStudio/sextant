@@ -576,3 +576,337 @@ namespace lt {
                                        std::to_string(off) + " off)");
     }
 } // namespace lt
+
+namespace lt {
+    using namespace sextant;
+
+    namespace {
+        // 0..10 on both axes over a 400 px frame at (50, 40): 40 px a unit.
+        CoordTransform sloped_tr() {
+            CoordTransform tr{};
+            tr.xmin = 0.0; tr.xmax = 10.0; tr.ymin = 0.0; tr.ymax = 10.0;
+            tr.px = 50.0f; tr.py = 40.0f; tr.pw = 400.0f; tr.ph = 400.0f;
+            return tr;
+        }
+
+        AxLinePlot sloped_of(Pos x, Pos y, double slope) {
+            AxLinePlot p;
+            p.mode = AxLineMode::PointSlope;
+            p.x = x; p.y = y; p.slope = slope;
+            p.opts.color = Color::Black;
+            return p;
+        }
+
+        AxLinePlot through_of(Pos x1, Pos y1, Pos x2, Pos y2) {
+            AxLinePlot p;
+            p.mode = AxLineMode::TwoPoints;
+            p.x = x1; p.y = y1; p.x2 = x2; p.y2 = y2;
+            p.opts.color = Color::Black;
+            return p;
+        }
+
+        // The distance from point q to the infinite line through a and b.
+        double off_line(const RefPt& a, const RefPt& b, const RefPt& q) {
+            const double dx = b.x - a.x, dy = b.y - a.y, len = std::hypot(dx, dy);
+            return std::fabs((q.x - a.x) * dy - (q.y - a.y) * dx) / len;
+        }
+    } // namespace
+
+    // axline(x, y, slope) and axline(x1, y1, x2, y2): the calls and read-back,
+    // validation, limits, and the pixel geometry -- straight in data units on
+    // linear axes, bent on a log axis, straight on screen for frame positions.
+    void test_axline_sloped() {
+        std::printf("\n[axline: a slope, or two points]\n");
+        using V = std::vector<double>;
+        const CoordTransform tr = sloped_tr();
+
+        // The calls.
+        {
+            auto fig = Figure::create();
+            auto ax = fig->add_subplot(1, 1, 1);
+            ax->axline(2.0, 3.0, 0.5);
+            ax->axline(1.0, 1.0, 4.0, 7.0, {.linestyle = LineStyle::Dashed});
+            ax->axline(3.0);
+            check(ax->axline_count() == 3, "axline: all three forms are the same kind");
+            const AxLineData a = ax->axline_data(0), b = ax->axline_data(1), c = ax->axline_data(2);
+            check(a.mode == AxLineMode::PointSlope && a.x.v == 2.0 && a.y.v == 3.0 && a.slope == 0.5,
+                  "axline: a point and slope read back");
+            check(b.mode == AxLineMode::TwoPoints && b.x2.v == 4.0 && b.y2.v == 7.0 && c.mode == AxLineMode::Value
+                      && c.value == 3.0,
+                  "axline: two points read back, the value form unchanged");
+            check(throws_invalid([&] { ax->axline(1.0, 1.0, std::nan("")); })
+                      && throws_invalid([&] { ax->axline(std::nan(""), 1.0, 1.0); })
+                      && throws_invalid([&] { ax->axline(1.0, 1.0, 1.0, 1.0); })
+                      && throws_invalid([&] { ax->axline(1.0, 1.0, std::numeric_limits<double>::infinity(), 2.0); })
+                      && throws_invalid([&] { ax->axline(0.0, 0.0, 1.0, {.zorder = std::nan("")}); })
+                      && ax->axline_count() == 3,
+                  "axline: a non-finite number, equal points or a bad zorder throw, and add nothing");
+            ax->axline(Pos::fraction(0.5), Pos::fraction(0.5), Pos::fraction(0.9), Pos::pixels(10.0));   // mixed spaces
+            ax->set_axline_data(0, {.mode = AxLineMode::PointSlope, .x = Pos(1.0), .y = Pos(1.0), .slope = 2.0});
+            check(ax->axline_data(0).slope == 2.0 && ax->axline_data(0).x.v == 1.0, "axline: set_axline_data() moves a sloped line");
+            ax->set_axline_data(0, {.value = 5.0});
+            check(ax->axline_data(0).mode == AxLineMode::Value && ax->axline_data(0).value == 5.0,
+                  "axline: and may turn it into a value line");
+            check(throws_invalid([&] { ax->set_axline_data(1, {.mode = AxLineMode::TwoPoints, .x = Pos(1.0), .y = Pos(1.0),
+                                                              .x2 = Pos(1.0), .y2 = Pos(1.0)}); }),
+                  "axline: set_axline_data() validates as the call");
+            // Sloped lines are not drawn into the cycle twice: one cycle colour each.
+            auto g = Figure::create();
+            auto a2 = g->add_subplot(1, 1, 1);
+            a2->axline(0.0, 0.0, 1.0);
+            a2->axline(0.0, 0.0, 2.0);
+            check(a2->axline_count() == 2, "axline: two sloped lines");
+        }
+
+        // Limits: data points count, frame positions do not, the line is infinite.
+        {
+            auto f = Figure::create();
+            auto a = f->add_subplot(1, 1, 1);
+            a->axline(2.0, 3.0, 5.0);
+            check(near(a->xlim().lo, 2.0, 1.0) && near(a->xlim().hi, 2.0, 1.0) && near(a->ylim().lo, 3.0, 1.0),
+                  "limits: a point and slope counts as its point (" + std::to_string(a->xlim().lo) + ")");
+            auto g = Figure::create();
+            auto b = g->add_subplot(1, 1, 1);
+            b->axline(0.0, 0.0, 10.0, 4.0);
+            check(b->xlim().hi >= 10.0 && b->ylim().hi >= 4.0, "limits: two points count both");
+            auto h = Figure::create();
+            auto c = h->add_subplot(1, 1, 1);
+            c->line(V{0, 1}, V{0, 1});
+            const Range x0 = c->xlim(), y0 = c->ylim();
+            c->axline(Pos::fraction(0.5), Pos::fraction(0.5), 3.0);
+            c->axline(Pos::pixels(500.0), 700.0, Pos::fraction(2.0), Pos::fraction(3.0));
+            check(c->xlim().hi == x0.hi && c->ylim().hi == y0.hi && c->xlim().lo == x0.lo && c->ylim().lo == y0.lo,
+                  "limits: frame positions move nothing");
+        }
+
+        // A straight line of the data on linear axes: through its point, with its slope.
+        {
+            const AxLinePlot p = sloped_of(Pos(5.0), Pos(5.0), 1.0);
+            const auto runs = axline_paths(p, tr);
+            check(runs.size() == 1 && runs[0].size() == 2, "geometry: a linear sloped line is one segment");
+            const RefPt a = runs[0][0], b = runs[0][1];
+            check(off_line(a, b, {tr.to_px(5.0), tr.to_py(5.0)}) < 0.01
+                      && near((b.y - a.y) / (b.x - a.x), -1.0, 1e-3),
+                  "geometry: through (5, 5), rising one pixel per pixel (y is down on screen)");
+            check(std::min({a.x, b.x}) >= tr.px - 5.0f && std::max({a.x, b.x}) <= tr.px + tr.pw + 5.0f
+                      && std::min({a.y, b.y}) >= tr.py - 5.0f && std::max({a.y, b.y}) <= tr.py + tr.ph + 5.0f,
+                  "geometry: cut to the frame and a few pixels");
+            const auto steep = axline_paths(sloped_of(Pos(5.0), Pos(5.0), 20.0), tr);
+            check(steep.size() == 1 && (near(steep[0][0].y, tr.py - 4.0, 1.0) || near(steep[0][1].y, tr.py - 4.0, 1.0)),
+                  "geometry: a steep line runs out of the top");
+            const auto miss = axline_paths(sloped_of(Pos(5.0), Pos(50.0), 0.0), tr);
+            check(miss.empty(), "geometry: a line outside the frame gives nothing");
+        }
+        {
+            const auto runs = axline_paths(through_of(Pos(1.0), Pos(2.0), Pos(6.0), Pos(4.0)), tr);
+            check(runs.size() == 1 && off_line(runs[0][0], runs[0][1], {tr.to_px(1.0), tr.to_py(2.0)}) < 0.01
+                      && off_line(runs[0][0], runs[0][1], {tr.to_px(6.0), tr.to_py(4.0)}) < 0.01,
+                  "geometry: through two points");
+            const auto vert = axline_paths(through_of(Pos(3.0), Pos(1.0), Pos(3.0), Pos(9.0)), tr);
+            check(vert.size() == 1 && near(vert[0][0].x, tr.to_px(3.0), 1e-3) && near(vert[0][1].x, tr.to_px(3.0), 1e-3),
+                  "geometry: two points with one x are a vertical line");
+        }
+
+        // Frame positions: a straight screen line, the slope the screen's.
+        {
+            const auto runs = axline_paths(sloped_of(Pos::fraction(0.5), Pos::fraction(0.5), 1.0), tr);
+            check(runs.size() == 1 && off_line(runs[0][0], runs[0][1], {tr.px + 200.0f, tr.py + 200.0f}) < 0.01
+                      && near((runs[0][1].y - runs[0][0].y) / (runs[0][1].x - runs[0][0].x), -1.0, 1e-3),
+                  "geometry: a fraction point with slope 1 rises at 45 degrees on screen");
+            const auto mixed = axline_paths(through_of(Pos(5.0), Pos::fraction(0.1), Pos::fraction(0.9), Pos::pixels(100.0)), tr);
+            check(mixed.size() == 1 && off_line(mixed[0][0], mixed[0][1], {tr.to_px(5.0), tr.py + tr.ph * 0.9f}) < 0.01
+                      && off_line(mixed[0][0], mixed[0][1], {tr.px + 0.9f * tr.pw, tr.py + tr.ph - 100.0f}) < 0.01,
+                  "geometry: mixed spaces are straight on screen through each resolved point");
+        }
+
+        // A log axis bends it: sampled in data, never off the equation, absent where there is no place.
+        {
+            CoordTransform lg = tr;
+            lg.ys.kind = Scale::Log;
+            lg.ymin = 1.0; lg.ymax = 1000.0;
+            const AxLinePlot p = sloped_of(Pos(3.0), Pos(10.0), 10.0);   // y = 10 + 10 (x - 3): <= 0 for x <= 2
+            const auto runs = axline_paths(p, lg);
+            check(runs.size() == 1 && runs[0].size() > 4, "geometry: on a log axis a straight data line is a curve of many points");
+            bool on = true;
+            for (const RefPt& q : runs[0]) {
+                const double x = lg.to_data_x(q.x);
+                on = on && near(lg.to_py(10.0 + 10.0 * (x - 3.0)), q.y, 0.6);
+            }
+            check(on, "geometry: every sampled point is on the data line");
+            check(runs[0].front().x >= lg.to_px(2.0) - 2.0f, "geometry: nothing where y <= 0 (the log axis has no place)");
+            // The chord is not the curve: the middle sample is off the straight line between the ends.
+            const RefPath& r = runs[0];
+            check(off_line(r.front(), r.back(), r[r.size() / 2]) > 1.0, "geometry: and it bends");
+            // A line wholly in the undefined region gives nothing.
+            check(axline_paths(sloped_of(Pos(3.0), Pos(-5.0), 0.0), lg).empty(), "geometry: y = -5 has no place on a log axis");
+            // A steep line is sampled along y.
+            const auto steep = axline_paths(sloped_of(Pos(5.0), Pos(10.0), 1000.0), lg);
+            bool all = !steep.empty();
+            for (const RefPath& run : steep)
+                for (const RefPt& q : run) all = all && std::isfinite(q.x) && std::isfinite(q.y);
+            check(all, "geometry: a steep line on a log axis is finite");
+        }
+
+        // A symlog axis too.
+        {
+            CoordTransform sl = tr;
+            sl.xs.kind = Scale::Symlog;
+            sl.xmin = -10.0; sl.xmax = 10.0;
+            const auto runs = axline_paths(sloped_of(Pos(0.0), Pos(1.0), 0.5), sl);
+            check(runs.size() == 1 && runs[0].size() > 4, "geometry: on a symlog axis it is sampled too");
+        }
+    }
+
+    // Drawn: the straight line, the curve on a log axis and the frame line, in PNG and SVG.
+    void test_axline_sloped_rendered() {
+        std::printf("\n[axline: a slope, rendered]\n");
+        const int W = 400, H = 320;
+        FigureSnapshot fs;
+        {
+            FigureAxesSnapshot fa;
+            fa.slot = AxesSlot{1, 1, 1};
+            RenderSnapshot& s = *fa.snap2d();
+            s.xmin = s.ymin = 0.0;
+            s.xmax = s.ymax = 10.0;
+            s.xlim_auto = s.ylim_auto = false;
+            // Red, y = x; green, through (8, 1) and (8, 9) vertically; blue dashed, a frame line at 45 degrees from the centre.
+            AxLinePlot r = sloped_of(Pos(0.0), Pos(0.0), 1.0);
+            r.opts.color = Color{0.8f, 0.0f, 0.0f, 1.0f};
+            r.opts.linewidth = 3.0f;
+            r.id = 1;
+            s.axlines.push_back(r);
+            AxLinePlot g = through_of(Pos(8.0), Pos(1.0), Pos(8.0), Pos(9.0));
+            g.opts.color = Color{0.0f, 0.6f, 0.0f, 1.0f};
+            g.opts.linewidth = 3.0f;
+            g.id = 2;
+            s.axlines.push_back(g);
+            AxLinePlot b = sloped_of(Pos::fraction(0.5), Pos::fraction(0.5), -1.0);
+            b.opts.color = Color{0.0f, 0.0f, 0.8f, 1.0f};
+            b.opts.linewidth = 3.0f;
+            b.opts.linestyle = LineStyle::Dashed;
+            b.id = 3;
+            s.axlines.push_back(b);
+            fs.axes.push_back(std::move(fa));
+            fs.generation = fs.data_generation = 1;
+        }
+        {
+            GLContext ctx({.width = W, .height = H, .title = "layout_test", .visible = false});
+            RenderDevice dev;
+            DataRenderer data;
+            export_figure_png(dev, data, fs, "axline_sloped.png", W, H, 1);
+            export_figure_svg(fs, "axline_sloped.svg", W, H);
+        }
+        const CellLayout cell = compute_figure_layout(fs, W, H).cells[0];
+        const CoordTransform& tr = cell.tr;
+        Png png("axline_sloped.png");
+        check(png.is(tr.to_px(3.0), tr.to_py(3.0), 204, 0, 0) && png.is(tr.to_px(7.0), tr.to_py(7.0), 204, 0, 0)
+                  && !png.is(tr.to_px(3.0), tr.to_py(6.0), 204, 0, 0),
+              "gl: the line y = x through the data");
+        check(png.is(tr.to_px(8.0), tr.to_py(5.0), 0, 153, 0) && png.is(tr.to_px(8.0), tr.to_py(9.8), 0, 153, 0),
+              "gl: the vertical line through two points, to the top of the frame");
+        int on = 0, off = 0;
+        const float cx = tr.px + tr.pw * 0.5f, cy = tr.py + tr.ph * 0.5f;
+        for (float t = -80.0f; t <= 80.0f; t += 1.0f) (png.is(cx + t, cy + t, 0, 0, 204) ? on : off)++;
+        check(on > 20 && off > 10, "gl: the frame line runs down at 45 degrees on screen, dashed (" +
+                                       std::to_string(on) + " on, " + std::to_string(off) + " off)");
+
+        const std::string svg = read_file("axline_sloped.svg");
+        check(elements(svg, "polyline", "rgb(204,0,0)").size() == 1 && elements(svg, "polyline", "rgb(0,153,0)").size() == 1,
+              "svg: a polyline per sloped line");
+        const auto dashed = elements(svg, "polyline", "rgb(0,0,204)");
+        check(dashed.size() == 1 && dashed[0].find("stroke-dasharray") != std::string::npos, "svg: the dashed one is dashed");
+
+        // On a log axis it is a curve: the pixel at the data line's place is coloured, the chord's place not.
+        FigureSnapshot ls;
+        {
+            FigureAxesSnapshot fa;
+            fa.slot = AxesSlot{1, 1, 1};
+            RenderSnapshot& s = *fa.snap2d();
+            s.xmin = 0.0; s.xmax = 10.0; s.ymin = 1.0; s.ymax = 1000.0;
+            s.xlim_auto = s.ylim_auto = false;
+            s.yscale.kind = Scale::Log;
+            AxLinePlot r = sloped_of(Pos(5.0), Pos(100.0), 100.0);   // y = 100 + 100 (x - 5)
+            r.opts.color = Color{0.8f, 0.0f, 0.0f, 1.0f};
+            r.opts.linewidth = 3.0f;
+            r.id = 1;
+            s.axlines.push_back(r);
+            ls.axes.push_back(std::move(fa));
+            ls.generation = ls.data_generation = 1;
+        }
+        {
+            GLContext ctx({.width = W, .height = H, .title = "layout_test", .visible = false});
+            RenderDevice dev;
+            DataRenderer data;
+            export_figure_png(dev, data, ls, "axline_sloped_log.png", W, H, 1);
+        }
+        const CellLayout lcell = compute_figure_layout(ls, W, H).cells[0];
+        const CoordTransform& lt_ = lcell.tr;
+        Png lpng("axline_sloped_log.png");
+        check(lpng.is(lt_.to_px(7.0), lt_.to_py(300.0), 204, 0, 0) && lpng.is(lt_.to_px(5.0), lt_.to_py(100.0), 204, 0, 0)
+                  && lpng.is(lt_.to_px(9.0), lt_.to_py(500.0), 204, 0, 0),
+              "gl: on a log axis the line passes its data points");
+        check(!lpng.is(lt_.to_px(3.0), lt_.to_py(100.0), 204, 0, 0), "gl: and is not the straight chord");
+    }
+} // namespace lt
+
+namespace lt {
+    using namespace sextant;
+
+    // Plane2D::axspan(): the call and read-back, the parent's limits, the band in
+    // the raster and in the SVG scene.
+    void test_plane_axspan() {
+        std::printf("\n[axspan: on a plane]\n");
+
+        auto fig = Figure::create({.width = 400, .height = 320});
+        auto a3 = fig->add_subplot3d(1, 1, 1);
+        a3->set_xlim(0, 10).set_ylim(0, 10).set_zlim(0, 10);
+        auto pl = a3->plane(PlaneOrientation::XY, 0.0);
+        pl->axspan(2.0, 6.0, {.color = Color{0.8f, 0.0f, 0.0f, 1.0f}, .alpha = 1.0f});
+        pl->axspan(3.0, 4.0, {.orientation = Orientation::Vertical, .color = Color{0.0f, 0.0f, 0.8f, 1.0f}, .alpha = 1.0f});
+        check(pl->axspan_count() == 2 && pl->axspan_data(0).lo == 2.0 && pl->axspan_data(0).hi == 6.0,
+              "plane axspan: the call and its read-back");
+        pl->axspan(9.0, 7.0);
+        check(pl->axspan_data(2).lo == 7.0 && pl->axspan_data(2).hi == 9.0, "plane axspan: stored ordered");
+        bool bad = false;
+        try {
+            pl->axspan(std::nan(""), 1.0);
+        } catch (const std::invalid_argument&) {
+            bad = true;
+        }
+        check(bad && pl->axspan_count() == 3, "plane axspan: a non-finite end throws and adds nothing");
+        pl->set_axspan_data(2, {1.0, 0.5});
+        check(pl->axspan_data(2).lo == 0.5 && pl->axspan_data(2).hi == 1.0, "plane axspan: set_axspan_data() orders it too");
+        pl->set_axspan_visible(2, false);
+        check(!pl->axspan_visible(2) && pl->axspan_visible(0), "plane axspan: set_axspan_visible()");
+        check(pl->remove(pl->last_object()) && pl->axspan_count() == 2, "plane axspan: remove() takes it by id");
+
+        // Limits: the parent's auto limits take a band's ends on the plane's axis.
+        {
+            auto f = Figure::create();
+            auto b3 = f->add_subplot3d(1, 1, 1);
+            auto p = b3->plane(PlaneOrientation::XY, 0.0);
+            p->axspan(20.0, 30.0);
+            check(b3->ylim().hi > 30.0 - 1e-9 && b3->ylim().lo < 20.0 + 1e-9, "plane axspan: a band widens the parent's limits");
+        }
+
+        // The raster and the SVG scene.
+        fig->savefig("plane_axspan.png");
+        fig->savefig_svg("plane_axspan.svg");
+        Png png("plane_axspan.png");
+        std::size_t red = 0, blue = 0;
+        for (int y = 0; y < png.h; ++y)
+            for (int x = 0; x < png.w; ++x) {
+                red += png.is(static_cast<float>(x), static_cast<float>(y), 204, 0, 0);
+                blue += png.is(static_cast<float>(x), static_cast<float>(y), 0, 0, 204);
+            }
+        check(red > 1500 && blue > 400, "plane axspan gl: both bands are drawn (" + std::to_string(red) + " red, " +
+                                            std::to_string(blue) + " blue px)");
+        const std::string svg = read_file("plane_axspan.svg");
+        check(svg.find("rgb(204,0,0)") != std::string::npos && svg.find("rgb(0,0,204)") != std::string::npos,
+              "plane axspan svg: both bands are written");
+
+        // cla() clears them.
+        pl->cla();
+        check(pl->axspan_count() == 0, "plane axspan: cla() clears them");
+    }
+} // namespace lt

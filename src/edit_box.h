@@ -22,7 +22,7 @@ void fill_id(ObjectId& id, const Holder& h, PlotKind kind, int index) {
 }
 
 // PlotStyleEdit's alternatives are in PlotKind's 2D order, then a text's, a
-// reference line's, a span's, a fill's and a quiver's.
+// reference line's, a span's, a fill's, a quiver's, then the three shapes'.
 inline PlotKind style_kind(const PlotStyleEdit& p) {
     using Opts = decltype(PlotStyleEdit::opts);
     static_assert(static_cast<int>(PlotKind::Heatmap) == 3
@@ -33,13 +33,19 @@ inline PlotKind style_kind(const PlotStyleEdit& p) {
                   && std::is_same_v<std::variant_alternative_t<6, Opts>, AxLineOptions>
                   && std::is_same_v<std::variant_alternative_t<7, Opts>, AxSpanOptions>
                   && std::is_same_v<std::variant_alternative_t<8, Opts>, FillOptions>
-                  && std::is_same_v<std::variant_alternative_t<9, Opts>, QuiverOptions>);
+                  && std::is_same_v<std::variant_alternative_t<9, Opts>, QuiverOptions>
+                  && std::is_same_v<std::variant_alternative_t<10, Opts>, PolyOptions>
+                  && std::is_same_v<std::variant_alternative_t<11, Opts>, CircleOptions>
+                  && std::is_same_v<std::variant_alternative_t<12, Opts>, WedgeOptions>);
     switch (p.opts.index()) {
         case 5: return PlotKind::Text;
         case 6: return PlotKind::AxLine;
         case 7: return PlotKind::AxSpan;
         case 8: return PlotKind::Fill;
         case 9: return PlotKind::Quiver;
+        case 10: return PlotKind::Poly;
+        case 11: return PlotKind::Circle;
+        case 12: return PlotKind::Wedge;
         default: return static_cast<PlotKind>(p.opts.index());
     }
 }

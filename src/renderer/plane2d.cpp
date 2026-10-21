@@ -2,6 +2,8 @@
 #include "../colormaps.h"
 #include "../fill_geometry.h"
 #include "../quiver_geometry.h"
+#include "../shape_geometry.h"
+#include "../reference_lines.h"
 #include "../line_steps.h"
 #include "error_bar_shape.h"
 #include "marker_shape.h"
@@ -262,7 +264,7 @@ namespace sextant {
         }
     } // namespace
 
-    PlaneGeometry plane_geometry(const PlaneSnapshot& p) {
+    PlaneGeometry plane_geometry(const PlaneSnapshot& p, const CoordTransform* raster_tr) {
         const RenderSnapshot& s = p.sheet;
         using Kind = PlaneGeometry::Batch::Kind;
 
@@ -276,6 +278,17 @@ namespace sextant {
         constexpr double kPixelsAcross = 400.0; // a plane, in round numbers
         const double px_u = std::max(1e-300, ext.xmax - ext.xmin) / kPixelsAcross;
         const double px_v = std::max(1e-300, ext.ymax - ext.ymin) / kPixelsAcross;
+
+        // The transform shapes and spans are laid out in, as the raster path does:
+        // the plane's own, else (no projector) a 400 px stand-in over the sheet's
+        // extent. Its pixels are taken back to plane coordinates.
+        CoordTransform st{};
+        if (raster_tr) {
+            st = *raster_tr;
+        } else {
+            st.xmin = ext.xmin; st.xmax = ext.xmax; st.ymin = ext.ymin; st.ymax = ext.ymax;
+            st.px = 0.0f; st.py = 0.0f; st.pw = kPixelsAcross; st.ph = kPixelsAcross;
+        }
 
         // One object's error bars: boxes, then whiskers (error_bars()).
         auto errs = [&](const CowVec<double>& xs, const CowVec<double>& ys,
@@ -391,6 +404,64 @@ namespace sextant {
                                 b.seg_uv(p0[0], p0[1], p1[0], p1[1], ec, fp.opts.linewidth);
                             }
                         }
+                        b.close();
+                    }
+                    break;
+                }
+
+                case PlotKind::Poly:
+                case PlotKind::Circle:
+                case PlotKind::Wedge: {
+                    ShapeGeom g;
+                    const Color* col = nullptr;
+                    float alpha = 1.0f, lw = 0.0f;
+                    LineStyle ls = LineStyle::None;
+                    Color ec;
+                    const auto take = [&](const auto& sp) {
+                        g = shape_geometry(sp, st);
+                        col = &*sp.opts.color; alpha = sp.opts.alpha; lw = sp.opts.linewidth; ls = sp.opts.linestyle;
+                        ec = sp.opts.edgecolor.value_or(*sp.opts.color);
+                    };
+                    if (r.kind == PlotKind::Poly) take(s.polys[r.index]);
+                    else if (r.kind == PlotKind::Circle) take(s.circles[r.index]);
+                    else take(s.wedges[r.index]);
+                    if (g.empty()) break;
+                    const auto uv = [&](const ShapePt& q) {
+                        return std::array{st.to_data_x(q.x), st.to_data_y(q.y)};
+                    };
+                    const Color c = with_alpha(*col, alpha);
+                    b.open(Kind::Tri);
+                    for (std::size_t i = 0; i + 2 < g.tris.size(); i += 3) {
+                        const auto a = uv(g.tris[i]), bb = uv(g.tris[i + 1]), cc = uv(g.tris[i + 2]);
+                        b.g.tris.push_back({{b.at(a[0], a[1]), b.at(bb[0], bb[1]), b.at(cc[0], cc[1])}, c});
+                    }
+                    b.close();
+                    if (lw > 0.0f && ls != LineStyle::None) {
+                        b.open(Kind::Seg);
+                        for (const std::vector<ShapePt>& ring : g.rings)
+                            for (std::size_t k = 0; k < ring.size(); ++k) {
+                                const auto p0 = uv(ring[k]), p1 = uv(ring[(k + 1) % ring.size()]);
+                                b.seg_uv(p0[0], p0[1], p1[0], p1[1], ec, lw);
+                            }
+                        b.close();
+                    }
+                    break;
+                }
+
+                case PlotKind::AxSpan: {
+                    // The band in the plane's own pixels (held to the plane), then its
+                    // outline.
+                    const auto& sp = s.axspans[r.index];
+                    const std::optional<RefRect> rr = axspan_rect(sp, st, 0.0f);
+                    if (!rr) break;
+                    const double u0 = st.to_data_x(rr->x0), u1 = st.to_data_x(rr->x1);
+                    const double v0 = st.to_data_y(rr->y1), v1 = st.to_data_y(rr->y0);
+                    b.open(Kind::Tri);
+                    b.rect(u0, v0, u1, v1, with_alpha(*sp.opts.color, sp.opts.alpha));
+                    b.close();
+                    if (sp.opts.linewidth > 0.0f) {
+                        b.open(Kind::Seg);
+                        b.rect_outline(u0, v0, u1, v1, axspan_edge(sp), sp.opts.linewidth);
                         b.close();
                     }
                     break;
@@ -573,7 +644,8 @@ namespace sextant {
         // The plane's contents, projected, one item per batch.
         void append_geometry_items(std::vector<PlanePlanItem>& out, const PlaneSnapshot& pl,
                                    std::size_t pi, float depth, const Projector3D& proj) {
-            const PlaneGeometry g = plane_geometry(pl);
+            const PlaneRaster raster = plane_raster(proj, pl.orient, pl.offset);
+            const PlaneGeometry g = plane_geometry(pl, &raster.tr);
             if (g.empty()) return;
 
             const Transform3D& tf = proj.transform();
@@ -581,7 +653,7 @@ namespace sextant {
 
             // A pixel on a plane is a pixel of its raster (`box_per_px`), matching
             // what the raster path draws.
-            const double ref = plane_raster(proj, pl.orient, pl.offset).box_per_px;
+            const double ref = raster.box_per_px;
 
             // The plane's normal in box space (axis-aligned, unchanged by data -> box).
             Vec3 normal{0.0, 0.0, 0.0};

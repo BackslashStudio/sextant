@@ -322,9 +322,20 @@ int main() {
     // reference_lines.cpp
     test_reference_lines();
     test_reference_lines_rendered();
+    test_axline_sloped();
+    test_axline_sloped_rendered();
+    test_plane_axspan();
     // fill_between.cpp
     test_fill_between();
     test_fill_between_rendered();
+    // shapes.cpp
+    test_shape_geometry();
+    test_shapes_api();
+    test_shapes_rendered();
+    test_shapes_plane_rendered();
+    test_shapes_pick();
+    test_shapes_panel();
+    test_shapes_review_fixes();
     // quiver.cpp
     test_quiver();
     test_quiver_rendered();

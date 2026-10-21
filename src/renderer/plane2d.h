@@ -118,9 +118,11 @@ namespace sextant {
 
     // Everything on `p`, in 2D draw order (draw_order()). Used by the SVG
     // writer only; the raster path draws into the plane's framebuffer instead.
+    // `raster_tr` is the plane's raster transform (plane_raster()), in which shapes
+    // and spans are laid out as the raster path lays them out; null = a stand-in.
     // Markers are drawn into the plane, so they foreshorten with it; `size` is in
     // raster pixels.
-    PlaneGeometry plane_geometry(const PlaneSnapshot& p);
+    PlaneGeometry plane_geometry(const PlaneSnapshot& p, const CoordTransform* raster_tr = nullptr);
 
     // Distance of the plane's centre from the eye; the whole-object heuristic,
     // comparable with bar3d_plot_distance().

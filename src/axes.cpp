@@ -558,6 +558,20 @@ void Axes::Impl::ingest_axline(double value, AxLineOptions opts, const char* who
     axlines.push_back({ value, std::move(opts), next_snapshot_generation(), new_id() });
 }
 
+// A sloped line: the options' orientation, from and to are not read. It keeps
+// no `value`.
+void Axes::Impl::ingest_axline_sloped(AxLineData d, AxLineOptions opts, const char* who) {
+    read_back::check_zorder(opts.zorder, who);
+    read_back::check_axline_sloped(d, who);
+    warn_math(mathtext, who, opts.name);
+    cycle->resolve(opts.color);
+    axlines.push_back({ 0.0, std::move(opts), next_snapshot_generation(), new_id() });
+    AxLinePlot& p = axlines.back();
+    p.mode = d.mode;
+    p.x = d.x; p.y = d.y; p.x2 = d.x2; p.y2 = d.y2;
+    p.slope = d.slope;
+}
+
 // The cycle is not taken (matplotlib's axhspan is the patch default, C0).
 void Axes::Impl::ingest_axspan(double lo, double hi, AxSpanOptions opts, const char* who) {
     read_back::check_zorder(opts.zorder, who);
@@ -599,6 +613,79 @@ Axes& Axes::fill(std::span<const double> x, std::span<const double> y1, double y
     const std::vector<double> base(x.size(), y2);
     d->ingest_fill(x, y1, base, std::move(opts), "fill");
     return *this;
+}
+
+
+void Axes::Impl::ingest_poly(std::span<const double> x, std::span<const double> y, PolyOptions opts,
+                             const char* who) {
+    read_back::check_zorder(opts.zorder, who);
+    read_back::check_poly(x, y, who);
+    warn_math(mathtext, who, opts.name);
+    cycle->resolve(opts.color);
+    polys.push_back({ read_back::own(x), read_back::own(y), std::move(opts),
+                      next_snapshot_generation(), new_id() });
+}
+
+void Axes::Impl::ingest_circle(Pos cx, Pos cy, Pos r, CircleOptions opts, const char* who) {
+    read_back::check_zorder(opts.zorder, who);
+    read_back::check_round(cx, cy, r, who);
+    warn_math(mathtext, who, opts.name);
+    cycle->resolve(opts.color);
+    circles.push_back({ cx, cy, r, std::move(opts), next_snapshot_generation(), new_id() });
+}
+
+// The hole is taken out of the options and kept as data, as a fill's mask is.
+void Axes::Impl::ingest_wedge(Pos cx, Pos cy, Pos r, double theta1, double theta2, WedgeOptions opts,
+                              const char* who) {
+    read_back::check_zorder(opts.zorder, who);
+    const double inner = opts.inner;
+    opts.inner = 0.0;
+    read_back::check_wedge(cx, cy, r, theta1, theta2, inner, who);
+    warn_math(mathtext, who, opts.name);
+    cycle->resolve(opts.color);
+    wedges.push_back({ cx, cy, r, theta1, theta2, inner, std::move(opts),
+                       next_snapshot_generation(), new_id() });
+}
+
+Axes& Axes::shape_poly(std::span<const double> x, std::span<const double> y, PolyOptions opts) {
+    d->ingest_poly(x, y, std::move(opts), "shape_poly");
+    return *this;
+}
+
+Axes& Axes::shape_circle(Pos cx, Pos cy, Pos r, CircleOptions opts) {
+    d->ingest_circle(cx, cy, r, std::move(opts), "shape_circle");
+    return *this;
+}
+
+Axes& Axes::shape_wedge(Pos cx, Pos cy, Pos r, double theta1, double theta2, WedgeOptions opts) {
+    d->ingest_wedge(cx, cy, r, theta1, theta2, std::move(opts), "shape_wedge");
+    return *this;
+}
+
+void Axes::Impl::set_poly_data(std::size_t i, std::span<const double> x, std::span<const double> y,
+                               const char* who) {
+    PolyPlot& p = read_back::at(polys, i, who);
+    read_back::check_poly(x, y, who);
+    p.x = read_back::own(x);
+    p.y = read_back::own(y);
+    p.data_stamp = next_snapshot_generation();
+}
+
+void Axes::Impl::set_circle_data(std::size_t i, const CircleData& c, const char* who) {
+    CirclePlot& p = read_back::at(circles, i, who);
+    read_back::check_round(c.cx, c.cy, c.r, who);
+    p.cx = c.cx;
+    p.cy = c.cy;
+    p.r = c.r;
+    p.data_stamp = next_snapshot_generation();
+}
+
+void Axes::Impl::set_wedge_data(std::size_t i, const WedgeData& w, const char* who) {
+    WedgePlot& p = read_back::at(wedges, i, who);
+    read_back::check_wedge(w.cx, w.cy, w.r, w.theta1, w.theta2, w.inner, who);
+    p.cx = w.cx; p.cy = w.cy; p.r = w.r;
+    p.theta1 = w.theta1; p.theta2 = w.theta2; p.inner = w.inner;
+    p.data_stamp = next_snapshot_generation();
 }
 
 void Axes::Impl::ingest_stack(std::span<const double> x, std::span<const std::vector<double>> ys,
@@ -675,6 +762,22 @@ Axes& Axes::quiver(std::span<const double> x, std::span<const double> y, std::sp
 
 Axes& Axes::axline(double value, AxLineOptions opts) {
     d->ingest_axline(value, std::move(opts), "axline");
+    return *this;
+}
+
+Axes& Axes::axline(Pos x, Pos y, double slope, AxLineOptions opts) {
+    AxLineData d;
+    d.mode = AxLineMode::PointSlope;
+    d.x = x; d.y = y; d.slope = slope;
+    this->d->ingest_axline_sloped(d, std::move(opts), "axline");
+    return *this;
+}
+
+Axes& Axes::axline(Pos x1, Pos y1, Pos x2, Pos y2, AxLineOptions opts) {
+    AxLineData d;
+    d.mode = AxLineMode::TwoPoints;
+    d.x = x1; d.y = y1; d.x2 = x2; d.y2 = y2;
+    this->d->ingest_axline_sloped(d, std::move(opts), "axline");
     return *this;
 }
 
@@ -942,6 +1045,38 @@ FillData Axes::fill_data(std::size_t i) const {
     return read_back::to_data(read_back::at(d->fills, i, "fill_data"));
 }
 
+
+std::size_t Axes::shape_poly_count() const   { return d->polys.size(); }
+std::size_t Axes::shape_circle_count() const { return d->circles.size(); }
+std::size_t Axes::shape_wedge_count() const  { return d->wedges.size(); }
+
+PolyData Axes::shape_poly_data(std::size_t i) const {
+    return read_back::to_data(read_back::at(d->polys, i, "shape_poly_data"));
+}
+CircleData Axes::shape_circle_data(std::size_t i) const {
+    return read_back::to_data(read_back::at(d->circles, i, "shape_circle_data"));
+}
+WedgeData Axes::shape_wedge_data(std::size_t i) const {
+    return read_back::to_data(read_back::at(d->wedges, i, "shape_wedge_data"));
+}
+
+Axes& Axes::set_shape_poly_data(std::size_t i, const PolyData& data) {
+    d->set_poly_data(i, data.x, data.y, "set_shape_poly_data");
+    return *this;
+}
+Axes& Axes::set_shape_poly_data(std::size_t i, std::span<const double> x, std::span<const double> y) {
+    d->set_poly_data(i, x, y, "set_shape_poly_data");
+    return *this;
+}
+Axes& Axes::set_shape_circle_data(std::size_t i, const CircleData& data) {
+    d->set_circle_data(i, data, "set_shape_circle_data");
+    return *this;
+}
+Axes& Axes::set_shape_wedge_data(std::size_t i, const WedgeData& data) {
+    d->set_wedge_data(i, data, "set_shape_wedge_data");
+    return *this;
+}
+
 std::size_t Axes::quiver_count() const    { return d->quivers.size(); }
 
 QuiverData Axes::quiver_data(std::size_t i) const {
@@ -960,8 +1095,15 @@ AxSpanData Axes::axspan_data(std::size_t i) const {
 
 Axes& Axes::set_axline_data(std::size_t i, const AxLineData& data) {
     AxLinePlot& p = read_back::at(d->axlines, i, "set_axline_data");
-    read_back::check_reference({data.value}, "set_axline_data");
-    p.value = data.value;
+    if (data.mode == AxLineMode::Value) {
+        read_back::check_reference({data.value}, "set_axline_data");
+        p.value = data.value;
+    } else {
+        read_back::check_axline_sloped(data, "set_axline_data");
+        p.x = data.x; p.y = data.y; p.x2 = data.x2; p.y2 = data.y2;
+        p.slope = data.slope;
+    }
+    p.mode = data.mode;
     p.data_stamp = next_snapshot_generation();
     return *this;
 }
@@ -1024,6 +1166,18 @@ Axes& Axes::set_fill_visible(std::size_t i, bool visible) {
     read_back::set_visible(d->fills, i, visible, "set_fill_visible");
     return *this;
 }
+Axes& Axes::set_shape_poly_visible(std::size_t i, bool visible) {
+    read_back::set_visible(d->polys, i, visible, "set_shape_poly_visible");
+    return *this;
+}
+Axes& Axes::set_shape_circle_visible(std::size_t i, bool visible) {
+    read_back::set_visible(d->circles, i, visible, "set_shape_circle_visible");
+    return *this;
+}
+Axes& Axes::set_shape_wedge_visible(std::size_t i, bool visible) {
+    read_back::set_visible(d->wedges, i, visible, "set_shape_wedge_visible");
+    return *this;
+}
 Axes& Axes::set_quiver_visible(std::size_t i, bool visible) {
     read_back::set_visible(d->quivers, i, visible, "set_quiver_visible");
     return *this;
@@ -1047,6 +1201,9 @@ bool Axes::scatter_z_visible(std::size_t i) const { return read_back::visible(d-
 bool Axes::bar_visible(std::size_t i) const       { return read_back::visible(d->bars, i, "bar_visible"); }
 bool Axes::heatmap_visible(std::size_t i) const   { return read_back::visible(d->heatmaps, i, "heatmap_visible"); }
 bool Axes::fill_visible(std::size_t i) const      { return read_back::visible(d->fills, i, "fill_visible"); }
+bool Axes::shape_poly_visible(std::size_t i) const   { return read_back::visible(d->polys, i, "shape_poly_visible"); }
+bool Axes::shape_circle_visible(std::size_t i) const { return read_back::visible(d->circles, i, "shape_circle_visible"); }
+bool Axes::shape_wedge_visible(std::size_t i) const  { return read_back::visible(d->wedges, i, "shape_wedge_visible"); }
 bool Axes::quiver_visible(std::size_t i) const    { return read_back::visible(d->quivers, i, "quiver_visible"); }
 bool Axes::axline_visible(std::size_t i) const    { return read_back::visible(d->axlines, i, "axline_visible"); }
 bool Axes::axspan_visible(std::size_t i) const    { return read_back::visible(d->axspans, i, "axspan_visible"); }

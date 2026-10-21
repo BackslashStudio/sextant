@@ -1963,6 +1963,123 @@ static void part_reference_lines() {
     fig->show(true);
 }
 
+// v1.3 stage 2: shape_poly(), shape_circle(), shape_wedge() with Pos spaces
+// (Coords::Pixels is new), the sloped axline() and Plane2D::axspan(). Hover the
+// shapes (data position and name), edit them in the Data panel (a polygon's
+// vertices, a circle's and wedge's numbers with their spaces, a sloped line's
+// mode, points and slope), pan and zoom (data shapes follow, frame ones stay).
+static void part_shapes() {
+    using sextant::Coords;
+    using sextant::Pos;
+    using sextant::Orientation;
+    auto fig = sextant::Figure::create({.width = 1500, .height = 900, .title = "Shapes and reference geometry"});
+    fig->suptitle("Shapes (shape_poly, shape_circle, shape_wedge) and sloped axline");
+
+    const sextant::Color blue{0.2f, 0.4f, 0.8f, 1.0f}, orange{0.9f, 0.5f, 0.1f, 1.0f},
+        green{0.2f, 0.7f, 0.3f, 1.0f}, red{0.8f, 0.2f, 0.2f, 1.0f};
+
+    // Polygons: a concave L, a star, a translucent one with an outline.
+    auto a1 = fig->add_subplot(2, 3, 1);
+    {
+        a1->shape_poly(std::vector<double>{0, 4, 4, 2, 2, 0}, std::vector<double>{0, 0, 2, 2, 4, 4},
+                       {.color = blue, .name = "L (concave)"});
+        std::vector<double> sx, sy;
+        for (int i = 0; i < 10; ++i) {
+            const double r = i % 2 ? 0.9 : 2.0, a = 3.14159265358979 / 5.0 * i + 1.5708;
+            sx.push_back(7.0 + r * std::cos(a));
+            sy.push_back(3.0 + r * std::sin(a));
+        }
+        a1->shape_poly(sx, sy, {.color = orange, .alpha = 0.7f, .edgecolor = sextant::Color::Black, .linewidth = 2.0f,
+                                .name = "star, outlined"});
+        a1->shape_poly(std::vector<double>{1, 6, 4}, std::vector<double>{5, 6, 8},
+                       {.color = green, .alpha = 0.4f, .linewidth = 1.5f, .linestyle = sextant::LineStyle::Dashed,
+                        .name = "dashed outline"});
+        a1->legend();
+        a1->set_title("polygons (ear-clipped); limits take the vertices");
+    }
+
+    // Radius spaces on unequal axes: data (an ellipse), a fraction of the frame, pixels.
+    auto a2 = fig->add_subplot(2, 3, 2);
+    {
+        a2->set_xlim(0, 20).set_ylim(0, 10);
+        a2->shape_circle(Pos(5.0), Pos(5.0), Pos(3.0), {.color = blue, .alpha = 0.5f, .linewidth = 2.0f, .name = "r = 3 data units"});
+        a2->shape_circle(Pos::fraction(0.5), Pos::fraction(0.5), Pos::fraction(0.25),
+                         {.color = orange, .alpha = 0.5f, .linewidth = 2.0f, .name = "r = 0.25 of min(w, h)"});
+        a2->shape_circle(Pos(15.0), Pos(5.0), Pos::pixels(60.0),
+                         {.color = green, .alpha = 0.5f, .linewidth = 2.0f, .name = "r = 60 px, data centre"});
+        a2->shape_circle(Pos::pixels(40.0), Pos::pixels(40.0), Pos::pixels(25.0),
+                         {.color = red, .name = "pinned 40 px from the corner"});
+        a2->legend();
+        a2->set_title("circle radius: data (ellipse) / fraction / pixels; resize and zoom");
+    }
+
+    // Wedges: sectors, a ring segment, a full ring, wrapping angles.
+    auto a3 = fig->add_subplot(2, 3, 3);
+    {
+        a3->set_xlim(0, 10).set_ylim(0, 10);
+        a3->shape_wedge(Pos(2.5), Pos(7.0), Pos::pixels(90.0), 0.0, 90.0, {.color = blue, .name = "0 .. 90"});
+        a3->shape_wedge(Pos(2.5), Pos(7.0), Pos::pixels(90.0), 90.0, 200.0, {.color = orange, .name = "90 .. 200"});
+        a3->shape_wedge(Pos(2.5), Pos(7.0), Pos::pixels(90.0), 200.0, 360.0, {.color = green, .name = "200 .. 360"});
+        a3->shape_wedge(Pos(7.5), Pos(7.0), Pos::pixels(90.0), 20.0, 140.0,
+                        {.color = red, .alpha = 0.6f, .edgecolor = sextant::Color::Black, .linewidth = 2.0f,
+                         .inner = 45.0, .name = "ring segment"});
+        a3->shape_wedge(Pos(5.0), Pos(2.5), Pos::pixels(70.0), 0.0, 360.0,
+                        {.color = blue, .alpha = 0.5f, .inner = 35.0, .name = "ring"});
+        a3->shape_wedge(Pos(5.0), Pos(2.5), Pos::pixels(70.0), 300.0, 60.0, {.color = orange, .name = "wraps through 0"});
+        a3->legend();
+        a3->set_title("wedges: sectors, a ring segment, a ring; the building block of pie");
+    }
+
+    // Log axes: a data-unit circle bends, a data line is a curve.
+    auto a4 = fig->add_subplot(2, 3, 4);
+    {
+        a4->set_xscale(sextant::Scale::Log);
+        a4->set_yscale(sextant::Scale::Log);
+        a4->set_xlim(1, 1000).set_ylim(1, 1000);
+        a4->shape_circle(Pos(30.0), Pos(30.0), Pos(20.0), {.color = blue, .alpha = 0.5f, .linewidth = 2.0f,
+                                                            .name = "circle, r = 20 data units"});
+        a4->axline(100.0, 100.0, 5.0, {.color = red, .name = "slope 5 through (100, 100)"});
+        a4->axline(2.0, 500.0, 900.0, 3.0, {.color = green, .name = "two points"});
+        a4->legend();
+        a4->set_title("log-log: a straight data line and a data circle bend");
+    }
+
+    // Sloped axline: a point and slope, two points, frame positions (straight on screen).
+    auto a5 = fig->add_subplot(2, 3, 5);
+    {
+        std::vector<double> x(100), y(100);
+        for (std::size_t i = 0; i < x.size(); ++i) {
+            x[i] = i * 0.1;
+            y[i] = std::sin(x[i]) + 0.4 * x[i];
+        }
+        a5->scatter(x, y, {.size = 5.0f});
+        a5->axline(0.0, 0.0, 0.4, {.color = red, .name = "slope 0.4 through the origin"});
+        a5->axline(0.0, 2.0, 8.0, 3.0, {.color = green, .linestyle = sextant::LineStyle::Dashed, .name = "(0, 2) and (8, 3)"});
+        a5->axline(Pos::fraction(0.5), Pos::fraction(0.5), -1.0,
+                   {.color = blue, .linewidth = 2.0f, .name = "45 degrees on screen, from the centre"});
+        a5->axline(4.0, 0.0, 4.0, 1.0, {.color = sextant::Color::Black, .name = "two points with one x: vertical"});
+        a5->legend();
+        a5->set_title("axline(x, y, slope) / (x1, y1, x2, y2); frame positions stay put");
+    }
+
+    // A 3D plane: shapes in plane units and on its sheet, a band across the plane.
+    auto a6 = fig->add_subplot3d(2, 3, 6);
+    {
+        a6->set_xlim(0, 10).set_ylim(0, 10).set_zlim(0, 10);
+        auto pl = a6->plane(sextant::PlaneOrientation::XY, 0.0);
+        pl->axspan(3.0, 5.0, {.color = orange, .alpha = 0.5f, .name = "band (Plane2D::axspan)"});
+        pl->shape_circle(Pos(6.0), Pos(6.0), Pos(2.0), {.color = blue, .alpha = 0.7f, .linewidth = 2.0f, .name = "disc"});
+        pl->shape_poly(std::vector<double>{1, 3, 2}, std::vector<double>{7, 7, 9}, {.color = green, .name = "triangle"});
+        pl->shape_wedge(Pos::fraction(0.2), Pos::fraction(0.25), Pos::fraction(0.15), 0.0, 270.0,
+                        {.color = red, .name = "fraction wedge on the sheet"});
+        a6->legend();
+        a6->set_title("on a plane: hover and edit them there too");
+    }
+
+    savefig_and_check_memory(fig, "part_shapes");
+    fig->show(true);
+}
+
 // Step 36d-1: Axes::fill_between() and Plane2D::fill_between(): areas under a
 // curve and bands, exclude and interpolate, steps, the Vertical orientation
 // with an outline, log axes and NaN gaps, planes; the Data panel edits them.
@@ -2947,6 +3064,7 @@ static void test_aspect_scales() {
 static void test_decorations() { // text, annotate (2D and 3D), axline, axspan
     part_text();
     part_reference_lines();
+    part_shapes();
 }
 
 static void test_legend_colorbar() {
@@ -2985,12 +3103,12 @@ static void test_show_nonblocking() {
 }
 
 int main() {
-    test_axes_gallery();
+    // test_axes_gallery();
     // test_axes3d_gallery();
     // test_figure_layout();
     // test_aspect_scales();
     // test_mathtext_gallery();
-    // test_decorations();
+    test_decorations();
     // test_legend_colorbar();
     // test_line();
     // test_scatter();

@@ -94,6 +94,35 @@ namespace sextant {
         Axes& fill(std::span<const double> x, std::span<const double> y1,
                            double y2 = 0.0, FillOptions opts = {});
 
+        // ----------------------------------------------------------------
+        // Shapes
+        // ----------------------------------------------------------------
+        // A filled polygon through the vertices (x[i], y[i]), closed implicitly,
+        // in PolyOptions::space (data units by default). Needs at least 3
+        // finite vertices and one y per x, else std::invalid_argument and
+        // nothing is added. Simple polygons only: a self-intersecting one
+        // is drawn without a promise about its fill. Automatic limits take Data
+        // vertices; the colour comes from the cycle like line(). Drawn in call
+        // order, hovered and picked where it covers.
+        Axes& shape_poly(std::span<const double> x, std::span<const double> y, PolyOptions opts = {});
+
+        // A filled circle at (cx, cy) with radius r, each a Pos: data units,
+        // a fraction of the frame, or pixels (Pos::pixels()). A Data radius needs
+        // a Data centre and is measured along each axis, so the circle is an
+        // ellipse where the axes' scales differ and bends on a log axis; a
+        // Fraction radius is a fraction of the frame's shorter side, a Pixels one
+        // a length; both are round. Throws std::invalid_argument for a
+        // non-finite number, r <= 0, or a Data radius with a non-Data centre.
+        // Limits take a circle whose centre and radius are all Data.
+        Axes& shape_circle(Pos cx, Pos cy, Pos r, CircleOptions opts = {});
+
+        // A sector of the circle, from theta1 to theta2 degrees counter-clockwise
+        // from +x (theta2 < theta1 wraps; 360 or more apart is the whole circle;
+        // equal draws nothing), with a hole of radius WedgeOptions::inner in
+        // r's space when set (a ring segment). Checks as shape_circle(), plus
+        // finite angles and 0 <= inner < r.
+        Axes& shape_wedge(Pos cx, Pos cy, Pos r, double theta1, double theta2, WedgeOptions opts = {});
+
         // Stacked areas (matplotlib's stackplot): layer k fills from the top of
         // the layers below it (the baseline, StackOptions::baseline, for the
         // first) up by ys[k], one value per point of `x` (any other length
@@ -144,6 +173,20 @@ namespace sextant {
         // order; not hovered or picked. Throws std::invalid_argument for a
         // non-finite value, `from` or `to`.
         Axes& axline(double value, AxLineOptions opts = {});
+
+        // A line through (x, y) with slope dy/dx, or through two points: the
+        // infinite line (matplotlib's axline), the same kind as the value form
+        // (cycle colour, legend, zorder); `orientation`, `from` and `to` do not
+        // apply. With every point in data units it is the straight line of the
+        // data: it bends on a log or symlog axis, where a straight line in data
+        // is a curve on screen, and is drawn so. With any point a Fraction or
+        // Pixels Pos it is a straight screen line through them, the slope then
+        // the screen's (y up). Two points with equal x give a vertical line.
+        // Automatic limits take the data points. Throws std::invalid_argument
+        // for a non-finite number, or two equal points.
+        Axes& axline(Pos x, Pos y, double slope, AxLineOptions opts = {});
+
+        Axes& axline(Pos x1, Pos y1, Pos x2, Pos y2, AxLineOptions opts = {});
 
         // A band across the frame from `lo` to `hi`: over y by default
         // (matplotlib's axhspan), over x with Vertical (axvspan); `lo > hi` is
@@ -357,6 +400,15 @@ namespace sextant {
         std::size_t fill_count() const;
         FillData fill_data(std::size_t i) const;
 
+        std::size_t shape_poly_count() const;
+        PolyData shape_poly_data(std::size_t i) const;
+
+        std::size_t shape_circle_count() const;
+        CircleData shape_circle_data(std::size_t i) const;
+
+        std::size_t shape_wedge_count() const;
+        WedgeData shape_wedge_data(std::size_t i) const;
+
         std::size_t quiver_count() const;
         QuiverData quiver_data(std::size_t i) const;
 
@@ -415,6 +467,15 @@ namespace sextant {
         Axes& set_fill_data(std::size_t i, std::span<const double> x, std::span<const double> y1,
                             std::span<const double> y2);
 
+        // A shape's numbers, validated as its plotting call.
+        Axes& set_shape_poly_data(std::size_t i, const PolyData& data);
+
+        Axes& set_shape_poly_data(std::size_t i, std::span<const double> x, std::span<const double> y);
+
+        Axes& set_shape_circle_data(std::size_t i, const CircleData& data);
+
+        Axes& set_shape_wedge_data(std::size_t i, const WedgeData& data);
+
         // A quiver's arrows, validated as quiver(). The amp stays; `c` follows
         // QuiverData::c (the span overload keeps it while the count holds).
         Axes& set_quiver_data(std::size_t i, const QuiverData& data);
@@ -461,6 +522,15 @@ namespace sextant {
         // A stack()'s layers are fills of their own.
         Axes& set_fill_visible(std::size_t i, bool visible);
         bool fill_visible(std::size_t i) const;
+
+        Axes& set_shape_poly_visible(std::size_t i, bool visible);
+        bool shape_poly_visible(std::size_t i) const;
+
+        Axes& set_shape_circle_visible(std::size_t i, bool visible);
+        bool shape_circle_visible(std::size_t i) const;
+
+        Axes& set_shape_wedge_visible(std::size_t i, bool visible);
+        bool shape_wedge_visible(std::size_t i) const;
 
         Axes& set_quiver_visible(std::size_t i, bool visible);
         bool quiver_visible(std::size_t i) const;

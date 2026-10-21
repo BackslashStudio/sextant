@@ -815,6 +815,7 @@ if(SEXTANT_BUILD_TESTS)
             tests/layout_test/bar_orient.cpp
             tests/layout_test/reference_lines.cpp
             tests/layout_test/fill_between.cpp
+            tests/layout_test/shapes.cpp
             tests/layout_test/quiver.cpp
             tests/layout_test/pick_area.cpp
             tests/layout_test/visible.cpp

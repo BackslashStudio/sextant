@@ -5,6 +5,7 @@
 #include "../coord_transform3d.h"
 #include "plane2d.h"
 #include "../contour.h"
+#include "../shape_geometry.h"
 #include <array>
 #include <cstdint>
 #include <span>
@@ -188,6 +189,14 @@ private:
     // A fill (fill_geometry.h): its triangles cached as bars' fills are, its
     // outline stroked per frame through the segment program.
     void draw_fill(const FillPlot& p, int index, const CoordTransform& tr, const PlotRect& pr);
+    // A shape (shape_geometry.h): its triangles streamed per frame through the
+    // flat program, its outline stroked as a fill's; nothing cached.
+    void draw_shape(const ShapeGeom& g, const Color& color, float alpha, float linewidth,
+                    LineStyle linestyle, const Color& edge, const CoordTransform& tr, const PlotRect& pr);
+    // Pixel rings (or open paths) stroked through the segment program, one stroke each.
+    void stroke_rings(const std::vector<std::vector<float>>& rings, const CoordTransform& tr,
+                      const PlotRect& pr, float linewidth, LineStyle ls, const Color& ec,
+                      bool closed = true);
     // A quiver (quiver_geometry.h): its arrows' ends cached as scatter centres
     // are, shaped in pixels by the instanced arrow program.
     void draw_quiver(const QuiverPlot& p, int index, const CoordTransform& tr, const PlotRect& pr);

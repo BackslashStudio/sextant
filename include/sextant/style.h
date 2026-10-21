@@ -768,9 +768,11 @@ namespace sextant {
     // last line's baseline.
     enum class VAlign { Top, Center, Baseline, Bottom };
 
-    // What one coordinate of a text's position is measured in: data units, or
-    // a fraction of the plot frame from its left (x) or bottom (y) edge.
-    enum class Coords { Data, Fraction };
+    // What one coordinate of a position (or a length) is measured in: data units,
+    // a fraction of the plot frame from its left (x) or bottom (y) edge, or
+    // pixels from the same edge (y up). A length (a radius) in pixels is just
+    // that many pixels.
+    enum class Coords { Data, Fraction, Pixels };
 
     // One coordinate of a text's position (Axes::text(), Axes::annotate()). A
     // bare number converts to a data value; Pos::fraction() makes a frame
@@ -779,7 +781,8 @@ namespace sextant {
     //
     //     ax.text("threshold", 2.5, Pos::fraction(0.95));
     //
-    // Pixels from a frame corner are a fraction of 0 or 1 plus TextOptions::dx/dy.
+    // Pos::pixels() measures from the frame's left or bottom edge (y up); a fraction of
+    // 0 or 1 plus TextOptions::dx/dy puts a text a pixel offset from a corner too.
     struct Pos {
         double v = 0.0;
         Coords space = Coords::Data;
@@ -793,11 +796,72 @@ namespace sextant {
             p.space = Coords::Fraction;
             return p;
         }
+
+        static Pos pixels(double px) {
+            Pos p(px);
+            p.space = Coords::Pixels;
+            return p;
+        }
     };
 
     // An arrow end: none, an open chevron, a filled triangle, or a bar across
     // the shaft.
     enum class ArrowHead { None, Open, Filled, Bar };
+
+    // A filled polygon (Axes::shape_poly()). The outline (`linewidth` > 0, none
+    // by default) is `edgecolor` (unset = `color`) at that color's own alpha,
+    // dashed by `linestyle`.
+    struct PolyOptions {
+        std::optional<Color> color; // see LineOptions::color
+        float alpha = 1.0f;
+        std::optional<Color> edgecolor;
+        float linewidth = 0.0f;
+        LineStyle linestyle = LineStyle::Solid;
+
+        // What the vertices are measured in: data units, a fraction of the
+        // plot frame, or pixels from its bottom left corner (see Pos). One
+        // space for all of them.
+        Coords space = Coords::Data;
+
+        std::string name;
+        bool show_legend = true; // see LineOptions::show_legend
+        bool visible = true;     // see LineOptions::visible
+        double zorder = 0.0;     // see LineOptions::zorder
+    };
+
+    // A filled circle (Axes::shape_circle()): the look of a PolyOptions.
+    struct CircleOptions {
+        std::optional<Color> color; // see LineOptions::color
+        float alpha = 1.0f;
+        std::optional<Color> edgecolor;
+        float linewidth = 0.0f;
+        LineStyle linestyle = LineStyle::Solid;
+
+        std::string name;
+        bool show_legend = true; // see LineOptions::show_legend
+        bool visible = true;     // see LineOptions::visible
+        double zorder = 0.0;     // see LineOptions::zorder
+    };
+
+    // A filled sector or ring segment (Axes::shape_wedge()): the look of a
+    // PolyOptions.
+    struct WedgeOptions {
+        std::optional<Color> color; // see LineOptions::color
+        float alpha = 1.0f;
+        std::optional<Color> edgecolor;
+        float linewidth = 0.0f;
+        LineStyle linestyle = LineStyle::Solid;
+
+        // The radius of a hole through the sector, in the space of `r` (0 = none).
+        // Kept as the wedge's data, read back and replaced through WedgeData::inner,
+        // not through these options.
+        double inner = 0.0;
+
+        std::string name;
+        bool show_legend = true; // see LineOptions::show_legend
+        bool visible = true;     // see LineOptions::visible
+        double zorder = 0.0;     // see LineOptions::zorder
+    };
 
     // A text's look (Axes::text(), annotate(), and the Axes3D ones). Sizes are
     // pixels as drawn; a text keeps its size under zoom and in 3D at any
@@ -934,9 +998,21 @@ namespace sextant {
         Range xrange, yrange;
     };
 
-    // Axes::axline(): where the line is, on the axis its orientation names.
+    // How an axline() is given: a value on one axis, a point and a slope, or
+    // two points.
+    enum class AxLineMode { Value, PointSlope, TwoPoints };
+
+    // Axes::axline(). Value: `value`, on the axis its orientation names.
+    // PointSlope: through (x, y) with `slope` (dy/dx). TwoPoints: through (x, y)
+    // and (x2, y2). The unused fields are 0. A sloped line whose points are all in
+    // data units is the straight line of the data (it bends on a log or symlog
+    // axis); otherwise the points are positions on the frame and the line is
+    // straight on screen, its slope the screen's (y up).
     struct AxLineData {
         double value = 0.0;
+        AxLineMode mode = AxLineMode::Value;
+        Pos x, y, x2, y2;
+        double slope = 0.0;
     };
 
     // Axes::axspan(): the band's ends, lo <= hi as axspan() stored them.
@@ -960,6 +1036,26 @@ namespace sextant {
     // arrow); the span overload keeps it while the arrow count is unchanged.
     struct QuiverData {
         std::vector<double> x, y, u, v, c;
+    };
+
+    // Axes::shape_poly(): the vertices, in the options' `space`.
+    struct PolyData {
+        std::vector<double> x, y;
+    };
+
+    // Axes::shape_circle(): the centre and radius, each in its own space. A
+    // Data radius needs a Data centre (x and y both); a Fraction radius is a
+    // fraction of the frame's shorter side.
+    struct CircleData {
+        Pos cx, cy, r;
+    };
+
+    // Axes::shape_wedge(): a circle's numbers, the sweep in degrees counter-
+    // clockwise from +x, and `inner`, the radius of the hole (0 = none) in the
+    // space of `r`.
+    struct WedgeData {
+        Pos cx, cy, r;
+        double theta1 = 0.0, theta2 = 90.0, inner = 0.0;
     };
 
     // Axes::text() and annotate(): the string and where it is. `arrow` is set

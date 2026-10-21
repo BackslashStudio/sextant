@@ -7,6 +7,15 @@ namespace sextant {
 
 namespace {
 
+// A Fraction or Pixels coordinate as a screen pixel: from the frame's left edge
+// (x) or bottom edge (y, up).
+float frame_px(const Pos& p, const PlotRect& f) {
+    return f.x + (p.space == Coords::Pixels ? static_cast<float>(p.v) : static_cast<float>(p.v) * f.w);
+}
+float frame_py(const Pos& p, const PlotRect& f) {
+    return f.y + f.h - (p.space == Coords::Pixels ? static_cast<float>(p.v) : static_cast<float>(p.v) * f.h);
+}
+
 constexpr float kDegToRad = 0.017453292519943295f;
 
 struct Px { float x = 0.0f, y = 0.0f; };
@@ -258,12 +267,8 @@ std::vector<TextDraw> plan_texts(const std::vector<TextPlot>& texts, const Coord
         if (c.y.space == Coords::Data && !in_view(c.y.v, tr.ymin, tr.ymax)) continue;
         if (c.arrow && !(in_view(c.px, tr.xmin, tr.xmax) && in_view(c.py, tr.ymin, tr.ymax))) continue;
 
-        const float ax = c.x.space == Coords::Data
-                             ? tr.to_px(c.x.v)
-                             : frame.x + static_cast<float>(c.x.v) * frame.w;
-        const float ay = c.y.space == Coords::Data
-                             ? tr.to_py(c.y.v)
-                             : frame.y + frame.h - static_cast<float>(c.y.v) * frame.h;
+        const float ax = c.x.space == Coords::Data ? tr.to_px(c.x.v) : frame_px(c.x, frame);
+        const float ay = c.y.space == Coords::Data ? tr.to_py(c.y.v) : frame_py(c.y, frame);
         TextDraw d;
         const PlotRect from = lay_out_block(p, ax, ay, d);
         if (c.arrow) plan_arrow(p, from, {tr.to_px(c.px), tr.to_py(c.py)}, d);
@@ -280,10 +285,9 @@ std::vector<TextDraw> plan_texts3d(const std::vector<TextPlot>& texts, const Pro
         const TextContent& c = p.content;
         if (!object_shown(p)) continue;
         TextDraw d;
-        if (c.x.space == Coords::Fraction && !c.arrow) {
+        if (c.x.space != Coords::Data && !c.arrow) {
             // text2d(): the frame, whatever the camera does.
-            lay_out_block(p, frame.x + static_cast<float>(c.x.v) * frame.w,
-                          frame.y + frame.h - static_cast<float>(c.y.v) * frame.h, d);
+            lay_out_block(p, frame_px(c.x, frame), frame_py(c.y, frame), d);
             out.push_back(std::move(d));
             continue;
         }

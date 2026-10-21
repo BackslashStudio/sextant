@@ -37,7 +37,8 @@ namespace sextant {
         Line, Scatter, ScatterZ, Bar, Heatmap,                // 2D kinds, on an Axes or a Plane2D
         Bar3D, Surface, SurfaceTri, Scatter3D, Line3D,         // 3D kinds
         Quiver,                                               // 2D, appended
-        Fill                                                  // 2D (fill(), stack()), appended
+        Fill,                                                 // 2D (fill(), stack()), appended
+        Poly, Circle, Wedge                                   // 2D (shape_poly(), shape_circle(), shape_wedge()), appended
     };
 
     // Where an object is now: its kind and its index within the kind, the `i` of

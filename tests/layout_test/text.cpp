@@ -106,6 +106,17 @@ namespace lt {
             o.dx = o.dy = 0.0f;
         }
 
+        // Pixels: from the frame's left / bottom edge (y up), blendable, never hidden.
+        {
+            auto d = plan_texts({plot_of("a", Pos::pixels(30.0), Pos::pixels(20.0), o)}, tr, kFrame);
+            check(d.size() == 1 && near(d[0].ax, 80.0f) && near(d[0].ay, 130.0f),
+                  "text plan: Pos::pixels measures from the frame's left and bottom edge, y up");
+            d = plan_texts({plot_of("b", 5.0, Pos::pixels(10.0), o),
+                            plot_of("c", Pos::pixels(-500.0), Pos::pixels(900.0), o)}, tr, kFrame);
+            check(d.size() == 2 && near(d[0].ax, 100.0f) && near(d[0].ay, 140.0f),
+                  "text plan: a pixel y blends with a data x; a pixel position is never hidden");
+        }
+
         // Baseline (the default): the only line's baseline on the anchor.
         {
             const auto d = plan_texts({plot_of("Ag", 5.0, 5.0, o)}, tr, kFrame);

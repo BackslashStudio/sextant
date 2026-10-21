@@ -156,6 +156,11 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot& snap) 
         t.data_stamp = ap.data_stamp;
         t.id = ap.id;
         t.label = pick_label(ap.opts.name, "axline", static_cast<int>(i));
+        if (ap.sloped()) {
+            t.sloped_axline = &ap;
+            out.push_back(std::move(t));
+            continue;
+        }
         t.columns.push_back({ap.on_x() ? "x" : "y", &ap.value, 1});
         t.rows_fixed = true;
         out.push_back(std::move(t));
@@ -172,6 +177,43 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot& snap) 
         t.columns.push_back({sp.on_x() ? "xmin" : "ymin", &sp.lo, 1});
         t.columns.push_back({sp.on_x() ? "xmax" : "ymax", &sp.hi, 1});
         t.rows_fixed = true;
+        out.push_back(std::move(t));
+    }
+
+    // Shapes: a polygon is a table of its vertices; a circle and a wedge are
+    // forms over their numbers.
+    for (std::size_t i = 0; i < snap.polys.size(); ++i) {
+        const auto& pp = snap.polys[i];
+        PlotDataTable t;
+        t.kind = PlotKind::Poly;
+        t.plot_index = static_cast<int>(i);
+        t.data_stamp = pp.data_stamp;
+        t.id = pp.id;
+        t.label = pick_label(pp.opts.name, "poly", static_cast<int>(i));
+        t.columns.push_back({"x", pp.x.data(), pp.x.size()});
+        t.columns.push_back({"y", pp.y.data(), pp.y.size()});
+        out.push_back(std::move(t));
+    }
+    for (std::size_t i = 0; i < snap.circles.size(); ++i) {
+        const auto& cp = snap.circles[i];
+        PlotDataTable t;
+        t.kind = PlotKind::Circle;
+        t.plot_index = static_cast<int>(i);
+        t.data_stamp = cp.data_stamp;
+        t.id = cp.id;
+        t.label = pick_label(cp.opts.name, "circle", static_cast<int>(i));
+        t.circle = &cp;
+        out.push_back(std::move(t));
+    }
+    for (std::size_t i = 0; i < snap.wedges.size(); ++i) {
+        const auto& wp = snap.wedges[i];
+        PlotDataTable t;
+        t.kind = PlotKind::Wedge;
+        t.plot_index = static_cast<int>(i);
+        t.data_stamp = wp.data_stamp;
+        t.id = wp.id;
+        t.label = pick_label(wp.opts.name, "wedge", static_cast<int>(i));
+        t.wedge = &wp;
         out.push_back(std::move(t));
     }
 

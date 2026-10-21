@@ -28,6 +28,9 @@ struct Axes::Impl {
     std::vector<AxSpanPlot>   axspans;
     std::vector<FillPlot>     fills;
     std::vector<QuiverPlot>   quivers;
+    std::vector<PolyPlot>     polys;
+    std::vector<CirclePlot>   circles;
+    std::vector<WedgePlot>    wedges;
 
     // The figure's FigureOptions::mathtext, set when the figure makes this
     // axes; only warn_math() reads it (drawing reads the snapshot's).
@@ -158,6 +161,7 @@ struct Axes::Impl {
         s.axlines = axlines; s.axspans = axspans;
         s.fills = fills;
         s.quivers = quivers;
+        s.polys = polys; s.circles = circles; s.wedges = wedges;
         s.title = title; s.xtitle = xtitle; s.ytitle = ytitle;
         s.title_stamps = title_stamps;
         s.grid_enabled   = grid_enabled;   s.grid_opts   = grid_opts;
@@ -239,8 +243,20 @@ struct Axes::Impl {
     void ingest_text(TextContent c, TextStyle style, const char* who);
     void set_text_data(std::size_t i, TextContent c, const char* who);
 
+    // Shapes for Axes and Plane2D; the set_*_data() validate as the call.
+    void ingest_poly(std::span<const double> x, std::span<const double> y, PolyOptions opts,
+                     const char* who);
+    void ingest_circle(Pos cx, Pos cy, Pos r, CircleOptions opts, const char* who);
+    void ingest_wedge(Pos cx, Pos cy, Pos r, double theta1, double theta2, WedgeOptions opts,
+                      const char* who);
+    void set_poly_data(std::size_t i, std::span<const double> x, std::span<const double> y,
+                       const char* who);
+    void set_circle_data(std::size_t i, const CircleData& d, const char* who);
+    void set_wedge_data(std::size_t i, const WedgeData& d, const char* who);
+
     // Reference lines and spans (Axes only). Throw on a non-finite number.
     void ingest_axline(double value, AxLineOptions opts, const char* who);
+    void ingest_axline_sloped(AxLineData d, AxLineOptions opts, const char* who);
     void ingest_axspan(double lo, double hi, AxSpanOptions opts, const char* who);
 };
 
