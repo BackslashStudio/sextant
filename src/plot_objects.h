@@ -914,16 +914,25 @@ unsigned long long visible_stamp_at(const S& s, PlotKind kind, int index) {
     }, ~0ull);
 }
 
+namespace objects_detail {
+// Outside the lambda below: Clang 18 crashes on `if constexpr (requires ...)` inside a
+// capturing generic lambda.
+template <class V>
+unsigned long long zorder_stamp_of(const V& v, int index) {
+    if constexpr (requires { v[0].zorder_stamp; })
+        return index >= 0 && static_cast<std::size_t>(index) < v.size()
+                   ? v[static_cast<std::size_t>(index)].zorder_stamp : ~0ull;
+    else
+        return ~0ull;
+}
+} // namespace objects_detail
+
 // The zorder_stamp of the object at (kind, index); ~0 if there is none, or the
 // kind has no zorder (a text).
 template <class S>
 unsigned long long zorder_stamp_at(const S& s, PlotKind kind, int index) {
     return with_kind(s, kind, [index](const auto& v) {
-        if constexpr (requires { v[0].zorder_stamp; })
-            return index >= 0 && static_cast<std::size_t>(index) < v.size()
-                       ? v[static_cast<std::size_t>(index)].zorder_stamp : ~0ull;
-        else
-            return ~0ull;
+        return objects_detail::zorder_stamp_of(v, index);
     }, ~0ull);
 }
 

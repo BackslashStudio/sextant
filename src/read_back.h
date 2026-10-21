@@ -50,6 +50,26 @@ namespace sextant::read_back {
             throw std::invalid_argument(std::string(who) + ": zorder must be finite");
     }
 
+    // The per-kind work of zorder()/set_zorder(), outside any lambda (Clang 18 crashes on
+    // `if constexpr (requires ...)` inside a capturing generic lambda). A kind without a
+    // zorder (a text) gives nothing / false.
+    template <class V>
+    std::optional<double> zorder_at(const V& v, std::size_t i) {
+        if constexpr (requires { v[0].opts.zorder; }) return v[i].opts.zorder;
+        else return std::nullopt;
+    }
+
+    template <class V>
+    bool store_zorder(V& v, std::size_t i, double z) {
+        if constexpr (requires { v[0].opts.zorder; }) {
+            v[i].opts.zorder = z;
+            v[i].zorder_stamp = next_snapshot_generation();
+            return true;
+        } else {
+            return false;
+        }
+    }
+
     // Axes::set_zorder() / Plane2D::set_zorder(): the object by id, with a fresh
     // zorder_stamp so a Data-panel style edit made before it keeps it
     // (assign_plot_opts()). A text, an unknown id or a stale one warns and gives
@@ -58,15 +78,8 @@ namespace sextant::read_back {
     bool set_zorder(H& holder, ObjectId id, double z, const char* who) {
         check_zorder(z, who);
         const auto at = holder.find_object(id);
-        const bool done = at && with_kind(holder, at->kind, [&](auto& v) {
-            if constexpr (requires { v[0].opts.zorder; }) {
-                auto& p = v[at->index];
-                p.opts.zorder = z;
-                p.zorder_stamp = next_snapshot_generation();
-                return true;
-            } else {
-                return false;
-            }
+        const bool done = at && with_kind(holder, at->kind, [index = at->index, z](auto& v) {
+            return store_zorder(v, index, z);
         }, false);
         if (!done) object_remove::warn_missing(who, "object", id);
         return done;
@@ -77,9 +90,8 @@ namespace sextant::read_back {
         const auto at = holder.find_object(id);
         std::optional<double> z;
         if (at)
-            z = with_kind(holder, at->kind, [&](const auto& v) -> std::optional<double> {
-                if constexpr (requires { v[0].opts.zorder; }) return v[at->index].opts.zorder;
-                else return std::nullopt;
+            z = with_kind(holder, at->kind, [index = at->index](const auto& v) {
+                return zorder_at(v, index);
             }, std::optional<double>{});
         if (!z) object_remove::warn_missing(who, "object", id);
         return z;
