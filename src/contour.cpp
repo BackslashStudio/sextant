@@ -36,15 +36,23 @@ void trace_level(const HeatmapPlot& hp, double level, ContourSet& out) {
 
     // Crossing point, interpolated along the edge (bit-identical from either
     // adjoining cell). Found in index space, emitted in data space via the
-    // heatmap's extent.
+    // heatmap's extent. A mesh's crossing lies on the straight line between
+    // the two centres (x_at() would bend at the edge between them).
+    const bool mesh = hp.mesh();
+    auto cx = [&](int j) { return 0.5 * (hp.x_edge(j) + hp.x_edge(j + 1)); };
+    auto cy = [&](int i) { return 0.5 * (hp.y_edge(i) + hp.y_edge(i + 1)); };
     auto hpt = [&](int i, int j) {
         const double a = val(i, j), b = val(i, j + 1);
         const double t = (b != a) ? std::clamp((level - a) / (b - a), 0.0, 1.0) : 0.5;
+        if (mesh)
+            return Pt{ static_cast<float>(cx(j) + t * (cx(j + 1) - cx(j))), static_cast<float>(cy(i)) };
         return Pt{ static_cast<float>(hp.x_at(j + 0.5 + t)), static_cast<float>(hp.y_at(i + 0.5)) };
     };
     auto vpt = [&](int i, int j) {
         const double a = val(i, j), b = val(i + 1, j);
         const double t = (b != a) ? std::clamp((level - a) / (b - a), 0.0, 1.0) : 0.5;
+        if (mesh)
+            return Pt{ static_cast<float>(cx(j)), static_cast<float>(cy(i) + t * (cy(i + 1) - cy(i))) };
         return Pt{ static_cast<float>(hp.x_at(j + 0.5)), static_cast<float>(hp.y_at(i + 0.5 + t)) };
     };
 
@@ -159,8 +167,8 @@ void trace_level(const HeatmapPlot& hp, double level, ContourSet& out) {
 
 ContourSet trace_contours(const HeatmapPlot& hp) {
     ContourSet out;
-    // An image has colours, not values to trace; a heatmap_rec() takes none.
-    if (!hp.colormapped() || hp.mesh() || hp.rows < 2 || hp.cols < 2 || hp.opts.contours.empty())
+    // An image has colours, not values to trace.
+    if (!hp.colormapped() || hp.rows < 2 || hp.cols < 2 || hp.opts.contours.empty())
         return out;
     if (hp.data.size() < static_cast<std::size_t>(hp.rows) * hp.cols) return out;
     for (double level : hp.opts.contours) trace_level(hp, level, out);
@@ -177,11 +185,18 @@ ContourDraw plan_contours(const ContourSet& set, const ContourProjector& proj,
                           const HeatmapOptions& opts,
                           const std::string& font_path)
 {
+    return plan_contours(set, proj, opts.contour_labels, opts.contour_fontsize, font_path);
+}
+
+ContourDraw plan_contours(const ContourSet& set, const ContourProjector& proj,
+                          bool labels, float fontsize, const std::string& font_path)
+{
     ContourDraw out;
     std::vector<float> px, py, arc;
     const PlotRect& frame = proj.frame();
 
-    for (const auto& line : set) {
+    for (std::size_t li = 0; li < set.size(); ++li) {
+        const ContourLine& line = set[li];
         const std::size_t n = line.x.size();
         if (n < 2) continue;
 
@@ -208,10 +223,11 @@ ContourDraw plan_contours(const ContourSet& set, const ContourProjector& proj,
             ContourRun r;
             r.px.assign(px.begin(), px.begin() + static_cast<std::ptrdiff_t>(n));
             r.py.assign(py.begin(), py.begin() + static_cast<std::ptrdiff_t>(n));
+            r.line = li;
             out.runs.push_back(std::move(r));
         };
 
-        if (!opts.contour_labels) { push_whole(); continue; }
+        if (!labels) { push_whole(); continue; }
 
         // Arc length in pixels, since the gap must fit the text on screen.
         arc.resize(n);
@@ -221,7 +237,7 @@ ContourDraw plan_contours(const ContourSet& set, const ContourProjector& proj,
         const float total = arc[n - 1];
 
         const std::string text = format_contour_level(line.level);
-        const float gap = text_width(font_path, opts.contour_fontsize, text)
+        const float gap = text_width(font_path, fontsize, text)
                         + 2.0f * kLabelPad;
         if (total < gap * kMinLabelledLength) { push_whole(); continue; }
 
@@ -239,6 +255,7 @@ ContourDraw plan_contours(const ContourSet& set, const ContourProjector& proj,
 
         auto push_range = [&](float s0, float s1) {
             ContourRun r;
+            r.line = li;
             const Pt a = at_arc(s0);
             r.px.push_back(a.x);
             r.py.push_back(a.y);
@@ -265,7 +282,7 @@ ContourDraw plan_contours(const ContourSet& set, const ContourProjector& proj,
         if (angle < 0.0f) angle += kPi;
         angle -= kHalfPi;
 
-        out.labels.push_back({ anchor.x, anchor.y, angle, text });
+        out.labels.push_back({ anchor.x, anchor.y, angle, text, li });
     }
 
     return out;

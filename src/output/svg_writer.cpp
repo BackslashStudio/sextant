@@ -10,6 +10,7 @@
 #include "../fill_geometry.h"
 #include "../heatmap_pixels.h"
 #include "../heatmap_tri_geometry.h"
+#include "../contour_plot.h"
 #include "../quiver_geometry.h"
 #include "../shape_geometry.h"
 #include "../renderer/marker_shape.h"
@@ -562,7 +563,7 @@ static void emit_scatter_z(std::ostringstream& o, const SvgAxesData& d,
             const float r = marker_size_at(sp, i) * 0.5f;
             const double t = kind == ColorNorm::Kind::Linear
                                  ? ((vrange != 0.0f) ? (sp.z[i] - vmin) / vrange : 0.0)
-                                 : norm_t(kind, sp.opts.norm.center, sp.opts.vmin, sp.opts.vmax, sp.z[i]);
+                                 : norm_t(kind, sp.opts.norm, sp.opts.vmin, sp.opts.vmax, sp.z[i]);
             const uint8_t* c = &lut[colormaps::index(t, sp.opts.cmap.is_cyclic()) * 4];
             char buf[32];
             std::snprintf(buf, sizeof(buf), "rgb(%d,%d,%d)", c[0], c[1], c[2]);
@@ -991,6 +992,10 @@ static void emit_quiver(std::ostringstream& o, const SvgAxesData& d, const Quive
 
 // The plot objects in call order, each with its error bars, as
 // DataRenderer::draw_plots().
+static void emit_contour_plot(std::ostringstream& o, const SvgAxesData& d, const ContourPlot& p);
+static void emit_contour_draw(std::ostringstream& o, const SvgAxesData& d, const ContourDraw& cd,
+                              const Color& color, float linewidth, float fontsize);
+
 static void emit_object(std::ostringstream& o, const SvgAxesData& d, const ObjectRef& r) {
     const std::size_t one[1] = {r.index};
     switch (r.kind) {
@@ -1036,6 +1041,9 @@ static void emit_object(std::ostringstream& o, const SvgAxesData& d, const Objec
             break;
         case PlotKind::HeatmapTri:
             emit_heatmap_tri(o, d, d.heatmap_tris[r.index]);
+            break;
+        case PlotKind::Contour:
+            emit_contour_plot(o, d, d.contours[r.index]);
             break;
         default: break;
     }
@@ -1095,6 +1103,28 @@ static void emit_contour_draw(std::ostringstream& o, const SvgAxesData& d,
               << " fill=\"" << stroke << "\" fill-opacity=\"" << color.a
               << "\">" << xml_escape(lb.text) << "</text>\n";
         }
+}
+
+// A contour() or contourf() in its place among the data: a contourf's
+// triangles as heatmap_tri's raster, a contour's lines and labels level by
+// level, each in its colour.
+static void emit_contour_plot(std::ostringstream& o, const SvgAxesData& d, const ContourPlot& p) {
+    if (!object_shown(p) || !p.geom) return;
+    if (p.opts.filled) {
+        if (p.geom->levels.size() >= 2 && !p.geom->fill.tri.empty()) emit_heatmap_tri(o, d, p.geom->fill);
+        return;
+    }
+    if (!(p.opts.linewidth > 0.0f) || p.geom->lines.empty()) return;
+    const ContourDraw cd = plan_contours(p.geom->lines, d.layout.tr, p.opts.labels, p.opts.fontsize,
+                                         d.axes_style.font_path);
+    std::vector<ContourDraw> by_level(p.geom->levels.size());
+    for (const auto& r : cd.runs) by_level[p.geom->line_level[r.line]].runs.push_back(r);
+    for (const auto& l : cd.labels) by_level[p.geom->line_level[l.line]].labels.push_back(l);
+    for (std::size_t k = 0; k < by_level.size(); ++k) {
+        if (by_level[k].runs.empty()) continue;
+        const std::optional<Color> c = contour_line_color(p, k);
+        if (c) emit_contour_draw(o, d, by_level[k], *c, p.opts.linewidth, p.opts.fontsize);
+    }
 }
 
 static void emit_contours(std::ostringstream& o, const SvgAxesData& d) {
@@ -1457,12 +1487,37 @@ static void emit_colorbar(std::ostringstream& o, const SvgAxesData& d, std::size
     const auto& cb = d.colorbar_opts;
     for (std::size_t b = 0; b < d.layout.colorbars.size(); ++b) {
         const auto& r = d.layout.colorbars[b].rect;
-        o << "  <rect x=\"" << r.x << "\" y=\"" << r.y
-          << "\" width=\"" << r.w << "\" height=\"" << r.h
-          << "\" fill=\"url(#colorbarGrad" << idx << "_" << b << ")\""
-          << " stroke=\"" << rgb(cb.border_color)
-          << "\" stroke-opacity=\"" << cb.border_color.a << "\""
-          << " stroke-width=\"" << cb.border_linewidth << "\"/>\n";
+        if (d.layout.colorbars[b].stepped()) {
+            // A boundary norm's bar: a flat rect per band, then the border alone.
+            const auto& sb = d.layout.colorbars[b];
+            const uint8_t* lut = colormaps::get(sb.cmap);
+            const std::size_t n = sb.band_t.size();
+            for (std::size_t i = 0; i < n; ++i) {
+                const uint8_t* c = &lut[colormaps::index(sb.band_t[i], sb.cmap.is_cyclic()) * 4];
+                const float f0 = static_cast<float>(i) / static_cast<float>(n);
+                const float f1 = static_cast<float>(i + 1) / static_cast<float>(n);
+                const float bx = sb.horizontal ? r.x + f0 * r.w : r.x;
+                const float by = sb.horizontal ? r.y : r.y + r.h - f1 * r.h;
+                const float bw = sb.horizontal ? (f1 - f0) * r.w : r.w;
+                const float bh = sb.horizontal ? r.h : (f1 - f0) * r.h;
+                o << "  <rect x=\"" << bx << "\" y=\"" << by << "\" width=\"" << bw << "\" height=\"" << bh
+                  << "\" fill=\"rgb(" << static_cast<int>(c[0]) << "," << static_cast<int>(c[1]) << ","
+                  << static_cast<int>(c[2]) << ")\"/>\n";
+            }
+            o << "  <rect x=\"" << r.x << "\" y=\"" << r.y
+              << "\" width=\"" << r.w << "\" height=\"" << r.h
+              << "\" fill=\"none\""
+              << " stroke=\"" << rgb(cb.border_color)
+              << "\" stroke-opacity=\"" << cb.border_color.a << "\""
+              << " stroke-width=\"" << cb.border_linewidth << "\"/>\n";
+        } else {
+            o << "  <rect x=\"" << r.x << "\" y=\"" << r.y
+              << "\" width=\"" << r.w << "\" height=\"" << r.h
+              << "\" fill=\"url(#colorbarGrad" << idx << "_" << b << ")\""
+              << " stroke=\"" << rgb(cb.border_color)
+              << "\" stroke-opacity=\"" << cb.border_color.a << "\""
+              << " stroke-width=\"" << cb.border_linewidth << "\"/>\n";
+        }
 
         // Anchors from the layout, centred on the line.
         const auto& cbx  = d.layout.colorbars[b];
@@ -1476,12 +1531,18 @@ static void emit_colorbar(std::ostringstream& o, const SvgAxesData& d, std::size
           << "\" font-size=\"" << cb.fontsize
           << "\" fill=\"" << rgb(cb.text_color)
           << "\" fill-opacity=\"" << cb.text_color.a << "\">\n";
-        std::snprintf(buf, sizeof(buf), "%.3g", static_cast<double>(cbx.vmax));
-        o << "    <text x=\"" << cbx.vmax_x << "\" y=\"" << cbx.vmax_y + base
-          << "\" text-anchor=\"" << anchor << "\">" << xml_escape(buf) << "</text>\n";
-        std::snprintf(buf, sizeof(buf), "%.3g", static_cast<double>(cbx.vmin));
-        o << "    <text x=\"" << cbx.vmin_x << "\" y=\"" << cbx.vmin_y + base
-          << "\" text-anchor=\"" << anchor << "\">" << xml_escape(buf) << "</text>\n";
+        if (cbx.stepped()) {
+            for (const auto& l: cbx.labels)
+                o << "    <text x=\"" << l.x << "\" y=\"" << l.y + base
+                  << "\" text-anchor=\"" << anchor << "\">" << xml_escape(l.text) << "</text>\n";
+        } else {
+            std::snprintf(buf, sizeof(buf), "%.3g", static_cast<double>(cbx.vmax));
+            o << "    <text x=\"" << cbx.vmax_x << "\" y=\"" << cbx.vmax_y + base
+              << "\" text-anchor=\"" << anchor << "\">" << xml_escape(buf) << "</text>\n";
+            std::snprintf(buf, sizeof(buf), "%.3g", static_cast<double>(cbx.vmin));
+            o << "    <text x=\"" << cbx.vmin_x << "\" y=\"" << cbx.vmin_y + base
+              << "\" text-anchor=\"" << anchor << "\">" << xml_escape(buf) << "</text>\n";
+        }
 
         // The bar's name: beyond a horizontal bar, rotated along a vertical
         // one (baseline shift in the rotated frame, as for the y title).
@@ -1516,6 +1577,7 @@ static void emit_defs(std::ostringstream& o, const std::vector<SvgAxesData>& axe
         // for fidelity. One gradient per bar (not deduplicated per colormap).
         // Horizontal: left to right, 0% = vmin.
         for (std::size_t b = 0; b < d.layout.colorbars.size(); ++b) {
+            if (d.layout.colorbars[b].stepped()) continue; // flat rects, no gradient
             const bool     horiz = d.layout.colorbars[b].horizontal;
             const uint8_t* lut = colormaps::get(d.layout.colorbars[b].cmap);
             o << "  <linearGradient id=\"colorbarGrad" << i << "_" << b

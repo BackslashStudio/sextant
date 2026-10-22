@@ -3,6 +3,7 @@
 #include "../fill_geometry.h"
 #include "../heatmap_pixels.h"
 #include "../heatmap_tri_geometry.h"
+#include "../contour_plot.h"
 #include "../quiver_geometry.h"
 #include "../shape_geometry.h"
 #include "../reference_lines.h"
@@ -23,7 +24,7 @@ namespace sextant {
             const float value = static_cast<float>(sp.z[i]);
             const double t = kind == ColorNorm::Kind::Linear
                                  ? ((vrange != 0.0f) ? (value - vmin) / vrange : 0.0)
-                                 : norm_t(kind, sp.opts.norm.center, sp.opts.vmin, sp.opts.vmax, sp.z[i]);
+                                 : norm_t(kind, sp.opts.norm, sp.opts.vmin, sp.opts.vmax, sp.z[i]);
             const std::uint8_t* c = &lut[colormaps::index(t, sp.opts.cmap.is_cyclic()) * 4];
             return {c[0] / 255.0f, c[1] / 255.0f, c[2] / 255.0f, c[3] / 255.0f};
         }
@@ -207,6 +208,11 @@ namespace sextant {
                 g.batches.push_back({PlaneGeometry::Batch::Kind::HeatmapTri, index, index + 1});
             }
 
+            // A contourf, likewise.
+            void contour_fill(std::size_t index) {
+                g.batches.push_back({PlaneGeometry::Batch::Kind::Contour, index, index + 1});
+            }
+
         private:
             std::size_t size_of(PlaneGeometry::Batch::Kind k) const {
                 switch (k) {
@@ -214,7 +220,8 @@ namespace sextant {
                     case PlaneGeometry::Batch::Kind::Seg: return g.segs.size();
                     case PlaneGeometry::Batch::Kind::Marker: return g.markers.size();
                     case PlaneGeometry::Batch::Kind::Heatmap:
-                    case PlaneGeometry::Batch::Kind::HeatmapTri: return 0; // never opened
+                    case PlaneGeometry::Batch::Kind::HeatmapTri:
+                    case PlaneGeometry::Batch::Kind::Contour: return 0; // never opened
                 }
                 return 0;
             }
@@ -325,6 +332,28 @@ namespace sextant {
                 case PlotKind::HeatmapTri:
                     b.heatmap_tri(r.index);
                     break;
+
+                case PlotKind::Contour: {
+                    // A contourf as heatmap_tri's resampling; a contour's lines as
+                    // strokes, whole (no labels on a plane), level by level.
+                    const ContourPlot& cp = s.contours[r.index];
+                    if (!cp.geom) break;
+                    if (cp.opts.filled) {
+                        if (cp.geom->levels.size() >= 2 && !cp.geom->fill.tri.empty()) b.contour_fill(r.index);
+                        break;
+                    }
+                    if (!(cp.opts.linewidth > 0.0f)) break;
+                    b.open(Kind::Seg);
+                    for (std::size_t k = 0; k < cp.geom->lines.size(); ++k) {
+                        const std::optional<Color> c = contour_line_color(cp, cp.geom->line_level[k]);
+                        if (!c) continue;
+                        const ContourLine& l = cp.geom->lines[k];
+                        for (std::size_t i = 0; i + 1 < l.x.size(); ++i)
+                            b.seg_uv(l.x[i], l.y[i], l.x[i + 1], l.y[i + 1], *c, cp.opts.linewidth);
+                    }
+                    b.close();
+                    break;
+                }
 
                 case PlotKind::Bar: {
                     const auto& bp = s.bars[r.index];
@@ -734,6 +763,15 @@ namespace sextant {
                         append_heatmap_item(out, pl, pi, pl.sheet.heatmaps[batch.begin], batch.begin, depth, proj);
                     continue;
                 }
+                if (batch.kind == PlaneGeometry::Batch::Kind::Contour) {
+                    // As heatmap_tri below: the contourf's triangles resampled.
+                    if (batch.begin < pl.sheet.contours.size() && pl.sheet.contours[batch.begin].geom)
+                        append_heatmap_item(out, pl, pi,
+                                            heatmap_tri_grid(pl.sheet.contours[batch.begin].geom->fill,
+                                                             proj.is_perspective() ? 128 : 512),
+                                            batch.begin, depth, proj);
+                    continue;
+                }
                 if (batch.kind == PlaneGeometry::Batch::Kind::HeatmapTri) {
                     // Resampled to an even grid: cell polygons under perspective (128 x 128
                     // stays under kPlane3DCellCap), the affine image under orthographic.
@@ -784,7 +822,8 @@ namespace sextant {
                         break;
 
                     case PlaneGeometry::Batch::Kind::Heatmap:
-                    case PlaneGeometry::Batch::Kind::HeatmapTri: break; // handled above
+                    case PlaneGeometry::Batch::Kind::HeatmapTri:
+                    case PlaneGeometry::Batch::Kind::Contour: break; // handled above
                     case PlaneGeometry::Batch::Kind::Marker:
                         item.form = PlanePlanItem::Form::Markers;
                         for (std::size_t i = batch.begin; i < batch.end && i < g.markers.size(); ++i) {

@@ -76,7 +76,7 @@ void for_each_quiver_arrow(const QuiverPlot& p, const AxisScale& xs, const AxisS
         const double du = s * p.u[i], dv = s * p.v[i];
         if (!std::isfinite(p.x[i]) || !std::isfinite(p.y[i]) || !std::isfinite(du)
             || !std::isfinite(dv) || (du == 0.0 && dv == 0.0)
-            || (mapped && !(i < p.c.size() && std::isfinite(p.c[i]) && !norm_masks(kind, p.c[i]))))
+            || (mapped && !(i < p.c.size() && std::isfinite(p.c[i]) && !norm_masks(kind, p.opts.norm, p.c[i]))))
             continue;
         const double x0 = p.x[i] - back * du, y0 = p.y[i] - back * dv;
         const double x1 = x0 + du, y1 = y0 + dv;
@@ -147,7 +147,7 @@ inline Color quiver_arrow_color(const QuiverPlot& p, std::size_t i) {
     const ColorNorm::Kind kind = norm_in_force(p.opts.norm, p.opts.vmin, p.opts.vmax);
     double t = 0.0;
     if (kind != ColorNorm::Kind::Linear) {
-        if (i < p.c.size()) t = norm_t(kind, p.opts.norm.center, p.opts.vmin, p.opts.vmax, p.c[i]);
+        if (i < p.c.size()) t = norm_t(kind, p.opts.norm, p.opts.vmin, p.opts.vmax, p.c[i]);
     } else {
         const double range = static_cast<double>(p.opts.vmax) - p.opts.vmin;
         t = range != 0.0 && i < p.c.size() ? (p.c[i] - p.opts.vmin) / range : 0.0;

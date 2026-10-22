@@ -120,6 +120,28 @@ namespace sextant {
         Axes& heatmap_tri(std::span<const double> x, std::span<const double> y,
                           std::span<const double> values, HeatmapTriOptions opts = {});
 
+        // Contour lines over a grid of points, as matplotlib's contour(X, Y, Z) with 1D
+        // X and Y: z is row-major, y.size() rows of x.size() values, z[i * cols + j]
+        // at (x[j], y[i]). x and y are finite and strictly monotone (either way), at
+        // least 2 each; z may hold NaN, which leaves out the squares it touches.
+        // Each square is split into four triangles around its centre (the corner
+        // mean), and the lines are the levels' crossings of that surface, straight
+        // on screen between grid edges. ContourOptions picks the levels (or their
+        // number), colours, width and labels. Throws std::invalid_argument for wrong
+        // lengths, fewer than 2 x or y, unordered or non-finite x or y, a
+        // non-finite level, more than 16384 levels, nlevels < 1, or a norm that
+        // doesn't fit; nothing is added then. Its own kind: contour_count(),
+        // contour_data(), PickKind::Contour.
+        Axes& contour(std::span<const double> x, std::span<const double> y, std::span<const double> z,
+                      ContourOptions opts = {});
+
+        // Filled contours, as matplotlib's contourf: contour() with
+        // `opts.filled` set. Each band between neighbouring levels takes one
+        // colour, decided per pixel on the same triangles, so contour() over the
+        // same data follows the band edges.
+        Axes& contourf(std::span<const double> x, std::span<const double> y, std::span<const double> z,
+                       ContourOptions opts = {});
+
         // A 2D histogram of the points (x[i], y[i]), as matplotlib's hist2d: the
         // count (or density) of each bin, drawn as a heatmap() over even bins, or
         // as a heatmap_rec() when Hist2dOptions gives edges for either axis. Not a
@@ -470,6 +492,9 @@ namespace sextant {
         std::size_t heatmap_tri_count() const;
         HeatmapTriData heatmap_tri_data(std::size_t i) const;
 
+        std::size_t contour_count() const;
+        ContourData contour_data(std::size_t i) const;
+
         std::size_t quiver_count() const;
         QuiverData quiver_data(std::size_t i) const;
 
@@ -554,6 +579,14 @@ namespace sextant {
         Axes& set_heatmap_tri_data(std::size_t i, std::span<const double> x, std::span<const double> y,
                                    std::span<const double> values);
 
+        // A contour's grid, checked as contour() checks it. ContourData's levels
+        // and `filled` replace the options' (empty levels: resolved again from
+        // `nlevels`); the span form keeps both.
+        Axes& set_contour_data(std::size_t i, const ContourData& data);
+
+        Axes& set_contour_data(std::size_t i, std::span<const double> x, std::span<const double> y,
+                               std::span<const double> z);
+
         // A quiver's arrows, validated as quiver(). The amp stays; `c` follows
         // QuiverData::c (the span overload keeps it while the count holds).
         Axes& set_quiver_data(std::size_t i, const QuiverData& data);
@@ -611,6 +644,9 @@ namespace sextant {
         bool shape_wedge_visible(std::size_t i) const;
         Axes& set_heatmap_tri_visible(std::size_t i, bool visible);
         bool heatmap_tri_visible(std::size_t i) const;
+
+        Axes& set_contour_visible(std::size_t i, bool visible);
+        bool contour_visible(std::size_t i) const;
 
         Axes& set_quiver_visible(std::size_t i, bool visible);
         bool quiver_visible(std::size_t i) const;

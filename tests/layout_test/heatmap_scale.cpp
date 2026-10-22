@@ -4,6 +4,7 @@
 // and the refusals. Part of sextant_layout_test; see layout_test.h.
 #include "layout_test.h"
 #include "heatmap_pixels.h"
+#include "figure_impl.h"
 
 namespace lt {
     using namespace sextant;
@@ -326,12 +327,74 @@ namespace lt {
             check(ax->remove(id) && ax->heatmap_count() == 2, "heatmap_rec: removed by its id");
         }
 
-        // ---- What a mesh does not take: contours, origin, line edits.
+        // ---- Contours on a mesh (v1.3 stage 3e-1): crossings between cell centres.
+        {
+            auto ramp_x = [](std::vector<double> xe, double level) {
+                HeatmapOptions o;
+                o.contours = {level};
+                const int n = static_cast<int>(xe.size()) - 1;
+                return trace_contours(with_edges(make_heatmap(2, n, [](int, int c) { return static_cast<float>(c); }, o),
+                                                 std::move(xe), {0, 1, 2}));
+            };
+            auto at_x = [](const ContourSet& set, double want) {
+                bool ok = set.size() == 1 && set[0].x.size() == 2;
+                for (std::size_t i = 0; ok && i < set[0].x.size(); ++i)
+                    ok = std::fabs(set[0].x[i] - want) < 1e-4 * std::max(1.0, std::fabs(want));
+                return ok;
+            };
+            // Centres 0.5, 2, 5: level 1.5 halfway from 2 to 5 (x_at() would give the edge, 3).
+            const ContourSet uneven = ramp_x({0, 1, 3, 7}, 1.5);
+            check(at_x(uneven, 3.5), "mesh contour: uneven edges cross halfway between the centres (3.5)");
+            check(uneven.size() == 1 && std::fabs(uneven[0].y[0] - 0.5f) < 1e-6f
+                      && std::fabs(uneven[0].y[1] - 1.5f) < 1e-6f,
+                  "mesh contour: and runs from row centre to row centre");
+            // Centres 5.5, 55, 550: level 0.5 at 30.25.
+            check(at_x(ramp_x({1, 10, 100, 1000}, 0.5), 30.25), "mesh contour: log-spaced edges, linear between centres");
+            // Descending edges: centres 5, 2, 0.5; level 1.5 at 1.25.
+            check(at_x(ramp_x({7, 3, 1, 0}, 1.5), 1.25), "mesh contour: descending edges");
+
+            HeatmapOptions o;
+            o.contours = {1.0};
+            const ContourSet ys = trace_contours(with_edges(
+                make_heatmap(3, 2, [](int r, int) { return static_cast<float>(r); }, o), {0, 1, 2}, {0, 2, 3, 10}));
+            check(ys.size() == 1 && std::fabs(ys[0].y[0] - 2.5f) < 1e-5f && std::fabs(ys[0].y[1] - 2.5f) < 1e-5f,
+                  "mesh contour: along y, the level at row 1's centre (2.5)");
+
+            // Drawn on a log axis: SVG polylines, the points placed through the scale.
+            RenderSnapshot s = limits(1.0, 1000.0, 0.0, 2.0, log10s(), AxisScale{});
+            HeatmapOptions so;
+            so.contours = {0.5};
+            s.heatmaps.push_back(with_edges(make_heatmap(2, 3, [](int, int c) { return static_cast<float>(c); }, so),
+                                            {1, 10, 100, 1000}, {0, 1, 2}));
+            const std::string svg = render_figure_svg(one_axes(s), W, H);
+            const std::size_t pl = svg.find("<polyline");
+            const std::size_t pts = svg.find("points=\"", pl);
+            float x0 = -1.0f;
+            if (pl != std::string::npos && pts != std::string::npos)
+                x0 = std::strtof(svg.c_str() + pts + 8, nullptr);
+            const float want = compute_figure_layout(one_axes(s), W, H).cells[0].tr.to_px(30.25);
+            std::printf("  mesh contour on a log axis: SVG x %.2f, the scale's %.2f\n", x0, want);
+            check(count(svg, "<polyline") == 1 && std::fabs(x0 - want) < 0.6f,
+                  "mesh contour: SVG on a log axis, one polyline at the scale's pixel");
+
+            // Through the public API: levels sorted, a non-finite one refused.
+            auto fig = Figure::create();
+            auto ax = fig->add_subplot(1, 1, 1);
+            const std::vector<double> v = {0, 1, 2, 3, 4, 5}, xe = {0, 1, 3, 7}, ye = {0, 1, 2};
+            ax->heatmap_rec(v, 2, 3, xe, ye, {.contours = {3.0, 1.0, 3.0}, .contour_labels = true});
+            check(throws([&] { ax->heatmap_rec(v, 2, 3, xe, ye, {.contours = {1.0, std::nan("")}}); })
+                      && ax->heatmap_count() == 1,
+                  "heatmap_rec: a non-finite contour level throws and adds nothing");
+            const FigureSnapshot fs = detail::FigureAccess::impl(*fig).build_figure_snapshot();
+            const HeatmapOptions& got = std::get<RenderSnapshot>(fs.axes[0].snap).heatmaps[0].opts;
+            check(got.contours == std::vector<double>{1.0, 3.0} && got.contour_labels,
+                  "heatmap_rec: contour levels sorted and de-duplicated, the style copied");
+        }
+
+        // ---- What a mesh does not take: origin, line edits.
         {
             HeatmapPlot hp = with_edges(make_heatmap(2, 2, [](int r, int c) { return static_cast<float>(r + c); }, {}),
                                         {0, 1, 3}, {0, 1, 2});
-            hp.opts.contours = {1.0};
-            check(trace_contours(hp).empty(), "mesh: traces no contours");
             RenderSnapshot t;
             t.heatmaps.push_back(hp);
             MatrixLineEdit e{MatrixLineEdit::Op::Insert, MatrixLineEdit::Axis::Col, 0, 1};

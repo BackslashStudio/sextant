@@ -350,6 +350,7 @@ set(SEXTANT_SOURCES
     src/style.cpp
     src/colormaps.cpp
     src/contour.cpp
+    src/contour_plot.cpp
     src/delaunay.cpp
     src/window_thread.cpp
     src/window_registry.cpp
@@ -814,6 +815,8 @@ if(SEXTANT_BUILD_TESTS)
             tests/layout_test/heatmap_scale.cpp
             tests/layout_test/heatmap_tri.cpp
             tests/layout_test/color_norm.cpp
+            tests/layout_test/boundary_norm.cpp
+            tests/layout_test/contour_kind.cpp
             tests/layout_test/marker_shapes.cpp
             tests/layout_test/marker_sizes.cpp
             tests/layout_test/line_steps.cpp

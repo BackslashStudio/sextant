@@ -405,10 +405,15 @@ namespace sextant {
             const float lh = font_vmetrics(cb.font_path, cb.fontsize).line_height;
             d.colorbars.reserve(reqs.size());
             for (const ColorbarRequest& r: reqs) {
-                const float num = horizontal
-                                      ? lh
-                                      : std::max(text_width(cb.font_path, cb.fontsize, colorbar_number(r.vmax)),
-                                                 text_width(cb.font_path, cb.fontsize, colorbar_number(r.vmin)));
+                float num = horizontal
+                                ? lh
+                                : std::max(text_width(cb.font_path, cb.fontsize, colorbar_number(r.vmax)),
+                                           text_width(cb.font_path, cb.fontsize, colorbar_number(r.vmin)));
+                // A stepped bar's labels are its boundaries: the widest of them.
+                if (!horizontal)
+                    for (double b: r.bounds)
+                        num = std::max(num, text_width(cb.font_path, cb.fontsize,
+                                                       colorbar_number(static_cast<float>(b))));
                 // The name costs a line height beside a vertical bar too (drawn
                 // rotated along it), outboard of the numbers.
                 const float name = r.name.empty()
@@ -416,7 +421,7 @@ namespace sextant {
                                        : kColorbarLabelGap + title_height(r.name, cb.font_path, cb.fontsize);
                 const float block = std::max(0.0f, cb.margin) + std::max(0.0f, cb.width)
                                     + kColorbarLabelGap + num + name;
-                d.colorbars.push_back({r.cmap, r.vmin, r.vmax, r.name, block});
+                d.colorbars.push_back({r.cmap, r.vmin, r.vmax, r.name, block, r.bounds, r.band_t});
                 d.colorbar_block += block;
             }
         }
@@ -1174,6 +1179,51 @@ namespace sextant {
             for (const LegendSlot& s: rows.slots) c.legend_slots.push_back({x + s.x, y + s.cy});
         }
 
+        // A stepped bar's boundary labels: boundary k of n bands sits k/n along
+        // the bar from vmin's end, at the numbers' anchor line. Every k-th is
+        // kept, the smallest stride whose neighbours don't overlap (a line
+        // height apart beside a vertical bar, their half widths plus a gap
+        // along a horizontal one); the last boundary always shows, replacing
+        // the one before it when they would overlap.
+        std::vector<ColorbarBox::Label> colorbar_bound_labels(const ColorbarBox& b, const std::vector<double>& bounds,
+                                                              const ColorbarOptions& cbo, float lh) {
+            const std::size_t n = bounds.size() - 1;
+            std::vector<ColorbarBox::Label> all(bounds.size());
+            std::vector<float> w(bounds.size(), 0.0f);
+            for (std::size_t k = 0; k < bounds.size(); ++k) {
+                const float f = static_cast<float>(k) / static_cast<float>(n);
+                all[k].text = colorbar_number(static_cast<float>(bounds[k]));
+                if (b.horizontal) {
+                    all[k].x = b.rect.x + f * b.rect.w;
+                    all[k].y = b.vmin_y;
+                    w[k] = text_width(cbo.font_path, cbo.fontsize, all[k].text);
+                } else {
+                    all[k].x = b.vmin_x;
+                    all[k].y = b.rect.y + b.rect.h - f * b.rect.h;
+                }
+            }
+            auto apart = [&](std::size_t i, std::size_t j) {
+                if (b.horizontal) return std::fabs(all[j].x - all[i].x) >= 0.5f * (w[i] + w[j]) + kColorbarLabelGap;
+                return std::fabs(all[j].y - all[i].y) >= lh;
+            };
+            std::vector<std::size_t> keep;
+            for (std::size_t stride = 1; stride <= n; ++stride) {
+                keep.clear();
+                for (std::size_t k = 0; k <= n; k += stride) keep.push_back(k);
+                if (keep.back() != n) {
+                    if (keep.size() > 1 && !apart(keep.back(), n)) keep.back() = n;
+                    else keep.push_back(n);
+                }
+                bool ok = true;
+                for (std::size_t i = 1; ok && i < keep.size(); ++i) ok = apart(keep[i - 1], keep[i]);
+                if (ok) break;
+            }
+            std::vector<ColorbarBox::Label> out;
+            out.reserve(keep.size());
+            for (std::size_t k: keep) out.push_back(std::move(all[k]));
+            return out;
+        }
+
         // Each bar in its block, outward from `start` (extended frame edge, or beyond a
         // legend on that side). Blocks come from compute_cell_decorations().
         void place_colorbars(CellLayout& c, const CellDecorations& dec, const ColorbarOptions& cbo,
@@ -1254,6 +1304,10 @@ namespace sextant {
                 } else {
                     b.name_x += ox;
                     b.name_y += oy;
+                }
+                if (spec.band_t.size() + 1 == spec.bounds.size() && !spec.band_t.empty()) {
+                    b.band_t = spec.band_t;
+                    b.labels = colorbar_bound_labels(b, spec.bounds, cbo, lh);
                 }
                 c.colorbars.push_back(std::move(b));
             }

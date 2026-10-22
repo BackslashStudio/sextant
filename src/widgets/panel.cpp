@@ -104,6 +104,7 @@ void sync_sheet(DataPanelState::SheetStyles& dst, const RenderSnapshot& sn) {
     copy(dst.circles, sn.circles);
     copy(dst.wedges, sn.wedges);
     copy(dst.heatmap_tris, sn.heatmap_tris);
+    copy(dst.contours, sn.contours);
     dst.ids = object_ids(sn, kPlotKinds2D);
 }
 

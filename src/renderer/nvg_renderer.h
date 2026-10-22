@@ -49,6 +49,9 @@ public:
                        unsigned long long data_generation, int axes_index);
 
     // The same for plane heatmaps, drawn in pass 3 as annotation.
+    // contour()'s inline labels (its lines are drawn with the data).
+    void draw_contour_labels(const CellLayout& cell, const RenderSnapshot& snap);
+
     void draw_contours3d(const CellLayout& cell, const RenderSnapshot3D& snap, ContourCache& cache,
                          unsigned long long data_generation, int axes_index);
 
@@ -78,6 +81,9 @@ public:
                    const std::string& text);
 
 private:
+    // draw_colorbar() for a stepped bar (a boundary norm).
+    void draw_stepped_colorbar(const ColorbarBox& box, const ColorbarOptions& opts);
+
     // Stroke and label one planned contour set.
     void stroke_contours(const ContourDraw& d, const Color& color,
                          float linewidth, float fontsize,

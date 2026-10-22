@@ -12,6 +12,7 @@
 #include "../line_steps.h"
 #include "../fill_geometry.h"
 #include "../heatmap_tri_geometry.h"
+#include "../contour_plot.h"
 #include "../quiver_geometry.h"
 #include "../reference_lines.h"
 #include "../shape_geometry.h"
@@ -560,13 +561,19 @@ void main() {
     // 0 and 1 land on the first and last entry as the CPU lookup does.
     // uNorm 0: vT is the colormap position; else vT is the value, normalised
     // here as norm_t() does: 1 log (uN = log vmin, log vmax), 2 two-slope
-    // (uN = vmin, centre, vmax).
+    // (uN = vmin, centre, vmax), 3 bands: uBands holds uNB (boundary, band
+    // position) texels (heatmap_band_texels()), the band found by binary
+    // search, a value outside the boundaries discarded; the position is
+    // already the entry, so it is not wrapped or clamped again (-1: no colour,
+    // discarded).
     static constexpr char k_heattri_frag[] = R"(
 #version 410 core
 in float vT;
 uniform sampler2D uCmap;
+uniform sampler2D uBands;
 uniform int uCyclic;
 uniform int uNorm;
+uniform int uNB;
 uniform vec3 uN;
 out vec4 FragColor;
 void main() {
@@ -577,8 +584,18 @@ void main() {
     } else if (uNorm == 2) {
         p = (vT - uN.y) * (uN.x - uN.y) > 0.0 ? 0.5 * (vT - uN.x) / (uN.y - uN.x)
                                              : 0.5 + 0.5 * (vT - uN.y) / (uN.z - uN.y);
+    } else if (uNorm == 3) {
+        if (!(vT >= texelFetch(uBands, ivec2(0, 0), 0).r && vT <= texelFetch(uBands, ivec2(uNB - 1, 0), 0).r))
+            discard;
+        int lo = 0, hi = uNB - 1;
+        for (int k = 0; k < 16 && hi - lo > 1; ++k) {
+            int mid = (lo + hi) / 2;
+            if (texelFetch(uBands, ivec2(mid, 0), 0).r <= vT) lo = mid; else hi = mid;
+        }
+        p = texelFetch(uBands, ivec2(lo, 0), 0).g;
+        if (p < 0.0) discard;
     }
-    float t = uCyclic != 0 ? fract(p) : clamp(p, 0.0, 1.0);
+    float t = uNorm == 3 ? p : uCyclic != 0 ? fract(p) : clamp(p, 0.0, 1.0);
     FragColor = vec4(texture(uCmap, vec2((t * 255.0 + 0.5) / 256.0, 0.5)).rgb, 1.0);
 }
 )";
@@ -1852,7 +1869,8 @@ void main() {
         heatmap_u_ = {loc(heatmap_program_, "uResolution"), loc(heatmap_program_, "uTex")};
         heattri_u_ = {loc(heattri_program_, "uResolution"), loc(heattri_program_, "uCmap"),
                       loc(heattri_program_, "uCyclic"), loc(heattri_program_, "uNorm"),
-                      loc(heattri_program_, "uN")};
+                      loc(heattri_program_, "uN"), loc(heattri_program_, "uBands"),
+                      loc(heattri_program_, "uNB")};
         plane3d_u_ = {
             loc(plane3d_program_, "uClip"), loc(plane3d_program_, "uTex"),
             loc(plane3d_program_, "uAlpha"), loc(plane3d_program_, "uBoxScale"),
@@ -2006,6 +2024,7 @@ void main() {
         if (heattri_vao_) glDeleteVertexArrays(1, &heattri_vao_);
         if (heattri_program_) glDeleteProgram(heattri_program_);
         if (heattri_cmap_tex_) glDeleteTextures(1, &heattri_cmap_tex_);
+        if (heattri_bands_tex_) glDeleteTextures(1, &heattri_bands_tex_);
 
         if (plane_comp_vbo_) glDeleteBuffers(1, &plane_comp_vbo_);
         if (plane_comp_vao_) glDeleteVertexArrays(1, &plane_comp_vao_);
@@ -2503,7 +2522,7 @@ void main() {
                 for (std::size_t i = 0; i < sp.x.size(); ++i) {
                     const double t = kind == ColorNorm::Kind::Linear
                                          ? ((vrange != 0.0f) ? (sp.z[i] - vmin) / vrange : 0.0)
-                                         : norm_t(kind, sp.opts.norm.center, sp.opts.vmin, sp.opts.vmax, sp.z[i]);
+                                         : norm_t(kind, sp.opts.norm, sp.opts.vmin, sp.opts.vmax, sp.z[i]);
                     const uint8_t* c = &lut[colormaps::index(t, sp.opts.cmap.is_cyclic()) * 4];
 
                     if (e.data_space) {
@@ -2813,7 +2832,44 @@ void main() {
             case PlotKind::Circle: draw_shape_of(snap.circles[r.index], tr, pr); break;
             case PlotKind::Wedge: draw_shape_of(snap.wedges[r.index], tr, pr); break;
             case PlotKind::HeatmapTri: draw_heatmap_tri(snap.heatmap_tris[r.index], tr, pr); break;
+            case PlotKind::Contour:
+                draw_contour(snap.contours[r.index], snap.axes_style.font_path, tr, pr);
+                break;
             default: break;
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // draw_contour
+    // -------------------------------------------------------------------------
+    // A contourf: its triangles through draw_heatmap_tri() (the band found per
+    // fragment). A contour: its lines as pixel paths, one stroke per level in
+    // its colour, broken where a label goes (the labels themselves are text,
+    // NvgRenderer::draw_contour_labels()). A plane has no labels: whole lines.
+    void DataRenderer::draw_contour(const ContourPlot& p, const std::string& font_path, const CoordTransform& tr,
+                                    const PlotRect& pr) {
+        if (!p.geom) return;
+        if (p.opts.filled) {
+            if (p.geom->levels.size() >= 2 && !p.geom->fill.tri.empty()) draw_heatmap_tri(p.geom->fill, tr, pr);
+            return;
+        }
+        if (!(p.opts.linewidth > 0.0f) || p.geom->lines.empty()) return;
+        const ContourDraw d = plan_contours(p.geom->lines, tr, p.opts.labels && plane_index_ < 0, p.opts.fontsize,
+                                            font_path);
+        std::vector<std::vector<std::vector<float>>> by_level(p.geom->levels.size());
+        for (const ContourRun& run : d.runs) {
+            std::vector<float> v;
+            v.reserve(run.px.size() * 2);
+            for (std::size_t k = 0; k < run.px.size(); ++k) {
+                v.push_back(run.px[k]);
+                v.push_back(run.py[k]);
+            }
+            by_level[p.geom->line_level[run.line]].push_back(std::move(v));
+        }
+        for (std::size_t k = 0; k < by_level.size(); ++k) {
+            if (by_level[k].empty()) continue;
+            const std::optional<Color> c = contour_line_color(p, k);
+            if (c) stroke_rings(by_level[k], tr, pr, p.opts.linewidth, LineStyle::Solid, *c, false);
         }
     }
 
@@ -3609,11 +3665,33 @@ void main() {
         const float res[2] = {tr.win_w, tr.win_h};
         glUniform2fv(heattri_u_.resolution, 1, res);
         glUniform1i(heattri_u_.cyclic, p.opts.cmap.is_cyclic() ? 1 : 0);
-        glUniform1i(heattri_u_.norm, kind == ColorNorm::Kind::Log ? 1 : kind == ColorNorm::Kind::TwoSlope ? 2 : 0);
+        glUniform1i(heattri_u_.norm, kind == ColorNorm::Kind::Log ? 1 : kind == ColorNorm::Kind::TwoSlope ? 2
+                                     : kind == ColorNorm::Kind::Boundaries ? 3 : 0);
         if (kind == ColorNorm::Kind::Log)
             glUniform3f(heattri_u_.n, std::log(p.opts.vmin), std::log(p.opts.vmax), 0.0f);
         else
             glUniform3f(heattri_u_.n, p.opts.vmin, p.opts.norm.center, p.opts.vmax);
+
+        // A boundary norm's bands, on unit 1 (re-uploaded per draw: a few texels).
+        if (kind == ColorNorm::Kind::Boundaries) {
+            const std::vector<float> texels = heatmap_band_texels(
+                p.opts.norm.bounds, p.band_t.empty() ? norm_band_positions(p.opts.norm) : p.band_t,
+                p.opts.cmap.is_cyclic());
+            glActiveTexture(GL_TEXTURE1);
+            if (!heattri_bands_tex_) {
+                glGenTextures(1, &heattri_bands_tex_);
+                glBindTexture(GL_TEXTURE_2D, heattri_bands_tex_);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            }
+            glBindTexture(GL_TEXTURE_2D, heattri_bands_tex_);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RG32F, static_cast<GLsizei>(texels.size() / 2), 1, 0, GL_RG, GL_FLOAT,
+                         texels.data());
+            glUniform1i(heattri_u_.bands, 1);
+            glUniform1i(heattri_u_.nb, static_cast<GLint>(texels.size() / 2));
+        }
 
         glActiveTexture(GL_TEXTURE0);
         if (!heattri_cmap_tex_) {

@@ -171,19 +171,28 @@ namespace sextant {
     //   two_slope(c)    vmin..c on the map's lower half and c..vmax on its upper
     //                   half (TwoSlopeNorm(vcenter=c)), for a diverging map around
     //                   a centre off the middle. c lies strictly between vmin and vmax.
+    //   boundaries(b)   one colour per band between neighbouring boundaries
+    //                   (BoundaryNorm(b, cmap.N)): band i is [b[i], b[i+1]), the
+    //                   last one closed, and the bands' colours spread over the
+    //                   whole map. 2 to 16384 boundaries, finite and strictly
+    //                   increasing; vmin/vmax are unused. A value outside
+    //                   [b.front(), b.back()] has no colour and is not drawn. The
+    //                   colorbar is stepped, labelled at the boundaries.
     // A plotting call whose norm doesn't fit its vmin/vmax throws
     // std::invalid_argument. One that stops fitting later (a panel edit) draws
     // as linear until it fits again.
     struct ColorNorm {
-        enum class Kind { Linear, Log, TwoSlope };
+        enum class Kind { Linear, Log, TwoSlope, Boundaries };
         Kind kind = Kind::Linear;
-        float center = 0.0f; // TwoSlope only
+        float center = 0.0f;        // TwoSlope only
+        std::vector<double> bounds; // Boundaries only
 
         static constexpr ColorNorm linear() { return {}; }
-        static constexpr ColorNorm log() { return { Kind::Log, 0.0f }; }
-        static constexpr ColorNorm two_slope(float center) { return { Kind::TwoSlope, center }; }
+        static constexpr ColorNorm log() { return { Kind::Log, 0.0f, {} }; }
+        static constexpr ColorNorm two_slope(float center) { return { Kind::TwoSlope, center, {} }; }
+        static ColorNorm boundaries(std::vector<double> b) { return { Kind::Boundaries, 0.0f, std::move(b) }; }
 
-        friend constexpr bool operator==(const ColorNorm&, const ColorNorm&) = default;
+        friend bool operator==(const ColorNorm&, const ColorNorm&) = default;
     };
 
     // Error-bar whisker end: `Flat` crossbar ("to here") or `Arrow` head pointing
@@ -609,7 +618,7 @@ namespace sextant {
     };
 
     // A heatmap over cells of any size (Axes::heatmap_rec()): HeatmapOptions
-    // without `origin` (row 0 is at the first y edge) and without contours.
+    // without `origin` (row 0 is at the first y edge).
     struct HeatmapRecOptions {
         Colormap cmap = Colormap::Viridis;
         float vmin = 0.0f;
@@ -619,6 +628,14 @@ namespace sextant {
         std::string name;    // see HeatmapOptions::name
         bool visible = true; // see LineOptions::visible
         double zorder = 0.0; // see LineOptions::zorder
+
+        // See HeatmapOptions::contours. Traced through the cell centres: a
+        // crossing lies on the straight line between two neighbouring centres.
+        std::vector<double> contours;
+        Color contour_color = Color::Black;
+        float contour_linewidth = 1.0f;
+        bool contour_labels = false;
+        float contour_fontsize = 10.0f;
 
         // See LineOptions::hint_labels. Row-major, index = row*cols + col.
         std::vector<std::string> hint_labels;
@@ -640,6 +657,41 @@ namespace sextant {
         // See LineOptions::hint_labels: one per vertex; hover shows the label of
         // the hovered triangle's nearest vertex.
         std::vector<std::string> hint_labels;
+    };
+
+    // Contour lines or filled contours (Axes::contour(), Axes::contourf()), as
+    // matplotlib's contour / contourf over a grid of points.
+    struct ContourOptions {
+        // The levels, in z's units (sorted and de-duplicated at the call; at most
+        // 16384, finite). Empty: `nlevels` nice values over z's finite range, the
+        // first at or below its minimum and the last at or above its maximum (as
+        // matplotlib's default, MaxNLocator(nlevels + 1)).
+        std::vector<double> levels;
+        int nlevels = 7;
+
+        // Filled bands between neighbouring levels (contourf()) instead of lines.
+        // A value outside the first..last level is not filled.
+        bool filled = false;
+
+        // Colours: a line takes its level's place on the colormap, a band its
+        // midpoint's, through `norm` over vmin..vmax (unset = the first and last
+        // level).
+        Colormap cmap = Colormap::Viridis;
+        ColorNorm norm; // see ColorNorm
+        std::optional<float> vmin, vmax;
+
+        // Lines only: one colour for every line instead of the colormap (as
+        // matplotlib's colors=), their width in pixels, and inline level labels
+        // (breaking each line to fit, as HeatmapOptions::contour_labels).
+        std::optional<Color> line_color;
+        float linewidth = 1.5f;
+        bool labels = false;
+        float fontsize = 10.0f; // pixels as drawn; not AxesStyle's
+
+        bool colorbar = false; // a contourf's is stepped, labelled at the levels
+        std::string name;      // see HeatmapOptions::name
+        bool visible = true;   // see LineOptions::visible
+        double zorder = 0.0;   // see LineOptions::zorder
     };
 
     // A 2D histogram (Axes::hist2d()), as matplotlib's hist2d.
@@ -1123,6 +1175,16 @@ namespace sextant {
     struct HeatmapTriData {
         std::vector<double> x, y, values;
         std::vector<std::uint32_t> tri;
+    };
+
+    // A contour() or contourf(): x (one per column), y (one per row), z row-major
+    // (y.size() rows of x.size()), the levels drawn (contour_data(): resolved;
+    // set_contour_data(): empty re-resolves from the options) and whether it
+    // is filled.
+    struct ContourData {
+        std::vector<double> x, y, z;
+        std::vector<double> levels;
+        bool filled = false;
     };
 
     // How an axline() is given: a value on one axis, a point and a slope, or

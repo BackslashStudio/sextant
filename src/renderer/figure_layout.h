@@ -96,6 +96,8 @@ namespace sextant {
         // Total thickness: margin + width + number gap + numbers' extent, plus
         // gap + line height when named.
         float block = 0.0f;
+        // A stepped bar's (ColorbarRequest's); empty for the gradient.
+        std::vector<double> bounds, band_t;
     };
 
     struct CellDecorations {
@@ -263,6 +265,19 @@ namespace sextant {
         // vertical bar (the rotation point). Empty: no text, nothing reserved.
         std::string name;
         float name_x = 0.0f, name_y = 0.0f;
+
+        // A stepped bar (a boundary norm): one flat block per band, of equal
+        // length, from vmin's end, in each band's colormap position; and its
+        // boundary labels (every k-th when they would crowd, the first and
+        // last always), anchored as the vmin/vmax numbers. Empty: a gradient
+        // bar labelled at vmin and vmax.
+        std::vector<double> band_t;
+        struct Label {
+            float x = 0.0f, y = 0.0f;
+            std::string text;
+        };
+        std::vector<Label> labels;
+        bool stepped() const { return !band_t.empty(); }
     };
 
     struct CellLayout {

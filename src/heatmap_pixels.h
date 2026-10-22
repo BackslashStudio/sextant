@@ -38,7 +38,7 @@ public:
             if (norm_ == ColorNorm::Kind::Linear) {
                 t = (vrange_ != 0.0f) ? (v - vmin_) / vrange_ : 0.0;
             } else {
-                t = norm_t(norm_, hp_.opts.norm.center, hp_.opts.vmin, hp_.opts.vmax, v);
+                t = norm_t(norm_, hp_.opts.norm, hp_.opts.vmin, hp_.opts.vmax, v);
                 if (std::isnan(t)) {
                     std::memset(out, 0, 4);
                     return;

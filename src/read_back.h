@@ -4,6 +4,7 @@
 #include "sextant/axes3d.h"
 #include "object_remove.h"
 #include "plot_objects.h"
+#include "contour_plot.h"
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -292,6 +293,9 @@ namespace sextant::read_back {
     inline PolyData   to_data(const PolyPlot& p)   { return { p.x.get(), p.y.get() }; }
     inline HeatmapTriData to_data(const HeatmapTriPlot& p) {
         return { p.x.get(), p.y.get(), p.values.get(), p.tri.get() };
+    }
+    inline ContourData to_data(const ContourPlot& p) {
+        return { p.x.get(), p.y.get(), p.z.get(), p.geom ? p.geom->levels : std::vector<double>{}, p.opts.filled };
     }
     inline CircleData to_data(const CirclePlot& p) { return { p.cx, p.cy, p.r }; }
     inline WedgeData  to_data(const WedgePlot& p)  {

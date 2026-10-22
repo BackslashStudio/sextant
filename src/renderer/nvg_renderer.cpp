@@ -5,6 +5,7 @@
 #include "../line_dash.h"
 #include "../rich_text.h"
 #include "../contour.h"
+#include "../contour_plot.h"
 #include "../quiver_geometry.h"
 #include "marker_shape.h"
 #include "nanovg.h"
@@ -318,6 +319,39 @@ namespace sextant {
                             hp.opts.contour_fontsize, snap.axes_style.font_path);
         }
 
+        nvgRestore(vg_);
+    }
+
+    // A contour()'s inline labels (its lines are data, drawn in pass 2), each
+    // in its line's colour; in pass 3 with the heatmap contours, clipped to
+    // the frame.
+    void NvgRenderer::draw_contour_labels(const CellLayout& cell, const RenderSnapshot& snap) {
+        bool any = false;
+        for (const auto& cp: snap.contours) any = any || (object_shown(cp) && cp.opts.labels && !cp.opts.filled);
+        if (!any || font_ == -1) return;
+        const PlotRect& r = cell.frame;
+        nvgSave(vg_);
+        nvgScissor(vg_, r.x, r.y, r.w, r.h);
+        nvgFontFaceId(vg_, font_for_path(snap.axes_style.font_path));
+        nvgTextAlign(vg_, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+        for (const ObjectRef& o: draw_order(snap)) {
+            if (o.kind != PlotKind::Contour) continue;
+            const ContourPlot& cp = snap.contours[o.index];
+            if (!object_shown(cp) || !cp.opts.labels || cp.opts.filled || !cp.geom) continue;
+            const ContourDraw d = plan_contours(cp.geom->lines, cell.tr, true, cp.opts.fontsize,
+                                                snap.axes_style.font_path);
+            nvgFontSize(vg_, cp.opts.fontsize);
+            for (const auto& lb: d.labels) {
+                const std::optional<Color> c = contour_line_color(cp, cp.geom->line_level[lb.line]);
+                if (!c) continue;
+                nvgFillColor(vg_, nvgRGBAf(c->r, c->g, c->b, c->a));
+                nvgSave(vg_);
+                nvgTranslate(vg_, lb.x, lb.y);
+                nvgRotate(vg_, lb.angle);
+                nvgText(vg_, 0.0f, 0.0f, lb.text.c_str(), nullptr);
+                nvgRestore(vg_);
+            }
+        }
         nvgRestore(vg_);
     }
 
@@ -762,6 +796,10 @@ namespace sextant {
     }
 
     void NvgRenderer::draw_colorbar(const ColorbarBox& box, const ColorbarOptions& opts) {
+        if (box.stepped()) {
+            draw_stepped_colorbar(box, opts);
+            return;
+        }
         const PlotRect& r = box.rect;
         const Colormap cmap = box.cmap;
         const float vmin = box.vmin, vmax = box.vmax;
@@ -835,6 +873,57 @@ namespace sextant {
                     label(0, 0, kCentred, box.name, opts.font_path, opts.fontsize);
                     nvgRestore(vg_);
                 }
+            }
+        }
+    }
+
+    // A boundary norm's bar: a flat block per band, its colour the entry the
+    // data's cells take, then the border, the boundary labels and the name.
+    void NvgRenderer::draw_stepped_colorbar(const ColorbarBox& box, const ColorbarOptions& opts) {
+        const PlotRect& r = box.rect;
+        const std::uint8_t* lut = colormaps::get(box.cmap);
+        const std::size_t n = box.band_t.size();
+        for (std::size_t i = 0; i < n; ++i) {
+            const std::uint8_t* c = &lut[colormaps::index(box.band_t[i], box.cmap.is_cyclic()) * 4];
+            const float f0 = static_cast<float>(i) / static_cast<float>(n);
+            const float f1 = static_cast<float>(i + 1) / static_cast<float>(n);
+            nvgBeginPath(vg_);
+            if (box.horizontal) nvgRect(vg_, r.x + f0 * r.w, r.y, (f1 - f0) * r.w, r.h);
+            else nvgRect(vg_, r.x, r.y + r.h - f1 * r.h, r.w, (f1 - f0) * r.h);
+            nvgFillColor(vg_, nvgRGBA(c[0], c[1], c[2], 255));
+            nvgFill(vg_);
+        }
+
+        const auto& bc = opts.border_color;
+        nvgBeginPath(vg_);
+        nvgRect(vg_, r.x, r.y, r.w, r.h);
+        nvgStrokeColor(vg_, nvgRGBAf(bc.r, bc.g, bc.b, bc.a));
+        nvgStrokeWidth(vg_, opts.border_linewidth);
+        nvgStroke(vg_);
+
+        if (font_ == -1) return;
+        const auto& tc = opts.text_color;
+        nvgFontFaceId(vg_, font_for_path(opts.font_path));
+        nvgFontSize(vg_, opts.fontsize);
+        nvgFillColor(vg_, nvgRGBAf(tc.r, tc.g, tc.b, tc.a));
+        const int halign = box.num_align == HAlign::Left
+                               ? NVG_ALIGN_LEFT
+                               : box.num_align == HAlign::Right
+                                     ? NVG_ALIGN_RIGHT
+                                     : NVG_ALIGN_CENTER;
+        nvgTextAlign(vg_, halign | NVG_ALIGN_MIDDLE);
+        for (const ColorbarBox::Label& l: box.labels) nvgText(vg_, l.x, l.y, l.text.c_str(), nullptr);
+
+        if (!box.name.empty()) {
+            constexpr int kCentred = NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE;
+            if (box.horizontal) {
+                label(box.name_x, box.name_y, kCentred, box.name, opts.font_path, opts.fontsize);
+            } else {
+                nvgSave(vg_);
+                nvgTranslate(vg_, box.name_x, box.name_y);
+                nvgRotate(vg_, -NVG_PI / 2.0f);
+                label(0, 0, kCentred, box.name, opts.font_path, opts.fontsize);
+                nvgRestore(vg_);
             }
         }
     }

@@ -120,16 +120,16 @@ namespace lt {
 
         // ---- The shared arithmetic.
         {
-            check(std::abs(norm_t(K::Log, 0.0f, 1.0, 100.0, 10.0) - 0.5) < 1e-12
-                      && std::abs(norm_t(K::Log, 0.0f, 1.0, 100.0, 1000.0) - 1.5) < 1e-12,
+            check(std::abs(norm_t(K::Log, ColorNorm{}, 1.0, 100.0, 10.0) - 0.5) < 1e-12
+                      && std::abs(norm_t(K::Log, ColorNorm{}, 1.0, 100.0, 1000.0) - 1.5) < 1e-12,
                   "norm: log puts each decade evenly (10 halfway from 1 to 100)");
-            check(std::isnan(norm_t(K::Log, 0.0f, 1.0, 100.0, 0.0)) && norm_masks(K::Log, -2.0)
-                      && !norm_masks(K::Linear, -2.0),
+            check(std::isnan(norm_t(K::Log, ColorNorm{}, 1.0, 100.0, 0.0)) && norm_masks(K::Log, ColorNorm{}, -2.0)
+                      && !norm_masks(K::Linear, ColorNorm{}, -2.0),
                   "norm: log leaves values <= 0 without a colour; linear keeps them");
-            check(norm_t(K::TwoSlope, 0.0f, -1.0, 3.0, 0.0) == 0.5 && norm_t(K::TwoSlope, 0.0f, -1.0, 3.0, -0.5) == 0.25
-                      && norm_t(K::TwoSlope, 0.0f, -1.0, 3.0, 1.5) == 0.75,
+            check(norm_t(K::TwoSlope, ColorNorm{}, -1.0, 3.0, 0.0) == 0.5 && norm_t(K::TwoSlope, ColorNorm{}, -1.0, 3.0, -0.5) == 0.25
+                      && norm_t(K::TwoSlope, ColorNorm{}, -1.0, 3.0, 1.5) == 0.75,
                   "norm: two-slope maps vmin..centre to 0..0.5 and centre..vmax to 0.5..1");
-            check(norm_t(K::TwoSlope, 0.0f, 3.0, -1.0, 1.5) == 0.25, "norm: two-slope with vmin > vmax mirrors");
+            check(norm_t(K::TwoSlope, ColorNorm{}, 3.0, -1.0, 1.5) == 0.25, "norm: two-slope with vmin > vmax mirrors");
             check(norm_fits(ColorNorm::log(), 0.1, 5.0) && !norm_fits(ColorNorm::log(), 0.0, 5.0)
                       && !norm_fits(ColorNorm::two_slope(5.0f), 0.0, 5.0) && norm_fits(ColorNorm::two_slope(1.0f), 0.0, 5.0),
                   "norm: log fits above 0, two-slope with its centre strictly inside");

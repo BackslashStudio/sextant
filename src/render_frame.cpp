@@ -137,6 +137,8 @@ void render_frame(RenderDevice& dev, DataRenderer& data,
         for (std::size_t k = 0; k < twins.size(); ++k)
             nvg.draw_contours(c.twins[k], twins[k].snap, data.contour_cache(), fsnap.data_generation,
                               axes_key(c.slot.index, twins[k].layer));
+        nvg.draw_contour_labels(c, snap);
+        for (std::size_t k = 0; k < twins.size(); ++k) nvg.draw_contour_labels(c.twins[k], twins[k].snap);
         // A twin's frame is its host's: drawn once, the twinned edges in their
         // axes' colors.
         nvg.draw_axes_border(c.frame, snap.axes_style, twin_edge_colors(fsnap.axes[i]));

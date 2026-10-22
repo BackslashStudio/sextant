@@ -2915,12 +2915,90 @@ static void part_color_norms() {
     fig->show(true);
 }
 
+// Contours on a mesh, the boundary norm and its stepped colorbar, contour and
+// contourf (also on a plane).
+static void part_contours() {
+    constexpr int NX = 61, NY = 41;
+    std::vector<double> gx(NX), gy(NY), field, holed;
+    for (int j = 0; j < NX; ++j) gx[j] = -3.0 + 6.0 * j / (NX - 1);
+    for (int i = 0; i < NY; ++i) gy[i] = -2.0 + 4.0 * i / (NY - 1);
+    for (double y : gy)
+        for (double x : gx) {
+            const double v = std::exp(-((x - 1) * (x - 1) + y * y)) - 0.7 * std::exp(-((x + 1.2) * (x + 1.2) + (y - 0.5) * (y - 0.5)) / 0.6);
+            field.push_back(v);
+            holed.push_back(x * x + y * y < 0.5 ? std::nan("") : v);
+        }
+
+    // A mesh: log-spaced columns, a decaying ridge.
+    constexpr int MC = 30, MR = 20;
+    std::vector<double> mx, my, mesh;
+    for (int j = 0; j <= MC; ++j) mx.push_back(std::pow(10.0, 3.0 * j / MC));
+    for (int i = 0; i <= MR; ++i) my.push_back(i / static_cast<double>(MR));
+    for (int i = 0; i < MR; ++i)
+        for (int j = 0; j < MC; ++j) {
+            const double lx = 3.0 * (j + 0.5) / MC, y = (i + 0.5) / MR;
+            mesh.push_back(std::sin(2.0 * lx) * std::cos(3.0 * y) + 0.3 * lx);
+        }
+
+    // Scattered vertices for heatmap_tri.
+    std::vector<double> tx, ty, tv;
+    unsigned s = 77;
+    auto rnd = [&s] { s = s * 1103515245u + 12345u; return ((s >> 8) & 0xFFFF) / 65535.0; };
+    for (int i = 0; i < 300; ++i) {
+        tx.push_back(rnd() * 4.0 - 2.0);
+        ty.push_back(rnd() * 4.0 - 2.0);
+        tv.push_back(tx.back() * tx.back() + ty.back() * ty.back());
+    }
+
+    using sextant::ColorNorm;
+    auto fig = sextant::Figure::create({.width = 1500, .height = 900, .title = "contours"});
+    fig->suptitle("contour / contourf, contours on heatmap_rec, ColorNorm::boundaries");
+    {
+        auto a = fig->add_subplot(2, 3, 1);
+        a->contourf(gx, gy, field, {.nlevels = 10, .cmap = sextant::Colormap::RdBu.reversed(), .colorbar = true,
+                                    .name = "contourf"});
+        a->contour(gx, gy, field, {.nlevels = 10, .line_color = sextant::Color::Black, .linewidth = 0.8f,
+                                   .labels = true});
+        a->set_title("contourf + contour (black, labelled) of the same data");
+    }
+    fig->add_subplot(2, 3, 2)
+            ->contour(gx, gy, holed, {.nlevels = 12, .cmap = sextant::Colormap::Plasma, .linewidth = 2.0f,
+                                      .labels = true, .colorbar = true, .name = "level"})
+            .set_title("contour, colormapped lines, a NaN hole");
+    {
+        auto a = fig->add_subplot(2, 3, 3);
+        a->set_xscale(sextant::Scale::Log);
+        a->heatmap_rec(mesh, MR, MC, mx, my, {.vmin = -1.0f, .vmax = 2.0f, .colorbar = true,
+                                              .contours = {-0.5, 0.0, 0.5, 1.0, 1.5}, .contour_labels = true});
+        a->set_title("heatmap_rec, log-spaced edges, with contours");
+    }
+    fig->add_subplot(2, 3, 4)
+            ->heatmap(field, NY, NX, {-3, 3}, {-2, 2},
+                      {.cmap = sextant::Colormap::Viridis, .norm = ColorNorm::boundaries({-0.7, -0.3, 0, 0.1, 0.5, 1}),
+                       .colorbar = true, .name = "bands"})
+            .set_title("heatmap, boundary norm (uneven bands, stepped bar)");
+    fig->add_subplot(2, 3, 5)
+            ->heatmap_tri(tx, ty, tv, {.norm = ColorNorm::boundaries({0, 0.5, 1, 2, 4, 8}), .colorbar = true,
+                                       .name = "r^2"})
+            .set_title("heatmap_tri, boundary norm per pixel");
+    {
+        auto a = fig->add_subplot3d(2, 3, 6);
+        auto pl = a->plane(sextant::PlaneOrientation::XY, 0.0);
+        pl->contourf(gx, gy, field, {.nlevels = 8, .colorbar = true, .name = "plane"});
+        pl->contour(gx, gy, field, {.nlevels = 8, .line_color = sextant::Color::Black, .linewidth = 1.0f});
+        a->set_title("contourf + contour on a plane");
+    }
+    savefig_and_check_memory(fig, "part_contours");
+    fig->show(true);
+}
+
 static void test_heatmap() {
     part_heatmaps();
     part_images();
     part_heatmap_scales();
     part_heatmap_tri();
     part_color_norms();
+    part_contours();
 }
 
 // Text and annotations in 2D and 3D: anchors, rotation, boxes, coordinates in

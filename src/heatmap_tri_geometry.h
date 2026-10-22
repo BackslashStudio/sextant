@@ -6,6 +6,7 @@
 // with shading="gouraud"), on any axis scale. Under a non-linear norm the
 // value is interpolated and the norm applied per pixel.
 #include "color_norm.h"
+#include "colormaps.h"
 #include "coord_transform.h"
 #include "plot_objects.h"
 
@@ -39,9 +40,40 @@ inline double heatmap_tri_attr(const HeatmapTriOptions& o, ColorNorm::Kind kind,
     return kind == ColorNorm::Kind::Linear ? heatmap_tri_t(o, v) : v;
 }
 
-// An interpolated heatmap_tri_attr() as a colormap position.
-inline double heatmap_tri_pos(const HeatmapTriOptions& o, ColorNorm::Kind kind, double a) {
-    return kind == ColorNorm::Kind::Linear ? a : norm_t(kind, o.norm.center, o.vmin, o.vmax, a);
+// An interpolated heatmap_tri_attr() as a colormap position; a contourf's
+// fill takes its own band colours (HeatmapTriPlot::band_t).
+inline double heatmap_tri_pos(const HeatmapTriPlot& p, ColorNorm::Kind kind, double a) {
+    if (kind == ColorNorm::Kind::Linear) return a;
+    if (kind == ColorNorm::Kind::Boundaries && !p.band_t.empty()) {
+        const std::ptrdiff_t b = norm_band(p.opts.norm.bounds, a);
+        return b < 0 || static_cast<std::size_t>(b) >= p.band_t.size() ? std::numeric_limits<double>::quiet_NaN()
+                                                                       : p.band_t[static_cast<std::size_t>(b)];
+    }
+    return norm_t(kind, p.opts.norm, p.opts.vmin, p.opts.vmax, a);
+}
+
+// Bands for the GL fragment's lookup under a boundary norm, as (boundary,
+// band position) pairs, one per boundary (the last pair's position unused).
+// Each position is the colormap entry the CPU picks for it (index / 255,
+// already wrapped or clamped), so the GPU samples the same entry; a NaN
+// position (a band with no colour) is -1, which the fragment discards.
+inline std::vector<float> heatmap_band_texels(const std::vector<double>& bounds, const std::vector<double>& band_t,
+                                              bool cyclic) {
+    std::vector<float> out(bounds.size() * 2, 0.0f);
+    for (std::size_t i = 0; i < bounds.size(); ++i) {
+        out[2 * i] = static_cast<float>(bounds[i]);
+        if (i < band_t.size())
+            out[2 * i + 1] = std::isnan(band_t[i]) ? -1.0f
+                                                   : static_cast<float>(colormaps::index(band_t[i], cyclic)) / 255.0f;
+    }
+    return out;
+}
+
+// A boundary norm's own band positions (spread over the whole map).
+inline std::vector<double> norm_band_positions(const ColorNorm& n) {
+    std::vector<double> t(n.bounds.size() > 1 ? n.bounds.size() - 1 : 0);
+    for (std::size_t i = 0; i < t.size(); ++i) t[i] = norm_band_t(i, t.size());
+    return t;
 }
 
 // One drawn triangle: its vertices (in pixels, or in scale space for the hit
@@ -54,7 +86,9 @@ struct TriPx {
 
 // The triangles that draw, in `tri` order: none with a NaN value, a value the
 // norm leaves without a colour (<= 0 under log) or a vertex the scale cannot
-// place (<= 0 on Log). `map(x, y, ox, oy)` places a vertex.
+// place (<= 0 on Log). `map(x, y, ox, oy)` places a vertex. A boundary norm
+// leaves out pixels, not triangles: a vertex outside the boundaries still
+// draws the part of its triangles inside them.
 template <class Map>
 std::vector<TriPx> heatmap_tri_mapped(const HeatmapTriPlot& p, const AxisScale& xs, const AxisScale& ys,
                                       Map&& map) {
@@ -65,7 +99,9 @@ std::vector<TriPx> heatmap_tri_mapped(const HeatmapTriPlot& p, const AxisScale& 
     std::vector<char> ok(n);
     const ColorNorm::Kind kind = heatmap_tri_norm(p.opts);
     for (std::size_t i = 0; i < n; ++i) {
-        ok[i] = !std::isnan(p.values[i]) && !norm_masks(kind, p.values[i]) && xs.valid(p.x[i]) && ys.valid(p.y[i]);
+        ok[i] = !std::isnan(p.values[i])
+                && !(kind == ColorNorm::Kind::Log && norm_masks(kind, p.opts.norm, p.values[i]))
+                && xs.valid(p.x[i]) && ys.valid(p.y[i]);
         if (ok[i]) map(p.x[i], p.y[i], px[i], py[i]);
     }
     out.reserve(p.tri.size() / 3);
@@ -137,7 +173,7 @@ inline std::vector<float> rasterize_heatmap_tri(const HeatmapTriPlot& p, const C
                 const auto wts = tri_weights(q, x0 + i + 0.5, y0 + j + 0.5);
                 if (!wts) continue;
                 out[static_cast<std::size_t>(j) * static_cast<std::size_t>(w) + static_cast<std::size_t>(i)] =
-                    static_cast<float>(heatmap_tri_pos(p.opts, kind,
+                    static_cast<float>(heatmap_tri_pos(p, kind,
                                                        (*wts)[0] * t[0] + (*wts)[1] * t[1] + (*wts)[2] * t[2]));
             }
     }
@@ -173,6 +209,8 @@ inline std::optional<TriHit> heatmap_tri_at(const HeatmapTriPlot& p, const AxisS
             if ((*wts)[static_cast<std::size_t>(k)] > (*wts)[static_cast<std::size_t>(best)]) best = k;
         }
         h.nearest = it->v[best];
+        // Under a boundary norm, a point outside the boundaries is not drawn.
+        if (norm_masks(heatmap_tri_norm(p.opts), p.opts.norm, h.value)) return std::nullopt;
         return h;
     }
     return std::nullopt;

@@ -1,5 +1,6 @@
 #include "hint.h"
 #include "heatmap_tri_geometry.h"
+#include "contour_plot.h"
 #include "renderer/surface_tri.h"
 #include "renderer/bar3d.h"
 #include "renderer/surface.h"
@@ -338,6 +339,17 @@ std::optional<PickHit> find_area(const RenderSnapshot& snap, const HintProjector
                 hit.element = 0;
                 return hit;
             }
+            case PlotKind::Contour: {
+                // A contourf's band under the cursor (its drawn triangles).
+                const auto f = contour_fill_at(snap.contours[o], xs, ys, cx, cy);
+                if (!f) break;
+                hit.kind = PickKind::Contour;
+                hit.object = o;
+                hit.element = f->band;
+                hit.value = f->value;
+                hit.area = true;
+                return hit;
+            }
             case PlotKind::HeatmapTri: {
                 // In scale space (heatmap_tri_at()), so the drawn weights.
                 const auto t = heatmap_tri_at(snap.heatmap_tris[o], xs, ys, cx, cy);
@@ -394,7 +406,7 @@ std::optional<PickHit> find_pick(const RenderSnapshot& snap, const HintProjector
         return find_area(snap, tr, order, cursor_x, cursor_y);
 
     float best_d2 = radius * radius;
-    int         best_kind = -1;          // 0 line, 1 scatter, 2 scatter_z, 3 quiver
+    int         best_kind = -1;          // 0 line, 1 scatter, 2 scatter_z, 3 quiver, 4 contour
     std::size_t best_obj  = 0, best_i = 0;
     float       best_px   = 0.0f, best_py = 0.0f;
 
@@ -445,14 +457,22 @@ std::optional<PickHit> find_pick(const RenderSnapshot& snap, const HintProjector
                 // At the arrow's (x, y), whatever its pivot.
                 sweep(PlotKind::Quiver, o, 3, snap.quivers[o].x, snap.quivers[o].y, no_hiding);
                 break;
+            case PlotKind::Contour: {
+                // A contour's lines, at the nearest point of any segment; its level.
+                if (!object_shown(snap.contours[o])) break;
+                const auto h = contour_line_near(snap.contours[o], tr, cursor_x, cursor_y, radius, x_lo, x_hi,
+                                                 y_lo, y_hi);
+                if (h) consider(h->x, h->y, 4, o, h->level);
+                break;
+            }
             default: break;
         }
     }
 
     if (best_kind < 0) return find_area(snap, tr, order, cursor_x, cursor_y);
 
-    static const PickKind kKinds[4] = { PickKind::Line, PickKind::Scatter,
-                                        PickKind::ScatterZ, PickKind::Quiver };
+    static const PickKind kKinds[5] = { PickKind::Line, PickKind::Scatter,
+                                        PickKind::ScatterZ, PickKind::Quiver, PickKind::Contour };
     PickHit hit;
     hit.kind = kKinds[best_kind];
     hit.object = best_obj;
@@ -493,6 +513,7 @@ ObjectId pick_object_id(const RenderSnapshot& s, PickKind kind, std::size_t i) {
         case PickKind::Circle:   return s.circles[i].id;
         case PickKind::Wedge:    return s.wedges[i].id;
         case PickKind::HeatmapTri: return s.heatmap_tris[i].id;
+        case PickKind::Contour:  return s.contours[i].id;
         default: return 0;
     }
 }
@@ -522,10 +543,10 @@ std::optional<PickHit> find_pick_layers(const CellLayers& l, float cursor_x, flo
         const ObjectId id = pick_object_id(*l.snaps[k], hit->kind, hit->object);
         const float dx = hit->anchor_x - cursor_x, dy = hit->anchor_y - cursor_y;
         const float d2 = dx * dx + dy * dy;
-        const bool area = pick_is_area(hit->kind);
+        const bool area = pick_is_area(*hit);
         bool wins = true;
         if (best) {
-            const bool best_area = pick_is_area(best->kind);
+            const bool best_area = pick_is_area(*best);
             if (area != best_area) wins = !area;   // a point beats an area
             else if (area) wins = id >= best_id;
             else wins = d2 < best_d2 || (d2 == best_d2 && id >= best_id);
@@ -595,6 +616,21 @@ std::string format_pick(const RenderSnapshot& snap, const PickHit& hit) {
             char buf[96];
             std::snprintf(buf, sizeof(buf), ", value=%.4g", hit.value);
             return append_label(fmt_point(hit.data_x, hit.data_y) + buf, tp.opts.hint_labels, hit.vertex);
+        }
+        case PickKind::Contour: {
+            // A band: where the cursor is, the value there and the band's
+            // levels; a line: its level. Then the name.
+            const auto& cp = snap.contours[hit.object];
+            std::string s;
+            if (hit.area && cp.geom && hit.element + 1 < cp.geom->levels.size()) {
+                char buf[96];
+                std::snprintf(buf, sizeof(buf), ", value=%.4g", hit.value);
+                s = fmt_point(hit.data_x, hit.data_y) + buf + "\nlevels " + contour_band_text(*cp.geom, hit.element);
+            } else if (cp.geom && hit.element < cp.geom->levels.size()) {
+                s = "level=" + format_contour_level(cp.geom->levels[hit.element]);
+            }
+            if (!cp.opts.name.empty()) s += '\n' + cp.opts.name;
+            return s;
         }
         case PickKind::Poly: case PickKind::Circle: case PickKind::Wedge: {
             // Where the cursor is, then the shape's name.

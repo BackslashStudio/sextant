@@ -117,6 +117,7 @@ struct PickHit {
     double      data_x = 0.0, data_y = 0.0;
     double      value = 0.0;
     std::size_t vertex = 0;
+    bool        area = false; // a contourf's band (a contour's line is a point hit)
 };
 
 // The 2D kinds hit by the area they cover rather than at a point.
@@ -124,6 +125,11 @@ inline bool pick_is_area(PickKind k) {
     return k == PickKind::Bar || k == PickKind::Fill || k == PickKind::Heatmap
            || k == PickKind::Poly || k == PickKind::Circle || k == PickKind::Wedge
            || k == PickKind::HeatmapTri;
+}
+
+// The same for a hit: a contour is an area when filled.
+inline bool pick_is_area(const PickHit& h) {
+    return h.kind == PickKind::Contour ? h.area : pick_is_area(h.kind);
 }
 
 // The hit find_hint() words. First the nearest point across line/scatter/

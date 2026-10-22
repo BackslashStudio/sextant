@@ -497,6 +497,12 @@ namespace sextant {
         Plane2D& heatmap_tri(std::span<const double> x, std::span<const double> y,
                              std::span<const double> values, HeatmapTriOptions opts = {});
 
+        // Contour lines and filled contours, as Axes::contour() / contourf().
+        Plane2D& contour(std::span<const double> x, std::span<const double> y, std::span<const double> z,
+                         ContourOptions opts = {});
+        Plane2D& contourf(std::span<const double> x, std::span<const double> y, std::span<const double> z,
+                          ContourOptions opts = {});
+
         // The area between two curves, as Axes::fill().
         Plane2D& fill(std::span<const double> x, std::span<const double> y1,
                               std::span<const double> y2, FillOptions opts = {});
@@ -594,6 +600,9 @@ namespace sextant {
         std::size_t heatmap_tri_count() const;
         HeatmapTriData heatmap_tri_data(std::size_t i) const;
 
+        std::size_t contour_count() const;
+        ContourData contour_data(std::size_t i) const;
+
         std::size_t quiver_count() const;
         QuiverData quiver_data(std::size_t i) const;
 
@@ -648,6 +657,11 @@ namespace sextant {
         Plane2D& set_heatmap_tri_data(std::size_t i, std::span<const double> x, std::span<const double> y,
                                       std::span<const double> values);
 
+        // As Axes::set_contour_data().
+        Plane2D& set_contour_data(std::size_t i, const ContourData& data);
+        Plane2D& set_contour_data(std::size_t i, std::span<const double> x, std::span<const double> y,
+                                  std::span<const double> z);
+
         Plane2D& set_quiver_data(std::size_t i, const QuiverData& data);
 
         Plane2D& set_quiver_data(std::size_t i, std::span<const double> x, std::span<const double> y,
@@ -688,6 +702,8 @@ namespace sextant {
         bool shape_wedge_visible(std::size_t i) const;
         Plane2D& set_heatmap_tri_visible(std::size_t i, bool visible);
         bool heatmap_tri_visible(std::size_t i) const;
+        Plane2D& set_contour_visible(std::size_t i, bool visible);
+        bool contour_visible(std::size_t i) const;
 
         Plane2D& set_quiver_visible(std::size_t i, bool visible);
         bool quiver_visible(std::size_t i) const;

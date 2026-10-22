@@ -32,6 +32,7 @@ struct Axes::Impl {
     std::vector<CirclePlot>   circles;
     std::vector<WedgePlot>    wedges;
     std::vector<HeatmapTriPlot> heatmap_tris;
+    std::vector<ContourPlot>    contours;
 
     // The figure's FigureOptions::mathtext, set when the figure makes this
     // axes; only warn_math() reads it (drawing reads the snapshot's).
@@ -161,6 +162,7 @@ struct Axes::Impl {
         s.quivers = quivers;
         s.polys = polys; s.circles = circles; s.wedges = wedges;
         s.heatmap_tris = heatmap_tris;
+        s.contours = contours;
         s.title = title; s.xtitle = xtitle; s.ytitle = ytitle;
         s.title_stamps = title_stamps;
         s.grid_enabled   = grid_enabled;   s.grid_opts   = grid_opts;
@@ -209,6 +211,13 @@ struct Axes::Impl {
     void ingest_heatmap_tri(std::span<const double> x, std::span<const double> y,
                             std::span<const double> values, std::span<const std::uint32_t> tri,
                             bool derive, HeatmapTriOptions opts, const char* who);
+    // contour() / contourf() (`filled` sets opts.filled).
+    void ingest_contour(std::span<const double> x, std::span<const double> y, std::span<const double> z,
+                        ContourOptions opts, bool filled, const char* who);
+    // Null `levels` / `filled` keep the options'.
+    void set_contour_data(std::size_t i, std::span<const double> x, std::span<const double> y,
+                          std::span<const double> z, const std::vector<double>* levels, const bool* filled,
+                          const char* who);
     // `tri` null keeps the triangles (the vertex count must stay).
     void set_heatmap_tri_data(std::size_t i, std::span<const double> x, std::span<const double> y,
                               std::span<const double> values, const std::vector<std::uint32_t>* tri,

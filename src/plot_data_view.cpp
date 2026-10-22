@@ -236,6 +236,22 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot& snap) 
         out.push_back(std::move(t));
     }
 
+    // contour / contourf: z, one row per grid point (row-major), values only:
+    // the grid's x and y are set through set_contour_data(). Always a tab, as
+    // a heatmap's.
+    for (std::size_t i = 0; i < snap.contours.size(); ++i) {
+        const auto& cp = snap.contours[i];
+        PlotDataTable t;
+        t.kind = PlotKind::Contour;
+        t.plot_index = static_cast<int>(i);
+        t.data_stamp = cp.data_stamp;
+        t.id = cp.id;
+        t.label = pick_label(cp.opts.name, cp.opts.filled ? "contourf" : "contour", static_cast<int>(i));
+        t.columns.push_back({"z", cp.z.data(), cp.z.size()});
+        t.rows_fixed = true;
+        out.push_back(std::move(t));
+    }
+
     push_text_tables(out, snap.texts);
     return out;
 }

@@ -22,8 +22,8 @@ void fill_id(ObjectId& id, const Holder& h, PlotKind kind, int index) {
 }
 
 // PlotStyleEdit's alternatives are in PlotKind's 2D order, then a text's, a
-// reference line's, a span's, a fill's, a quiver's, the three shapes', then a
-// heatmap_tri's.
+// reference line's, a span's, a fill's, a quiver's, the three shapes', a
+// heatmap_tri's, then a contour's.
 inline PlotKind style_kind(const PlotStyleEdit& p) {
     using Opts = decltype(PlotStyleEdit::opts);
     static_assert(static_cast<int>(PlotKind::Heatmap) == 3
@@ -38,7 +38,8 @@ inline PlotKind style_kind(const PlotStyleEdit& p) {
                   && std::is_same_v<std::variant_alternative_t<10, Opts>, PolyOptions>
                   && std::is_same_v<std::variant_alternative_t<11, Opts>, CircleOptions>
                   && std::is_same_v<std::variant_alternative_t<12, Opts>, WedgeOptions>
-                  && std::is_same_v<std::variant_alternative_t<13, Opts>, HeatmapTriOptions>);
+                  && std::is_same_v<std::variant_alternative_t<13, Opts>, HeatmapTriOptions>
+                  && std::is_same_v<std::variant_alternative_t<14, Opts>, ContourOptions>);
     switch (p.opts.index()) {
         case 5: return PlotKind::Text;
         case 6: return PlotKind::AxLine;
@@ -49,6 +50,7 @@ inline PlotKind style_kind(const PlotStyleEdit& p) {
         case 11: return PlotKind::Circle;
         case 12: return PlotKind::Wedge;
         case 13: return PlotKind::HeatmapTri;
+        case 14: return PlotKind::Contour;
         default: return static_cast<PlotKind>(p.opts.index());
     }
 }

@@ -391,6 +391,14 @@ namespace sextant {
                         b.y.tight.add(fy(tp.y[i]));
                     }
                 }
+            // A contour's grid extent, unpadded (every point, so a Log axis
+            // that cannot place the first still reaches the rest).
+            if (all.contours)
+                for (const auto& cp: *all.contours) {
+                    if (!object_shown(cp)) continue;
+                    for (double v: cp.x) b.x.tight.add(fx(v));
+                    for (double v: cp.y) b.y.tight.add(fy(v));
+                }
             return b;
         }
     } // namespace bounds_detail
@@ -557,6 +565,13 @@ namespace sextant {
                     b.x.tight.add(tp.x[i]);
                     b.y.tight.add(tp.y[i]);
                 }
+            }
+        // A contour's grid extent, likewise.
+        if (all.contours)
+            for (const auto& cp: *all.contours) {
+                if (!object_shown(cp)) continue;
+                for (double v: cp.x) b.x.tight.add(v);
+                for (double v: cp.y) b.y.tight.add(v);
             }
         return b;
     }

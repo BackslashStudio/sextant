@@ -4,6 +4,7 @@
 #include "color_norm.h"
 #include "delaunay.h"
 #include "hist2d.h"
+#include "contour_plot.h"
 #include "read_back.h"
 #include "rich_text.h"
 #include "quiver_geometry.h"
@@ -326,6 +327,15 @@ void check_origin(const std::string& origin, const std::string& w) {
                                     + origin + "\"");
 }
 
+// Contour levels sorted and de-duplicated once. Finiteness first (NaN doesn't sort).
+void sort_contour_levels(std::vector<double>& levels, const std::string& w) {
+    for (double level : levels)
+        if (!std::isfinite(level))
+            throw std::invalid_argument(w + ": contour levels must be finite");
+    std::sort(levels.begin(), levels.end());
+    levels.erase(std::unique(levels.begin(), levels.end()), levels.end());
+}
+
 } // namespace
 
 // Vector-shaped ingests, shared by Axes and Plane2D. `who` names the caller in
@@ -525,14 +535,7 @@ void Axes::Impl::ingest_heatmap(std::span<const double> data, int rows, int cols
     std::vector<float> cells = heatmap_cells(data, rows, cols, xrange, yrange, w);
     check_origin(opts.origin, w);
     check_norm(opts.norm, opts.vmin, opts.vmax, who);
-
-    // Sort and de-duplicate once. Check finiteness first (NaN doesn't sort).
-    for (double level : opts.contours)
-        if (!std::isfinite(level))
-            throw std::invalid_argument(w + ": contour levels must be finite");
-    std::sort(opts.contours.begin(), opts.contours.end());
-    opts.contours.erase(std::unique(opts.contours.begin(), opts.contours.end()),
-                        opts.contours.end());
+    sort_contour_levels(opts.contours, w);
 
     warn_math(mathtext, who, opts.name);
     heatmaps.push_back({
@@ -606,7 +609,7 @@ Axes& Axes::imshow_rgb(std::span<const std::uint8_t> data, int rows, int cols, i
 }
 
 // A mesh is a heatmap with edges: its options go to a HeatmapOptions with
-// origin "lower" (row 0 at the first y edge) and no contours.
+// origin "lower" (row 0 at the first y edge).
 void Axes::Impl::ingest_heatmap_rec(std::span<const double> data, int rows, int cols,
                                     std::span<const double> x_edges, std::span<const double> y_edges,
                                     HeatmapRecOptions opts, const char* who) {
@@ -615,6 +618,7 @@ void Axes::Impl::ingest_heatmap_rec(std::span<const double> data, int rows, int 
     const auto [xr, yr] = mesh_extent(x_edges, y_edges, rows, cols, w);
     std::vector<float> cells = heatmap_cells(data, rows, cols, xr, yr, w);
     check_norm(opts.norm, opts.vmin, opts.vmax, who);
+    sort_contour_levels(opts.contours, w);
 
     HeatmapOptions ho;
     ho.cmap = opts.cmap;
@@ -625,6 +629,11 @@ void Axes::Impl::ingest_heatmap_rec(std::span<const double> data, int rows, int 
     ho.name = std::move(opts.name);
     ho.visible = opts.visible;
     ho.zorder = opts.zorder;
+    ho.contours = std::move(opts.contours);
+    ho.contour_color = opts.contour_color;
+    ho.contour_linewidth = opts.contour_linewidth;
+    ho.contour_labels = opts.contour_labels;
+    ho.contour_fontsize = opts.contour_fontsize;
     ho.hint_labels = std::move(opts.hint_labels);
     warn_math(mathtext, who, ho.name);
     HeatmapPlot p{ std::move(cells), rows, cols, xr, yr, std::move(ho),
@@ -703,6 +712,35 @@ Axes& Axes::heatmap_tri(std::span<const double> x, std::span<const double> y, st
 Axes& Axes::heatmap_tri(std::span<const double> x, std::span<const double> y, std::span<const double> values,
                         HeatmapTriOptions opts) {
     d->ingest_heatmap_tri(x, y, values, {}, true, std::move(opts), "heatmap_tri");
+    return *this;
+}
+
+void Axes::Impl::ingest_contour(std::span<const double> x, std::span<const double> y, std::span<const double> z,
+                                ContourOptions opts, bool filled, const char* who) {
+    if (filled) opts.filled = true;
+    read_back::check_zorder(opts.zorder, who);
+    check_contour(x, y, z, opts, who);
+    warn_math(mathtext, who, opts.name);
+    ContourPlot p;
+    p.x = read_back::own(x);
+    p.y = read_back::own(y);
+    p.z = read_back::own(z);
+    p.opts = std::move(opts);
+    p.data_stamp = next_snapshot_generation();
+    p.id = new_id();
+    contour_rebuild(p);
+    contours.push_back(std::move(p));
+}
+
+Axes& Axes::contour(std::span<const double> x, std::span<const double> y, std::span<const double> z,
+                    ContourOptions opts) {
+    d->ingest_contour(x, y, z, std::move(opts), false, "contour");
+    return *this;
+}
+
+Axes& Axes::contourf(std::span<const double> x, std::span<const double> y, std::span<const double> z,
+                     ContourOptions opts) {
+    d->ingest_contour(x, y, z, std::move(opts), true, "contourf");
     return *this;
 }
 
@@ -1233,6 +1271,19 @@ Axes& Axes::set_shape_wedge_data(std::size_t i, const WedgeData& data) {
     return *this;
 }
 
+std::size_t Axes::contour_count() const { return d->contours.size(); }
+ContourData Axes::contour_data(std::size_t i) const {
+    return read_back::to_data(read_back::at(d->contours, i, "contour_data"));
+}
+Axes& Axes::set_contour_data(std::size_t i, const ContourData& data) {
+    d->set_contour_data(i, data.x, data.y, data.z, &data.levels, &data.filled, "set_contour_data");
+    return *this;
+}
+Axes& Axes::set_contour_data(std::size_t i, std::span<const double> x, std::span<const double> y,
+                             std::span<const double> z) {
+    d->set_contour_data(i, x, y, z, nullptr, nullptr, "set_contour_data");
+    return *this;
+}
 std::size_t Axes::heatmap_tri_count() const { return d->heatmap_tris.size(); }
 HeatmapTriData Axes::heatmap_tri_data(std::size_t i) const {
     return read_back::to_data(read_back::at(d->heatmap_tris, i, "heatmap_tri_data"));
@@ -1354,6 +1405,11 @@ Axes& Axes::set_shape_wedge_visible(std::size_t i, bool visible) {
     read_back::set_visible(d->wedges, i, visible, "set_shape_wedge_visible");
     return *this;
 }
+Axes& Axes::set_contour_visible(std::size_t i, bool visible) {
+    read_back::set_visible(d->contours, i, visible, "set_contour_visible");
+    return *this;
+}
+bool Axes::contour_visible(std::size_t i) const { return read_back::visible(d->contours, i, "contour_visible"); }
 Axes& Axes::set_heatmap_tri_visible(std::size_t i, bool visible) {
     read_back::set_visible(d->heatmap_tris, i, visible, "set_heatmap_tri_visible");
     return *this;
@@ -1505,6 +1561,22 @@ void Axes::Impl::set_heatmap_data(std::size_t i, std::span<const double> data, i
         p.x_edges = *x_edges;
         p.y_edges = *y_edges;
     }
+}
+
+void Axes::Impl::set_contour_data(std::size_t i, std::span<const double> x, std::span<const double> y,
+                                  std::span<const double> z, const std::vector<double>* levels, const bool* filled,
+                                  const char* who) {
+    ContourPlot& p = read_back::at(contours, i, who);
+    ContourOptions o = p.opts;
+    if (levels) o.levels = *levels;
+    if (filled) o.filled = *filled;
+    check_contour(x, y, z, o, who);
+    p.x = read_back::own(x);
+    p.y = read_back::own(y);
+    p.z = read_back::own(z);
+    p.opts = std::move(o);
+    p.data_stamp = next_snapshot_generation();
+    contour_rebuild(p);
 }
 
 void Axes::Impl::set_heatmap_tri_data(std::size_t i, std::span<const double> x, std::span<const double> y,

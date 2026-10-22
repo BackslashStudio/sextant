@@ -632,6 +632,12 @@ namespace lt {
     // color_norm.cpp
     void test_color_norm();
 
+    // boundary_norm.cpp
+    void test_boundary_norm();
+
+    // contour_kind.cpp
+    void test_contour_kind();
+
     // line_steps.cpp
     void test_line_steps();
     void test_line_steps_rendered();

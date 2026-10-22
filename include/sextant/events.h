@@ -39,7 +39,8 @@ namespace sextant {
         Quiver,                                               // 2D, appended
         Fill,                                                 // 2D (fill(), stack()), appended
         Poly, Circle, Wedge,                                  // 2D (shape_poly(), shape_circle(), shape_wedge()), appended
-        HeatmapTri                                            // 2D (heatmap_tri()), appended
+        HeatmapTri,                                           // 2D (heatmap_tri()), appended
+        Contour                                               // 2D (contour(), contourf()), appended
     };
 
     // Where an object is now: its kind and its index within the kind, the `i` of
@@ -120,7 +121,8 @@ namespace sextant {
         // `pick_index`: the element -- point, bar, marker or vertex index; a sample of a surface;
         // the flat cell index (row * columns + column) of a heatmap or bar3d; a
         // fill's segment i, between its points i and i + 1; a heatmap_tri's triangle t
-        // (tri[3t] .. tri[3t + 2]);
+        // (tri[3t] .. tri[3t + 2]); a contour's level index (the line near the press)
+        // or a contourf's band index (level i to i + 1);
         // `pick_row`/`pick_col` for those grids, else -1. `pick_plane` is the
         // plane's ObjectId (Axes3D::plane_index() maps it to the index in
         // plane_at()), or 0 for an object of the axes itself. `pick_index`,

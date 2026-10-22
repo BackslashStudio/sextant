@@ -319,6 +319,8 @@ int main() {
     test_heatmap_scale();
     test_heatmap_tri();
     test_color_norm();
+    test_boundary_norm();
+    test_contour_kind();
 
     // line_steps.cpp
     test_line_steps();

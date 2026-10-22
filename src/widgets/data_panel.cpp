@@ -4,6 +4,7 @@
 #include "figure_context.h"
 #include "panel_widgets.h"
 #include "../color_norm.h"
+#include "../contour_plot.h"
 #include "../edit_box.h"
 #include "../figure_edits.h"
 #include "../plot_data_view.h"
@@ -15,6 +16,7 @@
 #include <cmath>
 #include <cstdio>
 #include <functional>
+#include <cstdlib>
 #include <optional>
 #include <string>
 
@@ -910,29 +912,85 @@ namespace sextant {
             if (!p.err.empty()) errorbar_style(o.errorbar, *o.color, has_cap(p.err), has_box(p.err), push);
         }
 
-        // The colour norm, inside a field table after vmin/vmax: its kind and a
+        // A boundary list as the panel's text: "%.6g" values, comma-separated.
+        std::string bounds_text(const std::vector<double>& b) {
+            std::string s;
+            char buf[32];
+            for (std::size_t i = 0; i < b.size(); ++i) {
+                std::snprintf(buf, sizeof(buf), i ? ", %.6g" : "%.6g", b[i]);
+                s += buf;
+            }
+            return s;
+        }
+
+        // The text back to a list: numbers separated by commas or spaces;
+        // nothing when a token isn't a number.
+        std::optional<std::vector<double>> parse_bounds(const char* text) {
+            std::vector<double> out;
+            const char* p = text;
+            for (;;) {
+                while (*p == ' ' || *p == ',' || *p == '\t') ++p;
+                if (!*p) break;
+                char* end = nullptr;
+                const double v = std::strtod(p, &end);
+                if (end == p) return std::nullopt;
+                out.push_back(v);
+                p = end;
+            }
+            return out;
+        }
+
+        // The colour norm, inside a field table after vmin/vmax: its kind, a
         // two-slope centre (picking two-slope with a centre that doesn't fit puts
-        // it midway). One that doesn't fit draws as linear, which a note says.
+        // it midway) and a boundary list (picking boundaries without a usable
+        // one seeds six even boundaries over vmin..vmax; the list is text,
+        // applied on Enter, kept when it isn't usable). One that doesn't fit
+        // draws as linear, which a note says.
         template<class O, class Push>
         void norm_rows(const char* id, O& o, Push& push) {
             field_row("Norm");
-            static const char* kNorms[] = {"linear", "log", "two-slope"};
+            static const char* kNorms[] = {"linear", "log", "two-slope", "boundaries"};
             int k = static_cast<int>(o.norm.kind);
             ImGui::PushID(id);
             if (ImGui::Combo("##norm", &k, kNorms, IM_ARRAYSIZE(kNorms))) {
                 o.norm.kind = static_cast<ColorNorm::Kind>(k);
                 if (o.norm.kind == ColorNorm::Kind::TwoSlope && !norm_fits(o.norm, o.vmin, o.vmax))
                     o.norm.center = 0.5f * (o.vmin + o.vmax);
+                if (o.norm.kind == ColorNorm::Kind::Boundaries && !norm_bounds_ok(o.norm.bounds)) {
+                    double lo = std::min(o.vmin, o.vmax), hi = std::max(o.vmin, o.vmax);
+                    if (!(hi > lo)) hi = lo + 1.0;
+                    o.norm.bounds.resize(6);
+                    for (int i = 0; i < 6; ++i) o.norm.bounds[static_cast<std::size_t>(i)] = lo + (hi - lo) * i / 5.0;
+                }
                 push();
             }
             if (o.norm.kind == ColorNorm::Kind::TwoSlope) {
                 field_row("Centre");
                 if (drag_float("##ncentre", &o.norm.center, -FLT_MAX, FLT_MAX, 0.01f, "%.4g")) push();
             }
+            if (o.norm.kind == ColorNorm::Kind::Boundaries) {
+                field_row("Bounds");
+                // Re-seeded every frame; the active field keeps its own buffer.
+                char buf[2048];
+                std::snprintf(buf, sizeof(buf), "%s", bounds_text(o.norm.bounds).c_str());
+                ImGui::SetNextItemWidth(-FLT_MIN);
+                if (ImGui::InputText("##nbounds", buf, sizeof(buf), ImGuiInputTextFlags_EnterReturnsTrue)) {
+                    const auto b = parse_bounds(buf);
+                    if (b && norm_bounds_ok(*b)) {
+                        o.norm.bounds = *b;
+                        push();
+                    }
+                }
+                field_row("");
+                ImGui::TextDisabled("increasing, comma-separated; Enter applies");
+                field_row("");
+                ImGui::TextDisabled("vmin/vmax unused");
+            }
             if (!norm_fits(o.norm, o.vmin, o.vmax)) {
                 field_row("");
-                ImGui::TextDisabled(o.norm.kind == ColorNorm::Kind::Log ? "needs vmin, vmax > 0: drawn linear"
-                                                                         : "centre not inside: drawn linear");
+                ImGui::TextDisabled(o.norm.kind == ColorNorm::Kind::Log          ? "needs vmin, vmax > 0: drawn linear"
+                                    : o.norm.kind == ColorNorm::Kind::Boundaries ? "bounds not usable: drawn linear"
+                                                                                 : "centre not inside: drawn linear");
             }
             ImGui::PopID();
         }
@@ -1242,6 +1300,96 @@ namespace sextant {
             }
         }
 
+        // A contour or contourf (`p` the snapshot's, for its resolved limits):
+        // filled, levels (given, or a count of nice ones), colours through a
+        // norm over vmin/vmax (auto: the first and last level), and the lines'
+        // colour, width and labels.
+        template<class Push>
+        void contour_style(DataPanelState& st, ContourOptions& o, const ContourPlot& p, Push&& push) {
+            name_and_key(st, o, push);
+            if (ImGui::Checkbox("Filled##ctfill", &o.filled)) push();
+            if (ImGui::Checkbox("Colorbar##plotcb", &o.colorbar)) push();
+            const float gmin = p.geom ? p.geom->vmin : 0.0f, gmax = p.geom ? p.geom->vmax : 1.0f;
+
+            ImGui::SeparatorText("Levels");
+            ImGui::TextDisabled(o.levels.empty() ? "Nice values over z (count below); add one to give them."
+                                                 : "Given, in z's units.");
+            contour_levels(o.levels, gmin, gmax, push);
+            if (o.levels.empty() && begin_field_table("ctcount")) {
+                field_row("Count");
+                ImGui::SetNextItemWidth(-FLT_MIN);
+                if (ImGui::DragInt("##ctn", &o.nlevels, 0.1f, 1, 100, "%d")) {
+                    o.nlevels = std::clamp(o.nlevels, 1, 100);
+                    push();
+                }
+                end_field_table();
+            }
+
+            if (begin_field_table("contour_colors")) {
+                field_row("Colormap");
+                if (colormap_combo("##ctcmap", o.cmap)) push();
+                bool autol = !o.vmin && !o.vmax;
+                field_row("Limits");
+                if (ImGui::Checkbox("auto##ctauto", &autol)) {
+                    if (autol) {
+                        o.vmin.reset();
+                        o.vmax.reset();
+                    } else {
+                        o.vmin = gmin;
+                        o.vmax = gmax;
+                    }
+                    push();
+                }
+                if (!autol) {
+                    float lo = o.vmin.value_or(gmin), hi = o.vmax.value_or(gmax);
+                    field_row("vmin");
+                    if (drag_float("##ctvmin", &lo, -FLT_MAX, FLT_MAX, 0.01f, "%.4g")) {
+                        o.vmin = lo;
+                        push();
+                    }
+                    field_row("vmax");
+                    if (drag_float("##ctvmax", &hi, -FLT_MAX, FLT_MAX, 0.01f, "%.4g")) {
+                        o.vmax = hi;
+                        push();
+                    }
+                }
+                // norm_rows() works on float limits: the resolved ones here.
+                struct { float vmin, vmax; ColorNorm norm; } n{ o.vmin.value_or(gmin), o.vmax.value_or(gmax), o.norm };
+                auto push_norm = [&] {
+                    o.norm = n.norm;
+                    push();
+                };
+                norm_rows("ctn", n, push_norm);
+                end_field_table();
+            }
+
+            if (o.filled) return;
+            ImGui::SeparatorText("Lines");
+            bool single = o.line_color.has_value();
+            if (ImGui::Checkbox("One colour##ctone", &single)) {
+                if (single) o.line_color = Color::Black;
+                else o.line_color.reset();
+                push();
+            }
+            if (begin_field_table("contour_lines")) {
+                if (o.line_color) {
+                    field_row("Color");
+                    if (color_swatch("##ctcol", *o.line_color)) push();
+                }
+                field_row("Width");
+                if (drag_float("##ctw", &o.linewidth, 0.1f, 10.0f, 0.05f, "%.2f px")) push();
+                end_field_table();
+            }
+            if (ImGui::Checkbox("Labels##ctlab", &o.labels)) push();
+            ImGui::BeginDisabled(!o.labels);
+            if (begin_field_table("contour_lab")) {
+                field_row("Label size");
+                if (drag_float("##ctfs", &o.fontsize, 1.0f, 96.0f, 0.2f, "%.1f px")) push();
+                end_field_table();
+            }
+            ImGui::EndDisabled();
+        }
+
         // A heatmap_tri: the colour side of a heatmap, nothing else.
         template<class Push>
         void heatmap_tri_style(DataPanelState& st, HeatmapTriOptions& o, Push&& push) {
@@ -1260,7 +1408,7 @@ namespace sextant {
         }
 
         // An image (`colormapped` false) has its own colours: only its origin edits.
-        // A heatmap_rec() (`mesh`) has no origin and no contours.
+        // A heatmap_rec() (`mesh`) has no origin.
         template<class Push>
         void heatmap_style(DataPanelState& st, HeatmapOptions& o, bool colormapped, bool mesh, Push&& push) {
             if (!colormapped) {
@@ -1283,7 +1431,6 @@ namespace sextant {
                 if (!mesh) heatmap_origin_row(o, push);
                 end_field_table();
             }
-            if (mesh) return;
             ImGui::SeparatorText("Contours");
             ImGui::TextDisabled("Levels are in data units, not the vmin/vmax scale.");
             contour_levels(o.contours, o.vmin, o.vmax, push);
@@ -1339,6 +1486,7 @@ namespace sextant {
                 case PlotKind::Circle:   if (!both(ss->circles, sheet.circles)) return; break;
                 case PlotKind::Wedge:    if (!both(ss->wedges, sheet.wedges)) return; break;
                 case PlotKind::HeatmapTri: if (!both(ss->heatmap_tris, sheet.heatmap_tris)) return; break;
+                case PlotKind::Contour:  if (!both(ss->contours, sheet.contours)) return; break;
                 default: return; // the 3D kinds have blocks of their own
             }
             if (!section("Appearance", true)) return;
@@ -1390,6 +1538,9 @@ namespace sextant {
                     break;
                 case PlotKind::HeatmapTri:
                     heatmap_tri_style(st, ss->heatmap_tris[i], push_of(ss->heatmap_tris[i]));
+                    break;
+                case PlotKind::Contour:
+                    contour_style(st, ss->contours[i], sheet.contours[i], push_of(ss->contours[i]));
                     break;
                 default: break;
             }

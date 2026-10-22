@@ -28,10 +28,11 @@ namespace sextant {
 // The first five are 2D (also held by planes); then the native 3D kinds,
 // always addressed at the axes (plane -1). Text is held by both 2D and 3D
 // axes (never by a plane); AxLine and AxSpan by 2D axes only (a plane's sheet
-// holds none); Fill, Quiver, Poly, Circle, Wedge and HeatmapTri by 2D axes and
-// planes. Append new kinds to keep values stable.
+// holds none); Fill, Quiver, Poly, Circle, Wedge, HeatmapTri and Contour by 2D
+// axes and planes. Append new kinds to keep values stable.
 enum class PlotKind { Line, Scatter, Bar, Heatmap, ScatterZ, Bar3D, Surface, Scatter3D, Line3D,
-                      SurfaceTri, Text, AxLine, AxSpan, Fill, Quiver, Poly, Circle, Wedge, HeatmapTri };
+                      SurfaceTri, Text, AxLine, AxSpan, Fill, Quiver, Poly, Circle, Wedge, HeatmapTri,
+                      Contour };
 
 // A plot object's (or a plane's) identity, the public ObjectId
 // (sextant/object_id.h): kept by set_*_data(), unchanged by
@@ -308,12 +309,13 @@ struct ScatterZPlot {
 };
 
 // True when scatter_z point i has no colour under its norm (z <= 0 under
-// log): hidden as a point with no size is. Other kinds have no norm.
+// log, outside the boundaries): hidden as a point with no size is. Other
+// kinds have no norm.
 template <class P>
 bool marker_norm_masked(const P& p, std::size_t i) {
     if constexpr (requires { p.z; p.opts.norm; }) {
         const ColorNorm::Kind kind = norm_in_force(p.opts.norm, p.opts.vmin, p.opts.vmax);
-        return kind == ColorNorm::Kind::Log && i < p.z.size() && norm_masks(kind, p.z[i]);
+        return kind != ColorNorm::Kind::Linear && i < p.z.size() && norm_masks(kind, p.opts.norm, p.z[i]);
     } else {
         return false;
     }
@@ -724,7 +726,37 @@ struct HeatmapTriPlot {
 
     unsigned long long visible_stamp = 0;
     unsigned long long zorder_stamp = 0;
+
+    // Under a boundary norm, each band's colormap position instead of the
+    // norm's own spread (NaN: the band is not drawn). Set only on a contourf's
+    // fill (ContourGeometry); empty for a heatmap_tri.
+    std::vector<double> band_t;
 };
+
+// A contour's derived drawing data (contour_plot.h): its triangles, resolved
+// levels and colours, and traced lines.
+struct ContourGeometry;
+
+// Axes::contour() / contourf(): z over a grid of points, x one per column and
+// y one per row. `geom` is rebuilt by contour_rebuild() whenever the data or
+// the options change (ingest, set_contour_data(), a style edit).
+struct ContourPlot {
+    CowVec<double> x, y, z;
+    ContourOptions opts;
+    unsigned long long data_stamp = 0;
+    ObjectId id = 0;
+
+    unsigned long long visible_stamp = 0;
+    unsigned long long zorder_stamp = 0;
+
+    std::shared_ptr<const ContourGeometry> geom;
+
+    int rows() const { return static_cast<int>(y.size()); }
+    int cols() const { return static_cast<int>(x.size()); }
+};
+
+// Derives `p.geom` from its data and options (contour_plot.cpp).
+void contour_rebuild(ContourPlot& p);
 
 // The reference kinds, fills and quivers are optional so a view built over the
 // first five alone (tests) still reads as before.
@@ -742,6 +774,7 @@ struct AllPlotData {
     const std::vector<CirclePlot>*   circles = nullptr;
     const std::vector<WedgePlot>*    wedges = nullptr;
     const std::vector<HeatmapTriPlot>* heatmap_tris = nullptr;
+    const std::vector<ContourPlot>*    contours = nullptr;
 };
 
 // Caller-side stamps of an axes' titles: each set_*title() takes a fresh
@@ -833,6 +866,8 @@ struct RenderSnapshot {
     std::vector<WedgePlot>    wedges;
     // Axes::heatmap_tri(), likewise.
     std::vector<HeatmapTriPlot> heatmap_tris;
+    // Axes::contour() / contourf(), likewise.
+    std::vector<ContourPlot> contours;
 
     // Font sizes live in axes_style.
     std::string title, xtitle, ytitle;
@@ -864,7 +899,7 @@ struct RenderSnapshot {
     std::optional<std::vector<Tick>> xticks_override, yticks_override;
 
     AllPlotData all() const {
-        return { lines, scatters, bars, heatmaps, scatter_z, &axlines, &axspans, &fills, &quivers, &polys, &circles, &wedges, &heatmap_tris };
+        return { lines, scatters, bars, heatmaps, scatter_z, &axlines, &axspans, &fills, &quivers, &polys, &circles, &wedges, &heatmap_tris, &contours };
     }
 };
 
@@ -983,6 +1018,7 @@ inline std::optional<ObjectLocation> to_location(const std::optional<ObjectRef>&
         case PlotKind::Circle:    k = PickKind::Circle;    break;
         case PlotKind::Wedge:     k = PickKind::Wedge;     break;
         case PlotKind::HeatmapTri:k = PickKind::HeatmapTri;break;
+        case PlotKind::Contour:   k = PickKind::Contour;   break;
         case PlotKind::Text: case PlotKind::AxLine: case PlotKind::AxSpan: return std::nullopt;
     }
     return ObjectLocation{ k, r->index };
@@ -992,7 +1028,7 @@ inline constexpr PlotKind kPlotKinds2D[] = { PlotKind::Line, PlotKind::Scatter, 
                                              PlotKind::Heatmap, PlotKind::ScatterZ, PlotKind::Text,
                                              PlotKind::AxLine, PlotKind::AxSpan, PlotKind::Fill,
                                              PlotKind::Quiver, PlotKind::Poly, PlotKind::Circle,
-                                             PlotKind::Wedge, PlotKind::HeatmapTri };
+                                             PlotKind::Wedge, PlotKind::HeatmapTri, PlotKind::Contour };
 inline constexpr PlotKind kPlotKinds3D[] = { PlotKind::Bar3D, PlotKind::Surface,
                                              PlotKind::Scatter3D, PlotKind::Line3D,
                                              PlotKind::SurfaceTri, PlotKind::Text };
@@ -1018,6 +1054,7 @@ R with_kind(S& s, PlotKind kind, F&& f, R none) {
         case PlotKind::Circle:   return f(s.circles);
         case PlotKind::Wedge:    return f(s.wedges);
         case PlotKind::HeatmapTri: return f(s.heatmap_tris);
+        case PlotKind::Contour:  return f(s.contours);
         default:                 return none;
     }
 }
@@ -1114,7 +1151,7 @@ std::optional<ObjectRef> find_object_in(const S& s, const PlotKind (&kinds)[N], 
 // where it was among its kind, and the whole object, its id included.
 using PlotObject2D = std::variant<LinePlot, ScatterPlot, BarPlot, HeatmapPlot, ScatterZPlot,
                                   TextPlot, AxLinePlot, AxSpanPlot, FillPlot, QuiverPlot,
-                                  PolyPlot, CirclePlot, WedgePlot, HeatmapTriPlot>;
+                                  PolyPlot, CirclePlot, WedgePlot, HeatmapTriPlot, ContourPlot>;
 using PlotObject3D = std::variant<Bar3DPlot, SurfacePlot, Scatter3DPlot, Line3DPlot,
                                   SurfaceTriPlot, TextPlot>;
 template <class Object>
@@ -1257,6 +1294,7 @@ std::vector<ObjectRef> ordered_2d(const S& s, bool by_z) {
         add_order_keys(keys, PlotKind::Wedge, s.wedges);
     }
     if constexpr (requires { s.heatmap_tris; }) add_order_keys(keys, PlotKind::HeatmapTri, s.heatmap_tris);
+    if constexpr (requires { s.contours; }) add_order_keys(keys, PlotKind::Contour, s.contours);
     return sorted_refs(keys, by_z);
 }
 } // namespace objects_detail
@@ -1311,6 +1349,7 @@ std::vector<LayerRef> ordered_layers(std::span<const S* const> layers, bool by_z
             add(PlotKind::Wedge, s.wedges);
         }
         if constexpr (requires { s.heatmap_tris; }) add(PlotKind::HeatmapTri, s.heatmap_tris);
+        if constexpr (requires { s.contours; }) add(PlotKind::Contour, s.contours);
     }
     std::stable_sort(keys.begin(), keys.end(), [by_z](const Key& a, const Key& b) {
         if (by_z && a.z != b.z) return a.z < b.z;
@@ -1505,19 +1544,42 @@ struct FigureSnapshot {
     FigureStamps stamps;
 };
 
-// One plot object's colorbar: the scale it explains and its name.
+// One plot object's colorbar: the scale it explains and its name. A stepped
+// bar (a boundary norm in force) also carries its boundaries and each band's
+// colormap position, and vmin/vmax are its first and last boundary.
 struct ColorbarRequest {
     Colormap    cmap = Colormap::Viridis;
     float       vmin = 0.0f, vmax = 1.0f;
     std::string name;
+    std::vector<double> bounds; // empty: the gradient bar
+    std::vector<double> band_t; // bounds.size() - 1 positions
 };
+
+// A colormapped object's request, stepped under a boundary norm in force.
+template <class O>
+ColorbarRequest colorbar_request(const O& opts) {
+    ColorbarRequest q{ opts.cmap, opts.vmin, opts.vmax, opts.name, {}, {} };
+    if (norm_in_force(opts.norm, opts.vmin, opts.vmax) == ColorNorm::Kind::Boundaries) {
+        q.bounds = opts.norm.bounds;
+        q.band_t.resize(q.bounds.size() - 1);
+        for (std::size_t i = 0; i < q.band_t.size(); ++i) q.band_t[i] = norm_band_t(i, q.band_t.size());
+        q.vmin = static_cast<float>(q.bounds.front());
+        q.vmax = static_cast<float>(q.bounds.back());
+    }
+    return q;
+}
+
+// A contour's (contour_plot.cpp): a contourf's stepped at its levels in its
+// bands' colours; a contour's the gradient over its resolved limits (stepped
+// under a boundary norm).
+ColorbarRequest contour_colorbar_request(const ContourPlot& p);
 
 // Every colorbar an axes draws: one per requesting object, in call order
 // (outward from the frame). Shared by raster and SVG paths.
 inline std::vector<ColorbarRequest> find_colorbar_requests(const RenderSnapshot& snap) {
     std::vector<ColorbarRequest> reqs;
     auto add = [&reqs](const auto& opts) {
-        if (opts.colorbar) reqs.push_back({ opts.cmap, opts.vmin, opts.vmax, opts.name });
+        if (opts.colorbar) reqs.push_back(colorbar_request(opts));
     };
     for (const ObjectRef& r : call_order(snap)) {
         if (r.kind == PlotKind::Heatmap && snap.heatmaps[r.index].colormapped())
@@ -1526,6 +1588,8 @@ inline std::vector<ColorbarRequest> find_colorbar_requests(const RenderSnapshot&
         else if (r.kind == PlotKind::Quiver && snap.quivers[r.index].colormapped())
             add(snap.quivers[r.index].opts);
         else if (r.kind == PlotKind::HeatmapTri) add(snap.heatmap_tris[r.index].opts);
+        else if (r.kind == PlotKind::Contour && snap.contours[r.index].opts.colorbar && snap.contours[r.index].geom)
+            reqs.push_back(contour_colorbar_request(snap.contours[r.index]));
     }
     return reqs;
 }
@@ -1536,7 +1600,7 @@ inline std::vector<ColorbarRequest> find_colorbar_requests(const RenderSnapshot&
 inline std::vector<ColorbarRequest> find_colorbar_requests(const RenderSnapshot3D& snap) {
     std::vector<ColorbarRequest> reqs;
     auto add = [&reqs](const auto& opts, double lo, double hi) {
-        reqs.push_back({ opts.cmap, static_cast<float>(lo), static_cast<float>(hi), opts.name });
+        reqs.push_back({ opts.cmap, static_cast<float>(lo), static_cast<float>(hi), opts.name, {}, {} });
     };
     for (const ObjectRef& r : call_order(snap)) {
         double lo = 0.0, hi = 1.0;

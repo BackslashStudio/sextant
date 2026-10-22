@@ -263,7 +263,7 @@ namespace lt {
         STRUCT(ErrorBarOptions) STRUCT(LineOptions) STRUCT(ScatterOptions) STRUCT(ScatterZOptions)
         STRUCT(BarOptions) STRUCT(HistOptions) STRUCT(AxLineOptions) STRUCT(AxSpanOptions)
         STRUCT(FillOptions) STRUCT(QuiverOptions)
-        STRUCT(HeatmapOptions) STRUCT(ImageOptions) STRUCT(HeatmapRecOptions) STRUCT(HeatmapTriOptions) STRUCT(Hist2dOptions)
+        STRUCT(HeatmapOptions) STRUCT(ImageOptions) STRUCT(HeatmapRecOptions) STRUCT(HeatmapTriOptions) STRUCT(Hist2dOptions) STRUCT(ContourOptions)
         STRUCT(GridOptions)
         STRUCT(PolyOptions) STRUCT(CircleOptions) STRUCT(WedgeOptions)
         STRUCT(AxesStyle) STRUCT(LegendOptions) STRUCT(ColorbarOptions) STRUCT(SuptitleOptions)

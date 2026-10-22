@@ -24,7 +24,8 @@ namespace sextant {
 
     // Marching squares over cell centres: sample (i, j) sits at cell (j + 0.5,
     // i + 0.5), i counted from the yrange.lo end (storage row `i` for
-    // origin=="lower", else `rows-1-i`). Needs at least 2x2 cells. Saddles are
+    // origin=="lower", else `rows-1-i`). On a mesh (heatmap_rec) a crossing
+    // lies on the straight line between two neighbouring centres. Needs at least 2x2 cells. Saddles are
     // resolved by the corner average. Levels come pre-sorted from ingest.
     ContourSet trace_contours(const HeatmapPlot& hp);
 
@@ -32,8 +33,10 @@ namespace sextant {
     std::string format_contour_level(double level);
 
     // A projected stretch of a contour line; a labelled line yields two.
+    // `line` indexes the ContourSet it came from.
     struct ContourRun {
         std::vector<float> px, py;
+        std::size_t line = 0;
     };
 
     // An inline level label. `angle` is radians in pixel space (y down).
@@ -41,6 +44,7 @@ namespace sextant {
         float x = 0.0f, y = 0.0f;
         float angle = 0.0f;
         std::string text;
+        std::size_t line = 0;
     };
 
     struct ContourDraw {
@@ -93,6 +97,10 @@ namespace sextant {
     ContourDraw plan_contours(const ContourSet& set, const ContourProjector& proj,
                               const HeatmapOptions& opts,
                               const std::string& font_path);
+
+    // The same with the label choice given directly (a contour()'s lines).
+    ContourDraw plan_contours(const ContourSet& set, const ContourProjector& proj,
+                              bool labels, float fontsize, const std::string& font_path);
 
     class ContourCache;
 

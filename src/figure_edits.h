@@ -71,7 +71,7 @@ struct PlotStyleEdit {
     std::variant<LineOptions, ScatterOptions, BarOptions,
                  HeatmapOptions, ScatterZOptions, TextStyle,
                  AxLineOptions, AxSpanOptions, FillOptions, QuiverOptions,
-                 PolyOptions, CircleOptions, WedgeOptions, HeatmapTriOptions> opts;
+                 PolyOptions, CircleOptions, WedgeOptions, HeatmapTriOptions, ContourOptions> opts;
     ObjectId id = 0, plane_id = 0;   // see PlotCellEdit
     // The object's visible_stamp when the panel drew; filled in by
     // FigureEditBox. A set_<kind>_visible() since keeps its `visible`.
@@ -702,6 +702,14 @@ std::optional<PlotDataOp> apply_plot_data_op(T& t, const PlotCellEdit& e) {
                                  put_cell(e.column == 0 ? hp->x : e.column == 1 ? hp->y : hp->values,
                                           e.element, e.value));
             return std::nullopt;
+        case PlotKind::Contour:
+            // z only (x and y through set_contour_data()); the drawing follows.
+            if (auto* cp = op_target(t.contours, e)) {
+                auto undo = cell_undo(e, t.contours, *cp, put_cell(cp->z, e.element, e.value));
+                contour_rebuild(*cp);
+                return undo;
+            }
+            return std::nullopt;
         case PlotKind::Circle:
         case PlotKind::Wedge:
             // One row; see ShapeDataEdit.
@@ -948,6 +956,9 @@ std::optional<PlotDataOp> apply_plot_data_op(T& t, const PlotRowEdit& e) {
             return std::nullopt;
         case PlotKind::HeatmapTri:
             // A vertex belongs to triangles: rows are fixed.
+            return std::nullopt;
+        case PlotKind::Contour:
+            // Its grid is edited through set_contour_data() only.
             return std::nullopt;
         case PlotKind::Circle:
         case PlotKind::Wedge:
@@ -1335,6 +1346,8 @@ std::optional<ReplacedOpts<Opts>> assign_plot_opts(Vec& v, int idx, ObjectId id,
         if (kept) visible_flag(p->opts) = *kept;
         if constexpr (requires { p->opts.zorder; })
             if (kept_z) p->opts.zorder = *kept_z;
+        // A contour's drawing data follows its options (levels, norm, filled).
+        if constexpr (std::is_same_v<std::decay_t<decltype(*p)>, ContourPlot>) contour_rebuild(*p);
         return r;
     } else {
         auto labels = std::move(p->opts.hint_labels);
@@ -1374,6 +1387,7 @@ auto& styled_vector(T& t) {
     else if constexpr (std::is_same_v<O, CircleOptions>)  return t.circles;
     else if constexpr (std::is_same_v<O, WedgeOptions>)   return t.wedges;
     else if constexpr (std::is_same_v<O, HeatmapTriOptions>) return t.heatmap_tris;
+    else if constexpr (std::is_same_v<O, ContourOptions>) return t.contours;
     else                                                  return t.scatter_z;
 }
 

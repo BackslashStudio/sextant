@@ -115,6 +115,18 @@ namespace sextant {
         return *this;
     }
 
+    Plane2D& Plane2D::contour(std::span<const double> x, std::span<const double> y, std::span<const double> z,
+                              ContourOptions opts) {
+        d->sheet.ingest_contour(x, y, z, std::move(opts), false, "Plane2D::contour");
+        return *this;
+    }
+
+    Plane2D& Plane2D::contourf(std::span<const double> x, std::span<const double> y, std::span<const double> z,
+                               ContourOptions opts) {
+        d->sheet.ingest_contour(x, y, z, std::move(opts), true, "Plane2D::contourf");
+        return *this;
+    }
+
     Plane2D& Plane2D::heatmap_tri(std::span<const double> x, std::span<const double> y,
                                   std::span<const double> values, HeatmapTriOptions opts) {
         d->sheet.ingest_heatmap_tri(x, y, values, {}, true, std::move(opts), "Plane2D::heatmap_tri");
@@ -298,6 +310,26 @@ namespace sextant {
         return read_back::visible(d->sheet.wedges, i, "Plane2D::shape_wedge_visible");
     }
 
+    std::size_t Plane2D::contour_count() const { return d->sheet.contours.size(); }
+    ContourData Plane2D::contour_data(std::size_t i) const {
+        return read_back::to_data(read_back::at(d->sheet.contours, i, "Plane2D::contour_data"));
+    }
+    Plane2D& Plane2D::set_contour_data(std::size_t i, const ContourData& data) {
+        d->sheet.set_contour_data(i, data.x, data.y, data.z, &data.levels, &data.filled, "Plane2D::set_contour_data");
+        return *this;
+    }
+    Plane2D& Plane2D::set_contour_data(std::size_t i, std::span<const double> x, std::span<const double> y,
+                                       std::span<const double> z) {
+        d->sheet.set_contour_data(i, x, y, z, nullptr, nullptr, "Plane2D::set_contour_data");
+        return *this;
+    }
+    Plane2D& Plane2D::set_contour_visible(std::size_t i, bool visible) {
+        read_back::set_visible(d->sheet.contours, i, visible, "Plane2D::set_contour_visible");
+        return *this;
+    }
+    bool Plane2D::contour_visible(std::size_t i) const {
+        return read_back::visible(d->sheet.contours, i, "Plane2D::contour_visible");
+    }
     std::size_t Plane2D::heatmap_tri_count() const { return d->sheet.heatmap_tris.size(); }
     HeatmapTriData Plane2D::heatmap_tri_data(std::size_t i) const {
         return read_back::to_data(read_back::at(d->sheet.heatmap_tris, i, "Plane2D::heatmap_tri_data"));
