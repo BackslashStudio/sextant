@@ -3,6 +3,7 @@
 #include "panel_state.h"
 #include "figure_context.h"
 #include "panel_widgets.h"
+#include "../color_norm.h"
 #include "../edit_box.h"
 #include "../figure_edits.h"
 #include "../plot_data_view.h"
@@ -909,6 +910,33 @@ namespace sextant {
             if (!p.err.empty()) errorbar_style(o.errorbar, *o.color, has_cap(p.err), has_box(p.err), push);
         }
 
+        // The colour norm, inside a field table after vmin/vmax: its kind and a
+        // two-slope centre (picking two-slope with a centre that doesn't fit puts
+        // it midway). One that doesn't fit draws as linear, which a note says.
+        template<class O, class Push>
+        void norm_rows(const char* id, O& o, Push& push) {
+            field_row("Norm");
+            static const char* kNorms[] = {"linear", "log", "two-slope"};
+            int k = static_cast<int>(o.norm.kind);
+            ImGui::PushID(id);
+            if (ImGui::Combo("##norm", &k, kNorms, IM_ARRAYSIZE(kNorms))) {
+                o.norm.kind = static_cast<ColorNorm::Kind>(k);
+                if (o.norm.kind == ColorNorm::Kind::TwoSlope && !norm_fits(o.norm, o.vmin, o.vmax))
+                    o.norm.center = 0.5f * (o.vmin + o.vmax);
+                push();
+            }
+            if (o.norm.kind == ColorNorm::Kind::TwoSlope) {
+                field_row("Centre");
+                if (drag_float("##ncentre", &o.norm.center, -FLT_MAX, FLT_MAX, 0.01f, "%.4g")) push();
+            }
+            if (!norm_fits(o.norm, o.vmin, o.vmax)) {
+                field_row("");
+                ImGui::TextDisabled(o.norm.kind == ColorNorm::Kind::Log ? "needs vmin, vmax > 0: drawn linear"
+                                                                         : "centre not inside: drawn linear");
+            }
+            ImGui::PopID();
+        }
+
         template<class Push>
         void scatter_z_style(DataPanelState& st, ScatterZOptions& o, const ScatterZPlot& p, Push&& push) {
             name_and_key(st, o, push);
@@ -925,6 +953,7 @@ namespace sextant {
                 if (drag_float("##zvmin", &o.vmin, -FLT_MAX, FLT_MAX, 0.01f, "%.4g")) push();
                 field_row("vmax");
                 if (drag_float("##zvmax", &o.vmax, -FLT_MAX, FLT_MAX, 0.01f, "%.4g")) push();
+                norm_rows("zn", o, push);
                 field_row("Alpha");
                 if (drag_float("##zalpha", &o.alpha, 0.0f, 1.0f, 0.005f, "%.2f")) push();
                 end_field_table();
@@ -1120,6 +1149,7 @@ namespace sextant {
                     if (drag_float("##qvmin", &o.vmin, -FLT_MAX, FLT_MAX, 0.01f, "%.4g")) push();
                     field_row("vmax");
                     if (drag_float("##qvmax", &o.vmax, -FLT_MAX, FLT_MAX, 0.01f, "%.4g")) push();
+                    norm_rows("qn", o, push);
                 } else {
                     field_row("Color");
                     if (color_swatch("##qcol", *o.color)) push();
@@ -1224,6 +1254,7 @@ namespace sextant {
                 if (drag_float("##tvmin", &o.vmin, -FLT_MAX, FLT_MAX, 0.01f, "%.4g")) push();
                 field_row("vmax");
                 if (drag_float("##tvmax", &o.vmax, -FLT_MAX, FLT_MAX, 0.01f, "%.4g")) push();
+                norm_rows("tn", o, push);
                 end_field_table();
             }
         }
@@ -1248,6 +1279,7 @@ namespace sextant {
                 if (drag_float("##hvmin", &o.vmin, -FLT_MAX, FLT_MAX, 0.01f, "%.4g")) push();
                 field_row("vmax");
                 if (drag_float("##hvmax", &o.vmax, -FLT_MAX, FLT_MAX, 0.01f, "%.4g")) push();
+                norm_rows("hn", o, push);
                 if (!mesh) heatmap_origin_row(o, push);
                 end_field_table();
             }

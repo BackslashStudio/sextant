@@ -259,11 +259,12 @@ namespace lt {
 
     void test_describe() {
 #define STRUCT(T) check_struct<T>(#T);
-        STRUCT(Vec3) STRUCT(BoxAspect)
+        STRUCT(Vec3) STRUCT(BoxAspect) STRUCT(ColorNorm)
         STRUCT(ErrorBarOptions) STRUCT(LineOptions) STRUCT(ScatterOptions) STRUCT(ScatterZOptions)
         STRUCT(BarOptions) STRUCT(HistOptions) STRUCT(AxLineOptions) STRUCT(AxSpanOptions)
         STRUCT(FillOptions) STRUCT(QuiverOptions)
-        STRUCT(HeatmapOptions) STRUCT(ImageOptions) STRUCT(HeatmapRecOptions) STRUCT(HeatmapTriOptions) STRUCT(GridOptions)
+        STRUCT(HeatmapOptions) STRUCT(ImageOptions) STRUCT(HeatmapRecOptions) STRUCT(HeatmapTriOptions) STRUCT(Hist2dOptions)
+        STRUCT(GridOptions)
         STRUCT(PolyOptions) STRUCT(CircleOptions) STRUCT(WedgeOptions)
         STRUCT(AxesStyle) STRUCT(LegendOptions) STRUCT(ColorbarOptions) STRUCT(SuptitleOptions)
         STRUCT(FigureMargins) STRUCT(TextOptions) STRUCT(ArrowOptions)
@@ -277,6 +278,7 @@ namespace lt {
         ENUM(LineStyle) ENUM(MarkerStyle) ENUM(CapStyle) ENUM(AxisPosition)
         ENUM(LegendAnchor) ENUM(ColorbarAnchor) ENUM(HAlign) ENUM(PanelTheme) ENUM(MathFontset) ENUM(Projection)
         ENUM(PlaneOrientation) ENUM(VAlign) ENUM(Coords) ENUM(ArrowHead) ENUM(DrawStyle) ENUM(Orientation)
+        ENUM(ColorNorm::Kind)
 #undef ENUM
 
         // Nesting flattens to dotted paths; a const struct walks too.

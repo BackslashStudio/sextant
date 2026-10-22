@@ -163,6 +163,29 @@ namespace sextant {
     inline constexpr Colormap Colormap::Hsv{24, false, true};
     inline constexpr Colormap Colormap::Phase{25, false, true};
 
+    // How a value lands on the colormap between vmin and vmax, as matplotlib's
+    // norms:
+    //   linear()        evenly (the default, matplotlib's Normalize).
+    //   log()           evenly in log(value) (LogNorm). Needs vmin > 0 and
+    //                   vmax > 0; a value <= 0 has no colour and is not drawn.
+    //   two_slope(c)    vmin..c on the map's lower half and c..vmax on its upper
+    //                   half (TwoSlopeNorm(vcenter=c)), for a diverging map around
+    //                   a centre off the middle. c lies strictly between vmin and vmax.
+    // A plotting call whose norm doesn't fit its vmin/vmax throws
+    // std::invalid_argument. One that stops fitting later (a panel edit) draws
+    // as linear until it fits again.
+    struct ColorNorm {
+        enum class Kind { Linear, Log, TwoSlope };
+        Kind kind = Kind::Linear;
+        float center = 0.0f; // TwoSlope only
+
+        static constexpr ColorNorm linear() { return {}; }
+        static constexpr ColorNorm log() { return { Kind::Log, 0.0f }; }
+        static constexpr ColorNorm two_slope(float center) { return { Kind::TwoSlope, center }; }
+
+        friend constexpr bool operator==(const ColorNorm&, const ColorNorm&) = default;
+    };
+
     // Error-bar whisker end: `Flat` crossbar ("to here") or `Arrow` head pointing
     // away from the point ("at least this far"). Shared by 2D and 3D.
     enum class CapStyle { Flat, Arrow };
@@ -318,6 +341,7 @@ namespace sextant {
 
         float vmin = 0.0f;
         float vmax = 1.0f;
+        ColorNorm norm; // see ColorNorm; under log() a point with z <= 0 is not drawn
         bool colorbar = false;
 
         // Names the color scale, drawn along the outer side of this series'
@@ -496,6 +520,7 @@ namespace sextant {
         Colormap cmap = Colormap::Viridis;
         float vmin = 0.0f;
         float vmax = 1.0f;
+        ColorNorm norm; // see ColorNorm; under log() an arrow with c <= 0 is not drawn
         // A colorbar for the mapped colors (only with `c`); `name` labels it.
         bool colorbar = false;
 
@@ -538,6 +563,7 @@ namespace sextant {
         Colormap cmap = Colormap::Viridis;
         float vmin = 0.0f;
         float vmax = 1.0f;
+        ColorNorm norm; // see ColorNorm; under log() a cell <= 0 is empty, as NaN
         bool colorbar = false;
 
         // Names the color scale on this heatmap's colorbar (see ScatterZOptions::name).
@@ -588,6 +614,7 @@ namespace sextant {
         Colormap cmap = Colormap::Viridis;
         float vmin = 0.0f;
         float vmax = 1.0f;
+        ColorNorm norm; // see HeatmapOptions::norm
         bool colorbar = false;
         std::string name;    // see HeatmapOptions::name
         bool visible = true; // see LineOptions::visible
@@ -604,6 +631,7 @@ namespace sextant {
         Colormap cmap = Colormap::Viridis;
         float vmin = 0.0f;
         float vmax = 1.0f;
+        ColorNorm norm; // see ColorNorm; under log() a vertex <= 0 leaves out its triangles
         bool colorbar = false;
         std::string name;    // see HeatmapOptions::name
         bool visible = true; // see LineOptions::visible
@@ -612,6 +640,36 @@ namespace sextant {
         // See LineOptions::hint_labels: one per vertex; hover shows the label of
         // the hovered triangle's nearest vertex.
         std::vector<std::string> hint_labels;
+    };
+
+    // A 2D histogram (Axes::hist2d()), as matplotlib's hist2d.
+    struct Hist2dOptions {
+        // Even bins: `xbins` x `ybins` over `xrange` x `yrange` (unset = the
+        // extent of the points, widened by 0.5 each way when it is one value).
+        int xbins = 10, ybins = 10;
+        std::optional<Range> xrange, yrange;
+
+        // Bin edges for an axis (at least two, finite, strictly increasing):
+        // they replace its bins and range, e.g. log-spaced edges for a log axis.
+        // With either set the histogram is a heatmap_rec(), else a heatmap().
+        std::vector<double> x_edges, y_edges;
+
+        // Each bin's count / (points inside the edges * bin area) rather than its count.
+        bool density = false;
+
+        // A bin whose value (count, or density) is below cmin or above cmax is
+        // empty (NaN): cmin = 1 hides the empty bins.
+        std::optional<double> cmin, cmax;
+
+        Colormap cmap = Colormap::Viridis;
+        ColorNorm norm;            // see ColorNorm
+        // Unset = the bins' smallest and largest value (under log(), the smallest
+        // above 0; under two_slope(), widened to keep the centre between them).
+        std::optional<float> vmin, vmax;
+        bool colorbar = false;
+        std::string name;    // see HeatmapOptions::name
+        bool visible = true; // see LineOptions::visible
+        double zorder = 0.0; // see LineOptions::zorder
     };
 
     struct GridOptions {

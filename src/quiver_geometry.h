@@ -7,6 +7,7 @@
 // pivot; its two ends are placed on the axis scales, so it points the way the
 // data does. Across, it is pixels: a shaft `width` wide and a triangular head.
 #include "axis_scale.h"
+#include "color_norm.h"
 #include "colormaps.h"
 #include "plot_objects.h"
 
@@ -58,13 +59,16 @@ inline double quiver_auto_amp(std::span<const double> x, std::span<const double>
 
 // Calls fn(i, tx, ty, hx, hy) for each arrow drawn, with its tail (t) and tip
 // (h) in scale space through xs/ys (identities on a plane). Left out: a
-// non-finite number (c included, when colormapped), a zero vector, an end
-// with no place on its scale.
+// non-finite number (c included, when colormapped), a c the norm leaves
+// without a colour (<= 0 under log), a zero vector, an end with no place on
+// its scale.
 template <class F>
 void for_each_quiver_arrow(const QuiverPlot& p, const AxisScale& xs, const AxisScale& ys, F&& fn) {
     const std::size_t n = p.count();
     const double s = p.amp();
     const bool mapped = p.colormapped();
+    const ColorNorm::Kind kind = mapped ? norm_in_force(p.opts.norm, p.opts.vmin, p.opts.vmax)
+                                        : ColorNorm::Kind::Linear;
     const double back = p.opts.pivot == QuiverPivot::Tip      ? 1.0
                         : p.opts.pivot == QuiverPivot::Middle ? 0.5
                                                               : 0.0;
@@ -72,7 +76,7 @@ void for_each_quiver_arrow(const QuiverPlot& p, const AxisScale& xs, const AxisS
         const double du = s * p.u[i], dv = s * p.v[i];
         if (!std::isfinite(p.x[i]) || !std::isfinite(p.y[i]) || !std::isfinite(du)
             || !std::isfinite(dv) || (du == 0.0 && dv == 0.0)
-            || (mapped && !(i < p.c.size() && std::isfinite(p.c[i]))))
+            || (mapped && !(i < p.c.size() && std::isfinite(p.c[i]) && !norm_masks(kind, p.c[i]))))
             continue;
         const double x0 = p.x[i] - back * du, y0 = p.y[i] - back * dv;
         const double x1 = x0 + du, y1 = y0 + dv;
@@ -135,13 +139,19 @@ void arrow_triangles(int points, F&& emit) {
     }
 }
 
-// Arrow i's color before the quiver's alpha: its c through cmap/vmin/vmax
-// when colormapped (a cyclic map wraps), else the flat color.
+// Arrow i's color before the quiver's alpha: its c through cmap/vmin/vmax and
+// the norm when colormapped (a cyclic map wraps), else the flat color.
 inline Color quiver_arrow_color(const QuiverPlot& p, std::size_t i) {
     if (!p.colormapped()) return *p.opts.color;
     const uint8_t* lut = colormaps::get(p.opts.cmap);
-    const double range = static_cast<double>(p.opts.vmax) - p.opts.vmin;
-    const double t = range != 0.0 && i < p.c.size() ? (p.c[i] - p.opts.vmin) / range : 0.0;
+    const ColorNorm::Kind kind = norm_in_force(p.opts.norm, p.opts.vmin, p.opts.vmax);
+    double t = 0.0;
+    if (kind != ColorNorm::Kind::Linear) {
+        if (i < p.c.size()) t = norm_t(kind, p.opts.norm.center, p.opts.vmin, p.opts.vmax, p.c[i]);
+    } else {
+        const double range = static_cast<double>(p.opts.vmax) - p.opts.vmin;
+        t = range != 0.0 && i < p.c.size() ? (p.c[i] - p.opts.vmin) / range : 0.0;
+    }
     const uint8_t* c = &lut[colormaps::index(t, p.opts.cmap.is_cyclic()) * 4];
     return {c[0] / 255.0f, c[1] / 255.0f, c[2] / 255.0f, c[3] / 255.0f};
 }

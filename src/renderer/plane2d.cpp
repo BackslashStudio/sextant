@@ -16,10 +16,15 @@
 
 namespace sextant {
     namespace {
-        // Colormap lookup shared by the texture and the per-cell polygons.
-        Color cell_color(const std::uint8_t* lut, bool cyclic, float value, float vmin, float vrange) {
-            const double t = (vrange != 0.0f) ? (value - vmin) / vrange : 0.0;
-            const std::uint8_t* c = &lut[colormaps::index(t, cyclic) * 4];
+        // A scatter_z point's colormap colour; a non-linear norm normalises its
+        // z in double, as the 2D outputs do.
+        Color point_color(const ScatterZPlot& sp, const std::uint8_t* lut, ColorNorm::Kind kind, std::size_t i) {
+            const float vmin = sp.opts.vmin, vrange = sp.opts.vmax - sp.opts.vmin;
+            const float value = static_cast<float>(sp.z[i]);
+            const double t = kind == ColorNorm::Kind::Linear
+                                 ? ((vrange != 0.0f) ? (value - vmin) / vrange : 0.0)
+                                 : norm_t(kind, sp.opts.norm.center, sp.opts.vmin, sp.opts.vmax, sp.z[i]);
+            const std::uint8_t* c = &lut[colormaps::index(t, sp.opts.cmap.is_cyclic()) * 4];
             return {c[0] / 255.0f, c[1] / 255.0f, c[2] / 255.0f, c[3] / 255.0f};
         }
 
@@ -517,14 +522,13 @@ namespace sextant {
                     // scatter_z has no single color, so black (as in 2D).
                     errs(sp.x, sp.y, sp.err, sp.opts.errorbar, Color::Black, sp.opts.alpha);
                     const std::uint8_t* lut = colormaps::get(sp.opts.cmap);
-                    const float vmin = sp.opts.vmin, vrange = sp.opts.vmax - sp.opts.vmin;
+                    const ColorNorm::Kind kind = norm_in_force(sp.opts.norm, sp.opts.vmin, sp.opts.vmax);
                     const std::size_t n = std::min({sp.x.size(), sp.y.size(), sp.z.size()});
                     const float ew = std::max(0.0f, sp.opts.edge_linewidth);
                     b.open(Kind::Marker);
                     for (std::size_t i = 0; i < n; ++i) {
                         if (marker_hidden(sp, i)) continue;
-                        const Color face = cell_color(lut, sp.opts.cmap.is_cyclic(),
-                                                      static_cast<float>(sp.z[i]), vmin, vrange);
+                        const Color face = point_color(sp, lut, kind, i);
                         Color ec = sp.opts.edgecolor ? *sp.opts.edgecolor : face;
                         ec.a = std::clamp((sp.opts.edgecolor ? ec.a : 1.0f) * sp.opts.alpha,
                                           0.0f, 1.0f);

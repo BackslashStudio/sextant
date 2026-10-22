@@ -2,8 +2,10 @@
 // A heatmap's cell colours as RGBA8, shared by the GL texture, the SVG <image>
 // and a perspective plane's cell polygons, so every output colours a cell the
 // same way: a value through the colormap, or an imshow_rgb() image's own colour
-// (each channel clamped to [0, 1]). A NaN value, or an image pixel with a NaN
-// channel, is a transparent cell.
+// (each channel clamped to [0, 1]). A NaN value, a value the norm leaves
+// without a colour (<= 0 under log), or an image pixel with a NaN channel, is a
+// transparent cell.
+#include "color_norm.h"
 #include "colormaps.h"
 #include "plot_objects.h"
 
@@ -19,7 +21,8 @@ class HeatmapPixels {
 public:
     explicit HeatmapPixels(const HeatmapPlot& hp)
         : hp_(hp), lut_(colormaps::get(hp.opts.cmap)), cyclic_(hp.opts.cmap.is_cyclic()),
-          vmin_(hp.opts.vmin), vrange_(hp.opts.vmax - hp.opts.vmin) {}
+          vmin_(hp.opts.vmin), vrange_(hp.opts.vmax - hp.opts.vmin),
+          norm_(norm_in_force(hp.opts.norm, hp.opts.vmin, hp.opts.vmax)) {}
 
     // Storage cell k (row * cols + col, row 0 first whatever the origin) into
     // out[0..3]. Float arithmetic as the readers always did, so a heatmap's
@@ -31,7 +34,16 @@ public:
                 std::memset(out, 0, 4);
                 return;
             }
-            const double t = (vrange_ != 0.0f) ? (v - vmin_) / vrange_ : 0.0;
+            double t;
+            if (norm_ == ColorNorm::Kind::Linear) {
+                t = (vrange_ != 0.0f) ? (v - vmin_) / vrange_ : 0.0;
+            } else {
+                t = norm_t(norm_, hp_.opts.norm.center, hp_.opts.vmin, hp_.opts.vmax, v);
+                if (std::isnan(t)) {
+                    std::memset(out, 0, 4);
+                    return;
+                }
+            }
             std::memcpy(out, &lut_[colormaps::index(t, cyclic_) * 4], 4);
             return;
         }
@@ -58,6 +70,7 @@ private:
     const std::uint8_t*  lut_;
     bool                 cyclic_;
     float                vmin_, vrange_;
+    ColorNorm::Kind      norm_;
 };
 
 } // namespace sextant

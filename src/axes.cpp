@@ -1,7 +1,9 @@
 #include "axes_impl.h"
 #include "object_remove.h"
 #include "axis_limits.h"
+#include "color_norm.h"
 #include "delaunay.h"
+#include "hist2d.h"
 #include "read_back.h"
 #include "rich_text.h"
 #include "quiver_geometry.h"
@@ -374,6 +376,7 @@ void Axes::Impl::ingest_scatter_z(std::span<const double> x, std::span<const dou
     read_back::check_zorder(opts.zorder, who);
     if (x.size() != y.size() || x.size() != z.size())
         throw std::invalid_argument(std::string(who) + ": x, y, and z must have the same length");
+    check_norm(opts.norm, opts.vmin, opts.vmax, who);
     ErrorBarData err = take_error_bars(eb, x.size(), who);
     warn_math(mathtext, who, opts.name);
     read_back::check_sizes(opts.sizes, x.size(), who);
@@ -521,6 +524,7 @@ void Axes::Impl::ingest_heatmap(std::span<const double> data, int rows, int cols
     const std::string w = who;
     std::vector<float> cells = heatmap_cells(data, rows, cols, xrange, yrange, w);
     check_origin(opts.origin, w);
+    check_norm(opts.norm, opts.vmin, opts.vmax, who);
 
     // Sort and de-duplicate once. Check finiteness first (NaN doesn't sort).
     for (double level : opts.contours)
@@ -610,11 +614,13 @@ void Axes::Impl::ingest_heatmap_rec(std::span<const double> data, int rows, int 
     const std::string w = who;
     const auto [xr, yr] = mesh_extent(x_edges, y_edges, rows, cols, w);
     std::vector<float> cells = heatmap_cells(data, rows, cols, xr, yr, w);
+    check_norm(opts.norm, opts.vmin, opts.vmax, who);
 
     HeatmapOptions ho;
     ho.cmap = opts.cmap;
     ho.vmin = opts.vmin;
     ho.vmax = opts.vmax;
+    ho.norm = opts.norm;
     ho.colorbar = opts.colorbar;
     ho.name = std::move(opts.name);
     ho.visible = opts.visible;
@@ -635,6 +641,37 @@ Axes& Axes::heatmap_rec(std::span<const double> data, int rows, int cols,
     return *this;
 }
 
+// Binned here; the result is an ordinary heatmap (even bins) or mesh, which
+// does the drawing checks (the norm against the resolved limits among them).
+Axes& Axes::hist2d(std::span<const double> x, std::span<const double> y, Hist2dOptions opts) {
+    const Hist2dBins b = hist2d_bins(x, y, opts, "hist2d");
+    if (b.even) {
+        HeatmapOptions ho;
+        ho.cmap = opts.cmap;
+        ho.vmin = b.vmin;
+        ho.vmax = b.vmax;
+        ho.norm = opts.norm;
+        ho.colorbar = opts.colorbar;
+        ho.name = std::move(opts.name);
+        ho.visible = opts.visible;
+        ho.zorder = opts.zorder;
+        d->ingest_heatmap(b.values, b.rows(), b.cols(), Range{ b.x_edges.front(), b.x_edges.back() },
+                          Range{ b.y_edges.front(), b.y_edges.back() }, std::move(ho), "hist2d");
+    } else {
+        HeatmapRecOptions ro;
+        ro.cmap = opts.cmap;
+        ro.vmin = b.vmin;
+        ro.vmax = b.vmax;
+        ro.norm = opts.norm;
+        ro.colorbar = opts.colorbar;
+        ro.name = std::move(opts.name);
+        ro.visible = opts.visible;
+        ro.zorder = opts.zorder;
+        d->ingest_heatmap_rec(b.values, b.rows(), b.cols(), b.x_edges, b.y_edges, std::move(ro), "hist2d");
+    }
+    return *this;
+}
+
 // Values are kept as given (NaN too); the triangles are checked, or derived
 // once from (x, y) in data units.
 void Axes::Impl::ingest_heatmap_tri(std::span<const double> x, std::span<const double> y,
@@ -642,6 +679,7 @@ void Axes::Impl::ingest_heatmap_tri(std::span<const double> x, std::span<const d
                                     bool derive, HeatmapTriOptions opts, const char* who) {
     read_back::check_zorder(opts.zorder, who);
     read_back::check_tri_vertices(x, y, values, who);
+    check_norm(opts.norm, opts.vmin, opts.vmax, who);
     std::vector<std::uint32_t> t;
     if (derive) {
         if (!delaunay_triangulate(x, y, t))
@@ -849,6 +887,7 @@ void Axes::Impl::ingest_quiver(std::span<const double> x, std::span<const double
     read_back::check_quiver(x.size(), y.size(), u.size(), v.size(), who);
     if (c && c->size() != x.size())
         throw std::invalid_argument(std::string(who) + ": c must have one value per arrow");
+    if (c) check_norm(opts.norm, opts.vmin, opts.vmax, who);
     if (opts.amp && !(std::isfinite(*opts.amp) && *opts.amp > 0.0))
         throw std::invalid_argument(std::string(who) + ": amp must be finite and > 0");
     if (!opts.amp) opts.amp = quiver_auto_amp(x, y, u, v);

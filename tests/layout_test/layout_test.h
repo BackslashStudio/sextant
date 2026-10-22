@@ -629,6 +629,9 @@ namespace lt {
     // heatmap_tri.cpp
     void test_heatmap_tri();
 
+    // color_norm.cpp
+    void test_color_norm();
+
     // line_steps.cpp
     void test_line_steps();
     void test_line_steps_rendered();

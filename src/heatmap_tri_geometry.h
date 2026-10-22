@@ -3,7 +3,9 @@
 // a plane's raster and the hit test, so all of them leave out the same
 // triangles and interpolate the same way. Edges are straight in pixels and a
 // value varies linearly across a triangle in pixels (matplotlib's tripcolor
-// with shading="gouraud"), on any axis scale.
+// with shading="gouraud"), on any axis scale. Under a non-linear norm the
+// value is interpolated and the norm applied per pixel.
+#include "color_norm.h"
 #include "coord_transform.h"
 #include "plot_objects.h"
 
@@ -18,11 +20,28 @@
 
 namespace sextant {
 
-// A value on the colormap's 0..1 (not yet clamped or wrapped); vmin == vmax
-// puts everything at 0, as a heatmap does.
+// A value on the colormap's 0..1 under a linear norm (not yet clamped or
+// wrapped); vmin == vmax puts everything at 0, as a heatmap does.
 inline double heatmap_tri_t(const HeatmapTriOptions& o, double v) {
     const double span = static_cast<double>(o.vmax) - static_cast<double>(o.vmin);
     return span != 0.0 ? (v - o.vmin) / span : 0.0;
+}
+
+// The norm a heatmap_tri draws with (linear when its own doesn't fit).
+inline ColorNorm::Kind heatmap_tri_norm(const HeatmapTriOptions& o) {
+    return norm_in_force(o.norm, o.vmin, o.vmax);
+}
+
+// What a vertex carries for interpolation: its colormap position under a
+// linear norm (interpolating it is interpolating the value), else the value,
+// which heatmap_tri_pos() normalises per pixel.
+inline double heatmap_tri_attr(const HeatmapTriOptions& o, ColorNorm::Kind kind, double v) {
+    return kind == ColorNorm::Kind::Linear ? heatmap_tri_t(o, v) : v;
+}
+
+// An interpolated heatmap_tri_attr() as a colormap position.
+inline double heatmap_tri_pos(const HeatmapTriOptions& o, ColorNorm::Kind kind, double a) {
+    return kind == ColorNorm::Kind::Linear ? a : norm_t(kind, o.norm.center, o.vmin, o.vmax, a);
 }
 
 // One drawn triangle: its vertices (in pixels, or in scale space for the hit
@@ -33,8 +52,9 @@ struct TriPx {
     std::uint32_t index;
 };
 
-// The triangles that draw, in `tri` order: none with a NaN value or a vertex
-// the scale cannot place (<= 0 on Log). `map(x, y, ox, oy)` places a vertex.
+// The triangles that draw, in `tri` order: none with a NaN value, a value the
+// norm leaves without a colour (<= 0 under log) or a vertex the scale cannot
+// place (<= 0 on Log). `map(x, y, ox, oy)` places a vertex.
 template <class Map>
 std::vector<TriPx> heatmap_tri_mapped(const HeatmapTriPlot& p, const AxisScale& xs, const AxisScale& ys,
                                       Map&& map) {
@@ -43,8 +63,9 @@ std::vector<TriPx> heatmap_tri_mapped(const HeatmapTriPlot& p, const AxisScale& 
     if (p.y.size() != n || p.values.size() != n) return out;
     std::vector<double> px(n), py(n);
     std::vector<char> ok(n);
+    const ColorNorm::Kind kind = heatmap_tri_norm(p.opts);
     for (std::size_t i = 0; i < n; ++i) {
-        ok[i] = !std::isnan(p.values[i]) && xs.valid(p.x[i]) && ys.valid(p.y[i]);
+        ok[i] = !std::isnan(p.values[i]) && !norm_masks(kind, p.values[i]) && xs.valid(p.x[i]) && ys.valid(p.y[i]);
         if (ok[i]) map(p.x[i], p.y[i], px[i], py[i]);
     }
     out.reserve(p.tri.size() / 3);
@@ -98,6 +119,7 @@ inline std::vector<float> rasterize_heatmap_tri(const HeatmapTriPlot& p, const C
     std::vector<float> out(static_cast<std::size_t>(std::max(w, 0)) * static_cast<std::size_t>(std::max(h, 0)),
                            std::numeric_limits<float>::quiet_NaN());
     if (w <= 0 || h <= 0) return out;
+    const ColorNorm::Kind kind = heatmap_tri_norm(p.opts);
     for (const TriPx& q : heatmap_tri_pixels(p, tr)) {
         // The pixel box, clamped before the cast (a vertex can lie far off).
         const auto clampd = [](double v) { return std::clamp(v, -1e7, 1e7); };
@@ -107,14 +129,16 @@ inline std::vector<float> rasterize_heatmap_tri(const HeatmapTriPlot& p, const C
         const int i1 = std::min(w - 1, static_cast<int>(std::ceil(hx - 0.5)) - x0);
         const int j0 = std::max(0, static_cast<int>(std::floor(ly - 0.5)) - y0);
         const int j1 = std::min(h - 1, static_cast<int>(std::ceil(hy - 0.5)) - y0);
-        const double t[3] = { heatmap_tri_t(p.opts, p.values[q.v[0]]), heatmap_tri_t(p.opts, p.values[q.v[1]]),
-                              heatmap_tri_t(p.opts, p.values[q.v[2]]) };
+        const double t[3] = { heatmap_tri_attr(p.opts, kind, p.values[q.v[0]]),
+                              heatmap_tri_attr(p.opts, kind, p.values[q.v[1]]),
+                              heatmap_tri_attr(p.opts, kind, p.values[q.v[2]]) };
         for (int j = j0; j <= j1; ++j)
             for (int i = i0; i <= i1; ++i) {
                 const auto wts = tri_weights(q, x0 + i + 0.5, y0 + j + 0.5);
                 if (!wts) continue;
                 out[static_cast<std::size_t>(j) * static_cast<std::size_t>(w) + static_cast<std::size_t>(i)] =
-                    static_cast<float>((*wts)[0] * t[0] + (*wts)[1] * t[1] + (*wts)[2] * t[2]);
+                    static_cast<float>(heatmap_tri_pos(p.opts, kind,
+                                                       (*wts)[0] * t[0] + (*wts)[1] * t[1] + (*wts)[2] * t[2]));
             }
     }
     return out;
@@ -157,7 +181,8 @@ inline std::optional<TriHit> heatmap_tri_at(const HeatmapTriPlot& p, const AxisS
 // The triangles resampled onto an even n x n heatmap over their vertices' box
 // (linear axes, as a plane's sheet): each cell the value interpolated at its
 // centre, NaN (transparent) where no triangle covers it, with the same
-// colormap and range. What a plane's SVG writes, as a heatmap's image or cells.
+// colormap and range (under a non-linear norm, the colormap positions over a
+// linear 0..1). What a plane's SVG writes, as a heatmap's image or cells.
 inline HeatmapPlot heatmap_tri_grid(const HeatmapTriPlot& p, int n) {
     HeatmapPlot g;
     double x0 = std::numeric_limits<double>::max(), x1 = -x0, y0 = x0, y1 = -x0;
@@ -171,17 +196,23 @@ inline HeatmapPlot heatmap_tri_grid(const HeatmapTriPlot& p, int n) {
     CoordTransform tr{ x0, x1, y0, y1, 0.0f, 0.0f, static_cast<float>(n), static_cast<float>(n),
                        static_cast<float>(n), static_cast<float>(n) };
     const std::vector<float> t = rasterize_heatmap_tri(p, tr, 0, 0, n, n);
-    const double span = static_cast<double>(p.opts.vmax) - static_cast<double>(p.opts.vmin);
-    std::vector<float> v(t.size());
-    for (std::size_t i = 0; i < t.size(); ++i)
-        v[i] = std::isnan(t[i]) ? t[i] : static_cast<float>(p.opts.vmin + t[i] * span);
-    g.data = std::move(v);
+    g.opts.cmap = p.opts.cmap;
+    if (heatmap_tri_norm(p.opts) == ColorNorm::Kind::Linear) {
+        const double span = static_cast<double>(p.opts.vmax) - static_cast<double>(p.opts.vmin);
+        std::vector<float> v(t.size());
+        for (std::size_t i = 0; i < t.size(); ++i)
+            v[i] = std::isnan(t[i]) ? t[i] : static_cast<float>(p.opts.vmin + t[i] * span);
+        g.data = std::move(v);
+        g.opts.vmin = p.opts.vmin;
+        g.opts.vmax = p.opts.vmax;
+    } else {
+        g.data = t;
+        g.opts.vmin = 0.0f;
+        g.opts.vmax = 1.0f;
+    }
     g.rows = g.cols = n;
     g.xrange = { x0, x1 };
     g.yrange = { y0, y1 };
-    g.opts.cmap = p.opts.cmap;
-    g.opts.vmin = p.opts.vmin;
-    g.opts.vmax = p.opts.vmax;
     g.opts.origin = "upper";  // raster row 0 is the top
     return g;
 }

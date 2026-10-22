@@ -3,6 +3,7 @@
 #include "sextant/axes3d.h"
 #include "sextant/object_id.h"
 #include "axis_scale.h"
+#include "color_norm.h"
 #include "cow_vec.h"
 #include "tick_style.h"
 #include "tick.h"
@@ -306,21 +307,36 @@ struct ScatterZPlot {
     unsigned long long zorder_stamp = 0;
 };
 
+// True when scatter_z point i has no colour under its norm (z <= 0 under
+// log): hidden as a point with no size is. Other kinds have no norm.
+template <class P>
+bool marker_norm_masked(const P& p, std::size_t i) {
+    if constexpr (requires { p.z; p.opts.norm; }) {
+        const ColorNorm::Kind kind = norm_in_force(p.opts.norm, p.opts.vmin, p.opts.vmax);
+        return kind == ColorNorm::Kind::Log && i < p.z.size() && norm_masks(kind, p.z[i]);
+    } else {
+        return false;
+    }
+}
+
 // A marker's pixel diameter: its own from `sizes` when the series has them,
 // else the series' `size`. A per-point size that is NaN or <= 0 hides that
 // point (not drawn, not hovered): 0 is returned, which the GPU draws as nothing.
+// So does a scatter_z point its norm leaves without a colour.
 template <class P>
 float marker_size_at(const P& p, std::size_t i) {
+    if (marker_norm_masked(p, i)) return 0.0f;
     if (p.sizes.empty()) return p.opts.size;
     const float s = i < p.sizes.size() ? static_cast<float>(p.sizes[i]) : 0.0f;
     return s > 0.0f ? s : 0.0f;
 }
 
-// True when point i is hidden by its own size (see marker_size_at()). A series
-// without `sizes` hides nothing, whatever its `size`.
+// True when point i is hidden by its own size (see marker_size_at()) or its
+// norm. A series without `sizes` hides nothing by size, whatever its `size`.
 template <class P>
 bool marker_hidden(const P& p, std::size_t i) {
-    return !p.sizes.empty() && !(i < p.sizes.size() && static_cast<float>(p.sizes[i]) > 0.0f);
+    return (!p.sizes.empty() && !(i < p.sizes.size() && static_cast<float>(p.sizes[i]) > 0.0f))
+           || marker_norm_masked(p, i);
 }
 
 // Box axis index (into x, y, z) of each grid direction, for every consumer to

@@ -556,10 +556,13 @@ static void emit_scatter_z(std::ostringstream& o, const SvgAxesData& d,
         if (sp.x.empty()) continue;
         const uint8_t* lut   = colormaps::get(sp.opts.cmap);
         const float    vmin  = sp.opts.vmin, vrange = sp.opts.vmax - sp.opts.vmin;
+        const ColorNorm::Kind kind = norm_in_force(sp.opts.norm, sp.opts.vmin, sp.opts.vmax);
         for (std::size_t i = 0; i < sp.x.size(); ++i) {
             if (marker_hidden(sp, i)) continue;
             const float r = marker_size_at(sp, i) * 0.5f;
-            const double t = (vrange != 0.0f) ? (sp.z[i] - vmin) / vrange : 0.0;
+            const double t = kind == ColorNorm::Kind::Linear
+                                 ? ((vrange != 0.0f) ? (sp.z[i] - vmin) / vrange : 0.0)
+                                 : norm_t(kind, sp.opts.norm.center, sp.opts.vmin, sp.opts.vmax, sp.z[i]);
             const uint8_t* c = &lut[colormaps::index(t, sp.opts.cmap.is_cyclic()) * 4];
             char buf[32];
             std::snprintf(buf, sizeof(buf), "rgb(%d,%d,%d)", c[0], c[1], c[2]);

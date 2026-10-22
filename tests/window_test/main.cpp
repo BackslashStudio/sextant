@@ -2848,11 +2848,79 @@ static void part_heatmap_tri() {
     fig->show(true);
 }
 
+// Colour norms (linear, log, two-slope) across the colormapped kinds, and hist2d.
+static void part_color_norms() {
+    unsigned s = 4242;
+    auto rnd = [&s] { s = s * 1103515245u + 12345u; return ((s >> 8) & 0xFFFF) / 65535.0; };
+    auto gauss = [&] { return std::sqrt(-2.0 * std::log(std::max(rnd(), 1e-9))) * std::cos(6.28318530718 * rnd()); };
+
+    // A field over five decades: a sharp peak on a faint background.
+    constexpr int N = 60;
+    std::vector<double> peak(N * N), tilt(N * N);
+    for (int r = 0; r < N; ++r)
+        for (int c = 0; c < N; ++c) {
+            const double x = -3.0 + 6.0 * c / (N - 1), y = -3.0 + 6.0 * r / (N - 1);
+            peak[r * N + c] = 1e-3 + 100.0 * std::exp(-(x * x + y * y) / 0.3) + std::exp(-((x - 1.5) * (x - 1.5) + y * y));
+            tilt[r * N + c] = 4.0 * std::exp(-((x - 1) * (x - 1) + y * y)) - std::exp(-((x + 1.5) * (x + 1.5) + y * y));
+        }
+    std::vector<double> hx, hy, zx, zy, zz;
+    for (int i = 0; i < 20000; ++i) {
+        hx.push_back(gauss());
+        hy.push_back(0.6 * hx.back() + 0.8 * gauss());
+    }
+    for (int i = 0; i < 400; ++i) {
+        zx.push_back(rnd() * 10.0);
+        zy.push_back(rnd() * 10.0);
+        zz.push_back(std::pow(10.0, 4.0 * rnd() - 1.0));
+    }
+    std::vector<double> edges;
+    for (int i = 0; i <= 20; ++i) edges.push_back(std::pow(10.0, -1.0 + 3.0 * i / 20.0));
+    std::vector<double> lx, ly;
+    for (int i = 0; i < 5000; ++i) {
+        lx.push_back(std::pow(10.0, 0.5 + 0.5 * gauss()));
+        ly.push_back(gauss());
+    }
+
+    auto fig = sextant::Figure::create({.width = 1500, .height = 900, .title = "colour norms"});
+    fig->suptitle("ColorNorm: linear, log, two_slope; hist2d");
+    const sextant::Range r3{-3, 3};
+    fig->add_subplot(2, 3, 1)
+            ->heatmap(peak, N, N, r3, r3, {.vmin = 1e-3f, .vmax = 101.0f, .colorbar = true, .name = "linear"})
+            .set_title("five decades, linear: only the peak shows");
+    fig->add_subplot(2, 3, 2)
+            ->heatmap(peak, N, N, r3, r3, {.vmin = 1e-3f, .vmax = 101.0f, .norm = sextant::ColorNorm::log(),
+                                           .colorbar = true, .name = "log"})
+            .set_title("log norm: the background shows too");
+    fig->add_subplot(2, 3, 3)
+            ->heatmap(tilt, N, N, r3, r3, {.cmap = sextant::Colormap::RdBu.reversed(), .vmin = -1.0f, .vmax = 4.0f,
+                                           .norm = sextant::ColorNorm::two_slope(0.0f), .colorbar = true,
+                                           .name = "two-slope at 0"})
+            .set_title("two-slope: white at 0, though -1..4");
+    fig->add_subplot(2, 3, 4)
+            ->scatter_z(zx, zy, zz, {.size = 10.0f, .vmin = 0.1f, .vmax = 1000.0f,
+                                     .norm = sextant::ColorNorm::log(), .colorbar = true, .name = "z (log)"})
+            .set_title("scatter_z, log norm");
+    fig->add_subplot(2, 3, 5)
+            ->hist2d(hx, hy, {.xbins = 40, .ybins = 40, .norm = sextant::ColorNorm::log(), .colorbar = true,
+                              .name = "count"})
+            .set_title("hist2d, 20000 points, log norm (empty bins empty)");
+    {
+        auto a = fig->add_subplot(2, 3, 6);
+        a->set_xscale(sextant::Scale::Log);
+        a->hist2d(lx, ly, {.ybins = 20, .x_edges = edges, .cmin = 1.0, .cmap = sextant::Colormap::Magma,
+                           .colorbar = true, .name = "count"});
+        a->set_title("hist2d, log-spaced x edges on a log axis, cmin = 1");
+    }
+    savefig_and_check_memory(fig, "part_color_norms");
+    fig->show(true);
+}
+
 static void test_heatmap() {
     part_heatmaps();
     part_images();
     part_heatmap_scales();
     part_heatmap_tri();
+    part_color_norms();
 }
 
 // Text and annotations in 2D and 3D: anchors, rotation, boxes, coordinates in

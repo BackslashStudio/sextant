@@ -46,6 +46,7 @@ namespace sextant {
     SEXTANT_DESCRIBE(BoxAspect, F(x) F(y) F(z))
 
     // style.h
+    SEXTANT_DESCRIBE(ColorNorm, F(kind) F(center))
     SEXTANT_DESCRIBE(ErrorBarOptions,
                      F(color) F(linewidth) F(capsize) F(capstyle) F(boxwidth) F(box_alpha))
     SEXTANT_DESCRIBE(LineOptions,
@@ -57,7 +58,7 @@ namespace sextant {
     SEXTANT_DESCRIBE(ScatterZOptions,
                      F(cmap) F(size) F(sizes) F(marker) F(alpha) F(filled) F(edgecolor)
                      F(edge_linewidth)
-                     F(vmin) F(vmax) F(colorbar) F(name)
+                     F(vmin) F(vmax) F(norm) F(colorbar) F(name)
                      F(show_legend) F(visible) F(zorder) F(errorbar) F(hint_labels))
     SEXTANT_DESCRIBE(BarOptions,
                      F(color) F(orientation) F(bottom) F(width) F(alpha) F(name) F(show_legend) F(visible) F(zorder) F(edgecolor) F(linewidth)
@@ -82,18 +83,21 @@ namespace sextant {
                      F(color) F(alpha) F(edgecolor) F(linewidth) F(linestyle) F(inner) F(name)
                      F(show_legend) F(visible) F(zorder))
     SEXTANT_DESCRIBE(QuiverOptions,
-                     F(color) F(alpha) F(cmap) F(vmin) F(vmax) F(colorbar) F(amp) F(pivot) F(width) F(head_width) F(head_length) F(name)
+                     F(color) F(alpha) F(cmap) F(vmin) F(vmax) F(norm) F(colorbar) F(amp) F(pivot) F(width) F(head_width) F(head_length) F(name)
                      F(show_legend) F(visible) F(zorder) F(hint_labels))
     SEXTANT_DESCRIBE(HeatmapOptions,
-                     F(cmap) F(vmin) F(vmax) F(colorbar) F(name) F(visible) F(zorder) F(origin) F(contours)
+                     F(cmap) F(vmin) F(vmax) F(norm) F(colorbar) F(name) F(visible) F(zorder) F(origin) F(contours)
                      F(contour_color) F(contour_linewidth) F(contour_labels) F(contour_fontsize)
                      F(hint_labels))
     SEXTANT_DESCRIBE(ImageOptions,
                      F(xrange) F(yrange) F(origin) F(visible) F(zorder) F(hint_labels))
     SEXTANT_DESCRIBE(HeatmapRecOptions,
-                     F(cmap) F(vmin) F(vmax) F(colorbar) F(name) F(visible) F(zorder) F(hint_labels))
+                     F(cmap) F(vmin) F(vmax) F(norm) F(colorbar) F(name) F(visible) F(zorder) F(hint_labels))
     SEXTANT_DESCRIBE(HeatmapTriOptions,
-                     F(cmap) F(vmin) F(vmax) F(colorbar) F(name) F(visible) F(zorder) F(hint_labels))
+                     F(cmap) F(vmin) F(vmax) F(norm) F(colorbar) F(name) F(visible) F(zorder) F(hint_labels))
+    SEXTANT_DESCRIBE(Hist2dOptions,
+                     F(xbins) F(ybins) F(xrange) F(yrange) F(x_edges) F(y_edges) F(density) F(cmin) F(cmax)
+                     F(cmap) F(norm) F(vmin) F(vmax) F(colorbar) F(name) F(visible) F(zorder))
     SEXTANT_DESCRIBE(GridOptions, F(color) F(linestyle) F(linewidth) F(minor) F(minor_color))
     SEXTANT_DESCRIBE(AxesStyle,
                      F(background) F(spine_color) F(spine_linewidth) F(spine_bottom) F(spine_left) F(spine_top)
@@ -250,6 +254,9 @@ namespace sextant {
                        {"thin_cross", MarkerStyle::ThinCross}, {"thin_plus", MarkerStyle::ThinPlus},
                        {"vline", MarkerStyle::VLine}, {"hline", MarkerStyle::HLine})
     SEXTANT_ENUM_NAMES(CapStyle, {"flat", CapStyle::Flat}, {"arrow", CapStyle::Arrow})
+    SEXTANT_ENUM_NAMES(ColorNorm::Kind,
+                       {"linear", ColorNorm::Kind::Linear}, {"log", ColorNorm::Kind::Log},
+                       {"two_slope", ColorNorm::Kind::TwoSlope})
     SEXTANT_ENUM_NAMES(Scale, {"linear", Scale::Linear}, {"log", Scale::Log}, {"symlog", Scale::Symlog})
     SEXTANT_ENUM_NAMES(AxisPosition,
                        {"auto", AxisPosition::Auto}, {"low", AxisPosition::Low},

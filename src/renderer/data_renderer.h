@@ -261,6 +261,7 @@ private:
         unsigned long long data_generation = 0;
         Colormap           cmap       = Colormap::Viridis;
         float              vmin = 0.0f, vmax = 0.0f;
+        ColorNorm          norm;
         bool               flip = false;
         int                rows = 0, cols = 0;
     };
@@ -287,6 +288,7 @@ private:
         // scatter_z only: the colormap is baked in.
         Colormap           cmap = Colormap::Viridis;
         float              vmin = 0.0f, vmax = 0.0f, alpha = -1.0f;
+        ColorNorm          norm;
         CoordTransform     tr{};                         // only when !data_space
     };
     std::unordered_map<CacheKey, InstanceCache, CacheKeyHash> scatter_cache_;
@@ -339,6 +341,7 @@ private:
         bool               mapped = false;
         Colormap           cmap = Colormap::Viridis;
         float              vmin = 0.0f, vmax = 1.0f;
+        ColorNorm          norm;
         double             anchor_x = 0.0, anchor_y = 0.0;
         double             span_x = 0.0, span_y = 0.0;
         bool               data_space = true;
@@ -648,7 +651,7 @@ private:
     MarkerUniforms scatter_u_{};
     MarkerUniforms scatterz_u_{};   // .color unused: colour is per-instance
     HeatUniforms   heatmap_u_{};
-    struct HeatTriUniforms { int resolution = -1, cmap = -1, cyclic = -1; };
+    struct HeatTriUniforms { int resolution = -1, cmap = -1, cyclic = -1, norm = -1, n = -1; };
     HeatTriUniforms heattri_u_{};
 
     // Shared line/bar program: aPos(vec2) -> uColor(vec4), for bar fills and

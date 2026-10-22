@@ -558,14 +558,27 @@ void main() {
 
     // uCyclic: wrap rather than clamp. The 256 entries are texel centres, so
     // 0 and 1 land on the first and last entry as the CPU lookup does.
+    // uNorm 0: vT is the colormap position; else vT is the value, normalised
+    // here as norm_t() does: 1 log (uN = log vmin, log vmax), 2 two-slope
+    // (uN = vmin, centre, vmax).
     static constexpr char k_heattri_frag[] = R"(
 #version 410 core
 in float vT;
 uniform sampler2D uCmap;
 uniform int uCyclic;
+uniform int uNorm;
+uniform vec3 uN;
 out vec4 FragColor;
 void main() {
-    float t = uCyclic != 0 ? fract(vT) : clamp(vT, 0.0, 1.0);
+    float p = vT;
+    if (uNorm == 1) {
+        if (!(vT > 0.0)) discard;
+        p = uN.y != uN.x ? (log(vT) - uN.x) / (uN.y - uN.x) : 0.0;
+    } else if (uNorm == 2) {
+        p = (vT - uN.y) * (uN.x - uN.y) > 0.0 ? 0.5 * (vT - uN.x) / (uN.y - uN.x)
+                                             : 0.5 + 0.5 * (vT - uN.y) / (uN.z - uN.y);
+    }
+    float t = uCyclic != 0 ? fract(p) : clamp(p, 0.0, 1.0);
     FragColor = vec4(texture(uCmap, vec2((t * 255.0 + 0.5) / 256.0, 0.5)).rgb, 1.0);
 }
 )";
@@ -1838,7 +1851,8 @@ void main() {
         };
         heatmap_u_ = {loc(heatmap_program_, "uResolution"), loc(heatmap_program_, "uTex")};
         heattri_u_ = {loc(heattri_program_, "uResolution"), loc(heattri_program_, "uCmap"),
-                      loc(heattri_program_, "uCyclic")};
+                      loc(heattri_program_, "uCyclic"), loc(heattri_program_, "uNorm"),
+                      loc(heattri_program_, "uN")};
         plane3d_u_ = {
             loc(plane3d_program_, "uClip"), loc(plane3d_program_, "uTex"),
             loc(plane3d_program_, "uAlpha"), loc(plane3d_program_, "uBoxScale"),
@@ -2458,6 +2472,7 @@ void main() {
                                 && e.size == sp.opts.size
                                 && e.cmap == sp.opts.cmap
                                 && e.vmin == sp.opts.vmin && e.vmax == sp.opts.vmax
+                                && e.norm == sp.opts.norm
                                 && e.alpha == marker_face_alpha(sp.opts)
                                 && (e.data_space
                                         ? precise
@@ -2481,11 +2496,14 @@ void main() {
                 // Per-point color via the colormap LUT.
                 const uint8_t* lut = colormaps::get(sp.opts.cmap);
                 const float vmin = sp.opts.vmin, vrange = sp.opts.vmax - sp.opts.vmin;
+                const ColorNorm::Kind kind = norm_in_force(sp.opts.norm, sp.opts.vmin, sp.opts.vmax);
 
                 inst.clear();
                 inst.reserve(sp.x.size() * 7);
                 for (std::size_t i = 0; i < sp.x.size(); ++i) {
-                    const double t = (vrange != 0.0f) ? (sp.z[i] - vmin) / vrange : 0.0;
+                    const double t = kind == ColorNorm::Kind::Linear
+                                         ? ((vrange != 0.0f) ? (sp.z[i] - vmin) / vrange : 0.0)
+                                         : norm_t(kind, sp.opts.norm.center, sp.opts.vmin, sp.opts.vmax, sp.z[i]);
                     const uint8_t* c = &lut[colormaps::index(t, sp.opts.cmap.is_cyclic()) * 4];
 
                     if (e.data_space) {
@@ -2514,6 +2532,7 @@ void main() {
                 e.cmap = sp.opts.cmap;
                 e.vmin = sp.opts.vmin;
                 e.vmax = sp.opts.vmax;
+                e.norm = sp.opts.norm;
                 e.alpha = marker_face_alpha(sp.opts);
                 e.tr = tr;
             }
@@ -3189,7 +3208,7 @@ void main() {
                         && e.pivot == p.opts.pivot
                         && e.mapped == p.colormapped()
                         && (!e.mapped || (e.cmap == p.opts.cmap && e.vmin == p.opts.vmin
-                                          && e.vmax == p.opts.vmax))
+                                          && e.vmax == p.opts.vmax && e.norm == p.opts.norm))
                         && (e.data_space ? precise : (!precise && same_view(e.tr, tr)));
         if (!ok) {
             // The arrows' ends in scale space, then anchored at their extent's
@@ -3247,6 +3266,7 @@ void main() {
             e.cmap = p.opts.cmap;
             e.vmin = p.opts.vmin;
             e.vmax = p.opts.vmax;
+            e.norm = p.opts.norm;
             e.tr = tr;
         }
         if (e.instances <= 0 || e.vbo == 0) return;
@@ -3431,6 +3451,7 @@ void main() {
                             && hc.data_generation == data_generation_
                             && hc.cmap == hp.opts.cmap
                             && hc.vmin == hp.opts.vmin && hc.vmax == hp.opts.vmax
+                            && hc.norm == hp.opts.norm
                             && hc.flip == flip
                             && hc.rows == hp.rows && hc.cols == hp.cols;
 
@@ -3452,6 +3473,7 @@ void main() {
         hc.cmap = hp.opts.cmap;
         hc.vmin = hp.opts.vmin;
         hc.vmax = hp.opts.vmax;
+        hc.norm = hp.opts.norm;
         hc.flip = flip;
         hc.rows = hp.rows;
         hc.cols = hp.cols;
@@ -3566,19 +3588,20 @@ void main() {
     // draw_heatmap_tri
     // -------------------------------------------------------------------------
     // The drawn triangles of heatmap_tri_pixels(), each vertex with its colormap
-    // position; GL interpolates the position linearly in screen space and the
-    // fragment looks the colour up.
+    // position (under a non-linear norm, its value); GL interpolates it linearly
+    // in screen space and the fragment normalises it and looks the colour up.
     void DataRenderer::draw_heatmap_tri(const HeatmapTriPlot& p, const CoordTransform& tr,
                                         const PlotRect& pr) {
         const std::vector<TriPx> tris = heatmap_tri_pixels(p, tr);
         if (tris.empty()) return;
         heattri_verts_.clear();
         heattri_verts_.reserve(tris.size() * 9);
+        const ColorNorm::Kind kind = heatmap_tri_norm(p.opts);
         for (const TriPx& q : tris)
             for (int k = 0; k < 3; ++k) {
                 heattri_verts_.push_back(static_cast<float>(q.x[k]));
                 heattri_verts_.push_back(static_cast<float>(q.y[k]));
-                heattri_verts_.push_back(static_cast<float>(heatmap_tri_t(p.opts, p.values[q.v[k]])));
+                heattri_verts_.push_back(static_cast<float>(heatmap_tri_attr(p.opts, kind, p.values[q.v[k]])));
             }
 
         begin_pass(pr, tr.win_h);
@@ -3586,6 +3609,11 @@ void main() {
         const float res[2] = {tr.win_w, tr.win_h};
         glUniform2fv(heattri_u_.resolution, 1, res);
         glUniform1i(heattri_u_.cyclic, p.opts.cmap.is_cyclic() ? 1 : 0);
+        glUniform1i(heattri_u_.norm, kind == ColorNorm::Kind::Log ? 1 : kind == ColorNorm::Kind::TwoSlope ? 2 : 0);
+        if (kind == ColorNorm::Kind::Log)
+            glUniform3f(heattri_u_.n, std::log(p.opts.vmin), std::log(p.opts.vmax), 0.0f);
+        else
+            glUniform3f(heattri_u_.n, p.opts.vmin, p.opts.norm.center, p.opts.vmax);
 
         glActiveTexture(GL_TEXTURE0);
         if (!heattri_cmap_tex_) {

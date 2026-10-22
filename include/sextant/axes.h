@@ -120,6 +120,18 @@ namespace sextant {
         Axes& heatmap_tri(std::span<const double> x, std::span<const double> y,
                           std::span<const double> values, HeatmapTriOptions opts = {});
 
+        // A 2D histogram of the points (x[i], y[i]), as matplotlib's hist2d: the
+        // count (or density) of each bin, drawn as a heatmap() over even bins, or
+        // as a heatmap_rec() when Hist2dOptions gives edges for either axis. Not a
+        // kind of its own: the result counts in heatmap_count(), and its values
+        // read back through heatmap_data() (row 0 the lowest y bin). A point
+        // outside the bins or with a NaN coordinate is not counted. Throws
+        // std::invalid_argument if x and y differ in length, a bin count is < 1, a
+        // range is non-finite or empty, edges are too few, non-finite or not
+        // increasing, or the norm doesn't fit vmin/vmax; nothing is added then.
+        // Axes only, not Plane2D.
+        Axes& hist2d(std::span<const double> x, std::span<const double> y, Hist2dOptions opts = {});
+
         // ----------------------------------------------------------------
         // Filled areas
         // ----------------------------------------------------------------
