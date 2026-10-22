@@ -314,6 +314,9 @@ int main() {
     // alpha.cpp
     test_alpha();
 
+    // heatmap_rgb.cpp
+    test_heatmap_rgb();
+
     // line_steps.cpp
     test_line_steps();
     test_line_steps_rendered();

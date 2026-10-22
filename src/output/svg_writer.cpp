@@ -8,6 +8,7 @@
 #include "../tick_style.h"
 #include "../contour.h"
 #include "../fill_geometry.h"
+#include "../heatmap_pixels.h"
 #include "../quiver_geometry.h"
 #include "../shape_geometry.h"
 #include "../renderer/marker_shape.h"
@@ -581,15 +582,10 @@ static void emit_heatmap(std::ostringstream& o, const SvgAxesData& d,
         const auto& hp = d.heatmaps[k];
         if (hp.rows <= 0 || hp.cols <= 0) continue;
 
-        const uint8_t* lut = colormaps::get(hp.opts.cmap);
-        const int n = hp.rows * hp.cols;
-        std::vector<uint8_t> rgba(static_cast<std::size_t>(n) * 4);
-        const float vmin = hp.opts.vmin, vrange = hp.opts.vmax - hp.opts.vmin;
-        for (int i = 0; i < n; ++i) {
-            const double t = (vrange != 0.0f) ? (hp.data[i] - vmin) / vrange : 0.0;
-            const int idx = colormaps::index(t, hp.opts.cmap.is_cyclic());
-            std::memcpy(&rgba[static_cast<std::size_t>(i) * 4], &lut[idx * 4], 4);
-        }
+        const HeatmapPixels px(hp);
+        const std::size_t n = static_cast<std::size_t>(hp.rows) * hp.cols;
+        std::vector<uint8_t> rgba(n * 4);
+        for (std::size_t i = 0; i < n; ++i) px.rgba(i, &rgba[i * 4]);
 
         // An <image> can't have a reversed box, so reversed ranges are
         // mirrored in the pixels (a reversed yrange cancels the origin flip).

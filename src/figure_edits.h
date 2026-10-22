@@ -635,8 +635,9 @@ std::optional<PlotDataOp> apply_plot_data_op(T& t, const PlotCellEdit& e) {
             auto* hpp = op_target(t.heatmaps, e);
             if (!hpp) return std::nullopt;
             auto& hp = *hpp;
-            // Re-check the shape; it may have changed since the panel saw it.
-            if (hp.rows <= 0 || hp.cols <= 0) return std::nullopt;
+            // Re-check the shape; it may have changed since the panel saw it. An
+            // image's cells are colours and take no value edit.
+            if (hp.rows <= 0 || hp.cols <= 0 || !hp.colormapped()) return std::nullopt;
             const std::size_t n = static_cast<std::size_t>(hp.rows)
                                 * static_cast<std::size_t>(hp.cols);
             if (e.element >= n || e.element >= hp.data.size()) return std::nullopt;

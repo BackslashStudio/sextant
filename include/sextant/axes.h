@@ -6,6 +6,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <cstdint>
 #include <vector>
 #include <memory>
 
@@ -70,6 +71,18 @@ namespace sextant {
         // the boundary between columns 2 and 3.
         Axes& imshow(std::span<const double> data, int rows, int cols,
                      HeatmapOptions opts = {});
+
+        // An RGB (channels 3) or RGBA (4) image, row-major rows x cols x channels:
+        // each pixel is its own colour, no colormap. Doubles are clamped to [0, 1]
+        // when drawn, bytes span 0..255; a pixel with a NaN channel is transparent.
+        // Over the index extent unless ImageOptions gives ranges. For read-back
+        // and picking it is a heatmap (heatmap_count(), heatmap_data(),
+        // set_heatmap_data(), remove(), ...), with HeatmapData::channels 3 or 4.
+        Axes& imshow_rgb(std::span<const double> data, int rows, int cols, int channels,
+                         ImageOptions opts = {});
+
+        Axes& imshow_rgb(std::span<const std::uint8_t> data, int rows, int cols, int channels,
+                         ImageOptions opts = {});
 
         // ----------------------------------------------------------------
         // Filled areas

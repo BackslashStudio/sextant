@@ -477,6 +477,13 @@ namespace sextant {
         Plane2D& imshow(std::span<const double> data, int rows, int cols,
                         HeatmapOptions opts = {});
 
+        // An RGB or RGBA image, as Axes::imshow_rgb().
+        Plane2D& imshow_rgb(std::span<const double> data, int rows, int cols, int channels,
+                            ImageOptions opts = {});
+
+        Plane2D& imshow_rgb(std::span<const std::uint8_t> data, int rows, int cols, int channels,
+                            ImageOptions opts = {});
+
         // The area between two curves, as Axes::fill().
         Plane2D& fill(std::span<const double> x, std::span<const double> y1,
                               std::span<const double> y2, FillOptions opts = {});

@@ -198,6 +198,10 @@ struct Axes::Impl {
     void ingest_heatmap(std::span<const double> data, int rows, int cols,
                         Range xrange, Range yrange, HeatmapOptions opts,
                         const char* who);
+    // imshow_rgb(): a heatmap with `channels` 3 or 4 colour values per cell.
+    void ingest_image(std::span<const double> data, int rows, int cols, int channels,
+                      ImageOptions opts, const char* who);
+    static std::vector<double> image_bytes(std::span<const std::uint8_t> data);
 
     // set_*_data() for Axes and Plane2D: replace object i's data, validated as
     // when it was plotted. `who` names the caller.
@@ -214,7 +218,8 @@ struct Axes::Impl {
     void set_bar_data(std::size_t i, std::span<const double> x, std::span<const double> height,
                       const std::vector<double>* bottom, const char* who);
     void set_heatmap_data(std::size_t i, std::span<const double> data, int rows, int cols,
-                          Range xrange, Range yrange, const char* who);
+                          Range xrange, Range yrange, std::optional<int> channels,
+                          const char* who);
 
     // fill() for Axes and Plane2D: x, y1 and y2 one value each per
     // point. set_fill_data(): `exclude` the new mask (FillData), or null to

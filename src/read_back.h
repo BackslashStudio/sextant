@@ -144,7 +144,7 @@ namespace sextant::read_back {
 
     inline HeatmapData to_data(const HeatmapPlot& p) {
         return { std::vector<double>(p.data.begin(), p.data.end()),
-                 p.rows, p.cols, p.xrange, p.yrange };
+                 p.rows, p.cols, p.xrange, p.yrange, p.channels };
     }
 
     inline Bar3DData to_data(const Bar3DPlot& p) {

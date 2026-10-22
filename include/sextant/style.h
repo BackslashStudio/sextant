@@ -564,6 +564,24 @@ namespace sextant {
         std::vector<std::string> hint_labels;
     };
 
+    // An RGB or RGBA image (Axes::imshow_rgb()). It carries its own colours, so
+    // it has no colormap, vmin/vmax, colorbar or contours.
+    struct ImageOptions {
+        // Where the image sits, as heatmap()'s ranges (cell edges; reversed
+        // mirrors). Unset = the index extent, x in [0, cols] and y in [0, rows].
+        std::optional<Range> xrange, yrange;
+
+        // Where row 0 is drawn: "upper" (top, as a photo; the default) or
+        // "lower". Anything else throws std::invalid_argument.
+        std::string origin = "upper";
+
+        bool visible = true; // see LineOptions::visible
+        double zorder = 0.0;     // see LineOptions::zorder
+
+        // See LineOptions::hint_labels. Row-major, index = row*cols + col.
+        std::vector<std::string> hint_labels;
+    };
+
     struct GridOptions {
         Color color = {0.8f, 0.8f, 0.8f, 1.0f};
 
@@ -996,11 +1014,14 @@ namespace sextant {
     };
 
     // Row-major rows x cols, as passed. Values are stored in single precision,
-    // so they come back rounded to float.
+    // so they come back rounded to float. `channels` is 1 for a heatmap (values
+    // through the colormap) and 3 or 4 for an imshow_rgb() image, whose `data`
+    // is then rows x cols x channels, each in [0, 1] (bytes come back / 255).
     struct HeatmapData {
         std::vector<double> data;
         int rows = 0, cols = 0;
         Range xrange, yrange;
+        int channels = 1;
     };
 
     // How an axline() is given: a value on one axis, a point and a slope, or

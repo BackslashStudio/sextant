@@ -5,6 +5,7 @@
 #include "fill_geometry.h"
 #include "shape_geometry.h"
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 
 namespace sextant {
@@ -93,9 +94,24 @@ std::string fmt_z_err(double x, double y, double z,
     return fmt_err_pair("x", x, "y", y, err, i) + buf;
 }
 
+// A NaN cell (drawn transparent) has no value.
 std::string fmt_heatmap(int row, int col, float value) {
     char buf[64];
-    std::snprintf(buf, sizeof(buf), "row=%d, col=%d, value=%.4g", row, col, value);
+    if (std::isnan(value)) std::snprintf(buf, sizeof(buf), "row=%d, col=%d, no value", row, col);
+    else std::snprintf(buf, sizeof(buf), "row=%d, col=%d, value=%.4g", row, col, value);
+    return buf;
+}
+
+// An imshow_rgb() pixel: its channels as stored, in [0, 1] unless the caller
+// passed values outside it (they are clamped only when drawn).
+std::string fmt_image(int row, int col, const float* c, int channels) {
+    char buf[128];
+    if (channels == 4)
+        std::snprintf(buf, sizeof(buf), "row=%d, col=%d, rgba=(%.4g, %.4g, %.4g, %.4g)", row, col,
+                      c[0], c[1], c[2], c[3]);
+    else
+        std::snprintf(buf, sizeof(buf), "row=%d, col=%d, rgb=(%.4g, %.4g, %.4g)", row, col,
+                      c[0], c[1], c[2]);
     return buf;
 }
 
@@ -533,6 +549,12 @@ std::string format_pick(const RenderSnapshot& snap, const PickHit& hit) {
         }
         case PickKind::Heatmap: {
             const auto& hp = snap.heatmaps[hit.object];
+            const std::size_t ch = static_cast<std::size_t>(hp.channels);
+            if (!hp.colormapped()) {
+                if ((i + 1) * ch > hp.data.size()) return {};
+                return append_label(fmt_image(hit.row, hit.col, hp.data.data() + i * ch, hp.channels),
+                                    hp.opts.hint_labels, i);
+            }
             const float value = i < hp.data.size() ? hp.data[i] : 0.0f;
             return append_label(fmt_heatmap(hit.row, hit.col, value), hp.opts.hint_labels, i);
         }

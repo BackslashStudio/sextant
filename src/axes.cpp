@@ -286,13 +286,17 @@ void set_scale(bool has_heatmap, AxisScale& slot, double lo, double hi, bool& li
 }
 
 // Checks a heatmap's shape and ranges and narrows the cells to float (they are
-// uploaded as a float texture, and the copy is made here anyway).
+// uploaded as a float texture, and the copy is made here anyway). An image has
+// `channels` 3 or 4 values per cell.
 std::vector<float> heatmap_cells(std::span<const double> data, int rows, int cols,
-                                 Range xrange, Range yrange, const std::string& w) {
+                                 Range xrange, Range yrange, const std::string& w,
+                                 int channels = 1) {
     if (rows < 1 || cols < 1)
         throw std::invalid_argument(w + ": rows and cols must be positive");
-    if (static_cast<int>(data.size()) < rows * cols)
-        throw std::invalid_argument(w + ": data too small for rows×cols");
+    if (data.size() < static_cast<std::size_t>(rows) * static_cast<std::size_t>(cols)
+                          * static_cast<std::size_t>(channels))
+        throw std::invalid_argument(w + (channels == 1 ? ": data too small for rows×cols"
+                                                       : ": data too small for rows×cols×channels"));
 
     // Reject degenerate ranges here once; reversed ranges mirror the image.
     for (const Range& r : { xrange, yrange }) {
@@ -302,10 +306,25 @@ std::vector<float> heatmap_cells(std::span<const double> data, int rows, int col
             throw std::invalid_argument(w + ": range must span a non-zero interval");
     }
 
-    std::vector<float> cells(static_cast<std::size_t>(rows) * cols);
+    std::vector<float> cells(static_cast<std::size_t>(rows) * cols * channels);
     for (std::size_t i = 0; i < cells.size(); ++i)
         cells[i] = static_cast<float>(data[i]);
     return cells;
+}
+
+// Cells are even in data units, so they cannot follow a scale; a mesh kind
+// with its own cell edges is the way to scaled cells.
+void check_linear(const AxisScale& xscale, const AxisScale& yscale, const std::string& w) {
+    if (!xscale.linear() || !yscale.linear())
+        throw std::invalid_argument(w + ": a heatmap needs linear axes; this axes has a "
+                                    + std::string(!xscale.linear() ? "x" : "y") + " scale set");
+}
+
+// Every reader tests == "lower", so anything else would silently mean upper.
+void check_origin(const std::string& origin, const std::string& w) {
+    if (origin != "lower" && origin != "upper")
+        throw std::invalid_argument(w + ": origin must be \"lower\" or \"upper\", not \""
+                                    + origin + "\"");
 }
 
 } // namespace
@@ -503,17 +522,9 @@ void Axes::Impl::ingest_heatmap(std::span<const double> data, int rows, int cols
                                 const char* who) {
     read_back::check_zorder(opts.zorder, who);
     const std::string w = who;
-    // Cells are even in data units, so they cannot follow a scale; a mesh kind
-    // with its own cell edges is the way to scaled cells.
-    if (!xscale.linear() || !yscale.linear())
-        throw std::invalid_argument(w + ": a heatmap needs linear axes; this axes has a "
-                                    + std::string(!xscale.linear() ? "x" : "y") + " scale set");
+    check_linear(xscale, yscale, w);
     std::vector<float> cells = heatmap_cells(data, rows, cols, xrange, yrange, w);
-
-    // Every reader tests == "lower", so anything else would silently mean upper.
-    if (opts.origin != "lower" && opts.origin != "upper")
-        throw std::invalid_argument(w + ": origin must be \"lower\" or \"upper\", not \""
-                                    + opts.origin + "\"");
+    check_origin(opts.origin, w);
 
     // Sort and de-duplicate once. Check finiteness first (NaN doesn't sort).
     for (double level : opts.contours)
@@ -548,6 +559,51 @@ Axes& Axes::imshow(std::span<const double> data, int rows, int cols,
     const Range xr{ 0.0, static_cast<double>(std::max(cols, 1)) };
     const Range yr{ 0.0, static_cast<double>(std::max(rows, 1)) };
     return heatmap(data, rows, cols, xr, yr, std::move(opts));
+}
+
+// An image is a heatmap whose cells carry their own colour: the options it
+// shares with one (origin, visible, zorder, hint labels) go to a HeatmapOptions.
+void Axes::Impl::ingest_image(std::span<const double> data, int rows, int cols, int channels,
+                              ImageOptions opts, const char* who) {
+    read_back::check_zorder(opts.zorder, who);
+    const std::string w = who;
+    if (channels != 3 && channels != 4)
+        throw std::invalid_argument(w + ": channels must be 3 (RGB) or 4 (RGBA), not "
+                                    + std::to_string(channels));
+    check_linear(xscale, yscale, w);
+    // Clamped as imshow()'s, so a bad shape reports the rows/cols error.
+    const Range xr = opts.xrange.value_or(Range{ 0.0, static_cast<double>(std::max(cols, 1)) });
+    const Range yr = opts.yrange.value_or(Range{ 0.0, static_cast<double>(std::max(rows, 1)) });
+    std::vector<float> cells = heatmap_cells(data, rows, cols, xr, yr, w, channels);
+    check_origin(opts.origin, w);
+
+    HeatmapOptions ho;
+    ho.origin = std::move(opts.origin);
+    ho.visible = opts.visible;
+    ho.zorder = opts.zorder;
+    ho.hint_labels = std::move(opts.hint_labels);
+    HeatmapPlot p{ std::move(cells), rows, cols, xr, yr, std::move(ho),
+                   next_snapshot_generation(), new_id() };
+    p.channels = channels;
+    heatmaps.push_back(std::move(p));
+}
+
+std::vector<double> Axes::Impl::image_bytes(std::span<const std::uint8_t> data) {
+    std::vector<double> out(data.size());
+    for (std::size_t i = 0; i < data.size(); ++i) out[i] = data[i] / 255.0;
+    return out;
+}
+
+Axes& Axes::imshow_rgb(std::span<const double> data, int rows, int cols, int channels,
+                       ImageOptions opts) {
+    d->ingest_image(data, rows, cols, channels, std::move(opts), "imshow_rgb");
+    return *this;
+}
+
+Axes& Axes::imshow_rgb(std::span<const std::uint8_t> data, int rows, int cols, int channels,
+                       ImageOptions opts) {
+    d->ingest_image(Impl::image_bytes(data), rows, cols, channels, std::move(opts), "imshow_rgb");
+    return *this;
 }
 
 void Axes::Impl::ingest_axline(double value, AxLineOptions opts, const char* who) {
@@ -1294,9 +1350,15 @@ void Axes::Impl::set_quiver_data(std::size_t i, std::span<const double> x, std::
 }
 
 void Axes::Impl::set_heatmap_data(std::size_t i, std::span<const double> data, int rows, int cols,
-                                  Range xrange, Range yrange, const char* who) {
+                                  Range xrange, Range yrange, std::optional<int> channels,
+                                  const char* who) {
     HeatmapPlot& p = read_back::at(heatmaps, i, who);
-    std::vector<float> cells = heatmap_cells(data, rows, cols, xrange, yrange, who);
+    // A heatmap stays a heatmap and an image keeps its channel count.
+    if (channels && *channels != p.channels)
+        throw std::invalid_argument(std::string(who) + ": heatmap " + std::to_string(i) + " has "
+                                    + std::to_string(p.channels) + " channel(s), the data "
+                                    + std::to_string(*channels));
+    std::vector<float> cells = heatmap_cells(data, rows, cols, xrange, yrange, who, p.channels);
     read_back::keep_aligned(p, rows == p.rows && cols == p.cols);
     p.data = std::move(cells);
     p.rows = rows;
@@ -1358,12 +1420,12 @@ Axes& Axes::set_quiver_data(std::size_t i, std::span<const double> x, std::span<
 }
 Axes& Axes::set_heatmap_data(std::size_t i, const HeatmapData& data) {
     d->set_heatmap_data(i, data.data, data.rows, data.cols, data.xrange, data.yrange,
-                        "set_heatmap_data");
+                        data.channels, "set_heatmap_data");
     return *this;
 }
 Axes& Axes::set_heatmap_data(std::size_t i, std::span<const double> data, int rows, int cols,
                              Range xrange, Range yrange) {
-    d->set_heatmap_data(i, data, rows, cols, xrange, yrange, "set_heatmap_data");
+    d->set_heatmap_data(i, data, rows, cols, xrange, yrange, std::nullopt, "set_heatmap_data");
     return *this;
 }
 

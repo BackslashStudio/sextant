@@ -71,6 +71,8 @@ namespace lt {
                 return x ? "+" + num(*x, 9) : "-";
             else if constexpr (std::is_same_v<X, std::optional<bool>>)
                 return x ? (*x ? "+true" : "+false") : "-";
+            else if constexpr (std::is_same_v<X, std::optional<Range>>)
+                return x ? "+" + num(x->lo, 17) + " " + num(x->hi, 17) : "-";
             else if constexpr (std::is_same_v<X, std::vector<double>>) {
                 std::string s = std::to_string(x.size());
                 for (double d : x) s += kSep + num(d, 17);
@@ -109,6 +111,13 @@ namespace lt {
             } else if constexpr (std::is_same_v<X, std::optional<bool>>) {
                 if (s == "-") x.reset();
                 else x = s == "+true";
+            } else if constexpr (std::is_same_v<X, std::optional<Range>>) {
+                if (s == "-") x.reset();
+                else {
+                    Range r;
+                    std::sscanf(s.c_str() + 1, "%lf %lf", &r.lo, &r.hi);
+                    x = r;
+                }
             } else if constexpr (std::is_same_v<X, std::vector<double>>) {
                 x.clear();
                 for (const auto& e : split(s)) x.push_back(std::strtod(e.c_str(), nullptr));
@@ -164,6 +173,7 @@ namespace lt {
             else if constexpr (std::is_same_v<X, std::optional<double>>) x = 1.5 + k;
             else if constexpr (std::is_same_v<X, std::optional<float>>) x = 2.5f + static_cast<float>(k);
             else if constexpr (std::is_same_v<X, std::optional<bool>>) x = (k % 2) == 0;
+            else if constexpr (std::is_same_v<X, std::optional<Range>>) x = Range{-0.5 - k, 1.0 / 3.0 + k};
             else if constexpr (std::is_same_v<X, std::vector<double>>) {
                 x.push_back(0.5 + k);
                 x.push_back(-1.0 / 3.0);
@@ -253,7 +263,8 @@ namespace lt {
         STRUCT(ErrorBarOptions) STRUCT(LineOptions) STRUCT(ScatterOptions) STRUCT(ScatterZOptions)
         STRUCT(BarOptions) STRUCT(HistOptions) STRUCT(AxLineOptions) STRUCT(AxSpanOptions)
         STRUCT(FillOptions) STRUCT(QuiverOptions)
-        STRUCT(HeatmapOptions) STRUCT(GridOptions)
+        STRUCT(HeatmapOptions) STRUCT(ImageOptions) STRUCT(GridOptions)
+        STRUCT(PolyOptions) STRUCT(CircleOptions) STRUCT(WedgeOptions)
         STRUCT(AxesStyle) STRUCT(LegendOptions) STRUCT(ColorbarOptions) STRUCT(SuptitleOptions)
         STRUCT(FigureMargins) STRUCT(TextOptions) STRUCT(ArrowOptions)
         STRUCT(FigureOptions) STRUCT(SvgExportOptions) STRUCT(PngExportOptions)

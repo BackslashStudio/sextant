@@ -87,6 +87,19 @@ namespace sextant {
         return heatmap(data, rows, cols, xr, yr, std::move(opts));
     }
 
+    Plane2D& Plane2D::imshow_rgb(std::span<const double> data, int rows, int cols, int channels,
+                                 ImageOptions opts) {
+        d->sheet.ingest_image(data, rows, cols, channels, std::move(opts), "Plane2D::imshow_rgb");
+        return *this;
+    }
+
+    Plane2D& Plane2D::imshow_rgb(std::span<const std::uint8_t> data, int rows, int cols, int channels,
+                                 ImageOptions opts) {
+        d->sheet.ingest_image(Axes::Impl::image_bytes(data), rows, cols, channels, std::move(opts),
+                              "Plane2D::imshow_rgb");
+        return *this;
+    }
+
     Plane2D& Plane2D::fill(std::span<const double> x, std::span<const double> y1,
                                    std::span<const double> y2, FillOptions opts) {
         d->sheet.ingest_fill(x, y1, y2, std::move(opts), "Plane2D::fill");
@@ -345,12 +358,13 @@ namespace sextant {
     }
     Plane2D& Plane2D::set_heatmap_data(std::size_t i, const HeatmapData& data) {
         d->sheet.set_heatmap_data(i, data.data, data.rows, data.cols, data.xrange, data.yrange,
-                                  "Plane2D::set_heatmap_data");
+                                  data.channels, "Plane2D::set_heatmap_data");
         return *this;
     }
     Plane2D& Plane2D::set_heatmap_data(std::size_t i, std::span<const double> data, int rows,
                                        int cols, Range xrange, Range yrange) {
-        d->sheet.set_heatmap_data(i, data, rows, cols, xrange, yrange, "Plane2D::set_heatmap_data");
+        d->sheet.set_heatmap_data(i, data, rows, cols, xrange, yrange, std::nullopt,
+                                  "Plane2D::set_heatmap_data");
         return *this;
     }
 

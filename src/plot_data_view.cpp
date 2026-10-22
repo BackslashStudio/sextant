@@ -89,7 +89,8 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot& snap) 
         t.plot_index = static_cast<int>(i);
         t.data_stamp = snap.heatmaps[i].data_stamp;
         t.id = snap.heatmaps[i].id;
-        t.label = synth_label("heatmap", static_cast<int>(i));
+        // An image keeps its heatmap index (heatmap_data(i) reads it).
+        t.label = synth_label(snap.heatmaps[i].colormapped() ? "heatmap" : "image", static_cast<int>(i));
         t.heatmap = &snap.heatmaps[i];
         out.push_back(std::move(t));
     }

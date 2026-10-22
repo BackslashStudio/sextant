@@ -2557,7 +2557,7 @@ static void part_line_styles() {
 
 // Heatmaps: colormaps (sequential, diverging, cyclic), origin and extents,
 // contours, a NaN hole, and translucent planes crossing in 3D.
-static void test_heatmap() {
+static void part_heatmaps() {
     constexpr int R = 40, C = 60;
     std::vector<double> field(R * C), saddle(R * C), phase(R * C), holed;
     for (int r = 0; r < R; ++r)
@@ -2618,6 +2618,98 @@ static void test_heatmap() {
 
     savefig_and_check_memory(fig, "test_heatmap");
     fig->show(true);
+}
+
+// imshow_rgb: RGB/RGBA images (doubles and bytes), extent, alpha over other
+// objects, hover; NaN heatmap cells drawn transparent, contours around them.
+static void part_images() {
+    constexpr int R = 48, C = 72;
+    std::vector<double> rgb(R * C * 3), rgba(R * C * 4), field(R * C);
+    for (int r = 0; r < R; ++r)
+        for (int c = 0; c < C; ++c) {
+            const double u = c / (C - 1.0), v = r / (R - 1.0);
+            double* p = &rgb[(r * C + c) * 3];
+            p[0] = u;
+            p[1] = v;
+            p[2] = 1.0 - u;
+            double* q = &rgba[(r * C + c) * 4];
+            q[0] = 0.9;
+            q[1] = 0.2;
+            q[2] = 0.1;
+            q[3] = u; // transparent at the left, opaque at the right
+            const double x = -3.0 + 6.0 * u, y = -2.0 + 4.0 * v;
+            field[r * C + c] = std::exp(-(x * x + y * y) / 2.0);
+        }
+    std::vector<double> holed = field;
+    for (int r = 18; r < 30; ++r)
+        for (int c = 30; c < 42; ++c) holed[r * C + c] = std::nan("");
+
+    // An 8 x 8 checker of bytes; a 3 x 3 of named colours, for hover.
+    std::vector<std::uint8_t> checker(8 * 8 * 3);
+    for (int r = 0; r < 8; ++r)
+        for (int c = 0; c < 8; ++c) {
+            const bool on = (r + c) % 2 == 0;
+            std::uint8_t* p = &checker[(r * 8 + c) * 3];
+            p[0] = on ? 240 : 30;
+            p[1] = on ? 200 : 60;
+            p[2] = on ? 40 : 160;
+        }
+    const std::vector<double> nine{1, 0, 0, 0, 1, 0, 0, 0, 1,
+                                   1, 1, 0, 0, 1, 1, 1, 0, 1,
+                                   0, 0, 0, 0.5, 0.5, 0.5, 1, 1, 1};
+
+    auto fig = sextant::Figure::create({.width = 1500, .height = 900, .title = "Images"});
+    fig->suptitle("imshow_rgb: RGB / RGBA, doubles and bytes; NaN heatmap cells");
+
+    fig->add_subplot(2, 3, 1)
+            ->imshow_rgb(rgb, R, C, 3)
+            .set_title("RGB doubles, origin upper (red right, green down)");
+
+    fig->add_subplot(2, 3, 2)
+            ->imshow_rgb(checker, 8, 8, 3, {.xrange = sextant::Range{-1.0, 1.0}, .yrange = sextant::Range{0.0, 1.0}})
+            .set_title("bytes on an extent: x -1..1, y 0..1");
+
+    {
+        auto ax = fig->add_subplot(2, 3, 3);
+        std::vector<double> x(200), y(200);
+        for (std::size_t i = 0; i < x.size(); ++i) {
+            x[i] = 72.0 * i / 199.0;
+            y[i] = 24.0 + 18.0 * std::sin(i * 0.08);
+        }
+        ax->line(x, y, {.color = sextant::Color::Blue, .linewidth = 3.0f});
+        ax->imshow_rgb(rgba, R, C, 4, {.zorder = 1.0});
+        ax->set_title("RGBA over a line: alpha 0 at the left, 1 at the right");
+    }
+
+    fig->add_subplot(2, 3, 4)
+            ->heatmap(holed, R, C, {-3.0, 3.0}, {-2.0, 2.0},
+                      {.colorbar = true, .name = "density", .contours = {0.2, 0.5, 0.8},
+                       .contour_color = {1.0f, 1.0f, 1.0f, 0.9f}, .contour_labels = true})
+            .set_title("heatmap with NaN cells: transparent; contours step around");
+
+    fig->add_subplot(2, 3, 5)
+            ->imshow_rgb(nine, 3, 3, 3,
+                         {.hint_labels = {"red", "green", "blue", "yellow", "cyan", "magenta",
+                                          "black", "grey", "white"}})
+            .set_title("hover: rgb=(...) and the hint label");
+
+    {
+        auto ax = fig->add_subplot3d(2, 3, 6);
+        ax->set_title("planes: an image (XY) and a holed heatmap (YZ)")
+                .set_view(-50.0, 25.0);
+        ax->plane(sextant::PlaneOrientation::XY, 0.0)
+                ->imshow_rgb(rgb, R, C, 3, {.xrange = sextant::Range{-3.0, 3.0}, .yrange = sextant::Range{-2.0, 2.0}});
+        ax->plane(sextant::PlaneOrientation::YZ, 0.0)
+                ->heatmap(holed, R, C, {-3.0, 3.0}, {-2.0, 2.0});
+    }
+
+    savefig_and_check_memory(fig, "part_images");
+    fig->show(true);
+}
+
+static void test_heatmap() {
+    part_heatmaps();
+    part_images();
 }
 
 // Text and annotations in 2D and 3D: anchors, rotation, boxes, coordinates in
@@ -3108,12 +3200,12 @@ int main() {
     // test_figure_layout();
     // test_aspect_scales();
     // test_mathtext_gallery();
-    test_decorations();
+    // test_decorations();
     // test_legend_colorbar();
     // test_line();
     // test_scatter();
     // test_bar();
-    // test_heatmap();
+    test_heatmap();
     // test_fill();
     // test_quiver();
     // test_bar3d();

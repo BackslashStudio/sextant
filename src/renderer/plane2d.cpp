@@ -1,6 +1,7 @@
 #include "plane2d.h"
 #include "../colormaps.h"
 #include "../fill_geometry.h"
+#include "../heatmap_pixels.h"
 #include "../quiver_geometry.h"
 #include "../shape_geometry.h"
 #include "../reference_lines.h"
@@ -106,22 +107,16 @@ namespace sextant {
         std::vector<std::uint8_t> out;
         if (hp.rows <= 0 || hp.cols <= 0) return out;
 
-        const bool cyclic = hp.opts.cmap.is_cyclic();
-        const std::uint8_t* lut = colormaps::get(hp.opts.cmap);
-        const float vmin = hp.opts.vmin, vrange = hp.opts.vmax - hp.opts.vmin;
+        const HeatmapPixels px(hp);
         // Row 0 of the output is the yrange.hi edge; flip for origin "lower".
         const bool flip = (hp.opts.origin == "lower");
 
         out.resize(static_cast<std::size_t>(hp.rows) * hp.cols * 4);
         for (int r = 0; r < hp.rows; ++r) {
             const int src = flip ? (hp.rows - 1 - r) : r;
-            for (int c = 0; c < hp.cols; ++c) {
-                const double t = (vrange != 0.0f)
-                                     ? (hp.data[static_cast<std::size_t>(src) * hp.cols + c] - vmin) / vrange
-                                     : 0.0;
-                std::memcpy(&out[(static_cast<std::size_t>(r) * hp.cols + c) * 4],
-                            &lut[colormaps::index(t, cyclic) * 4], 4);
-            }
+            for (int c = 0; c < hp.cols; ++c)
+                px.rgba(static_cast<std::size_t>(src) * hp.cols + c,
+                        &out[(static_cast<std::size_t>(r) * hp.cols + c) * 4]);
         }
         return out;
     }
@@ -569,8 +564,7 @@ namespace sextant {
                             PlaneOrientation orient, double offset,
                             const Projector3D& proj) {
             item.form = PlanePlanItem::Form::Polys;
-            const std::uint8_t* lut = colormaps::get(hp.opts.cmap);
-            const float vmin = hp.opts.vmin, vrange = hp.opts.vmax - hp.opts.vmin;
+            const HeatmapPixels px(hp);
             const bool flip = (hp.opts.origin == "lower");
 
             std::vector<Vec3> ring(4);
@@ -593,6 +587,9 @@ namespace sextant {
                         ring[static_cast<std::size_t>(i)] =
                                 proj.transform().to_box(pts[i].x, pts[i].y, pts[i].z);
 
+                    // A transparent (NaN) cell draws nothing.
+                    const Color fill = px.color(static_cast<std::size_t>(r) * hp.cols + c);
+                    if (fill.a <= 0.0f) continue;
                     proj.project_polygon(ring, out);
                     if (out.size() < 3) continue;
 
@@ -602,8 +599,7 @@ namespace sextant {
                         poly.xy.push_back(px.x);
                         poly.xy.push_back(px.y);
                     }
-                    poly.fill = cell_color(lut, hp.opts.cmap.is_cyclic(),
-                                           hp.data[static_cast<std::size_t>(r) * hp.cols + c], vmin, vrange);
+                    poly.fill = fill;
                     item.polys.push_back(std::move(poly));
                 }
             }

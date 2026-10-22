@@ -213,6 +213,17 @@ namespace sextant {
                 ImGui::TextDisabled("Empty matrix.");
                 return;
             }
+            // An image's pixels are colours, not values: described, not edited.
+            if (!hp.colormapped()) {
+                ImGui::Text("%d rows x %d cols, %s", hp.rows, hp.cols, hp.channels == 4 ? "RGBA" : "RGB");
+                ImGui::TextDisabled("%s", hp.opts.origin == "upper"
+                                              ? "Row 0 is first in storage; origin=\"upper\" draws it at the top."
+                                              : "Row 0 is first in storage; origin=\"lower\" draws it at the bottom.");
+                ImGui::TextDisabled("Extent: x %g .. %g, y %g .. %g", hp.xrange.lo, hp.xrange.hi,
+                                    hp.yrange.lo, hp.yrange.hi);
+                ImGui::TextDisabled("Pixels are not edited here; set_heatmap_data() replaces them.");
+                return;
+            }
 
             // Deferred like draw_vector_table's row_edit; one per frame.
             std::optional<MatrixLineEdit> line_edit;
@@ -1175,7 +1186,26 @@ namespace sextant {
         }
 
         template<class Push>
-        void heatmap_style(DataPanelState& st, HeatmapOptions& o, Push&& push) {
+        void heatmap_origin_row(HeatmapOptions& o, Push& push) {
+            field_row("Origin");
+            static const char* kOrigins[] = {"lower", "upper"};
+            int oc = o.origin == "lower" ? 0 : 1;
+            if (ImGui::Combo("##horigin", &oc, kOrigins, IM_ARRAYSIZE(kOrigins))) {
+                o.origin = kOrigins[oc];
+                push();
+            }
+        }
+
+        // An image (`colormapped` false) has its own colours: only its origin edits.
+        template<class Push>
+        void heatmap_style(DataPanelState& st, HeatmapOptions& o, bool colormapped, Push&& push) {
+            if (!colormapped) {
+                if (begin_field_table("image")) {
+                    heatmap_origin_row(o, push);
+                    end_field_table();
+                }
+                return;
+            }
             name_and_key(st, o, push);
             if (ImGui::Checkbox("Colorbar##plotcb", &o.colorbar)) push();
             if (begin_field_table("heatmap")) {
@@ -1185,13 +1215,7 @@ namespace sextant {
                 if (drag_float("##hvmin", &o.vmin, -FLT_MAX, FLT_MAX, 0.01f, "%.4g")) push();
                 field_row("vmax");
                 if (drag_float("##hvmax", &o.vmax, -FLT_MAX, FLT_MAX, 0.01f, "%.4g")) push();
-                field_row("Origin");
-                static const char* kOrigins[] = {"lower", "upper"};
-                int oc = o.origin == "lower" ? 0 : 1;
-                if (ImGui::Combo("##horigin", &oc, kOrigins, IM_ARRAYSIZE(kOrigins))) {
-                    o.origin = kOrigins[oc];
-                    push();
-                }
+                heatmap_origin_row(o, push);
                 end_field_table();
             }
             ImGui::SeparatorText("Contours");
@@ -1271,7 +1295,7 @@ namespace sextant {
                     bar_style(st, ss->bars[i], sheet.bars[i], pi, sink, push_of(ss->bars[i]));
                     break;
                 case PlotKind::Heatmap:
-                    heatmap_style(st, ss->heatmaps[i], push_of(ss->heatmaps[i]));
+                    heatmap_style(st, ss->heatmaps[i], sheet.heatmaps[i].colormapped(), push_of(ss->heatmaps[i]));
                     break;
                 case PlotKind::ScatterZ:
                     scatter_z_style(st, ss->scatter_z[i], sheet.scatter_z[i], push_of(ss->scatter_z[i]));

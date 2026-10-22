@@ -242,6 +242,12 @@ struct HeatmapPlot {
 
     unsigned long long visible_stamp = 0;
     unsigned long long zorder_stamp = 0;
+
+    // 1: `data` is rows x cols values through opts.cmap. 3 or 4: an
+    // imshow_rgb() image, rows x cols x channels colours in [0, 1]; the
+    // colormap, colorbar and contours of opts are unused.
+    int channels = 1;
+    bool colormapped() const { return channels == 1; }
 };
 
 // Continuous-color scatter: z is mapped through opts.cmap/vmin/vmax.
@@ -1435,7 +1441,8 @@ inline std::vector<ColorbarRequest> find_colorbar_requests(const RenderSnapshot&
         if (opts.colorbar) reqs.push_back({ opts.cmap, opts.vmin, opts.vmax, opts.name });
     };
     for (const ObjectRef& r : call_order(snap)) {
-        if (r.kind == PlotKind::Heatmap)       add(snap.heatmaps[r.index].opts);
+        if (r.kind == PlotKind::Heatmap && snap.heatmaps[r.index].colormapped())
+            add(snap.heatmaps[r.index].opts);
         else if (r.kind == PlotKind::ScatterZ) add(snap.scatter_z[r.index].opts);
         else if (r.kind == PlotKind::Quiver && snap.quivers[r.index].colormapped())
             add(snap.quivers[r.index].opts);

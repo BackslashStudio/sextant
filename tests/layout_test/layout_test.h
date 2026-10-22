@@ -620,6 +620,9 @@ namespace lt {
     // alpha.cpp
     void test_alpha();
 
+    // heatmap_rgb.cpp
+    void test_heatmap_rgb();
+
     // line_steps.cpp
     void test_line_steps();
     void test_line_steps_rendered();

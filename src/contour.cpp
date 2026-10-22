@@ -65,6 +65,8 @@ void trace_level(const HeatmapPlot& hp, double level, ContourSet& out) {
         for (int j = 0; j + 1 < nx; ++j) {
             const double bl = val(i, j),     br = val(i, j + 1);
             const double tl = val(i + 1, j), tr = val(i + 1, j + 1);
+            // A NaN corner leaves its square out (matplotlib's masked cells).
+            if (std::isnan(bl) || std::isnan(br) || std::isnan(tl) || std::isnan(tr)) continue;
 
             const int idx = (bl >= level ? 1 : 0) | (br >= level ? 2 : 0)
                           | (tr >= level ? 4 : 0) | (tl >= level ? 8 : 0);
@@ -157,7 +159,8 @@ void trace_level(const HeatmapPlot& hp, double level, ContourSet& out) {
 
 ContourSet trace_contours(const HeatmapPlot& hp) {
     ContourSet out;
-    if (hp.rows < 2 || hp.cols < 2 || hp.opts.contours.empty()) return out;
+    // An image has colours, not values to trace.
+    if (!hp.colormapped() || hp.rows < 2 || hp.cols < 2 || hp.opts.contours.empty()) return out;
     if (hp.data.size() < static_cast<std::size_t>(hp.rows) * hp.cols) return out;
     for (double level : hp.opts.contours) trace_level(hp, level, out);
     return out;
