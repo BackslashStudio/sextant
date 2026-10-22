@@ -11,6 +11,7 @@
 #include "../line_dash.h"
 #include "../line_steps.h"
 #include "../fill_geometry.h"
+#include "../heatmap_tri_geometry.h"
 #include "../quiver_geometry.h"
 #include "../reference_lines.h"
 #include "../shape_geometry.h"
@@ -537,6 +538,36 @@ in vec2 vTC;
 uniform sampler2D uTex;
 out vec4 FragColor;
 void main() { FragColor = texture(uTex, vTC); }
+)";
+
+    // heatmap_tri: pixel-space triangles carrying the colormap position, looked
+    // up per fragment (never interpolated colour), as surface_tri's path.
+    static constexpr char k_heattri_vert[] = R"(
+#version 410 core
+layout(location = 0) in vec2 aPos;
+layout(location = 1) in float aT;
+uniform vec2 uResolution;
+out float vT;
+void main() {
+    vec2 ndc = (aPos / uResolution) * 2.0 - 1.0;
+    ndc.y = -ndc.y;
+    gl_Position = vec4(ndc, 0.0, 1.0);
+    vT = aT;
+}
+)";
+
+    // uCyclic: wrap rather than clamp. The 256 entries are texel centres, so
+    // 0 and 1 land on the first and last entry as the CPU lookup does.
+    static constexpr char k_heattri_frag[] = R"(
+#version 410 core
+in float vT;
+uniform sampler2D uCmap;
+uniform int uCyclic;
+out vec4 FragColor;
+void main() {
+    float t = uCyclic != 0 ? fract(vT) : clamp(vT, 0.0, 1.0);
+    FragColor = vec4(texture(uCmap, vec2((t * 255.0 + 0.5) / 256.0, 0.5)).rgb, 1.0);
+}
 )";
 
     // A heatmap on a 3D plane: the quad above with a 3D matrix. Same cached
@@ -1561,6 +1592,7 @@ void main() {
         heatmap_program_ = build_program(k_heatmap_vert, k_heatmap_frag);
         glGenVertexArrays(1, &heatmap_vao_);
         glGenBuffers(1, &heatmap_vbo_);
+        glGenBuffers(1, &heatmap_ebo_);
         // Layout: (px, py, tx, ty) per vertex — uploaded fresh each draw.
         glBindVertexArray(heatmap_vao_);
         glBindBuffer(GL_ARRAY_BUFFER, heatmap_vbo_);
@@ -1568,6 +1600,20 @@ void main() {
         glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), nullptr);
         glEnableVertexAttribArray(1);
         glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float),
+                              reinterpret_cast<void *>(2 * sizeof(float)));
+        glBindVertexArray(0);
+
+        // --- heatmap_tri ---
+        heattri_program_ = build_program(k_heattri_vert, k_heattri_frag);
+        glGenVertexArrays(1, &heattri_vao_);
+        glGenBuffers(1, &heattri_vbo_);
+        // Layout: (px, py, t) per vertex, uploaded fresh each draw.
+        glBindVertexArray(heattri_vao_);
+        glBindBuffer(GL_ARRAY_BUFFER, heattri_vbo_);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 3 * sizeof(float), nullptr);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, 3 * sizeof(float),
                               reinterpret_cast<void *>(2 * sizeof(float)));
         glBindVertexArray(0);
 
@@ -1791,6 +1837,8 @@ void main() {
             loc(scatterz_program_, "uEdgeFace")
         };
         heatmap_u_ = {loc(heatmap_program_, "uResolution"), loc(heatmap_program_, "uTex")};
+        heattri_u_ = {loc(heattri_program_, "uResolution"), loc(heattri_program_, "uCmap"),
+                      loc(heattri_program_, "uCyclic")};
         plane3d_u_ = {
             loc(plane3d_program_, "uClip"), loc(plane3d_program_, "uTex"),
             loc(plane3d_program_, "uAlpha"), loc(plane3d_program_, "uBoxScale"),
@@ -1936,8 +1984,14 @@ void main() {
         if (scatterz_program_) glDeleteProgram(scatterz_program_);
 
         if (heatmap_vbo_) glDeleteBuffers(1, &heatmap_vbo_);
+        if (heatmap_ebo_) glDeleteBuffers(1, &heatmap_ebo_);
         if (heatmap_vao_) glDeleteVertexArrays(1, &heatmap_vao_);
         if (heatmap_program_) glDeleteProgram(heatmap_program_);
+
+        if (heattri_vbo_) glDeleteBuffers(1, &heattri_vbo_);
+        if (heattri_vao_) glDeleteVertexArrays(1, &heattri_vao_);
+        if (heattri_program_) glDeleteProgram(heattri_program_);
+        if (heattri_cmap_tex_) glDeleteTextures(1, &heattri_cmap_tex_);
 
         if (plane_comp_vbo_) glDeleteBuffers(1, &plane_comp_vbo_);
         if (plane_comp_vao_) glDeleteVertexArrays(1, &plane_comp_vao_);
@@ -2739,6 +2793,7 @@ void main() {
             case PlotKind::Poly: draw_shape_of(snap.polys[r.index], tr, pr); break;
             case PlotKind::Circle: draw_shape_of(snap.circles[r.index], tr, pr); break;
             case PlotKind::Wedge: draw_shape_of(snap.wedges[r.index], tr, pr); break;
+            case PlotKind::HeatmapTri: draw_heatmap_tri(snap.heatmap_tris[r.index], tr, pr); break;
             default: break;
         }
     }
@@ -3422,6 +3477,12 @@ void main() {
             const CacheKey key{axes_index_, plane_index_, static_cast<int>(hi)};
             ensure_heatmap_texture(heat_cache_[key], hp);
 
+            // Even cells on linear axes: one quad. Otherwise the grid path.
+            if (hp.mesh() || !tr.xs.linear() || !tr.ys.linear()) {
+                draw_heatmap_grid(hp, tr);
+                continue;
+            }
+
             // Quad over xrange x yrange in pixel space. Tex (0,0) = top-left; a
             // reversed range mirrors the image.
             const float x0 = tr.to_px(hp.xrange.lo), x1 = tr.to_px(hp.xrange.hi);
@@ -3441,6 +3502,114 @@ void main() {
             glDrawArrays(GL_TRIANGLES, 0, 6);
         }
 
+        glBindVertexArray(0);
+        glUseProgram(0);
+        end_pass();
+    }
+
+    // A per-axis scale maps a rectangle to a rectangle, so a grid of shared
+    // vertices, each edge placed through the scale, with uv (c/cols, 1 - r/rows)
+    // into the GL_NEAREST texture colours every cell exactly, unsubdivided.
+    // Program, VAO and texture are draw_heatmap()'s, bound.
+    void DataRenderer::draw_heatmap_grid(const HeatmapPlot& hp, const CoordTransform& tr) {
+        const int rows = hp.rows, cols = hp.cols;
+        const std::size_t w = static_cast<std::size_t>(cols) + 1;
+        const std::size_t h = static_cast<std::size_t>(rows) + 1;
+
+        // An edge far off the frame (Log puts v <= 0 hundreds of decades below)
+        // is pulled in to just outside it: a cell shows one texel, so squeezing
+        // its hidden part changes no pixel.
+        const float xlo = tr.px - 1.0f, xhi = tr.px + tr.pw + 1.0f;
+        const float ylo = tr.py - 1.0f, yhi = tr.py + tr.ph + 1.0f;
+        std::vector<float> ex(w), ey(h);
+        for (int c = 0; c <= cols; ++c)
+            ex[static_cast<std::size_t>(c)] = std::clamp(tr.to_px(hp.x_edge(c)), xlo, xhi);
+        for (int r = 0; r <= rows; ++r)
+            ey[static_cast<std::size_t>(r)] = std::clamp(tr.to_py(hp.y_edge(r)), ylo, yhi);
+
+        heatmap_grid_.resize(w * h * 4);
+        float* v = heatmap_grid_.data();
+        for (std::size_t r = 0; r < h; ++r) {
+            const float tv = 1.0f - static_cast<float>(r) / static_cast<float>(rows);
+            for (std::size_t c = 0; c < w; ++c) {
+                *v++ = ex[c];
+                *v++ = ey[r];
+                *v++ = static_cast<float>(c) / static_cast<float>(cols);
+                *v++ = tv;
+            }
+        }
+        glBindBuffer(GL_ARRAY_BUFFER, heatmap_vbo_);
+        glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(heatmap_grid_.size() * sizeof(float)),
+                     heatmap_grid_.data(), GL_DYNAMIC_DRAW);
+
+        // The VAO keeps the element buffer binding.
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, heatmap_ebo_);
+        if (heatmap_ebo_rows_ != rows || heatmap_ebo_cols_ != cols) {
+            std::vector<std::uint32_t> idx;
+            idx.reserve(static_cast<std::size_t>(rows) * cols * 6);
+            for (std::size_t r = 0; r + 1 < h; ++r)
+                for (std::size_t c = 0; c + 1 < w; ++c) {
+                    const auto a = static_cast<std::uint32_t>(r * w + c);
+                    const auto b = a + 1, d = static_cast<std::uint32_t>(a + w), e = d + 1;
+                    idx.insert(idx.end(), { a, b, e, a, e, d });
+                }
+            glBufferData(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLsizeiptr>(idx.size() * sizeof(std::uint32_t)),
+                         idx.data(), GL_STATIC_DRAW);
+            heatmap_ebo_rows_ = rows;
+            heatmap_ebo_cols_ = cols;
+        }
+        glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(static_cast<std::size_t>(rows) * cols * 6),
+                       GL_UNSIGNED_INT, nullptr);
+    }
+
+    // -------------------------------------------------------------------------
+    // draw_heatmap_tri
+    // -------------------------------------------------------------------------
+    // The drawn triangles of heatmap_tri_pixels(), each vertex with its colormap
+    // position; GL interpolates the position linearly in screen space and the
+    // fragment looks the colour up.
+    void DataRenderer::draw_heatmap_tri(const HeatmapTriPlot& p, const CoordTransform& tr,
+                                        const PlotRect& pr) {
+        const std::vector<TriPx> tris = heatmap_tri_pixels(p, tr);
+        if (tris.empty()) return;
+        heattri_verts_.clear();
+        heattri_verts_.reserve(tris.size() * 9);
+        for (const TriPx& q : tris)
+            for (int k = 0; k < 3; ++k) {
+                heattri_verts_.push_back(static_cast<float>(q.x[k]));
+                heattri_verts_.push_back(static_cast<float>(q.y[k]));
+                heattri_verts_.push_back(static_cast<float>(heatmap_tri_t(p.opts, p.values[q.v[k]])));
+            }
+
+        begin_pass(pr, tr.win_h);
+        glUseProgram(heattri_program_);
+        const float res[2] = {tr.win_w, tr.win_h};
+        glUniform2fv(heattri_u_.resolution, 1, res);
+        glUniform1i(heattri_u_.cyclic, p.opts.cmap.is_cyclic() ? 1 : 0);
+
+        glActiveTexture(GL_TEXTURE0);
+        if (!heattri_cmap_tex_) {
+            glGenTextures(1, &heattri_cmap_tex_);
+            glBindTexture(GL_TEXTURE_2D, heattri_cmap_tex_);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            heattri_cmap_in_tex_.reset();
+        }
+        glBindTexture(GL_TEXTURE_2D, heattri_cmap_tex_);
+        if (heattri_cmap_in_tex_ != p.opts.cmap) {
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 256, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                         colormaps::get(p.opts.cmap));
+            heattri_cmap_in_tex_ = p.opts.cmap;
+        }
+        glUniform1i(heattri_u_.cmap, 0);
+
+        glBindVertexArray(heattri_vao_);
+        glBindBuffer(GL_ARRAY_BUFFER, heattri_vbo_);
+        glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(heattri_verts_.size() * sizeof(float)),
+                     heattri_verts_.data(), GL_DYNAMIC_DRAW);
+        glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(heattri_verts_.size() / 3));
         glBindVertexArray(0);
         glUseProgram(0);
         end_pass();

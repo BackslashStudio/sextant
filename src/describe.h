@@ -90,6 +90,10 @@ namespace sextant {
                      F(hint_labels))
     SEXTANT_DESCRIBE(ImageOptions,
                      F(xrange) F(yrange) F(origin) F(visible) F(zorder) F(hint_labels))
+    SEXTANT_DESCRIBE(HeatmapRecOptions,
+                     F(cmap) F(vmin) F(vmax) F(colorbar) F(name) F(visible) F(zorder) F(hint_labels))
+    SEXTANT_DESCRIBE(HeatmapTriOptions,
+                     F(cmap) F(vmin) F(vmax) F(colorbar) F(name) F(visible) F(zorder) F(hint_labels))
     SEXTANT_DESCRIBE(GridOptions, F(color) F(linestyle) F(linewidth) F(minor) F(minor_color))
     SEXTANT_DESCRIBE(AxesStyle,
                      F(background) F(spine_color) F(spine_linewidth) F(spine_bottom) F(spine_left) F(spine_top)

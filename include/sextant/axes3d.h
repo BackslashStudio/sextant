@@ -484,6 +484,19 @@ namespace sextant {
         Plane2D& imshow_rgb(std::span<const std::uint8_t> data, int rows, int cols, int channels,
                             ImageOptions opts = {});
 
+        // Cells of any size, as Axes::heatmap_rec().
+        Plane2D& heatmap_rec(std::span<const double> data, int rows, int cols,
+                             std::span<const double> x_edges, std::span<const double> y_edges,
+                             HeatmapRecOptions opts = {});
+
+        // A heatmap over triangles, as Axes::heatmap_tri() (both forms).
+        Plane2D& heatmap_tri(std::span<const double> x, std::span<const double> y,
+                             std::span<const double> values, std::span<const std::uint32_t> tri,
+                             HeatmapTriOptions opts = {});
+
+        Plane2D& heatmap_tri(std::span<const double> x, std::span<const double> y,
+                             std::span<const double> values, HeatmapTriOptions opts = {});
+
         // The area between two curves, as Axes::fill().
         Plane2D& fill(std::span<const double> x, std::span<const double> y1,
                               std::span<const double> y2, FillOptions opts = {});
@@ -578,6 +591,9 @@ namespace sextant {
         std::size_t shape_wedge_count() const;
         WedgeData shape_wedge_data(std::size_t i) const;
 
+        std::size_t heatmap_tri_count() const;
+        HeatmapTriData heatmap_tri_data(std::size_t i) const;
+
         std::size_t quiver_count() const;
         QuiverData quiver_data(std::size_t i) const;
 
@@ -620,6 +636,18 @@ namespace sextant {
 
         Plane2D& set_shape_wedge_data(std::size_t i, const WedgeData& data);
 
+        // A heatmap_tri()'s vertices, values and triangles, checked as the explicit
+        // form of heatmap_tri() checks them (`tri` is required; nothing re-triangulates).
+        // The span form without `tri` keeps the triangles, so the vertex count must
+        // stay. hint_labels are kept while the vertex count is unchanged.
+        Plane2D& set_heatmap_tri_data(std::size_t i, const HeatmapTriData& data);
+
+        Plane2D& set_heatmap_tri_data(std::size_t i, std::span<const double> x, std::span<const double> y,
+                                      std::span<const double> values, std::span<const std::uint32_t> tri);
+
+        Plane2D& set_heatmap_tri_data(std::size_t i, std::span<const double> x, std::span<const double> y,
+                                      std::span<const double> values);
+
         Plane2D& set_quiver_data(std::size_t i, const QuiverData& data);
 
         Plane2D& set_quiver_data(std::size_t i, std::span<const double> x, std::span<const double> y,
@@ -658,6 +686,8 @@ namespace sextant {
 
         Plane2D& set_shape_wedge_visible(std::size_t i, bool visible);
         bool shape_wedge_visible(std::size_t i) const;
+        Plane2D& set_heatmap_tri_visible(std::size_t i, bool visible);
+        bool heatmap_tri_visible(std::size_t i) const;
 
         Plane2D& set_quiver_visible(std::size_t i, bool visible);
         bool quiver_visible(std::size_t i) const;

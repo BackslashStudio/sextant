@@ -9,6 +9,7 @@
 #include "../contour.h"
 #include "../fill_geometry.h"
 #include "../heatmap_pixels.h"
+#include "../heatmap_tri_geometry.h"
 #include "../quiver_geometry.h"
 #include "../shape_geometry.h"
 #include "../renderer/marker_shape.h"
@@ -574,6 +575,137 @@ static void emit_scatter_z(std::ostringstream& o, const SvgAxesData& d,
     }
 }
 
+// Up to this many cells, a mesh or a heatmap on a scaled axis is written as
+// one <rect> per cell; above it, as one <image> rasterized at the plot area's
+// pixel size.
+constexpr std::size_t kSvgHeatmapCellCap = 4096;
+
+// A mesh, or a heatmap on a Log/Symlog axis: uneven cells, which one affine
+// <image> can't hold. Edges placed as DataRenderer::draw_heatmap_grid() places
+// them (pulled in to just outside the frame).
+static void emit_heatmap_cells(std::ostringstream& o, const SvgAxesData& d, const HeatmapPlot& hp) {
+    const auto& tr = d.layout.tr;
+    const HeatmapPixels px(hp);
+    const bool lower = (hp.opts.origin == "lower");
+    const std::size_t cells = static_cast<std::size_t>(hp.rows) * hp.cols;
+
+    if (cells <= kSvgHeatmapCellCap) {
+        const float xlo = tr.px - 1.0f, xhi = tr.px + tr.pw + 1.0f;
+        const float ylo = tr.py - 1.0f, yhi = tr.py + tr.ph + 1.0f;
+        std::vector<float> ex(static_cast<std::size_t>(hp.cols) + 1), ey(static_cast<std::size_t>(hp.rows) + 1);
+        for (int c = 0; c <= hp.cols; ++c)
+            ex[static_cast<std::size_t>(c)] = std::clamp(tr.to_px(hp.x_edge(c)), xlo, xhi);
+        for (int r = 0; r <= hp.rows; ++r)
+            ey[static_cast<std::size_t>(r)] = std::clamp(tr.to_py(hp.y_edge(r)), ylo, yhi);
+
+        // crispEdges, so neighbouring cells leave no hairline seam.
+        o << "    <g shape-rendering=\"crispEdges\">\n";
+        for (int r = 0; r < hp.rows; ++r) {
+            const std::size_t band = static_cast<std::size_t>(lower ? r : hp.rows - 1 - r);
+            const float y0 = std::min(ey[band], ey[band + 1]), y1 = std::max(ey[band], ey[band + 1]);
+            if (!(y1 > y0)) continue;
+            for (int c = 0; c < hp.cols; ++c) {
+                const std::size_t cc = static_cast<std::size_t>(c);
+                const float x0 = std::min(ex[cc], ex[cc + 1]), x1 = std::max(ex[cc], ex[cc + 1]);
+                if (!(x1 > x0)) continue;
+                const Color fill = px.color(static_cast<std::size_t>(r) * hp.cols + cc);
+                if (fill.a <= 0.0f) continue;
+                o << "      <rect x=\"" << x0 << "\" y=\"" << y0 << "\" width=\"" << x1 - x0
+                  << "\" height=\"" << y1 - y0 << "\" fill=\"" << rgb(fill) << "\"";
+                if (fill.a < 1.0f) o << " fill-opacity=\"" << fill.a << "\"";
+                o << "/>\n";
+            }
+        }
+        o << "    </g>\n";
+        return;
+    }
+
+    // The raster: the extent's part of the plot area, whole pixels, each pixel
+    // the cell under its centre (as GL's rasterization picks it). Columns and
+    // rows separate, so each pixel column and row is looked up once.
+    const float ex0 = tr.to_px(hp.x_edge(0)), ex1 = tr.to_px(hp.x_edge(hp.cols));
+    const float ey0 = tr.to_py(hp.y_edge(0)), ey1 = tr.to_py(hp.y_edge(hp.rows));
+    const int X0 = static_cast<int>(std::floor(std::max(std::min(ex0, ex1), tr.px)));
+    const int X1 = static_cast<int>(std::ceil(std::min(std::max(ex0, ex1), tr.px + tr.pw)));
+    const int Y0 = static_cast<int>(std::floor(std::max(std::min(ey0, ey1), tr.py)));
+    const int Y1 = static_cast<int>(std::ceil(std::min(std::max(ey0, ey1), tr.py + tr.ph)));
+    if (X1 <= X0 || Y1 <= Y0) return;
+    const int W = X1 - X0, H = Y1 - Y0;
+
+    std::vector<int> col_of(static_cast<std::size_t>(W)), row_of(static_cast<std::size_t>(H));
+    for (int i = 0; i < W; ++i) {
+        const double f = hp.col_at(tr.to_data_x(static_cast<float>(X0 + i) + 0.5f));
+        col_of[static_cast<std::size_t>(i)] = (f >= 0.0 && f < hp.cols) ? static_cast<int>(f) : -1;
+    }
+    for (int j = 0; j < H; ++j) {
+        const double f = hp.row_at(tr.to_data_y(static_cast<float>(Y0 + j) + 0.5f));
+        const int band = (f >= 0.0 && f < hp.rows) ? static_cast<int>(f) : -1;
+        row_of[static_cast<std::size_t>(j)] = band < 0 ? -1 : (lower ? band : hp.rows - 1 - band);
+    }
+    std::vector<uint8_t> rgba(static_cast<std::size_t>(W) * H * 4, 0);
+    for (int j = 0; j < H; ++j) {
+        const int r = row_of[static_cast<std::size_t>(j)];
+        if (r < 0) continue;
+        for (int i = 0; i < W; ++i) {
+            const int c = col_of[static_cast<std::size_t>(i)];
+            if (c < 0) continue;
+            px.rgba(static_cast<std::size_t>(r) * hp.cols + static_cast<std::size_t>(c),
+                    &rgba[(static_cast<std::size_t>(j) * W + static_cast<std::size_t>(i)) * 4]);
+        }
+    }
+    const std::string b64 = base64_encode(write_png_to_memory(W, H, rgba));
+    o << "    <image x=\"" << X0 << "\" y=\"" << Y0 << "\" width=\"" << W << "\" height=\"" << H
+      << "\" preserveAspectRatio=\"none\""
+      << " style=\"image-rendering: optimizeSpeed;"
+      <<        " image-rendering: -moz-crisp-edges;"
+      <<        " image-rendering: -webkit-optimize-contrast;"
+      <<        " image-rendering: crisp-edges;"
+      <<        " image-rendering: pixelated;\""
+      << " xlink:href=\"data:image/png;base64," << b64 << "\"/>\n";
+}
+
+// A heatmap_tri: no SVG primitive interpolates a colour over a triangle, so it
+// is one <image> rasterized at the plot area's pixel size over its triangles'
+// box, each pixel the colormap position under its centre
+// (rasterize_heatmap_tri(), as GL interpolates in screen space).
+static void emit_heatmap_tri(std::ostringstream& o, const SvgAxesData& d, const HeatmapTriPlot& p) {
+    const auto& tr = d.layout.tr;
+    const std::vector<TriPx> tris = heatmap_tri_pixels(p, tr);
+    if (tris.empty()) return;
+    double lx = tr.px + tr.pw, hx = tr.px, ly = tr.py + tr.ph, hy = tr.py;
+    for (const TriPx& q : tris)
+        for (int k = 0; k < 3; ++k) {
+            lx = std::min(lx, q.x[k]);
+            hx = std::max(hx, q.x[k]);
+            ly = std::min(ly, q.y[k]);
+            hy = std::max(hy, q.y[k]);
+        }
+    const int X0 = static_cast<int>(std::floor(std::max<double>(lx, tr.px)));
+    const int X1 = static_cast<int>(std::ceil(std::min<double>(hx, tr.px + tr.pw)));
+    const int Y0 = static_cast<int>(std::floor(std::max<double>(ly, tr.py)));
+    const int Y1 = static_cast<int>(std::ceil(std::min<double>(hy, tr.py + tr.ph)));
+    if (X1 <= X0 || Y1 <= Y0) return;
+    const int W = X1 - X0, H = Y1 - Y0;
+
+    const std::vector<float> t = rasterize_heatmap_tri(p, tr, X0, Y0, W, H);
+    const std::uint8_t* lut = colormaps::get(p.opts.cmap);
+    const bool cyclic = p.opts.cmap.is_cyclic();
+    std::vector<uint8_t> rgba(static_cast<std::size_t>(W) * H * 4, 0);
+    for (std::size_t i = 0; i < t.size(); ++i) {
+        if (std::isnan(t[i])) continue;
+        std::memcpy(&rgba[i * 4], &lut[colormaps::index(t[i], cyclic) * 4], 4);
+    }
+    const std::string b64 = base64_encode(write_png_to_memory(W, H, rgba));
+    o << "    <image x=\"" << X0 << "\" y=\"" << Y0 << "\" width=\"" << W << "\" height=\"" << H
+      << "\" preserveAspectRatio=\"none\""
+      << " style=\"image-rendering: optimizeSpeed;"
+      <<        " image-rendering: -moz-crisp-edges;"
+      <<        " image-rendering: -webkit-optimize-contrast;"
+      <<        " image-rendering: crisp-edges;"
+      <<        " image-rendering: pixelated;\""
+      << " xlink:href=\"data:image/png;base64," << b64 << "\"/>\n";
+}
+
 // Heatmap as a base64 PNG <image>, via the same colormap LUT and origin flip
 // as DataRenderer::draw_heatmap, plus mirroring for reversed ranges.
 static void emit_heatmap(std::ostringstream& o, const SvgAxesData& d,
@@ -581,6 +713,10 @@ static void emit_heatmap(std::ostringstream& o, const SvgAxesData& d,
     for (const std::size_t k : which) {
         const auto& hp = d.heatmaps[k];
         if (hp.rows <= 0 || hp.cols <= 0) continue;
+        if (hp.mesh() || !d.layout.tr.xs.linear() || !d.layout.tr.ys.linear()) {
+            emit_heatmap_cells(o, d, hp);
+            continue;
+        }
 
         const HeatmapPixels px(hp);
         const std::size_t n = static_cast<std::size_t>(hp.rows) * hp.cols;
@@ -894,6 +1030,9 @@ static void emit_object(std::ostringstream& o, const SvgAxesData& d, const Objec
             break;
         case PlotKind::Wedge:
             emit_shape_of(o, d, d.wedges[r.index]);
+            break;
+        case PlotKind::HeatmapTri:
+            emit_heatmap_tri(o, d, d.heatmap_tris[r.index]);
             break;
         default: break;
     }

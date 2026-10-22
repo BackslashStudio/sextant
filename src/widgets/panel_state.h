@@ -335,6 +335,7 @@ namespace sextant {
             std::vector<PolyOptions> polys;
             std::vector<CircleOptions> circles;
             std::vector<WedgeOptions> wedges;
+            std::vector<HeatmapTriOptions> heatmap_tris;
             std::vector<ObjectId> ids;   // seeded from, kind by kind
         };
 

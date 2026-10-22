@@ -50,6 +50,8 @@ struct PlotDataTable {
     // Non-null => a mesh; vertices are in `columns`, and this adds the
     // read-only topology.
     const SurfaceTriPlot* mesh = nullptr;
+    // Likewise for a heatmap_tri (columns x, y, value).
+    const HeatmapTriPlot* heatmap_tri = nullptr;
 
     // True when either grid pointer is set.
     bool is_grid() const { return bars3d != nullptr || surface != nullptr; }

@@ -31,6 +31,7 @@ struct Axes::Impl {
     std::vector<PolyPlot>     polys;
     std::vector<CirclePlot>   circles;
     std::vector<WedgePlot>    wedges;
+    std::vector<HeatmapTriPlot> heatmap_tris;
 
     // The figure's FigureOptions::mathtext, set when the figure makes this
     // axes; only warn_math() reads it (drawing reads the snapshot's).
@@ -84,9 +85,6 @@ struct Axes::Impl {
     // Take the shared fields from another member, if there is one (cla()).
     void adopt_shared_x();
     void adopt_shared_y();
-    // Whether any member of the x (y) group, or this axes alone, holds a heatmap.
-    bool group_has_heatmap_x() const;
-    bool group_has_heatmap_y() const;
     void leave_groups();
     // sharex() (x) / sharey() on `other`; see Axes::sharex().
     void share(Impl& other, bool x, const char* who);
@@ -162,6 +160,7 @@ struct Axes::Impl {
         s.fills = fills;
         s.quivers = quivers;
         s.polys = polys; s.circles = circles; s.wedges = wedges;
+        s.heatmap_tris = heatmap_tris;
         s.title = title; s.xtitle = xtitle; s.ytitle = ytitle;
         s.title_stamps = title_stamps;
         s.grid_enabled   = grid_enabled;   s.grid_opts   = grid_opts;
@@ -202,6 +201,18 @@ struct Axes::Impl {
     void ingest_image(std::span<const double> data, int rows, int cols, int channels,
                       ImageOptions opts, const char* who);
     static std::vector<double> image_bytes(std::span<const std::uint8_t> data);
+    // heatmap_rec(): a heatmap with x_edges / y_edges.
+    void ingest_heatmap_rec(std::span<const double> data, int rows, int cols,
+                            std::span<const double> x_edges, std::span<const double> y_edges,
+                            HeatmapRecOptions opts, const char* who);
+    // heatmap_tri(): `tri` as given, or with `derive` the Delaunay triangulation of (x, y).
+    void ingest_heatmap_tri(std::span<const double> x, std::span<const double> y,
+                            std::span<const double> values, std::span<const std::uint32_t> tri,
+                            bool derive, HeatmapTriOptions opts, const char* who);
+    // `tri` null keeps the triangles (the vertex count must stay).
+    void set_heatmap_tri_data(std::size_t i, std::span<const double> x, std::span<const double> y,
+                              std::span<const double> values, const std::vector<std::uint32_t>* tri,
+                              const char* who);
 
     // set_*_data() for Axes and Plane2D: replace object i's data, validated as
     // when it was plotted. `who` names the caller.
@@ -217,8 +228,11 @@ struct Axes::Impl {
     // `bottom`: the new bases (BarData), or null to keep them as `sizes` above.
     void set_bar_data(std::size_t i, std::span<const double> x, std::span<const double> height,
                       const std::vector<double>* bottom, const char* who);
+    // `x_edges` / `y_edges`: HeatmapData's (a mesh takes them, the other
+    // kinds want them empty), or null from a span overload (refused on a mesh).
     void set_heatmap_data(std::size_t i, std::span<const double> data, int rows, int cols,
                           Range xrange, Range yrange, std::optional<int> channels,
+                          const std::vector<double>* x_edges, const std::vector<double>* y_edges,
                           const char* who);
 
     // fill() for Axes and Plane2D: x, y1 and y2 one value each per

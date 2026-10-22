@@ -106,6 +106,8 @@ private:
 // (a 2D kind on that plane's sheet). `row`/`col`: heatmap cells, else -1.
 // An area hit (pick_is_area()) also has the cursor's data position, `data_x`/
 // `data_y` (on a plane, in the plane's own coordinates).
+// A heatmap_tri hit: `element` the triangle, `value` the value interpolated at
+// the cursor and `vertex` the triangle's nearest vertex (for hint_labels).
 struct PickHit {
     PickKind    kind = PickKind::None;
     int         plane = -1;
@@ -113,12 +115,15 @@ struct PickHit {
     int         row = -1, col = -1;
     float       anchor_x = 0, anchor_y = 0;   // physical pixels
     double      data_x = 0.0, data_y = 0.0;
+    double      value = 0.0;
+    std::size_t vertex = 0;
 };
 
 // The 2D kinds hit by the area they cover rather than at a point.
 inline bool pick_is_area(PickKind k) {
     return k == PickKind::Bar || k == PickKind::Fill || k == PickKind::Heatmap
-           || k == PickKind::Poly || k == PickKind::Circle || k == PickKind::Wedge;
+           || k == PickKind::Poly || k == PickKind::Circle || k == PickKind::Wedge
+           || k == PickKind::HeatmapTri;
 }
 
 // The hit find_hint() words. First the nearest point across line/scatter/

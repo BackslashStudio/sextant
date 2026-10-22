@@ -210,6 +210,7 @@ std::string render_figure_svg(const FigureSnapshot& fsnap,
             sd.polys     = snap.polys;
             sd.circles   = snap.circles;
             sd.wedges    = snap.wedges;
+            sd.heatmap_tris = snap.heatmap_tris;
 
             sd.title           = snap.title;
             sd.xtitle          = snap.xtitle;

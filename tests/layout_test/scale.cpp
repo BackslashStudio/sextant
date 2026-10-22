@@ -304,18 +304,16 @@ namespace lt {
             o->set_xscale(Scale::Log, {.linthresh = -5.0});
             check(o->xscale() == Scale::Log, "api: options a scale does not read are not");
 
-            // Heatmaps take no scale.
+            // Heatmaps take any scale (heatmap_scale.cpp draws them).
             const std::vector<double> cells{1, 2, 3, 4};
             auto h = Figure::create()->add_subplot(1, 1, 1);
             h->set_xscale(Scale::Log);
-            check(throws([&] { h->imshow(cells, 2, 2); }) && h->heatmap_count() == 0,
-                  "refuse: heatmap() on a log axes throws and adds nothing");
+            h->imshow(cells, 2, 2);
+            check(h->heatmap_count() == 1, "api: heatmap() on a log axes is added");
             auto h2 = Figure::create()->add_subplot(1, 1, 1);
             h2->imshow(cells, 2, 2);
-            check(throws([&] { h2->set_yscale(Scale::Symlog); }) && h2->yscale() == Scale::Linear,
-                  "refuse: a scale on an axes holding a heatmap throws and changes nothing");
-            h2->set_yscale(Scale::Linear);
-            check(h2->yscale() == Scale::Linear, "refuse: Linear is always allowed");
+            h2->set_yscale(Scale::Symlog);
+            check(h2->yscale() == Scale::Symlog, "api: an axes holding a heatmap takes a scale");
 
             // Formats.
             check(throws([&] { o->set_xtick_format("%d"); }) && throws([&] { o->set_ytick_format("%s"); }),
@@ -470,7 +468,8 @@ namespace lt {
         }
 
         // The panel's scale and format edits: applied in the ticks group,
-        // skipped over a heatmap or a newer setter, limits dropped and restored.
+        // also over a heatmap, skipped under a newer setter, limits dropped and
+        // restored.
         void test_edits() {
             RenderSnapshot s = limits(-1.0, 5.0, 0.0, 1.0, AxisScale{}, AxisScale{});
             AxesEdit e;
@@ -494,8 +493,7 @@ namespace lt {
             RenderSnapshot h = limits(1.0, 5.0, 0.0, 1.0, AxisScale{}, AxisScale{});
             h.heatmaps.emplace_back();
             apply_axes_edit(h, e);
-            check(h.xscale.linear() && h.ytick_format == "%.1f",
-                  "edit: no scale over a heatmap (the format still applies)");
+            check(h.xscale == log10s() && h.ytick_format == "%.1f", "edit: a scale over a heatmap applies");
 
             RenderSnapshot newer = limits(1.0, 5.0, 0.0, 1.0, AxisScale{}, AxisScale{});
             newer.style_stamps.xticks = 10;

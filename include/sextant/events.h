@@ -38,7 +38,8 @@ namespace sextant {
         Bar3D, Surface, SurfaceTri, Scatter3D, Line3D,         // 3D kinds
         Quiver,                                               // 2D, appended
         Fill,                                                 // 2D (fill(), stack()), appended
-        Poly, Circle, Wedge                                   // 2D (shape_poly(), shape_circle(), shape_wedge()), appended
+        Poly, Circle, Wedge,                                  // 2D (shape_poly(), shape_circle(), shape_wedge()), appended
+        HeatmapTri                                            // 2D (heatmap_tri()), appended
     };
 
     // Where an object is now: its kind and its index within the kind, the `i` of
@@ -112,13 +113,14 @@ namespace sextant {
         // Pick (the position fields above describe the press): what was under it.
         // A point, marker, arrow or path vertex within the pick radius
         // (Figure::set_pick_radius(), 12 by default) answers first, the nearest;
-        // else the topmost bar, fill or heatmap the press is inside, whose
+        // else the topmost bar, fill, heatmap or heatmap_tri the press is inside, whose
         // position is the event's xdata/ydata. `pick_object`: the object's ObjectId
         // (0 = none; Axes::find_object() or Plane2D::find_object() maps it to the
         // index within its kind, nothing if the object was removed since);
         // `pick_index`: the element -- point, bar, marker or vertex index; a sample of a surface;
         // the flat cell index (row * columns + column) of a heatmap or bar3d; a
-        // fill's segment i, between its points i and i + 1;
+        // fill's segment i, between its points i and i + 1; a heatmap_tri's triangle t
+        // (tri[3t] .. tri[3t + 2]);
         // `pick_row`/`pick_col` for those grids, else -1. `pick_plane` is the
         // plane's ObjectId (Axes3D::plane_index() maps it to the index in
         // plane_at()), or 0 for an object of the axes itself. `pick_index`,

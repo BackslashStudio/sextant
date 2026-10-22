@@ -269,7 +269,8 @@ namespace lt {
             auto log_fig = Figure::create();
             auto logged = log_fig->add_subplot(1, 1, 1);
             logged->set_yscale(Scale::Log);
-            check(throws([&] { logged->imshow_rgb(kRgb, 2, 2, 3); }), "imshow_rgb: needs linear axes, as heatmap()");
+            logged->imshow_rgb(kRgb, 2, 2, 3);
+            check(logged->heatmap_count() == 1, "imshow_rgb: takes a log axis, as heatmap()");
 
             ax->imshow_rgb(kRgb, 2, 2, 3);
             const ObjectId id = ax->last_object();

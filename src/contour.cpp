@@ -159,8 +159,9 @@ void trace_level(const HeatmapPlot& hp, double level, ContourSet& out) {
 
 ContourSet trace_contours(const HeatmapPlot& hp) {
     ContourSet out;
-    // An image has colours, not values to trace.
-    if (!hp.colormapped() || hp.rows < 2 || hp.cols < 2 || hp.opts.contours.empty()) return out;
+    // An image has colours, not values to trace; a heatmap_rec() takes none.
+    if (!hp.colormapped() || hp.mesh() || hp.rows < 2 || hp.cols < 2 || hp.opts.contours.empty())
+        return out;
     if (hp.data.size() < static_cast<std::size_t>(hp.rows) * hp.cols) return out;
     for (double level : hp.opts.contours) trace_level(hp, level, out);
     return out;

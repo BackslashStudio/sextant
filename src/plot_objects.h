@@ -10,6 +10,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cmath>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -26,10 +27,10 @@ namespace sextant {
 // The first five are 2D (also held by planes); then the native 3D kinds,
 // always addressed at the axes (plane -1). Text is held by both 2D and 3D
 // axes (never by a plane); AxLine and AxSpan by 2D axes only (a plane's sheet
-// holds none); Fill, Quiver, Poly, Circle and Wedge by 2D axes and planes. Append new kinds to keep
-// values stable.
+// holds none); Fill, Quiver, Poly, Circle, Wedge and HeatmapTri by 2D axes and
+// planes. Append new kinds to keep values stable.
 enum class PlotKind { Line, Scatter, Bar, Heatmap, ScatterZ, Bar3D, Surface, Scatter3D, Line3D,
-                      SurfaceTri, Text, AxLine, AxSpan, Fill, Quiver, Poly, Circle, Wedge };
+                      SurfaceTri, Text, AxLine, AxSpan, Fill, Quiver, Poly, Circle, Wedge, HeatmapTri };
 
 // A plot object's (or a plane's) identity, the public ObjectId
 // (sextant/object_id.h): kept by set_*_data(), unchanged by
@@ -212,9 +213,10 @@ inline Color bar_edge(const BarPlot& p) {
 }
 
 // Row-major rows x cols values, mapped through vmin/vmax and the colormap. The
-// grid spans xrange x yrange uniformly (ranges are outer edges); use the
-// accessors below for cell positions. Rows count from yrange.lo; the origin
-// flip is applied where data is read.
+// grid spans xrange x yrange uniformly (ranges are outer edges), or, for a
+// heatmap_rec(), runs through x_edges / y_edges; use the accessors below for
+// cell positions. Rows count from yrange.lo; the origin flip is applied where
+// data is read (a mesh is always "lower").
 struct HeatmapPlot {
     CowVec<float>  data;
     int            rows = 0, cols = 0;
@@ -223,19 +225,37 @@ struct HeatmapPlot {
     unsigned long long data_stamp = 0;
     ObjectId id = 0;
 
+    // An even grid's cell size; a mesh's average.
     double cell_w() const { return cols > 0 ? (xrange.hi - xrange.lo) / cols : 0.0; }
     double cell_h() const { return rows > 0 ? (yrange.hi - yrange.lo) / rows : 0.0; }
 
-    // Cell index (fractional; a centre is j + 0.5) -> data space.
-    double x_at(double col) const { return xrange.lo + col * cell_w(); }
-    double y_at(double row) const { return yrange.lo + row * cell_h(); }
+    // Cell index (fractional; a centre is j + 0.5) -> data space. A mesh is
+    // linear within each cell.
+    double x_at(double col) const {
+        return x_edges.empty() ? xrange.lo + col * cell_w() : edge_at(x_edges, col);
+    }
+    double y_at(double row) const {
+        return y_edges.empty() ? yrange.lo + row * cell_h() : edge_at(y_edges, row);
+    }
+
+    // Edge k exactly (0..cols, 0..rows): the mesh's own, or the range's ends.
+    double x_edge(int k) const {
+        if (!x_edges.empty()) return x_edges[static_cast<std::size_t>(k)];
+        return k == cols ? xrange.hi : xrange.lo + k * cell_w();
+    }
+    double y_edge(int k) const {
+        if (!y_edges.empty()) return y_edges[static_cast<std::size_t>(k)];
+        return k == rows ? yrange.hi : yrange.lo + k * cell_h();
+    }
 
     // Data space -> fractional cell index. A degenerate range returns 0.
     double col_at(double x) const {
+        if (!x_edges.empty()) return index_at(x_edges, x);
         const double w = xrange.hi - xrange.lo;
         return w != 0.0 ? (x - xrange.lo) / w * cols : 0.0;
     }
     double row_at(double y) const {
+        if (!y_edges.empty()) return index_at(y_edges, y);
         const double h = yrange.hi - yrange.lo;
         return h != 0.0 ? (y - yrange.lo) / h * rows : 0.0;
     }
@@ -248,6 +268,29 @@ struct HeatmapPlot {
     // colormap, colorbar and contours of opts are unused.
     int channels = 1;
     bool colormapped() const { return channels == 1; }
+
+    // A heatmap_rec(): cols + 1 and rows + 1 edges, strictly monotone; empty
+    // for an even grid. xrange / yrange are their first and last.
+    CowVec<double> x_edges, y_edges;
+    bool mesh() const { return !x_edges.empty(); }
+
+private:
+    // Cell f's edge position, extrapolating past either end.
+    static double edge_at(const CowVec<double>& e, double f) {
+        const std::size_t n = e.size() - 1;
+        const double i = std::clamp(std::floor(f), 0.0, static_cast<double>(n - 1));
+        const std::size_t k = static_cast<std::size_t>(i);
+        return e[k] + (f - i) * (e[k + 1] - e[k]);
+    }
+    // edge_at()'s inverse, for either direction of the edges.
+    static double index_at(const CowVec<double>& e, double v) {
+        const std::size_t n = e.size() - 1;
+        const auto it = e[n] > e[0] ? std::upper_bound(e.begin(), e.end(), v)
+                                    : std::upper_bound(e.begin(), e.end(), v, std::greater<double>());
+        const std::size_t k = std::min<std::size_t>(
+            static_cast<std::size_t>(std::max<std::ptrdiff_t>(it - e.begin() - 1, 0)), n - 1);
+        return static_cast<double>(k) + (v - e[k]) / (e[k + 1] - e[k]);
+    }
 };
 
 // Continuous-color scatter: z is mapped through opts.cmap/vmin/vmax.
@@ -654,6 +697,19 @@ struct WedgePlot {
     unsigned long long zorder_stamp = 0;
 };
 
+// Axes::heatmap_tri(): one value per vertex over triangles (three vertex
+// indices each into x / y / values), coloured per pixel through opts.cmap.
+struct HeatmapTriPlot {
+    CowVec<double> x, y, values;
+    CowVec<std::uint32_t> tri;
+    HeatmapTriOptions opts;
+    unsigned long long data_stamp = 0;
+    ObjectId id = 0;
+
+    unsigned long long visible_stamp = 0;
+    unsigned long long zorder_stamp = 0;
+};
+
 // The reference kinds, fills and quivers are optional so a view built over the
 // first five alone (tests) still reads as before.
 struct AllPlotData {
@@ -669,6 +725,7 @@ struct AllPlotData {
     const std::vector<PolyPlot>*     polys = nullptr;
     const std::vector<CirclePlot>*   circles = nullptr;
     const std::vector<WedgePlot>*    wedges = nullptr;
+    const std::vector<HeatmapTriPlot>* heatmap_tris = nullptr;
 };
 
 // Caller-side stamps of an axes' titles: each set_*title() takes a fresh
@@ -758,6 +815,8 @@ struct RenderSnapshot {
     std::vector<PolyPlot>     polys;
     std::vector<CirclePlot>   circles;
     std::vector<WedgePlot>    wedges;
+    // Axes::heatmap_tri(), likewise.
+    std::vector<HeatmapTriPlot> heatmap_tris;
 
     // Font sizes live in axes_style.
     std::string title, xtitle, ytitle;
@@ -789,7 +848,7 @@ struct RenderSnapshot {
     std::optional<std::vector<Tick>> xticks_override, yticks_override;
 
     AllPlotData all() const {
-        return { lines, scatters, bars, heatmaps, scatter_z, &axlines, &axspans, &fills, &quivers, &polys, &circles, &wedges };
+        return { lines, scatters, bars, heatmaps, scatter_z, &axlines, &axspans, &fills, &quivers, &polys, &circles, &wedges, &heatmap_tris };
     }
 };
 
@@ -907,6 +966,7 @@ inline std::optional<ObjectLocation> to_location(const std::optional<ObjectRef>&
         case PlotKind::Poly:      k = PickKind::Poly;      break;
         case PlotKind::Circle:    k = PickKind::Circle;    break;
         case PlotKind::Wedge:     k = PickKind::Wedge;     break;
+        case PlotKind::HeatmapTri:k = PickKind::HeatmapTri;break;
         case PlotKind::Text: case PlotKind::AxLine: case PlotKind::AxSpan: return std::nullopt;
     }
     return ObjectLocation{ k, r->index };
@@ -916,7 +976,7 @@ inline constexpr PlotKind kPlotKinds2D[] = { PlotKind::Line, PlotKind::Scatter, 
                                              PlotKind::Heatmap, PlotKind::ScatterZ, PlotKind::Text,
                                              PlotKind::AxLine, PlotKind::AxSpan, PlotKind::Fill,
                                              PlotKind::Quiver, PlotKind::Poly, PlotKind::Circle,
-                                             PlotKind::Wedge };
+                                             PlotKind::Wedge, PlotKind::HeatmapTri };
 inline constexpr PlotKind kPlotKinds3D[] = { PlotKind::Bar3D, PlotKind::Surface,
                                              PlotKind::Scatter3D, PlotKind::Line3D,
                                              PlotKind::SurfaceTri, PlotKind::Text };
@@ -941,6 +1001,7 @@ R with_kind(S& s, PlotKind kind, F&& f, R none) {
         case PlotKind::Poly:     return f(s.polys);
         case PlotKind::Circle:   return f(s.circles);
         case PlotKind::Wedge:    return f(s.wedges);
+        case PlotKind::HeatmapTri: return f(s.heatmap_tris);
         default:                 return none;
     }
 }
@@ -1037,7 +1098,7 @@ std::optional<ObjectRef> find_object_in(const S& s, const PlotKind (&kinds)[N], 
 // where it was among its kind, and the whole object, its id included.
 using PlotObject2D = std::variant<LinePlot, ScatterPlot, BarPlot, HeatmapPlot, ScatterZPlot,
                                   TextPlot, AxLinePlot, AxSpanPlot, FillPlot, QuiverPlot,
-                                  PolyPlot, CirclePlot, WedgePlot>;
+                                  PolyPlot, CirclePlot, WedgePlot, HeatmapTriPlot>;
 using PlotObject3D = std::variant<Bar3DPlot, SurfacePlot, Scatter3DPlot, Line3DPlot,
                                   SurfaceTriPlot, TextPlot>;
 template <class Object>
@@ -1179,6 +1240,7 @@ std::vector<ObjectRef> ordered_2d(const S& s, bool by_z) {
         add_order_keys(keys, PlotKind::Circle, s.circles);
         add_order_keys(keys, PlotKind::Wedge, s.wedges);
     }
+    if constexpr (requires { s.heatmap_tris; }) add_order_keys(keys, PlotKind::HeatmapTri, s.heatmap_tris);
     return sorted_refs(keys, by_z);
 }
 } // namespace objects_detail
@@ -1232,6 +1294,7 @@ std::vector<LayerRef> ordered_layers(std::span<const S* const> layers, bool by_z
             add(PlotKind::Circle, s.circles);
             add(PlotKind::Wedge, s.wedges);
         }
+        if constexpr (requires { s.heatmap_tris; }) add(PlotKind::HeatmapTri, s.heatmap_tris);
     }
     std::stable_sort(keys.begin(), keys.end(), [by_z](const Key& a, const Key& b) {
         if (by_z && a.z != b.z) return a.z < b.z;
@@ -1446,6 +1509,7 @@ inline std::vector<ColorbarRequest> find_colorbar_requests(const RenderSnapshot&
         else if (r.kind == PlotKind::ScatterZ) add(snap.scatter_z[r.index].opts);
         else if (r.kind == PlotKind::Quiver && snap.quivers[r.index].colormapped())
             add(snap.quivers[r.index].opts);
+        else if (r.kind == PlotKind::HeatmapTri) add(snap.heatmap_tris[r.index].opts);
     }
     return reqs;
 }

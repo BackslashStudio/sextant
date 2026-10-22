@@ -62,8 +62,10 @@ namespace sextant {
                    HistOptions hist_opts = {});
 
         // `data` is row-major rows x cols, drawn as a uniform mesh over
-        // xrange x yrange (cell edges, see Range). Throws if either range is
-        // non-finite or degenerate, or if either axis is Log or Symlog.
+        // xrange x yrange (cell edges, see Range): even in data units, so on a Log
+        // or Symlog axis the cells follow the scale. Throws if either range is
+        // non-finite or degenerate. On a Log axis the part of a cell at or below 0
+        // is not drawn.
         Axes& heatmap(std::span<const double> data, int rows, int cols,
                       Range xrange, Range yrange, HeatmapOptions opts = {});
 
@@ -83,6 +85,40 @@ namespace sextant {
 
         Axes& imshow_rgb(std::span<const std::uint8_t> data, int rows, int cols, int channels,
                          ImageOptions opts = {});
+
+        // Row-major rows x cols values over cells of any size, as matplotlib's
+        // pcolormesh: column j spans x_edges[j]..x_edges[j+1] (cols + 1 edges),
+        // row i y_edges[i]..y_edges[i+1] (rows + 1), so row 0 is at y_edges[0].
+        // Edges are finite and strictly increasing or decreasing. Log-spaced edges
+        // give cells even on a log axis. Throws std::invalid_argument for a wrong
+        // edge count or order or too little data, and adds nothing. It is a
+        // heatmap for read-back and picking (heatmap_count(), heatmap_data() with
+        // HeatmapData::x_edges / y_edges, set_heatmap_data(), remove(), ...).
+        Axes& heatmap_rec(std::span<const double> data, int rows, int cols,
+                          std::span<const double> x_edges, std::span<const double> y_edges,
+                          HeatmapRecOptions opts = {});
+
+        // A heatmap over triangles, as matplotlib's tripcolor(shading="gouraud"): one
+        // value per vertex (x[i], y[i]), interpolated across each triangle and
+        // coloured per pixel through the colormap. `tri` holds three vertex indices
+        // per triangle, row-major. Edges are straight on screen, so on a Log or
+        // Symlog axis a triangle follows its vertices, not the scale. A NaN value, or
+        // a vertex a Log axis cannot place (<= 0), leaves out its triangles. Throws
+        // std::invalid_argument if x or y is non-finite, the lengths differ, there
+        // are fewer than three vertices, `tri` is empty or not a multiple of three,
+        // or an index is >= |x|; nothing is added then. A heatmap_tri has its own
+        // count, read-back and pick kind (PickKind::HeatmapTri).
+        Axes& heatmap_tri(std::span<const double> x, std::span<const double> y,
+                          std::span<const double> values, std::span<const std::uint32_t> tri,
+                          HeatmapTriOptions opts = {});
+
+        // The same with the triangles derived: a Delaunay triangulation of (x, y),
+        // once, at this call. Duplicate points keep their slots, a concave domain
+        // fills to its convex hull (pass `tri` for one), and collinear points throw.
+        // `heatmap_tri(x, y, values, {})` is ambiguous with the form above: leave the
+        // options out, or name a field.
+        Axes& heatmap_tri(std::span<const double> x, std::span<const double> y,
+                          std::span<const double> values, HeatmapTriOptions opts = {});
 
         // ----------------------------------------------------------------
         // Filled areas
@@ -241,10 +277,8 @@ namespace sextant {
         Axes& set_ylim(double lo, double hi);
 
         // The axis' scale (see Scale); the limits stay in data units. Throws
-        // std::invalid_argument for options the scale cannot use, and for Log or
-        // Symlog on an axes holding a heatmap (an even mesh takes no scale).
-        // Switching to Log drops set limits that reach 0 or below back to
-        // automatic. On a log axis, set_xlim()/set_ylim() throw for an end <= 0.
+        // std::invalid_argument for options the scale cannot use. Switching to Log
+        // drops set limits that reach 0 or below back to automatic. On a log axis, set_xlim()/set_ylim() throw for an end <= 0.
         Axes& set_xscale(Scale scale, ScaleOptions opts = {});
 
         Axes& set_yscale(Scale scale, ScaleOptions opts = {});
@@ -256,8 +290,7 @@ namespace sextant {
         // and automatic limits cover all their data. Tick positions, formats and
         // titles stay per axes. Inner tick labels hide by themselves (see
         // AxesStyle::show_xtick_labels). Throws std::invalid_argument for an axes
-        // of another Figure, and when an axes holding a heatmap would take a Log
-        // or Symlog scale; nothing changes then. There is no unsharing.
+        // of another Figure; nothing changes then. There is no unsharing.
         Axes& sharex(Axes& other);
 
         Axes& sharey(Axes& other);
@@ -422,6 +455,9 @@ namespace sextant {
         std::size_t shape_wedge_count() const;
         WedgeData shape_wedge_data(std::size_t i) const;
 
+        std::size_t heatmap_tri_count() const;
+        HeatmapTriData heatmap_tri_data(std::size_t i) const;
+
         std::size_t quiver_count() const;
         QuiverData quiver_data(std::size_t i) const;
 
@@ -467,9 +503,14 @@ namespace sextant {
 
         Axes& set_bar_data(std::size_t i, std::span<const double> x, std::span<const double> height);
 
+        // A heatmap_rec() takes its new edges from HeatmapData::x_edges / y_edges
+        // (xrange / yrange are not read), checked as heatmap_rec() checks them; a
+        // heatmap() or image takes xrange / yrange and empty edges. Either form on
+        // the other kind throws std::invalid_argument.
         Axes& set_heatmap_data(std::size_t i, const HeatmapData& data);
 
-        // As heatmap() takes it: row-major rows x cols over xrange x yrange.
+        // As heatmap() takes it: row-major rows x cols over xrange x yrange. Throws
+        // for a heatmap_rec() (give it edges through HeatmapData).
         Axes& set_heatmap_data(std::size_t i, std::span<const double> data, int rows, int cols,
                                Range xrange, Range yrange);
 
@@ -488,6 +529,18 @@ namespace sextant {
         Axes& set_shape_circle_data(std::size_t i, const CircleData& data);
 
         Axes& set_shape_wedge_data(std::size_t i, const WedgeData& data);
+
+        // A heatmap_tri()'s vertices, values and triangles, checked as the explicit
+        // form of heatmap_tri() checks them (`tri` is required; nothing re-triangulates).
+        // The span form without `tri` keeps the triangles, so the vertex count must
+        // stay. hint_labels are kept while the vertex count is unchanged.
+        Axes& set_heatmap_tri_data(std::size_t i, const HeatmapTriData& data);
+
+        Axes& set_heatmap_tri_data(std::size_t i, std::span<const double> x, std::span<const double> y,
+                                   std::span<const double> values, std::span<const std::uint32_t> tri);
+
+        Axes& set_heatmap_tri_data(std::size_t i, std::span<const double> x, std::span<const double> y,
+                                   std::span<const double> values);
 
         // A quiver's arrows, validated as quiver(). The amp stays; `c` follows
         // QuiverData::c (the span overload keeps it while the count holds).
@@ -544,6 +597,8 @@ namespace sextant {
 
         Axes& set_shape_wedge_visible(std::size_t i, bool visible);
         bool shape_wedge_visible(std::size_t i) const;
+        Axes& set_heatmap_tri_visible(std::size_t i, bool visible);
+        bool heatmap_tri_visible(std::size_t i) const;
 
         Axes& set_quiver_visible(std::size_t i, bool visible);
         bool quiver_visible(std::size_t i) const;

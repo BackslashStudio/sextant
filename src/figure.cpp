@@ -44,17 +44,8 @@ void warn_if_inexact(std::string_view path, const SvgSaveReport& r) {
     emit_message(std::string(path) + ": " + r.warning);
 }
 
-// Share groups (Axes::sharex()) on the snapshot: whether a group holds a
-// heatmap, and copying one member's shared fields to the rest.
-// Twins are members like any other (Axes::twinx()).
-bool snapshot_group_has_heatmap(const FigureSnapshot& fs, unsigned long long id, bool x) {
-    bool has = false;
-    fs.for_each2d([&](int, const RenderSnapshot& s) {
-        has = has || ((x ? s.xshare : s.yshare) == id && !s.heatmaps.empty());
-    });
-    return has;
-}
-
+// Share groups (Axes::sharex()) on the snapshot: copying one member's shared
+// fields to the rest. Twins are members like any other (Axes::twinx()).
 void sync_snapshot_groups(FigureSnapshot& fs, const RenderSnapshot& src) {
     fs.for_each2d([&](int, RenderSnapshot& s) {
         if (&s == &src) return;
@@ -63,24 +54,10 @@ void sync_snapshot_groups(FigureSnapshot& fs, const RenderSnapshot& src) {
     });
 }
 
-// `e` without a Log/Symlog scale the axis' group can't take (a heatmap on any
-// member), as Axes::set_xscale() refuses it. `hx`/`hy`: the groups hold one.
-const AxesEdit& without_refused_scale(const AxesEdit& e, bool hx, bool hy, AxesEdit& scratch) {
-    const bool rx = hx && e.xscale && !e.xscale->linear();
-    const bool ry = hy && e.yscale && !e.yscale->linear();
-    if (!rx && !ry) return e;
-    scratch = e;
-    if (rx) scratch.xscale.reset();
-    if (ry) scratch.yscale.reset();
-    return scratch;
-}
-
 } // namespace
 
 void Axes::Impl::apply_shared_edit(const AxesEdit& e) {
-    AxesEdit scratch;
-    apply_axes_edit(*this, without_refused_scale(e, group_has_heatmap_x(), group_has_heatmap_y(),
-                                                 scratch));
+    apply_axes_edit(*this, e);
     sync_shared_x();
     sync_shared_y();
 }
@@ -301,11 +278,8 @@ void Figure::Impl::patch_snapshot(const FigureEdits& edits, FigureEdits* inv) {
         // A 3D slot is addressed on the other lane.
         RenderSnapshot* sp = next->find2d(idx);
         if (!sp) continue;
-        AxesEdit undo, scratch;
-        const AxesEdit& ok = without_refused_scale(
-            e, sp->xshare && snapshot_group_has_heatmap(*next, sp->xshare, true),
-            sp->yshare && snapshot_group_has_heatmap(*next, sp->yshare, false), scratch);
-        apply_axes_edit(*sp, ok, inv ? &undo : nullptr);
+        AxesEdit undo;
+        apply_axes_edit(*sp, e, inv ? &undo : nullptr);
         // The group follows; the inverse, applied to this axes, brings it back the same way.
         sync_snapshot_groups(*next, *sp);
         if (inv && !axes_edit_empty(undo)) inv->per_axes.push_back({idx, std::move(undo)});

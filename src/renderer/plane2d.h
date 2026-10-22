@@ -103,10 +103,10 @@ namespace sextant {
         std::vector<Marker> markers;
 
         // The 2D call order as consecutive ranges into the three lists, or a
-        // heatmap (fills and strokes alternate, and coplanar primitives can't be
-        // depth-sorted).
+        // heatmap or heatmap_tri by its index in the sheet (fills and strokes
+        // alternate, and coplanar primitives can't be depth-sorted).
         struct Batch {
-            enum class Kind { Tri, Seg, Marker, Heatmap } kind = Kind::Tri;
+            enum class Kind { Tri, Seg, Marker, Heatmap, HeatmapTri } kind = Kind::Tri;
 
             std::size_t begin = 0, end = 0;
         };

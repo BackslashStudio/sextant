@@ -623,6 +623,12 @@ namespace lt {
     // heatmap_rgb.cpp
     void test_heatmap_rgb();
 
+    // heatmap_scale.cpp
+    void test_heatmap_scale();
+
+    // heatmap_tri.cpp
+    void test_heatmap_tri();
+
     // line_steps.cpp
     void test_line_steps();
     void test_line_steps_rendered();

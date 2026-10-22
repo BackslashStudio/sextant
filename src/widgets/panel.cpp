@@ -103,6 +103,7 @@ void sync_sheet(DataPanelState::SheetStyles& dst, const RenderSnapshot& sn) {
     copy(dst.polys, sn.polys);
     copy(dst.circles, sn.circles);
     copy(dst.wedges, sn.wedges);
+    copy(dst.heatmap_tris, sn.heatmap_tris);
     dst.ids = object_ids(sn, kPlotKinds2D);
 }
 
@@ -1664,20 +1665,8 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
         // Scale and label format, per axis.
         ImGui::SeparatorText("Scale & format");
         {
-            // An even-mesh heatmap takes no scale (see Axes::set_xscale()), on
-            // this axes or any sharing the axis.
-            const auto group_heatmap = [&](bool x) {
-                const unsigned long long id = x ? cur2d->xshare : cur2d->yshare;
-                if (!id) return !cur2d->heatmaps.empty();
-                bool has = false;
-                fsnap.for_each2d([&](int, const RenderSnapshot& o) {
-                    has = has || ((x ? o.xshare : o.yshare) == id && !o.heatmaps.empty());
-                });
-                return has;
-            };
             struct ScaleAxis {
                 const char* id;
-                bool has_heatmap;
                 AxisScale* scale;
                 std::optional<AxisScale> AxesEdit::* field;
                 char* fmt;
@@ -1687,9 +1676,9 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
             };
             auto& c = st.cosmetic;
             ScaleAxis axes[2] = {
-                {"X", group_heatmap(true), &c.xscale_local, &AxesEdit::xscale, c.xfmt_buf, sizeof(c.xfmt_buf),
+                {"X", &c.xscale_local, &AxesEdit::xscale, c.xfmt_buf, sizeof(c.xfmt_buf),
                  &c.xfmt_bad, &AxesEdit::xtick_format},
-                {"Y", group_heatmap(false), &c.yscale_local, &AxesEdit::yscale, c.yfmt_buf, sizeof(c.yfmt_buf),
+                {"Y", &c.yscale_local, &AxesEdit::yscale, c.yfmt_buf, sizeof(c.yfmt_buf),
                  &c.yfmt_bad, &AxesEdit::ytick_format},
             };
             for (ScaleAxis& a : axes) {
@@ -1698,7 +1687,6 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
                     ImGui::TextDisabled("%s axis: see Host", a.id);
                     continue;
                 }
-                const bool has_heatmap = a.has_heatmap;
                 ImGui::PushID(a.id);
                 ImGui::TextDisabled("%s axis", a.id);
                 if (begin_field_table("scale", 2)) {
@@ -1707,12 +1695,7 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
                         edit_box.update(idx, [&](AxesEdit& e){ e.*a.field = v; });
                     };
                     field_row("Scale");
-                    ImGui::BeginDisabled(has_heatmap);
                     if (scale_combo("##scale", a.scale->kind)) push_scale();
-                    ImGui::EndDisabled();
-                    if (has_heatmap && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-                        ImGui::SetTooltip("A heatmap's cells are even in data units, so this axis stays linear\n"
-                                          "(the heatmap may be on an axes sharing it).");
                     if (!a.scale->linear()) {
                         field_row("Base");
                         double b = a.scale->base;

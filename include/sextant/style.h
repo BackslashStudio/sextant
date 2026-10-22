@@ -582,6 +582,38 @@ namespace sextant {
         std::vector<std::string> hint_labels;
     };
 
+    // A heatmap over cells of any size (Axes::heatmap_rec()): HeatmapOptions
+    // without `origin` (row 0 is at the first y edge) and without contours.
+    struct HeatmapRecOptions {
+        Colormap cmap = Colormap::Viridis;
+        float vmin = 0.0f;
+        float vmax = 1.0f;
+        bool colorbar = false;
+        std::string name;    // see HeatmapOptions::name
+        bool visible = true; // see LineOptions::visible
+        double zorder = 0.0; // see LineOptions::zorder
+
+        // See LineOptions::hint_labels. Row-major, index = row*cols + col.
+        std::vector<std::string> hint_labels;
+    };
+
+    // A heatmap over triangles (Axes::heatmap_tri()): one value per vertex,
+    // interpolated across each triangle and coloured per pixel through the
+    // colormap, as matplotlib's tripcolor with shading="gouraud".
+    struct HeatmapTriOptions {
+        Colormap cmap = Colormap::Viridis;
+        float vmin = 0.0f;
+        float vmax = 1.0f;
+        bool colorbar = false;
+        std::string name;    // see HeatmapOptions::name
+        bool visible = true; // see LineOptions::visible
+        double zorder = 0.0; // see LineOptions::zorder
+
+        // See LineOptions::hint_labels: one per vertex; hover shows the label of
+        // the hovered triangle's nearest vertex.
+        std::vector<std::string> hint_labels;
+    };
+
     struct GridOptions {
         Color color = {0.8f, 0.8f, 0.8f, 1.0f};
 
@@ -1017,11 +1049,22 @@ namespace sextant {
     // so they come back rounded to float. `channels` is 1 for a heatmap (values
     // through the colormap) and 3 or 4 for an imshow_rgb() image, whose `data`
     // is then rows x cols x channels, each in [0, 1] (bytes come back / 255).
+    // A heatmap_rec() has its cell edges in x_edges (cols + 1) and y_edges
+    // (rows + 1), and xrange / yrange are its first and last edges; for the
+    // other kinds the edges are empty.
     struct HeatmapData {
         std::vector<double> data;
         int rows = 0, cols = 0;
         Range xrange, yrange;
         int channels = 1;
+        std::vector<double> x_edges, y_edges;
+    };
+
+    // A heatmap_tri(): the vertices, one value each (NaN kept), and three vertex
+    // indices per triangle -- as passed, or the Delaunay triangulation derived.
+    struct HeatmapTriData {
+        std::vector<double> x, y, values;
+        std::vector<std::uint32_t> tri;
     };
 
     // How an axline() is given: a value on one axis, a point and a slope, or

@@ -854,7 +854,7 @@ namespace sextant {
                     }
                     break;
                 }
-                default: break; // heatmaps: explained by their colorbar
+                default: break; // heatmaps and heatmap_tri: explained by their colorbar
             }
         }
     }

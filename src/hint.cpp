@@ -1,4 +1,5 @@
 #include "hint.h"
+#include "heatmap_tri_geometry.h"
 #include "renderer/surface_tri.h"
 #include "renderer/bar3d.h"
 #include "renderer/surface.h"
@@ -337,6 +338,17 @@ std::optional<PickHit> find_area(const RenderSnapshot& snap, const HintProjector
                 hit.element = 0;
                 return hit;
             }
+            case PlotKind::HeatmapTri: {
+                // In scale space (heatmap_tri_at()), so the drawn weights.
+                const auto t = heatmap_tri_at(snap.heatmap_tris[o], xs, ys, cx, cy);
+                if (!t) break;
+                hit.kind = PickKind::HeatmapTri;
+                hit.object = o;
+                hit.element = t->triangle;
+                hit.value = t->value;
+                hit.vertex = t->nearest;
+                return hit;
+            }
             case PlotKind::Heatmap: {
                 // The cell, in cell-index space via col_at()/row_at(). Storage
                 // is row 0 first regardless of origin, so undo the
@@ -480,6 +492,7 @@ ObjectId pick_object_id(const RenderSnapshot& s, PickKind kind, std::size_t i) {
         case PickKind::Poly:     return s.polys[i].id;
         case PickKind::Circle:   return s.circles[i].id;
         case PickKind::Wedge:    return s.wedges[i].id;
+        case PickKind::HeatmapTri: return s.heatmap_tris[i].id;
         default: return 0;
     }
 }
@@ -575,6 +588,13 @@ std::string format_pick(const RenderSnapshot& snap, const PickHit& hit) {
             const std::string& name = snap.fills[hit.object].opts.name;
             if (!name.empty()) s += '\n' + name;
             return s;
+        }
+        case PickKind::HeatmapTri: {
+            // Where the cursor is, the value there, then the nearest vertex's label.
+            const auto& tp = snap.heatmap_tris[hit.object];
+            char buf[96];
+            std::snprintf(buf, sizeof(buf), ", value=%.4g", hit.value);
+            return append_label(fmt_point(hit.data_x, hit.data_y) + buf, tp.opts.hint_labels, hit.vertex);
         }
         case PickKind::Poly: case PickKind::Circle: case PickKind::Wedge: {
             // Where the cursor is, then the shape's name.

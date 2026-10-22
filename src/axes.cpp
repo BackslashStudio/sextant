@@ -1,6 +1,7 @@
 #include "axes_impl.h"
 #include "object_remove.h"
 #include "axis_limits.h"
+#include "delaunay.h"
 #include "read_back.h"
 #include "rich_text.h"
 #include "quiver_geometry.h"
@@ -8,6 +9,7 @@
 #include "ticker.h"
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <algorithm>
 #include <cmath>
 #include <atomic>
@@ -55,19 +57,6 @@ unsigned long long next_share_id() {
 }
 } // namespace
 
-bool Axes::Impl::group_has_heatmap_x() const {
-    if (!xshare) return !heatmaps.empty();
-    for (const Impl* m : xshare->members)
-        if (!m->heatmaps.empty()) return true;
-    return false;
-}
-bool Axes::Impl::group_has_heatmap_y() const {
-    if (!yshare) return !heatmaps.empty();
-    for (const Impl* m : yshare->members)
-        if (!m->heatmaps.empty()) return true;
-    return false;
-}
-
 void Axes::Impl::leave_groups() {
     for (auto* g : {&xshare, &yshare}) {
         if (!*g) continue;
@@ -86,7 +75,7 @@ void Axes::Impl::share(Impl& other, bool x, const char* who) {
     auto& tg = other.*group;
     if (og && og == tg) return;
 
-    // Everyone joining takes other's scale: refuse a log or symlog over a heatmap.
+    // Everyone joining takes other's scale.
     const AxisScale& to = x ? other.xscale : other.yscale;
     const std::vector<Impl*> joining = og ? og->members : std::vector<Impl*>{this};
     // An axes new to sharing on this axis whose other axis is shared too can
@@ -96,12 +85,6 @@ void Axes::Impl::share(Impl& other, bool x, const char* who) {
         throw std::invalid_argument(
             std::string(who) + ": both axes of an axes with a Datalim aspect would be shared, "
             "leaving none to widen");
-    if (!to.linear())
-        for (const Impl* m : joining)
-            if (!m->heatmaps.empty())
-                throw std::invalid_argument(
-                    std::string(who) + ": an axes holding a heatmap stays linear, and the other "
-                    "axes' scale is not");
 
     if (!tg) {
         tg = std::make_shared<ShareGroup>();
@@ -148,8 +131,8 @@ std::shared_ptr<Axes> Axes::Impl::make_twin(bool x, const char* who) {
     td.cycle = cycle;
     td.twin_defaults();
     // Into the host's group on the shared axis, taking its limits and scale.
-    // A fresh axes holds no heatmap; this throws only for a host with a
-    // Datalim aspect whose other axis is shared already.
+    // This throws only for a host with a Datalim aspect whose other axis is
+    // shared already.
     td.share(*this, x, who);
     slot = t;
     return t;
@@ -255,11 +238,11 @@ void check_limits_fit(const AxisScale& s, double lo, double hi, const char* who)
         throw std::invalid_argument(std::string(who) + ": a log axis needs limits above 0");
 }
 
-// One axis' set_*scale(). Validates what the scale reads, refuses a heatmap
-// (see ingest_heatmap()), and drops set limits the new scale can't place.
+// One axis' set_*scale(). Validates what the scale reads and drops set limits
+// the new scale can't place.
 // Takes fresh limit and tick stamps either way: a pan, zoom or panel scale
 // made over the old scale is not replayed onto the new one.
-void set_scale(bool has_heatmap, AxisScale& slot, double lo, double hi, bool& lim_auto,
+void set_scale(AxisScale& slot, double lo, double hi, bool& lim_auto,
                unsigned long long& lim_stamp, unsigned long long& tick_stamp, Scale scale,
                const ScaleOptions& o, const char* who) {
     const std::string w = who;
@@ -274,8 +257,6 @@ void set_scale(bool has_heatmap, AxisScale& slot, double lo, double hi, bool& li
             positive(o.linthresh, "linthresh");
             positive(o.linscale, "linscale");
         }
-        if (has_heatmap)
-            throw std::invalid_argument(w + ": an axes holding a heatmap stays linear");
     }
     if (scale != Scale::Linear && scale != Scale::Log && scale != Scale::Symlog)
         throw std::invalid_argument(w + ": unknown scale");
@@ -312,12 +293,28 @@ std::vector<float> heatmap_cells(std::span<const double> data, int rows, int col
     return cells;
 }
 
-// Cells are even in data units, so they cannot follow a scale; a mesh kind
-// with its own cell edges is the way to scaled cells.
-void check_linear(const AxisScale& xscale, const AxisScale& yscale, const std::string& w) {
-    if (!xscale.linear() || !yscale.linear())
-        throw std::invalid_argument(w + ": a heatmap needs linear axes; this axes has a "
-                                    + std::string(!xscale.linear() ? "x" : "y") + " scale set");
+// A heatmap_rec()'s edges: cols + 1 and rows + 1, finite and strictly
+// monotone either way. Returns the extent, first edge to last.
+std::pair<Range, Range> mesh_extent(std::span<const double> x_edges, std::span<const double> y_edges,
+                                    int rows, int cols, const std::string& w) {
+    if (rows < 1 || cols < 1)
+        throw std::invalid_argument(w + ": rows and cols must be positive");
+    auto check = [&w](std::span<const double> e, int cells, const char* name) {
+        if (e.size() != static_cast<std::size_t>(cells) + 1)
+            throw std::invalid_argument(w + ": " + name + " needs " + std::to_string(cells + 1)
+                                        + " edges, not " + std::to_string(e.size()));
+        for (double v : e)
+            if (!std::isfinite(v)) throw std::invalid_argument(w + ": " + name + " must be finite");
+        const bool up = e[1] > e[0];
+        for (std::size_t k = 1; k < e.size(); ++k)
+            if (up ? !(e[k] > e[k - 1]) : !(e[k] < e[k - 1]))
+                throw std::invalid_argument(w + ": " + name
+                                            + " must be strictly increasing or strictly decreasing");
+        return Range{ e.front(), e.back() };
+    };
+    const Range xr = check(x_edges, cols, "x_edges");
+    const Range yr = check(y_edges, rows, "y_edges");
+    return { xr, yr };
 }
 
 // Every reader tests == "lower", so anything else would silently mean upper.
@@ -522,7 +519,6 @@ void Axes::Impl::ingest_heatmap(std::span<const double> data, int rows, int cols
                                 const char* who) {
     read_back::check_zorder(opts.zorder, who);
     const std::string w = who;
-    check_linear(xscale, yscale, w);
     std::vector<float> cells = heatmap_cells(data, rows, cols, xrange, yrange, w);
     check_origin(opts.origin, w);
 
@@ -570,7 +566,6 @@ void Axes::Impl::ingest_image(std::span<const double> data, int rows, int cols, 
     if (channels != 3 && channels != 4)
         throw std::invalid_argument(w + ": channels must be 3 (RGB) or 4 (RGBA), not "
                                     + std::to_string(channels));
-    check_linear(xscale, yscale, w);
     // Clamped as imshow()'s, so a bad shape reports the rows/cols error.
     const Range xr = opts.xrange.value_or(Range{ 0.0, static_cast<double>(std::max(cols, 1)) });
     const Range yr = opts.yrange.value_or(Range{ 0.0, static_cast<double>(std::max(rows, 1)) });
@@ -603,6 +598,73 @@ Axes& Axes::imshow_rgb(std::span<const double> data, int rows, int cols, int cha
 Axes& Axes::imshow_rgb(std::span<const std::uint8_t> data, int rows, int cols, int channels,
                        ImageOptions opts) {
     d->ingest_image(Impl::image_bytes(data), rows, cols, channels, std::move(opts), "imshow_rgb");
+    return *this;
+}
+
+// A mesh is a heatmap with edges: its options go to a HeatmapOptions with
+// origin "lower" (row 0 at the first y edge) and no contours.
+void Axes::Impl::ingest_heatmap_rec(std::span<const double> data, int rows, int cols,
+                                    std::span<const double> x_edges, std::span<const double> y_edges,
+                                    HeatmapRecOptions opts, const char* who) {
+    read_back::check_zorder(opts.zorder, who);
+    const std::string w = who;
+    const auto [xr, yr] = mesh_extent(x_edges, y_edges, rows, cols, w);
+    std::vector<float> cells = heatmap_cells(data, rows, cols, xr, yr, w);
+
+    HeatmapOptions ho;
+    ho.cmap = opts.cmap;
+    ho.vmin = opts.vmin;
+    ho.vmax = opts.vmax;
+    ho.colorbar = opts.colorbar;
+    ho.name = std::move(opts.name);
+    ho.visible = opts.visible;
+    ho.zorder = opts.zorder;
+    ho.hint_labels = std::move(opts.hint_labels);
+    warn_math(mathtext, who, ho.name);
+    HeatmapPlot p{ std::move(cells), rows, cols, xr, yr, std::move(ho),
+                   next_snapshot_generation(), new_id() };
+    p.x_edges = std::vector<double>(x_edges.begin(), x_edges.end());
+    p.y_edges = std::vector<double>(y_edges.begin(), y_edges.end());
+    heatmaps.push_back(std::move(p));
+}
+
+Axes& Axes::heatmap_rec(std::span<const double> data, int rows, int cols,
+                        std::span<const double> x_edges, std::span<const double> y_edges,
+                        HeatmapRecOptions opts) {
+    d->ingest_heatmap_rec(data, rows, cols, x_edges, y_edges, std::move(opts), "heatmap_rec");
+    return *this;
+}
+
+// Values are kept as given (NaN too); the triangles are checked, or derived
+// once from (x, y) in data units.
+void Axes::Impl::ingest_heatmap_tri(std::span<const double> x, std::span<const double> y,
+                                    std::span<const double> values, std::span<const std::uint32_t> tri,
+                                    bool derive, HeatmapTriOptions opts, const char* who) {
+    read_back::check_zorder(opts.zorder, who);
+    read_back::check_tri_vertices(x, y, values, who);
+    std::vector<std::uint32_t> t;
+    if (derive) {
+        if (!delaunay_triangulate(x, y, t))
+            throw std::invalid_argument(std::string(who) + ": these points have no triangulation -- they are "
+                                        "collinear, or fewer than three of them are distinct");
+    } else {
+        read_back::check_tri_indices(tri, x.size(), who);
+        t = read_back::own(tri);
+    }
+    warn_math(mathtext, who, opts.name);
+    heatmap_tris.push_back({ read_back::own(x), read_back::own(y), read_back::own(values), std::move(t),
+                             std::move(opts), next_snapshot_generation(), new_id() });
+}
+
+Axes& Axes::heatmap_tri(std::span<const double> x, std::span<const double> y, std::span<const double> values,
+                        std::span<const std::uint32_t> tri, HeatmapTriOptions opts) {
+    d->ingest_heatmap_tri(x, y, values, tri, false, std::move(opts), "heatmap_tri");
+    return *this;
+}
+
+Axes& Axes::heatmap_tri(std::span<const double> x, std::span<const double> y, std::span<const double> values,
+                        HeatmapTriOptions opts) {
+    d->ingest_heatmap_tri(x, y, values, {}, true, std::move(opts), "heatmap_tri");
     return *this;
 }
 
@@ -903,9 +965,8 @@ Axes& Axes::set_ylim(double lo, double hi) {
     return *this;
 }
 Axes& Axes::set_xscale(Scale scale, ScaleOptions opts) {
-    // The scale is the group's: a heatmap on any member refuses it, and every
-    // member's ticks lane takes the new stamp.
-    set_scale(d->group_has_heatmap_x(), d->xscale, d->xmin, d->xmax, d->xlim_auto, d->limit_stamps.x,
+    // The scale is the group's: every member's ticks lane takes the new stamp.
+    set_scale(d->xscale, d->xmin, d->xmax, d->xlim_auto, d->limit_stamps.x,
               d->style_stamps.xticks, scale, opts, "set_xscale");
     d->sync_shared_x();
     if (d->xshare)
@@ -913,7 +974,7 @@ Axes& Axes::set_xscale(Scale scale, ScaleOptions opts) {
     return *this;
 }
 Axes& Axes::set_yscale(Scale scale, ScaleOptions opts) {
-    set_scale(d->group_has_heatmap_y(), d->yscale, d->ymin, d->ymax, d->ylim_auto, d->limit_stamps.y,
+    set_scale(d->yscale, d->ymin, d->ymax, d->ylim_auto, d->limit_stamps.y,
               d->style_stamps.yticks, scale, opts, "set_yscale");
     d->sync_shared_y();
     if (d->yshare)
@@ -1133,6 +1194,26 @@ Axes& Axes::set_shape_wedge_data(std::size_t i, const WedgeData& data) {
     return *this;
 }
 
+std::size_t Axes::heatmap_tri_count() const { return d->heatmap_tris.size(); }
+HeatmapTriData Axes::heatmap_tri_data(std::size_t i) const {
+    return read_back::to_data(read_back::at(d->heatmap_tris, i, "heatmap_tri_data"));
+}
+Axes& Axes::set_heatmap_tri_data(std::size_t i, const HeatmapTriData& data) {
+    d->set_heatmap_tri_data(i, data.x, data.y, data.values, &data.tri, "set_heatmap_tri_data");
+    return *this;
+}
+Axes& Axes::set_heatmap_tri_data(std::size_t i, std::span<const double> x, std::span<const double> y,
+                                 std::span<const double> values, std::span<const std::uint32_t> tri) {
+    const std::vector<std::uint32_t> t = read_back::own(tri);
+    d->set_heatmap_tri_data(i, x, y, values, &t, "set_heatmap_tri_data");
+    return *this;
+}
+Axes& Axes::set_heatmap_tri_data(std::size_t i, std::span<const double> x, std::span<const double> y,
+                                 std::span<const double> values) {
+    d->set_heatmap_tri_data(i, x, y, values, nullptr, "set_heatmap_tri_data");
+    return *this;
+}
+
 std::size_t Axes::quiver_count() const    { return d->quivers.size(); }
 
 QuiverData Axes::quiver_data(std::size_t i) const {
@@ -1234,6 +1315,10 @@ Axes& Axes::set_shape_wedge_visible(std::size_t i, bool visible) {
     read_back::set_visible(d->wedges, i, visible, "set_shape_wedge_visible");
     return *this;
 }
+Axes& Axes::set_heatmap_tri_visible(std::size_t i, bool visible) {
+    read_back::set_visible(d->heatmap_tris, i, visible, "set_heatmap_tri_visible");
+    return *this;
+}
 Axes& Axes::set_quiver_visible(std::size_t i, bool visible) {
     read_back::set_visible(d->quivers, i, visible, "set_quiver_visible");
     return *this;
@@ -1260,6 +1345,7 @@ bool Axes::fill_visible(std::size_t i) const      { return read_back::visible(d-
 bool Axes::shape_poly_visible(std::size_t i) const   { return read_back::visible(d->polys, i, "shape_poly_visible"); }
 bool Axes::shape_circle_visible(std::size_t i) const { return read_back::visible(d->circles, i, "shape_circle_visible"); }
 bool Axes::shape_wedge_visible(std::size_t i) const  { return read_back::visible(d->wedges, i, "shape_wedge_visible"); }
+bool Axes::heatmap_tri_visible(std::size_t i) const  { return read_back::visible(d->heatmap_tris, i, "heatmap_tri_visible"); }
 bool Axes::quiver_visible(std::size_t i) const    { return read_back::visible(d->quivers, i, "quiver_visible"); }
 bool Axes::axline_visible(std::size_t i) const    { return read_back::visible(d->axlines, i, "axline_visible"); }
 bool Axes::axspan_visible(std::size_t i) const    { return read_back::visible(d->axspans, i, "axspan_visible"); }
@@ -1351,20 +1437,53 @@ void Axes::Impl::set_quiver_data(std::size_t i, std::span<const double> x, std::
 
 void Axes::Impl::set_heatmap_data(std::size_t i, std::span<const double> data, int rows, int cols,
                                   Range xrange, Range yrange, std::optional<int> channels,
+                                  const std::vector<double>* x_edges, const std::vector<double>* y_edges,
                                   const char* who) {
     HeatmapPlot& p = read_back::at(heatmaps, i, who);
+    const std::string w = who;
     // A heatmap stays a heatmap and an image keeps its channel count.
     if (channels && *channels != p.channels)
-        throw std::invalid_argument(std::string(who) + ": heatmap " + std::to_string(i) + " has "
+        throw std::invalid_argument(w + ": heatmap " + std::to_string(i) + " has "
                                     + std::to_string(p.channels) + " channel(s), the data "
                                     + std::to_string(*channels));
-    std::vector<float> cells = heatmap_cells(data, rows, cols, xrange, yrange, who, p.channels);
+    // A mesh takes edges, an even grid ranges.
+    const bool edges_given = x_edges && (!x_edges->empty() || !y_edges->empty());
+    if (p.mesh() && !edges_given)
+        throw std::invalid_argument(w + ": heatmap " + std::to_string(i) + " is a heatmap_rec(); "
+                                    "give its x_edges and y_edges through HeatmapData");
+    if (!p.mesh() && edges_given)
+        throw std::invalid_argument(w + ": heatmap " + std::to_string(i) + " is an even grid; "
+                                    "it takes xrange and yrange, not edges");
+    if (p.mesh()) std::tie(xrange, yrange) = mesh_extent(*x_edges, *y_edges, rows, cols, w);
+    std::vector<float> cells = heatmap_cells(data, rows, cols, xrange, yrange, w, p.channels);
     read_back::keep_aligned(p, rows == p.rows && cols == p.cols);
     p.data = std::move(cells);
     p.rows = rows;
     p.cols = cols;
     p.xrange = xrange;
     p.yrange = yrange;
+    if (p.mesh()) {
+        p.x_edges = *x_edges;
+        p.y_edges = *y_edges;
+    }
+}
+
+void Axes::Impl::set_heatmap_tri_data(std::size_t i, std::span<const double> x, std::span<const double> y,
+                                      std::span<const double> values, const std::vector<std::uint32_t>* tri,
+                                      const char* who) {
+    HeatmapTriPlot& p = read_back::at(heatmap_tris, i, who);
+    read_back::check_tri_vertices(x, y, values, who);
+    if (tri) {
+        read_back::check_tri_indices(*tri, x.size(), who);
+    } else if (x.size() != p.x.size()) {
+        throw std::invalid_argument(std::string(who) + ": without tri the vertex count must stay ("
+                                    + std::to_string(p.x.size()) + "), as the triangles are kept");
+    }
+    read_back::keep_aligned(p, x.size() == p.x.size());
+    p.x = read_back::own(x);
+    p.y = read_back::own(y);
+    p.values = read_back::own(values);
+    if (tri) p.tri = *tri;
 }
 
 Axes& Axes::set_line_data(std::size_t i, const LineData& data) {
@@ -1420,12 +1539,13 @@ Axes& Axes::set_quiver_data(std::size_t i, std::span<const double> x, std::span<
 }
 Axes& Axes::set_heatmap_data(std::size_t i, const HeatmapData& data) {
     d->set_heatmap_data(i, data.data, data.rows, data.cols, data.xrange, data.yrange,
-                        data.channels, "set_heatmap_data");
+                        data.channels, &data.x_edges, &data.y_edges, "set_heatmap_data");
     return *this;
 }
 Axes& Axes::set_heatmap_data(std::size_t i, std::span<const double> data, int rows, int cols,
                              Range xrange, Range yrange) {
-    d->set_heatmap_data(i, data, rows, cols, xrange, yrange, std::nullopt, "set_heatmap_data");
+    d->set_heatmap_data(i, data, rows, cols, xrange, yrange, std::nullopt, nullptr, nullptr,
+                        "set_heatmap_data");
     return *this;
 }
 

@@ -100,6 +100,27 @@ namespace sextant {
         return *this;
     }
 
+    Plane2D& Plane2D::heatmap_rec(std::span<const double> data, int rows, int cols,
+                                  std::span<const double> x_edges, std::span<const double> y_edges,
+                                  HeatmapRecOptions opts) {
+        d->sheet.ingest_heatmap_rec(data, rows, cols, x_edges, y_edges, std::move(opts),
+                                    "Plane2D::heatmap_rec");
+        return *this;
+    }
+
+    Plane2D& Plane2D::heatmap_tri(std::span<const double> x, std::span<const double> y,
+                                  std::span<const double> values, std::span<const std::uint32_t> tri,
+                                  HeatmapTriOptions opts) {
+        d->sheet.ingest_heatmap_tri(x, y, values, tri, false, std::move(opts), "Plane2D::heatmap_tri");
+        return *this;
+    }
+
+    Plane2D& Plane2D::heatmap_tri(std::span<const double> x, std::span<const double> y,
+                                  std::span<const double> values, HeatmapTriOptions opts) {
+        d->sheet.ingest_heatmap_tri(x, y, values, {}, true, std::move(opts), "Plane2D::heatmap_tri");
+        return *this;
+    }
+
     Plane2D& Plane2D::fill(std::span<const double> x, std::span<const double> y1,
                                    std::span<const double> y2, FillOptions opts) {
         d->sheet.ingest_fill(x, y1, y2, std::move(opts), "Plane2D::fill");
@@ -277,6 +298,33 @@ namespace sextant {
         return read_back::visible(d->sheet.wedges, i, "Plane2D::shape_wedge_visible");
     }
 
+    std::size_t Plane2D::heatmap_tri_count() const { return d->sheet.heatmap_tris.size(); }
+    HeatmapTriData Plane2D::heatmap_tri_data(std::size_t i) const {
+        return read_back::to_data(read_back::at(d->sheet.heatmap_tris, i, "Plane2D::heatmap_tri_data"));
+    }
+    Plane2D& Plane2D::set_heatmap_tri_data(std::size_t i, const HeatmapTriData& data) {
+        d->sheet.set_heatmap_tri_data(i, data.x, data.y, data.values, &data.tri, "Plane2D::set_heatmap_tri_data");
+        return *this;
+    }
+    Plane2D& Plane2D::set_heatmap_tri_data(std::size_t i, std::span<const double> x, std::span<const double> y,
+                                           std::span<const double> values, std::span<const std::uint32_t> tri) {
+        const std::vector<std::uint32_t> t = read_back::own(tri);
+        d->sheet.set_heatmap_tri_data(i, x, y, values, &t, "Plane2D::set_heatmap_tri_data");
+        return *this;
+    }
+    Plane2D& Plane2D::set_heatmap_tri_data(std::size_t i, std::span<const double> x, std::span<const double> y,
+                                           std::span<const double> values) {
+        d->sheet.set_heatmap_tri_data(i, x, y, values, nullptr, "Plane2D::set_heatmap_tri_data");
+        return *this;
+    }
+    Plane2D& Plane2D::set_heatmap_tri_visible(std::size_t i, bool visible) {
+        read_back::set_visible(d->sheet.heatmap_tris, i, visible, "Plane2D::set_heatmap_tri_visible");
+        return *this;
+    }
+    bool Plane2D::heatmap_tri_visible(std::size_t i) const {
+        return read_back::visible(d->sheet.heatmap_tris, i, "Plane2D::heatmap_tri_visible");
+    }
+
     std::size_t Plane2D::quiver_count() const    { return d->sheet.quivers.size(); }
 
     LineData Plane2D::line_data(std::size_t i) const {
@@ -358,13 +406,13 @@ namespace sextant {
     }
     Plane2D& Plane2D::set_heatmap_data(std::size_t i, const HeatmapData& data) {
         d->sheet.set_heatmap_data(i, data.data, data.rows, data.cols, data.xrange, data.yrange,
-                                  data.channels, "Plane2D::set_heatmap_data");
+                                  data.channels, &data.x_edges, &data.y_edges, "Plane2D::set_heatmap_data");
         return *this;
     }
     Plane2D& Plane2D::set_heatmap_data(std::size_t i, std::span<const double> data, int rows,
                                        int cols, Range xrange, Range yrange) {
         d->sheet.set_heatmap_data(i, data, rows, cols, xrange, yrange, std::nullopt,
-                                  "Plane2D::set_heatmap_data");
+                                  nullptr, nullptr, "Plane2D::set_heatmap_data");
         return *this;
     }
 

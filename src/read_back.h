@@ -144,7 +144,7 @@ namespace sextant::read_back {
 
     inline HeatmapData to_data(const HeatmapPlot& p) {
         return { std::vector<double>(p.data.begin(), p.data.end()),
-                 p.rows, p.cols, p.xrange, p.yrange, p.channels };
+                 p.rows, p.cols, p.xrange, p.yrange, p.channels, p.x_edges.get(), p.y_edges.get() };
     }
 
     inline Bar3DData to_data(const Bar3DPlot& p) {
@@ -241,6 +241,33 @@ namespace sextant::read_back {
                 throw std::invalid_argument(std::string(who) + ": vertices must be finite");
     }
 
+    // A heatmap_tri()'s vertices: x and y finite, values one per vertex (NaN
+    // allowed: it leaves out the vertex's triangles), at least three.
+    inline void check_tri_vertices(std::span<const double> x, std::span<const double> y,
+                                   std::span<const double> values, const char* who) {
+        const std::string w = who;
+        if (y.size() != x.size() || values.size() != x.size())
+            throw std::invalid_argument(w + ": x, y and values must be the same length");
+        if (x.size() < 3)
+            throw std::invalid_argument(w + ": a triangle mesh needs at least three vertices");
+        for (std::size_t i = 0; i < x.size(); ++i)
+            if (!std::isfinite(x[i]) || !std::isfinite(y[i]))
+                throw std::invalid_argument(w + ": x and y must be finite");
+    }
+
+    // Explicit topology over `n` vertices, as Axes3D::surface_tri() checks it.
+    inline void check_tri_indices(std::span<const std::uint32_t> tri, std::size_t n, const char* who) {
+        const std::string w = who;
+        if (tri.empty())
+            throw std::invalid_argument(w + ": tri must name at least one triangle");
+        if (tri.size() % 3 != 0)
+            throw std::invalid_argument(w + ": tri must be a multiple of three -- three vertex "
+                                            "indices per triangle, row-major");
+        for (const std::uint32_t i : tri)
+            if (static_cast<std::size_t>(i) >= n)
+                throw std::invalid_argument(w + ": every index in tri must be less than the vertex count");
+    }
+
     // A circle's or wedge's centre and radius: finite, r > 0, and a Data
     // radius (measured along the axes) needs a Data centre.
     inline void check_round(const Pos& cx, const Pos& cy, const Pos& r, const char* who) {
@@ -263,6 +290,9 @@ namespace sextant::read_back {
     }
 
     inline PolyData   to_data(const PolyPlot& p)   { return { p.x.get(), p.y.get() }; }
+    inline HeatmapTriData to_data(const HeatmapTriPlot& p) {
+        return { p.x.get(), p.y.get(), p.values.get(), p.tri.get() };
+    }
     inline CircleData to_data(const CirclePlot& p) { return { p.cx, p.cy, p.r }; }
     inline WedgeData  to_data(const WedgePlot& p)  {
         return { p.cx, p.cy, p.r, p.theta1, p.theta2, p.inner };

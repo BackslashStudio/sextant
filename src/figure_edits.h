@@ -71,7 +71,7 @@ struct PlotStyleEdit {
     std::variant<LineOptions, ScatterOptions, BarOptions,
                  HeatmapOptions, ScatterZOptions, TextStyle,
                  AxLineOptions, AxSpanOptions, FillOptions, QuiverOptions,
-                 PolyOptions, CircleOptions, WedgeOptions> opts;
+                 PolyOptions, CircleOptions, WedgeOptions, HeatmapTriOptions> opts;
     ObjectId id = 0, plane_id = 0;   // see PlotCellEdit
     // The object's visible_stamp when the panel drew; filled in by
     // FigureEditBox. A set_<kind>_visible() since keeps its `visible`.
@@ -313,8 +313,8 @@ struct AxesEdit {
     StyleStamps style_seen = StyleStamps::any();
     std::optional<std::vector<Tick>> xticks_override, yticks_override;
     // An axis' scale and tick format, in its ticks group (StyleStamps::xticks).
-    // A scale is skipped on an axes holding a heatmap; one that can't place set
-    // limits drops them to automatic, as Axes::set_xscale() does.
+    // A scale that can't place set limits drops them to automatic, as
+    // Axes::set_xscale() does.
     std::optional<AxisScale>   xscale, yscale;
     std::optional<std::string> xtick_format, ytick_format;
     // Axes::set_aspect() (StyleStamps::aspect). Datalim with a ratio is skipped
@@ -695,6 +695,13 @@ std::optional<PlotDataOp> apply_plot_data_op(T& t, const PlotCellEdit& e) {
             if (auto* pp = op_target(t.polys, e))
                 return cell_undo(e, t.polys, *pp, put_cell(e.column == 0 ? pp->x : pp->y, e.element, e.value));
             return std::nullopt;
+        case PlotKind::HeatmapTri:
+            // x, y, then values; the triangles are not edited here.
+            if (auto* hp = op_target(t.heatmap_tris, e))
+                return cell_undo(e, t.heatmap_tris, *hp,
+                                 put_cell(e.column == 0 ? hp->x : e.column == 1 ? hp->y : hp->values,
+                                          e.element, e.value));
+            return std::nullopt;
         case PlotKind::Circle:
         case PlotKind::Wedge:
             // One row; see ShapeDataEdit.
@@ -939,6 +946,9 @@ std::optional<PlotDataOp> apply_plot_data_op(T& t, const PlotRowEdit& e) {
             if (auto* pp = op_target(t.polys, e))
                 return row_op(e, t.polys, *pp, pp->x, pp->y);
             return std::nullopt;
+        case PlotKind::HeatmapTri:
+            // A vertex belongs to triangles: rows are fixed.
+            return std::nullopt;
         case PlotKind::Circle:
         case PlotKind::Wedge:
             // One row; see ShapeDataEdit.
@@ -1095,6 +1105,8 @@ std::optional<PlotDataOp> apply_plot_data_op(T& t, const MatrixLineEdit& e) {
     if (!hpp) return std::nullopt;
     auto& hp = *hpp;
     if (hp.rows <= 0 || hp.cols <= 0) return std::nullopt;
+    // A heatmap_rec()'s shape is fixed by its edges.
+    if (hp.mesh()) return std::nullopt;
 
     const std::size_t rows = static_cast<std::size_t>(hp.rows);
     const std::size_t cols = static_cast<std::size_t>(hp.cols);
@@ -1361,6 +1373,7 @@ auto& styled_vector(T& t) {
     else if constexpr (std::is_same_v<O, PolyOptions>)    return t.polys;
     else if constexpr (std::is_same_v<O, CircleOptions>)  return t.circles;
     else if constexpr (std::is_same_v<O, WedgeOptions>)   return t.wedges;
+    else if constexpr (std::is_same_v<O, HeatmapTriOptions>) return t.heatmap_tris;
     else                                                  return t.scatter_z;
 }
 
@@ -1456,12 +1469,12 @@ void apply_style_edits(T& dst, const E& e, E* inv = nullptr) {
     if (have.yticks <= seen.yticks)
         ticks(dst.yticks_override, e.yticks_override, undo(&E::yticks_override));
     if constexpr (requires { dst.xscale; e.xscale; }) {
-        // A scale is refused over a heatmap, and drops set limits it can't place
+        // A scale drops set limits it can't place
         // (the inverse restores them, unless the limit lane already recorded older).
         auto scale = [&](AxisScale& d, const std::optional<AxisScale>& v, std::optional<AxisScale>* old,
                          bool& lim_auto, double lo, double hi, std::optional<bool>* old_auto,
                          std::optional<double>* old_lo, std::optional<double>* old_hi) {
-            if (!v || (!v->linear() && !dst.heatmaps.empty())) return;
+            if (!v) return;
             if (old) *old = d;
             d = *v;
             if (lim_auto || limits_fit(d, lo, hi)) return;

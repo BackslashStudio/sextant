@@ -378,11 +378,19 @@ namespace sextant {
             for (const auto& hp: all.heatmaps) {
                 if (!object_shown(hp)) continue;
                 // The heatmap's extent, unpadded; either range may be reversed.
-                b.x.tight.add(fx(hp.xrange.lo));
-                b.x.tight.add(fx(hp.xrange.hi));
-                b.y.tight.add(fy(hp.yrange.lo));
-                b.y.tight.add(fy(hp.yrange.hi));
+                // Every edge, so a Log axis that has no place for the first still
+                // reaches the lowest cell it can draw.
+                for (int c = 0; c <= hp.cols; ++c) b.x.tight.add(fx(hp.x_edge(c)));
+                for (int r = 0; r <= hp.rows; ++r) b.y.tight.add(fy(hp.y_edge(r)));
             }
+            if (all.heatmap_tris)
+                for (const auto& tp: *all.heatmap_tris) {
+                    if (!object_shown(tp)) continue;
+                    for (std::size_t i = 0; i < tp.x.size(); ++i) {
+                        b.x.tight.add(fx(tp.x[i]));
+                        b.y.tight.add(fy(tp.y[i]));
+                    }
+                }
             return b;
         }
     } // namespace bounds_detail
@@ -541,6 +549,15 @@ namespace sextant {
             b.y.tight.add(hp.yrange.lo);
             b.y.tight.add(hp.yrange.hi);
         }
+        // A heatmap_tri's vertices, unpadded too.
+        if (all.heatmap_tris)
+            for (const auto& tp: *all.heatmap_tris) {
+                if (!object_shown(tp)) continue;
+                for (std::size_t i = 0; i < tp.x.size(); ++i) {
+                    b.x.tight.add(tp.x[i]);
+                    b.y.tight.add(tp.y[i]);
+                }
+            }
         return b;
     }
 

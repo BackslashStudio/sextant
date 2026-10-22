@@ -86,7 +86,7 @@ namespace lt {
             try { other->sharex(*a); } catch (const std::invalid_argument&) { threw = true; }
             check(threw, "share: an axes of another figure is refused");
 
-            // A heatmap's even mesh takes no log scale, through the group too.
+            // A heatmap takes any scale, through the group too.
             auto fig2 = Figure::create();
             auto p = fig2->add_subplot(1, 3, 1);
             auto q = fig2->add_subplot(1, 3, 2);
@@ -94,16 +94,14 @@ namespace lt {
             const std::vector<double> cells{1.0, 2.0, 3.0, 4.0};
             r->heatmap(cells, 2, 2, {1.0, 3.0}, {1.0, 3.0});
             p->set_xscale(Scale::Log);
-            threw = false;
-            try { r->sharex(*p); } catch (const std::invalid_argument&) { threw = true; }
-            check(threw && r->xscale() == Scale::Linear, "share: a heatmap axes can't join a log group");
-            r->set_xlim(0.0, 9.0);
-            check(!same(p->xlim(), Range{0.0, 9.0}), "share: and it did not join");
-            r->sharex(*q);
-            threw = false;
-            try { q->set_xscale(Scale::Log); } catch (const std::invalid_argument&) { threw = true; }
-            check(threw && q->xscale() == Scale::Linear && r->xscale() == Scale::Linear,
-                  "share: set_xscale(Log) is refused when any member holds a heatmap");
+            r->sharex(*p);
+            check(r->xscale() == Scale::Log, "share: a heatmap axes joins a log group and takes its scale");
+            r->set_xlim(2.0, 9.0);
+            check(same(p->xlim(), Range{2.0, 9.0}), "share: and it joined");
+            q->sharex(*r);
+            q->set_xscale(Scale::Symlog);
+            check(p->xscale() == Scale::Symlog && r->xscale() == Scale::Symlog,
+                  "share: set_xscale() moves a group that holds a heatmap");
         }
 
         void test_lifetime() {
@@ -180,7 +178,7 @@ namespace lt {
                   "share edit: and on the latest scale, A B A");
             c.top->set_xscale(Scale::Linear);
 
-            // A scale edit the group can't take is dropped, on both paths.
+            // A scale edit reaches a group holding a heatmap, on both paths.
             auto fig = Figure::create();
             auto a = fig->add_subplot(1, 2, 1);
             auto h = fig->add_subplot(1, 2, 2);
@@ -195,11 +193,10 @@ namespace lt {
                 e.xscale = s;
             });
             auto s2 = fi.host_frame();
-            check(s2->axes[0].snap2d()->xscale.linear() && s2->axes[1].snap2d()->xscale.linear(),
-                  "share edit: a log scale is refused when a member holds a heatmap");
+            check(s2->axes[0].snap2d()->xscale.kind == Scale::Log && s2->axes[1].snap2d()->xscale.kind == Scale::Log,
+                  "share edit: a log scale moves a group that holds a heatmap");
             fi.apply_edits_and_publish();
-            check(a->xscale() == Scale::Linear && h->xscale() == Scale::Linear,
-                  "share edit: and the replay refuses it too");
+            check(a->xscale() == Scale::Log && h->xscale() == Scale::Log, "share edit: and the replay too");
             (void)s0;
         }
 

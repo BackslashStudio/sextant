@@ -316,6 +316,8 @@ int main() {
 
     // heatmap_rgb.cpp
     test_heatmap_rgb();
+    test_heatmap_scale();
+    test_heatmap_tri();
 
     // line_steps.cpp
     test_line_steps();

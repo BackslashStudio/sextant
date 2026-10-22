@@ -2,6 +2,7 @@
 #include "../colormaps.h"
 #include "../fill_geometry.h"
 #include "../heatmap_pixels.h"
+#include "../heatmap_tri_geometry.h"
 #include "../quiver_geometry.h"
 #include "../shape_geometry.h"
 #include "../reference_lines.h"
@@ -196,13 +197,19 @@ namespace sextant {
                 g.batches.push_back({PlaneGeometry::Batch::Kind::Heatmap, index, index + 1});
             }
 
+            // A heatmap_tri, likewise.
+            void heatmap_tri(std::size_t index) {
+                g.batches.push_back({PlaneGeometry::Batch::Kind::HeatmapTri, index, index + 1});
+            }
+
         private:
             std::size_t size_of(PlaneGeometry::Batch::Kind k) const {
                 switch (k) {
                     case PlaneGeometry::Batch::Kind::Tri: return g.tris.size();
                     case PlaneGeometry::Batch::Kind::Seg: return g.segs.size();
                     case PlaneGeometry::Batch::Kind::Marker: return g.markers.size();
-                    case PlaneGeometry::Batch::Kind::Heatmap: return 0; // never opened
+                    case PlaneGeometry::Batch::Kind::Heatmap:
+                    case PlaneGeometry::Batch::Kind::HeatmapTri: return 0; // never opened
                 }
                 return 0;
             }
@@ -308,6 +315,10 @@ namespace sextant {
             switch (r.kind) {
                 case PlotKind::Heatmap:
                     b.heatmap(r.index);
+                    break;
+
+                case PlotKind::HeatmapTri:
+                    b.heatmap_tri(r.index);
                     break;
 
                 case PlotKind::Bar: {
@@ -605,12 +616,42 @@ namespace sextant {
             }
         }
 
+        // A mesh over the cell cap as an even grid for the affine <image>: up to
+        // four samples per cell along each axis (2048 at most), each the cell
+        // under its centre.
+        HeatmapPlot resampled_mesh(const HeatmapPlot& hp) {
+            HeatmapPlot even = hp;
+            even.x_edges = std::vector<double>{};
+            even.y_edges = std::vector<double>{};
+            even.cols = std::min(2048, 4 * hp.cols);
+            even.rows = std::min(2048, 4 * hp.rows);
+            const std::size_t n = static_cast<std::size_t>(hp.channels);
+            std::vector<float> data(static_cast<std::size_t>(even.rows) * even.cols * n);
+            std::vector<std::size_t> col_of(static_cast<std::size_t>(even.cols));
+            for (int i = 0; i < even.cols; ++i)
+                col_of[static_cast<std::size_t>(i)] = static_cast<std::size_t>(std::clamp(
+                    static_cast<int>(hp.col_at(even.x_at(i + 0.5))), 0, hp.cols - 1));
+            for (int j = 0; j < even.rows; ++j) {
+                const auto r = static_cast<std::size_t>(std::clamp(
+                    static_cast<int>(hp.row_at(even.y_at(j + 0.5))), 0, hp.rows - 1));
+                for (int i = 0; i < even.cols; ++i) {
+                    const std::size_t src = (r * static_cast<std::size_t>(hp.cols) + col_of[static_cast<std::size_t>(i)]) * n;
+                    const std::size_t dst = (static_cast<std::size_t>(j) * even.cols + static_cast<std::size_t>(i)) * n;
+                    for (std::size_t k = 0; k < n; ++k) data[dst + k] = hp.data[src + k];
+                }
+            }
+            even.data = std::move(data);
+            return even;
+        }
+
         // One heatmap as an item: an affine <image> under orthographic, cell
-        // polygons under perspective (up to kPlane3DCellCap).
+        // polygons under perspective (up to kPlane3DCellCap). A mesh is cell
+        // polygons in both projections; over the cap, an even resampling as an
+        // <image>.
+        // `hi` is the object's index in its kind, for the item's provenance.
         void append_heatmap_item(std::vector<PlanePlanItem>& out, const PlaneSnapshot& pl,
-                                 std::size_t pi, std::size_t hi, float depth,
+                                 std::size_t pi, const HeatmapPlot& hp, std::size_t hi, float depth,
                                  const Projector3D& proj) {
-            const HeatmapPlot& hp = pl.sheet.heatmaps[hi];
             if (hp.rows <= 0 || hp.cols <= 0) return;
 
             PlanePlanItem item;
@@ -622,7 +663,17 @@ namespace sextant {
             const std::size_t cells = static_cast<std::size_t>(hp.rows) * hp.cols;
             const PlaneQuad q = plane_heatmap_quad(hp, pl.orient, pl.offset);
 
-            if (!proj.is_perspective()) {
+            if (hp.mesh()) {
+                if (cells <= kPlane3DCellCap) {
+                    fill_cell_form(item, hp, pl.orient, pl.offset, proj);
+                } else {
+                    fill_image_form(item, resampled_mesh(hp), q, proj);
+                    item.warning = "plane " + std::to_string(pi) + ": " +
+                                   std::to_string(cells) + " cells of a heatmap_rec() exceed the " +
+                                   std::to_string(kPlane3DCellCap) +
+                                   "-cell cap for cell polygons; resampled to an even <image>";
+                }
+            } else if (!proj.is_perspective()) {
                 fill_image_form(item, hp, q, proj);
             } else if (cells <= kPlane3DCellCap) {
                 fill_cell_form(item, hp, pl.orient, pl.offset, proj);
@@ -675,7 +726,18 @@ namespace sextant {
 
             for (const auto& batch: g.batches) {
                 if (batch.kind == PlaneGeometry::Batch::Kind::Heatmap) {
-                    append_heatmap_item(out, pl, pi, batch.begin, depth, proj);
+                    if (batch.begin < pl.sheet.heatmaps.size())
+                        append_heatmap_item(out, pl, pi, pl.sheet.heatmaps[batch.begin], batch.begin, depth, proj);
+                    continue;
+                }
+                if (batch.kind == PlaneGeometry::Batch::Kind::HeatmapTri) {
+                    // Resampled to an even grid: cell polygons under perspective (128 x 128
+                    // stays under kPlane3DCellCap), the affine image under orthographic.
+                    if (batch.begin < pl.sheet.heatmap_tris.size())
+                        append_heatmap_item(out, pl, pi,
+                                            heatmap_tri_grid(pl.sheet.heatmap_tris[batch.begin],
+                                                             proj.is_perspective() ? 128 : 512),
+                                            batch.begin, depth, proj);
                     continue;
                 }
                 PlanePlanItem item;
@@ -717,7 +779,8 @@ namespace sextant {
                         }
                         break;
 
-                    case PlaneGeometry::Batch::Kind::Heatmap: break; // handled above
+                    case PlaneGeometry::Batch::Kind::Heatmap:
+                    case PlaneGeometry::Batch::Kind::HeatmapTri: break; // handled above
                     case PlaneGeometry::Batch::Kind::Marker:
                         item.form = PlanePlanItem::Form::Markers;
                         for (std::size_t i = batch.begin; i < batch.end && i < g.markers.size(); ++i) {

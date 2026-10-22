@@ -2707,9 +2707,152 @@ static void part_images() {
     fig->show(true);
 }
 
+// Heatmaps on log and symlog axes, and heatmap_rec (pcolormesh): cells of any
+// size, log-spaced edges even on a log axis.
+static void part_heatmap_scales() {
+    constexpr int R = 24, C = 36;
+    std::vector<double> field(R * C);
+    for (int r = 0; r < R; ++r)
+        for (int c = 0; c < C; ++c) {
+            const double u = c / (C - 1.0), v = r / (R - 1.0);
+            field[r * C + c] = std::sin(6.0 * u) * std::cos(4.0 * v);
+        }
+    // Log-spaced x edges 1..1e4, uneven linear y edges.
+    std::vector<double> xe(C + 1), ye(R + 1);
+    for (int c = 0; c <= C; ++c) xe[c] = std::pow(10.0, 4.0 * c / C);
+    for (int r = 0; r <= R; ++r) ye[r] = std::pow(r / static_cast<double>(R), 2.0) * 10.0;
+    // A coarse mesh with very uneven cells, for hover.
+    const std::vector<double> small{0, 1, 2, 3, 4, 5}, sxe{0, 1, 1.5, 4}, sye{0, 3, 3.5};
+
+    auto fig = sextant::Figure::create({.width = 1500, .height = 900, .title = "Heatmap scales"});
+    fig->suptitle("heatmap on log / symlog axes; heatmap_rec (cells of any size)");
+
+    {
+        auto ax = fig->add_subplot(2, 3, 1);
+        ax->set_xscale(sextant::Scale::Log);
+        ax->heatmap(field, R, C, {1.0, 1e4}, {0.0, 10.0}, {.cmap = sextant::Colormap::RdBu, .vmin = -1.0f});
+        ax->set_title("heatmap, x 1..1e4 even in data, on a log x");
+    }
+    {
+        auto ax = fig->add_subplot(2, 3, 2);
+        ax->set_xscale(sextant::Scale::Log);
+        ax->heatmap_rec(field, R, C, xe, ye, {.cmap = sextant::Colormap::RdBu, .vmin = -1.0f, .colorbar = true});
+        ax->set_title("heatmap_rec, log-spaced x edges on a log x");
+    }
+    {
+        auto ax = fig->add_subplot(2, 3, 3);
+        ax->set_xscale(sextant::Scale::Symlog).set_yscale(sextant::Scale::Symlog);
+        ax->heatmap(field, R, C, {-1000.0, 1000.0}, {-100.0, 100.0}, {.cmap = sextant::Colormap::Viridis, .vmin = -1.0f});
+        ax->set_title("heatmap on symlog x and y");
+    }
+    {
+        auto ax = fig->add_subplot(2, 3, 4);
+        ax->set_xscale(sextant::Scale::Log);
+        ax->heatmap(field, R, C, {-2.0, 10.0}, {0.0, 1.0});
+        ax->set_xlim(0.1, 10.0);
+        ax->set_title("log x over a heatmap from -2: cells <= 0 not drawn");
+    }
+    fig->add_subplot(2, 3, 5)
+            ->heatmap_rec(small, 2, 3, sxe, sye,
+                          {.cmap = sextant::Colormap::Magma, .vmax = 5.0f, .colorbar = true,
+                           .hint_labels = {"a", "b", "c", "d", "e", "f"}})
+            .set_title("heatmap_rec: uneven cells; hover row/col and label");
+    {
+        auto ax = fig->add_subplot3d(2, 3, 6);
+        ax->set_title("a heatmap_rec on a plane").set_view(-50.0, 25.0);
+        std::vector<double> pe(C + 1);
+        for (int c = 0; c <= C; ++c) pe[c] = -3.0 + 6.0 * std::pow(c / static_cast<double>(C), 2.0);
+        std::vector<double> qe(R + 1);
+        for (int r = 0; r <= R; ++r) qe[r] = -2.0 + 4.0 * r / static_cast<double>(R);
+        ax->plane(sextant::PlaneOrientation::XY, 0.0)->heatmap_rec(field, R, C, pe, qe, {.vmin = -1.0f});
+    }
+
+    savefig_and_check_memory(fig, "part_heatmap_scales");
+    fig->show(true);
+}
+
+// heatmap_tri: values per vertex over triangles (matplotlib's tripcolor with
+// shading="gouraud"), Delaunay or explicit, on linear and log axes and a plane.
+static void part_heatmap_tri() {
+    // Scattered points over [-3, 3] x [-2, 2], a bump-and-dip field.
+    std::vector<double> sx, sy, sv;
+    unsigned s = 12345;
+    auto rnd = [&s] { s = s * 1103515245u + 12345u; return ((s >> 8) & 0xFFFF) / 65535.0; };
+    for (int i = 0; i < 300; ++i) {
+        const double x = -3.0 + 6.0 * rnd(), y = -2.0 + 4.0 * rnd();
+        sx.push_back(x);
+        sy.push_back(y);
+        sv.push_back(std::exp(-((x - 1) * (x - 1) + y * y)) - std::exp(-((x + 1) * (x + 1) + y * y)));
+    }
+    // An annulus with explicit triangles (its hole is not filled, as Delaunay would).
+    constexpr int NA = 48;
+    std::vector<double> ax, ay, av;
+    std::vector<std::uint32_t> at;
+    for (int k = 0; k < NA; ++k) {
+        const double a = 2.0 * 3.14159265358979 * k / NA;
+        for (double r : {1.0, 2.0}) {
+            ax.push_back(r * std::cos(a));
+            ay.push_back(r * std::sin(a));
+            av.push_back(std::sin(3.0 * a) * (r - 0.5));
+        }
+    }
+    for (int k = 0; k < NA; ++k) {
+        const std::uint32_t i0 = 2 * k, o0 = 2 * k + 1, i1 = 2 * ((k + 1) % NA), o1 = i1 + 1;
+        at.insert(at.end(), {i0, o0, o1, i0, o1, i1});
+    }
+    // Log-spaced x for a log axis; NaN holes.
+    std::vector<double> lx, ly, lv;
+    for (int i = 0; i < 200; ++i) {
+        const double u = rnd(), v = rnd();
+        lx.push_back(std::pow(10.0, 3.0 * u));
+        ly.push_back(v);
+        lv.push_back(std::sin(6.0 * u) * v);
+    }
+    std::vector<double> holed = sv;
+    for (std::size_t i = 0; i < holed.size(); ++i)
+        if (sx[i] * sx[i] + sy[i] * sy[i] < 0.6) holed[i] = std::nan("");
+    const std::vector<double> qx{0, 1, 2, 0.5, 1.5}, qy{0, 0, 0, 1, 1}, qv{0, 1, 2, 3, 4};
+
+    auto fig = sextant::Figure::create({.width = 1500, .height = 900, .title = "heatmap_tri"});
+    fig->suptitle("heatmap_tri: values per vertex, interpolated per pixel through the colormap");
+
+    fig->add_subplot(2, 3, 1)
+            ->heatmap_tri(sx, sy, sv, {.cmap = sextant::Colormap::RdBu, .vmin = -1.0f, .colorbar = true,
+                                       .name = "field"})
+            .set_title("Delaunay over 300 scattered points");
+    fig->add_subplot(2, 3, 2)
+            ->heatmap_tri(ax, ay, av, at, {.cmap = sextant::Colormap::Twilight, .vmin = -1.5f, .vmax = 1.5f})
+            .set_aspect(1.0)
+            .set_title("explicit triangles: an annulus (cyclic map)");
+    {
+        auto a = fig->add_subplot(2, 3, 3);
+        a->set_xscale(sextant::Scale::Log);
+        a->heatmap_tri(lx, ly, lv, {.vmin = -1.0f});
+        a->set_title("log x: straight edges, linear on screen");
+    }
+    fig->add_subplot(2, 3, 4)
+            ->heatmap_tri(sx, sy, holed, {.cmap = sextant::Colormap::RdBu, .vmin = -1.0f})
+            .set_title("NaN values leave their triangles out");
+    fig->add_subplot(2, 3, 5)
+            ->heatmap_tri(qx, qy, qv, {.cmap = sextant::Colormap::Magma, .vmax = 4.0f, .colorbar = true,
+                                       .hint_labels = {"v0", "v1", "v2", "v3", "v4"}})
+            .set_title("hover: value and the nearest vertex's label");
+    {
+        auto a3 = fig->add_subplot3d(2, 3, 6);
+        a3->set_title("heatmap_tri on a plane").set_view(-50.0, 25.0);
+        a3->plane(sextant::PlaneOrientation::XY, 0.0)
+                ->heatmap_tri(sx, sy, sv, {.cmap = sextant::Colormap::RdBu, .vmin = -1.0f});
+    }
+
+    savefig_and_check_memory(fig, "part_heatmap_tri");
+    fig->show(true);
+}
+
 static void test_heatmap() {
     part_heatmaps();
     part_images();
+    part_heatmap_scales();
+    part_heatmap_tri();
 }
 
 // Text and annotations in 2D and 3D: anchors, rotation, boxes, coordinates in

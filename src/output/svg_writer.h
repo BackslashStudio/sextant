@@ -36,6 +36,7 @@ namespace sextant {
         std::vector<PolyPlot> polys;
         std::vector<CirclePlot> circles;
         std::vector<WedgePlot> wedges;
+        std::vector<HeatmapTriPlot> heatmap_tris;
         // Font sizes come from axes_style.
         std::string title, xtitle, ytitle;
         bool grid_enabled = false;

@@ -218,6 +218,24 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot& snap) 
         out.push_back(std::move(t));
     }
 
+    // heatmap_tri: one row per vertex, the triangles read only beside them. As a
+    // heatmap, its name labels the colorbar, so the tab is always synthesized.
+    for (std::size_t i = 0; i < snap.heatmap_tris.size(); ++i) {
+        const auto& hp = snap.heatmap_tris[i];
+        PlotDataTable t;
+        t.kind = PlotKind::HeatmapTri;
+        t.plot_index = static_cast<int>(i);
+        t.data_stamp = hp.data_stamp;
+        t.id = hp.id;
+        t.label = synth_label("heatmap_tri", static_cast<int>(i));
+        t.columns.push_back({"x", hp.x.data(), hp.x.size()});
+        t.columns.push_back({"y", hp.y.data(), hp.y.size()});
+        t.columns.push_back({"value", hp.values.data(), hp.values.size()});
+        t.heatmap_tri = &hp;
+        t.rows_fixed = true;
+        out.push_back(std::move(t));
+    }
+
     push_text_tables(out, snap.texts);
     return out;
 }

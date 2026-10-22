@@ -269,6 +269,9 @@ private:
     // Upload `hp`'s colormapped pixels unless cached; leaves the texture bound
     // on unit 0. Shared by 2D and plane quads.
     void ensure_heatmap_texture(HeatCache& hc, const HeatmapPlot& hp);
+    // draw_heatmap() for a mesh or a non-linear axis.
+    void draw_heatmap_grid(const HeatmapPlot& hp, const CoordTransform& tr);
+    void draw_heatmap_tri(const HeatmapTriPlot& p, const CoordTransform& tr, const PlotRect& pr);
 
     // Scatter/scatter_z instances in data space minus `anchor` (transform is a
     // uniform, so pan/zoom reuses them). `data_space == false` is the deep-zoom
@@ -645,6 +648,8 @@ private:
     MarkerUniforms scatter_u_{};
     MarkerUniforms scatterz_u_{};   // .color unused: colour is per-instance
     HeatUniforms   heatmap_u_{};
+    struct HeatTriUniforms { int resolution = -1, cmap = -1, cyclic = -1; };
+    HeatTriUniforms heattri_u_{};
 
     // Shared line/bar program: aPos(vec2) -> uColor(vec4), for bar fills and
     // outlines.
@@ -681,6 +686,20 @@ private:
     unsigned int heatmap_program_ = 0;
     unsigned int heatmap_vao_     = 0;
     unsigned int heatmap_vbo_     = 0;
+    // The grid path (draw_heatmap()): indices for a rows x cols grid, kept
+    // while the shape repeats, and the vertex scratch.
+    unsigned int heatmap_ebo_     = 0;
+    int heatmap_ebo_rows_ = 0, heatmap_ebo_cols_ = 0;
+    std::vector<float> heatmap_grid_;
+
+    // heatmap_tri program: (px, py, t) triangles, the colormap per fragment from
+    // a 256x1 texture re-uploaded only when the map changes.
+    unsigned int heattri_program_ = 0;
+    unsigned int heattri_vao_     = 0;
+    unsigned int heattri_vbo_     = 0;
+    unsigned int heattri_cmap_tex_ = 0;
+    std::optional<Colormap> heattri_cmap_in_tex_;
+    std::vector<float> heattri_verts_;
 };
 
 } // namespace sextant

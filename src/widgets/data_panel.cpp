@@ -239,13 +239,18 @@ namespace sextant {
                 else ImGui::TextDisabled("| nothing finite to shade");
             }
             // Always shown: storage is row 0 first regardless of origin.
-            ImGui::TextDisabled("%s", hp.opts.origin == "upper"
+            ImGui::TextDisabled("%s", hp.mesh() ? "Row 0 is first in storage and at the first y edge."
+                                      : hp.opts.origin == "upper"
                                           ? "Row 0 is first in storage; origin=\"upper\" draws it at the top."
                                           : "Row 0 is first in storage; origin=\"lower\" draws it at the bottom.");
             // Name the extent, since cell coordinates aren't visible in the grid.
-            ImGui::TextDisabled("Extent: x %g .. %g, y %g .. %g (cell %g x %g)",
-                                hp.xrange.lo, hp.xrange.hi, hp.yrange.lo, hp.yrange.hi,
-                                hp.cell_w(), hp.cell_h());
+            if (hp.mesh())
+                ImGui::TextDisabled("Extent: x %g .. %g, y %g .. %g (cells of any size, from edges)",
+                                    hp.xrange.lo, hp.xrange.hi, hp.yrange.lo, hp.yrange.hi);
+            else
+                ImGui::TextDisabled("Extent: x %g .. %g, y %g .. %g (cell %g x %g)",
+                                    hp.xrange.lo, hp.xrange.hi, hp.yrange.lo, hp.yrange.hi,
+                                    hp.cell_w(), hp.cell_h());
 
             int first = 0;
             if (hp.cols > kMaxGridCols) {
@@ -274,10 +279,13 @@ namespace sextant {
             }
             ImGui::TableHeadersRow();
 
+            // A heatmap_rec()'s shape is fixed by its edges: no insert or remove.
+            const bool fixed = hp.mesh();
             // Column controls, before the clipper (a frozen row); "colctl" keeps ids
             // distinct.
             ImGui::TableNextRow();
             ImGui::PushID("colctl");
+            ImGui::BeginDisabled(fixed);
             for (int c = 0; c < shown; ++c) {
                 if (!ImGui::TableSetColumnIndex(c + kGutterCols)) continue;
                 const int abs_c = first + c;
@@ -298,12 +306,14 @@ namespace sextant {
                 ImGui::EndDisabled();
                 // AllowWhenDisabled, so the disabled button's tooltip still shows.
                 if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-                    if (hp.cols <= 1) ImGui::SetTooltip("A matrix cannot lose its last column");
+                    if (fixed) ImGui::SetTooltip("A heatmap_rec()'s columns are fixed by its edges");
+                    else if (hp.cols <= 1) ImGui::SetTooltip("A matrix cannot lose its last column");
                     else ImGui::SetTooltip("Remove column %d", abs_c);
                 }
                 ImGui::PopID();
             }
             ImGui::PopID();
+            ImGui::EndDisabled();
 
             ImGuiListClipper clipper;
             clipper.Begin(hp.rows);
@@ -316,6 +326,7 @@ namespace sextant {
                     if (ImGui::TableSetColumnIndex(1)) {
                         ImGui::PushID("rowctl");
                         ImGui::PushID(r);
+                        ImGui::BeginDisabled(fixed);
                         if (ImGui::SmallButton("+"))
                             line_edit = MatrixLineEdit{
                                 MatrixLineEdit::Op::Insert, MatrixLineEdit::Axis::Row,
@@ -331,9 +342,11 @@ namespace sextant {
                             };
                         ImGui::EndDisabled();
                         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-                            if (hp.rows <= 1) ImGui::SetTooltip("A matrix cannot lose its last row");
+                            if (fixed) ImGui::SetTooltip("A heatmap_rec()'s rows are fixed by its edges");
+                            else if (hp.rows <= 1) ImGui::SetTooltip("A matrix cannot lose its last row");
                             else ImGui::SetTooltip("Remove row %d", r);
                         }
+                        ImGui::EndDisabled();
                         ImGui::PopID();
                         ImGui::PopID();
                     }
@@ -364,6 +377,7 @@ namespace sextant {
             ImGui::EndTable();
 
             // Append an edge line below the table (no in-table anchor).
+            ImGui::BeginDisabled(fixed);
             if (ImGui::SmallButton("+ row"))
                 line_edit = MatrixLineEdit{
                     MatrixLineEdit::Op::Insert, MatrixLineEdit::Axis::Row,
@@ -376,9 +390,11 @@ namespace sextant {
                     t.plot_index, static_cast<std::size_t>(hp.cols)
                 };
             ImGui::SameLine();
-            ImGui::TextDisabled("new lines copy the previous one");
+            ImGui::EndDisabled();
+            ImGui::SameLine();
+            ImGui::TextDisabled("%s", fixed ? "a heatmap_rec() keeps its shape" : "new lines copy the previous one");
 
-            if (line_edit) push_op(*line_edit);
+            if (line_edit && !fixed) push_op(*line_edit);
         }
 
         // A grid with coordinates: a |u| x |v| matrix of heights (or bar bases) with
@@ -1196,9 +1212,26 @@ namespace sextant {
             }
         }
 
-        // An image (`colormapped` false) has its own colours: only its origin edits.
+        // A heatmap_tri: the colour side of a heatmap, nothing else.
         template<class Push>
-        void heatmap_style(DataPanelState& st, HeatmapOptions& o, bool colormapped, Push&& push) {
+        void heatmap_tri_style(DataPanelState& st, HeatmapTriOptions& o, Push&& push) {
+            name_and_key(st, o, push);
+            if (ImGui::Checkbox("Colorbar##plotcb", &o.colorbar)) push();
+            if (begin_field_table("heatmap_tri")) {
+                field_row("Colormap");
+                if (colormap_combo("##tcmap", o.cmap)) push();
+                field_row("vmin");
+                if (drag_float("##tvmin", &o.vmin, -FLT_MAX, FLT_MAX, 0.01f, "%.4g")) push();
+                field_row("vmax");
+                if (drag_float("##tvmax", &o.vmax, -FLT_MAX, FLT_MAX, 0.01f, "%.4g")) push();
+                end_field_table();
+            }
+        }
+
+        // An image (`colormapped` false) has its own colours: only its origin edits.
+        // A heatmap_rec() (`mesh`) has no origin and no contours.
+        template<class Push>
+        void heatmap_style(DataPanelState& st, HeatmapOptions& o, bool colormapped, bool mesh, Push&& push) {
             if (!colormapped) {
                 if (begin_field_table("image")) {
                     heatmap_origin_row(o, push);
@@ -1215,9 +1248,10 @@ namespace sextant {
                 if (drag_float("##hvmin", &o.vmin, -FLT_MAX, FLT_MAX, 0.01f, "%.4g")) push();
                 field_row("vmax");
                 if (drag_float("##hvmax", &o.vmax, -FLT_MAX, FLT_MAX, 0.01f, "%.4g")) push();
-                heatmap_origin_row(o, push);
+                if (!mesh) heatmap_origin_row(o, push);
                 end_field_table();
             }
+            if (mesh) return;
             ImGui::SeparatorText("Contours");
             ImGui::TextDisabled("Levels are in data units, not the vmin/vmax scale.");
             contour_levels(o.contours, o.vmin, o.vmax, push);
@@ -1272,6 +1306,7 @@ namespace sextant {
                 case PlotKind::Poly:     if (!both(ss->polys, sheet.polys)) return; break;
                 case PlotKind::Circle:   if (!both(ss->circles, sheet.circles)) return; break;
                 case PlotKind::Wedge:    if (!both(ss->wedges, sheet.wedges)) return; break;
+                case PlotKind::HeatmapTri: if (!both(ss->heatmap_tris, sheet.heatmap_tris)) return; break;
                 default: return; // the 3D kinds have blocks of their own
             }
             if (!section("Appearance", true)) return;
@@ -1295,7 +1330,7 @@ namespace sextant {
                     bar_style(st, ss->bars[i], sheet.bars[i], pi, sink, push_of(ss->bars[i]));
                     break;
                 case PlotKind::Heatmap:
-                    heatmap_style(st, ss->heatmaps[i], sheet.heatmaps[i].colormapped(), push_of(ss->heatmaps[i]));
+                    heatmap_style(st, ss->heatmaps[i], sheet.heatmaps[i].colormapped(), sheet.heatmaps[i].mesh(), push_of(ss->heatmaps[i]));
                     break;
                 case PlotKind::ScatterZ:
                     scatter_z_style(st, ss->scatter_z[i], sheet.scatter_z[i], push_of(ss->scatter_z[i]));
@@ -1320,6 +1355,9 @@ namespace sextant {
                     break;
                 case PlotKind::Wedge:
                     patch_style(st, ss->wedges[i], "wedge", push_of(ss->wedges[i]));
+                    break;
+                case PlotKind::HeatmapTri:
+                    heatmap_tri_style(st, ss->heatmap_tris[i], push_of(ss->heatmap_tris[i]));
                     break;
                 default: break;
             }
@@ -1638,11 +1676,11 @@ namespace sextant {
         }
 
         // A mesh's topology, read only (editing it would re-mesh). Shown so the face
-        // count can be checked.
-        void draw_mesh_topology(const PlotDataTable& t) {
-            const SurfaceTriPlot& m = *t.mesh;
+        // count can be checked. `face(f, a, b, c)` names face f's vertices.
+        template <class Face>
+        void draw_topology(std::size_t faces, std::size_t verts, Face face) {
             if (!section("Topology", false)) return;
-            ImGui::Text("%zu faces over %zu vertices", m.face_count(), m.count());
+            ImGui::Text("%zu faces over %zu vertices", faces, verts);
             ImGui::TextDisabled("Read only: an index names a vertex, so editing one "
                 "re-meshes rather than moves anything.");
             constexpr ImGuiTableFlags kFlags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg
@@ -1656,11 +1694,11 @@ namespace sextant {
             ImGui::TableSetupColumn("c", ImGuiTableColumnFlags_WidthFixed, 56.0f);
             ImGui::TableHeadersRow();
             ImGuiListClipper clipper;
-            clipper.Begin(static_cast<int>(m.face_count()));
+            clipper.Begin(static_cast<int>(faces));
             while (clipper.Step()) {
                 for (int f = clipper.DisplayStart; f < clipper.DisplayEnd; ++f) {
                     std::size_t a = 0, b = 0, c = 0;
-                    m.face_verts(static_cast<std::size_t>(f), a, b, c);
+                    face(static_cast<std::size_t>(f), a, b, c);
                     ImGui::TableNextRow();
                     if (ImGui::TableSetColumnIndex(0)) ImGui::Text("%d", f);
                     if (ImGui::TableSetColumnIndex(1)) ImGui::Text("%zu", a);
@@ -1670,6 +1708,23 @@ namespace sextant {
             }
             ImGui::EndTable();
             ImGui::Separator();
+        }
+
+        // A surface_tri's or a heatmap_tri's.
+        void draw_mesh_topology(const PlotDataTable& t) {
+            if (t.mesh) {
+                const SurfaceTriPlot& m = *t.mesh;
+                draw_topology(m.face_count(), m.count(), [&m](std::size_t f, std::size_t& a, std::size_t& b,
+                                                               std::size_t& c) { m.face_verts(f, a, b, c); });
+            } else if (t.heatmap_tri) {
+                const HeatmapTriPlot& p = *t.heatmap_tri;
+                draw_topology(p.tri.size() / 3, p.x.size(), [&p](std::size_t f, std::size_t& a, std::size_t& b,
+                                                                   std::size_t& c) {
+                    a = p.tri[3 * f];
+                    b = p.tri[3 * f + 1];
+                    c = p.tri[3 * f + 2];
+                });
+            }
         }
 
         // ---- Texts ---------------------------------------------------------------
@@ -2235,7 +2290,7 @@ namespace sextant {
                         continue;
                     }
                     fmt = draw_table_format(st, fmt_buf, sizeof fmt_buf);
-                    if (t.mesh) draw_mesh_topology(t);
+                    if (t.mesh || t.heatmap_tri) draw_mesh_topology(t);
                     if (t.is_grid())
                         draw_grid_table(t, fmt, idx, fsnap.data_generation, sink, st);
                     else if (t.heatmap)
