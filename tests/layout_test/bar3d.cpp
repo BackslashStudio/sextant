@@ -472,12 +472,10 @@ namespace lt {
                                      : "bar3d alpha: and every face carries it into the output");
 
             // Translucent bars draw all twelve edges as their own strokes (once
-            // each); `edge_alpha` is independent of the face alpha (the two are
-            // set differently here).
+            // each), at edgecolor.a times the bars' `alpha`.
             Bar3DPlot outlined = glassy;
             outlined.opts.edges = true;
             outlined.opts.edgecolor = {0.0f, 0.0f, 0.0f, 0.8f};
-            outlined.opts.edge_alpha = 0.5f;
             outlined.opts.edge_linewidth = 1.5f;
             const std::vector<Bar3DPolygon> caged = plan_bars3d(proj, {outlined});
             std::size_t faces_n = 0, lines_n = 0;
@@ -485,7 +483,7 @@ namespace lt {
             for (const Bar3DPolygon& p: caged) {
                 (p.filled ? faces_n : lines_n)++;
                 if (p.filled && p.stroke_width != 0.0f) faces_unstroked = false;
-                if (!p.filled && std::fabs(p.stroke.a - 0.8f * 0.5f) > 1e-6f)
+                if (!p.filled && std::fabs(p.stroke.a - 0.8f * 0.45f) > 1e-6f)
                     edge_alpha_ok = false;
             }
             check(faces_n == clear_.size() && lines_n == clear_.size() / 6 * 12,
@@ -498,10 +496,10 @@ namespace lt {
                       : "bar3d alpha: with the faces themselves left unstroked, so no edge is drawn twice");
             check(edge_alpha_ok,
                   mode
-                      ? "bar3d alpha: and the outline takes edgecolor.a * edge_alpha (perspective)"
-                      : "bar3d alpha: and the outline takes edgecolor.a * edge_alpha, not the face's alpha");
+                      ? "bar3d alpha: and the outline takes edgecolor.a * alpha (perspective)"
+                      : "bar3d alpha: and the outline takes edgecolor.a * alpha");
 
-            // By default the outline stays solid over translucent faces.
+            // By default the outline fades with the faces.
             Bar3DPlot default_edge = glassy;
             default_edge.opts.edges = true;
             default_edge.opts.edge_linewidth = 1.5f;
@@ -509,12 +507,12 @@ namespace lt {
             for (const Bar3DPolygon& p: plan_bars3d(proj, {default_edge}))
                 if (!p.filled) {
                     any_line = true;
-                    solid_outline = p.stroke.a == 1.0f;
+                    solid_outline = std::fabs(p.stroke.a - 0.45f) <= 1e-6f;
                 }
             check(any_line && solid_outline,
                   mode
-                      ? "bar3d alpha: and by default it stays fully opaque over the glass (perspective)"
-                      : "bar3d alpha: and by default it stays fully opaque over the glass");
+                      ? "bar3d alpha: and by default it fades with the glass (perspective)"
+                      : "bar3d alpha: and by default it fades with the glass, at the bars' alpha");
 
             // Opaque bars keep the stroke on their faces.
             Bar3DPlot solid = b;

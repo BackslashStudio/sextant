@@ -52,10 +52,10 @@ namespace sextant {
                      F(color) F(linewidth) F(linestyle) F(name) F(show_legend) F(visible) F(zorder) F(alpha) F(loop) F(drawstyle)
                      F(errorbar) F(hint_labels))
     SEXTANT_DESCRIBE(ScatterOptions,
-                     F(color) F(size) F(sizes) F(marker) F(name) F(show_legend) F(visible) F(zorder) F(alpha)
-                     F(edgecolor) F(edge_alpha) F(edge_linewidth) F(errorbar) F(hint_labels))
+                     F(color) F(size) F(sizes) F(marker) F(name) F(show_legend) F(visible) F(zorder) F(alpha) F(filled)
+                     F(edgecolor) F(edge_linewidth) F(errorbar) F(hint_labels))
     SEXTANT_DESCRIBE(ScatterZOptions,
-                     F(cmap) F(size) F(sizes) F(marker) F(alpha) F(edgecolor) F(edge_alpha)
+                     F(cmap) F(size) F(sizes) F(marker) F(alpha) F(filled) F(edgecolor)
                      F(edge_linewidth)
                      F(vmin) F(vmax) F(colorbar) F(name)
                      F(show_legend) F(visible) F(zorder) F(errorbar) F(hint_labels))
@@ -138,21 +138,20 @@ namespace sextant {
     SEXTANT_DESCRIBE(Plane2DOptions, F(alpha) F(visible))
     SEXTANT_DESCRIBE(Bar3DOptions,
                      F(color) F(alpha) F(width) F(depth) F(bottom) F(shading) F(edges)
-                     F(edgecolor) F(edge_alpha) F(edge_linewidth) F(name) F(show_legend) F(visible)
+                     F(edgecolor) F(edge_linewidth) F(name) F(show_legend) F(visible)
                      F(hint_labels))
     SEXTANT_DESCRIBE(SurfaceOptions,
                      F(color) F(colormap) F(cmap) F(vmin) F(vmax) F(colorbar) F(name)
-                     F(show_legend) F(visible) F(alpha) F(shading) F(edges) F(edgecolor) F(edge_alpha)
+                     F(show_legend) F(visible) F(alpha) F(shading) F(edges) F(edgecolor)
                      F(edge_linewidth) F(hint_labels))
     SEXTANT_DESCRIBE(SurfaceTriOptions,
                      F(color) F(cmap) F(vmin) F(vmax) F(colorbar) F(name) F(show_legend) F(visible) F(alpha)
-                     F(shading) F(edges) F(edgecolor) F(edge_alpha) F(edge_linewidth)
+                     F(shading) F(edges) F(edgecolor) F(edge_linewidth)
                      F(hint_labels))
     SEXTANT_DESCRIBE(ErrorBar3DOptions,
-                     F(color) F(linewidth) F(capsize) F(capstyle) F(boxwidth) F(box_alpha)
-                     F(edge_alpha))
+                     F(color) F(linewidth) F(capsize) F(capstyle) F(boxwidth) F(box_alpha))
     SEXTANT_DESCRIBE(Scatter3DOptions,
-                     F(color) F(size) F(sizes) F(marker) F(alpha) F(edgecolor) F(edge_alpha)
+                     F(color) F(size) F(sizes) F(marker) F(alpha) F(filled) F(edgecolor)
                      F(edge_linewidth)
                      F(depthshade) F(cmap) F(vmin) F(vmax)
                      F(colorbar) F(name) F(show_legend) F(visible) F(errorbar) F(hint_labels))

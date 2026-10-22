@@ -35,11 +35,16 @@ struct ErrorBar3DPiece {
 inline Color errorbar3d_color(const ErrorBar3DOptions& style, Color fallback) {
     return style.color.value_or(fallback);
 }
+// Faded by the series' `alpha`.
 inline Color errorbar3d_color(const Scatter3DPlot& s) {
-    return errorbar3d_color(s.opts.errorbar, s.colormapped() ? Color::Black : *s.opts.color);
+    Color c = errorbar3d_color(s.opts.errorbar, s.colormapped() ? Color::Black : *s.opts.color);
+    c.a *= std::clamp(s.opts.alpha, 0.0f, 1.0f);
+    return c;
 }
 inline Color errorbar3d_color(const Line3DPlot& l) {
-    return errorbar3d_color(l.opts.errorbar, l.colormapped() ? Color::Black : *l.opts.color);
+    Color c = errorbar3d_color(l.opts.errorbar, l.colormapped() ? Color::Black : *l.opts.color);
+    c.a *= std::clamp(l.opts.alpha, 0.0f, 1.0f);
+    return c;
 }
 
 // True when a series draws any error bar; `linewidth <= 0` draws none.
@@ -54,7 +59,7 @@ inline bool errorbar3d_translucent(const ErrorBar3DData& err, const ErrorBar3DOp
     if (c.a < 1.0f) return true;
     if (!err.any_box()) return false;
     const auto part = [](float a) { return a > 0.0f && a < 1.0f; };
-    return part(c.a * style.box_alpha) || part(c.a * style.edge_alpha);
+    return part(c.a * style.box_alpha);
 }
 inline bool errorbar3d_translucent(const Scatter3DPlot& s) {
     return errorbar3d_translucent(s.err, s.opts.errorbar, errorbar3d_color(s));

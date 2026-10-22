@@ -92,11 +92,10 @@ namespace lt {
         std::printf("\n[3D error bars: the ErrorBar3D parameter and its style]\n");
 
         check(!std::is_same_v<ErrorBar3DOptions, ErrorBarOptions>,
-              "api: ErrorBar3DOptions is its own struct again -- a block's edges need an "
-              "opacity 2D has no use for");
+              "api: ErrorBar3DOptions is its own struct");
         const ErrorBar3DOptions st;
-        check(st.box_alpha == 0.25f && st.edge_alpha == 0.5f,
-              "api: a block is translucent by default -- faces at 0.25, edges at 0.5");
+        check(st.box_alpha == 0.25f,
+              "api: a block's faces are translucent by default, at 0.25");
         check(!ErrorBar3D{}.any(), "api: an empty ErrorBar3D sets nothing");
 
         const std::vector<double> x{2.0, 5.0, 8.0}, y{2.0, 6.0, 3.0}, z{3.0, 5.0, 7.0};
@@ -283,16 +282,12 @@ namespace lt {
             check(count_faces(v) == 0 && count_strokes(v) == 12,
                   "geometry: box_alpha 0 drops the faces and keeps the edges");
             s.opts.errorbar.box_alpha = 0.25f;
-            s.opts.errorbar.edge_alpha = 0.0f;
+            s.opts.alpha = 0.5f;
             v = build(s, proj);
-            check(count_faces(v) == 6 && count_strokes(v) == 0,
-                  "geometry: edge_alpha 0 drops the edges and keeps the faces");
-            s.opts.errorbar.edge_alpha = 0.5f;
-            v = build(s, proj);
-            bool alphas = !v.empty();
+            bool alphas = count_faces(v) == 6 && count_strokes(v) == 12;
             for (const ErrorBar3DPiece& p: v)
-                alphas = alphas && near_px(p.color.a, p.face ? 0.25f : 0.5f);
-            check(alphas, "geometry: faces carry box_alpha and edges edge_alpha, over the colour's own");
+                alphas = alphas && near_px(p.color.a, p.face ? 0.125f : 0.5f);
+            check(alphas, "geometry: the series' alpha fades edges and faces (box_alpha on top) alike");
         }
 
         // ---- Colour.
@@ -447,7 +442,6 @@ namespace lt {
                 s.err.box_lo[2] = std::vector<double>{2.0};
                 s.opts.errorbar.color = Color::Red;
                 s.opts.errorbar.box_alpha = box_alpha;
-                s.opts.errorbar.edge_alpha = 1.0f;
                 fs.axes[0].snap3d()->scatter3d.push_back(s);
                 render(fs, stem);
                 const FigureLayout lay = compute_figure_layout(fs, W, H);
@@ -507,9 +501,9 @@ namespace lt {
             block.err.box_lo[0] = std::vector<double>{1.0};
             block.opts.errorbar.color = Color{0.0f, 0.6f, 0.0f, 1.0f};
             const std::string bs = scene(block, "eb3d_scene_block.svg");
-            check(count_elements(bs, "<line ", g, "stroke-opacity=\"0.5\"") == 12 &&
+            check(count_elements(bs, "<line ", g, "stroke-opacity") == 0 &&
                   count_elements(bs, "<line ", g) == 12,
-                  "svg: a block's twelve edges, at edge_alpha");
+                  "svg: a block's twelve edges, at the colour's own (opaque) alpha");
             check(count_elements(bs, "<polygon ", "fill=\"rgb(0,153,0)\"",
                                  "fill-opacity=\"0.25\"") == 6,
                   "svg: and its six faces at box_alpha");

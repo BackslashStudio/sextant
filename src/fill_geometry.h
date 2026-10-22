@@ -197,8 +197,12 @@ inline long fill_segment_at(const FillPlot& p, const AxisScale& rs, const AxisSc
     return found;
 }
 
-// The outline color: `edgecolor`, else the fill's.
-inline Color fill_edge(const FillPlot& p) { return p.opts.edgecolor.value_or(*p.opts.color); }
+// The outline color: `edgecolor`, else the fill's, faded by `alpha`.
+inline Color fill_edge(const FillPlot& p) {
+    Color c = p.opts.edgecolor.value_or(*p.opts.color);
+    c.a *= std::clamp(p.opts.alpha, 0.0f, 1.0f);
+    return c;
+}
 
 // The points a fill gives the automatic limits, as add(r, v) in scale space
 // through rs/vs: every point of every run (lone ones included) on both curves,

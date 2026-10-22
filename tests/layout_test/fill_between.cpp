@@ -635,7 +635,7 @@ namespace lt {
             red.exclude.mut()[8] = 1.0;
             s.fills.push_back(red);
             FillPlot band = fill_of(V{0, 5, 10}, V{9, 9, 9}, V{7, 7, 7}, kBlue, 2);
-            band.opts.alpha = 0.5f;
+            band.opts.color->a = 0.5f; // not `alpha`, which would fade the outline too
             band.opts.linewidth = 2.0f;
             band.opts.edgecolor = kGreen;
             band.opts.linestyle = LineStyle::Dashed;

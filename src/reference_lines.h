@@ -260,7 +260,11 @@ inline std::optional<RefRect> axspan_rect(const AxSpanPlot& p, const CoordTransf
 // The `reach` both outputs pass: past an outline's half width.
 inline float axspan_reach(const AxSpanPlot& p) { return std::max(p.opts.linewidth, 0.0f) + 2.0f; }
 
-// A span's outline color: `edgecolor`, else the fill's.
-inline Color axspan_edge(const AxSpanPlot& p) { return p.opts.edgecolor.value_or(*p.opts.color); }
+// A span's outline color: `edgecolor`, else the fill's, faded by `alpha`.
+inline Color axspan_edge(const AxSpanPlot& p) {
+    Color c = p.opts.edgecolor.value_or(*p.opts.color);
+    c.a *= std::clamp(p.opts.alpha, 0.0f, 1.0f);
+    return c;
+}
 
 } // namespace sextant

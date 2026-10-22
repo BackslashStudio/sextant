@@ -14,6 +14,13 @@ namespace sextant {
                m == MarkerStyle::VLine || m == MarkerStyle::HLine;
     }
 
+    // A marker's fill opacity factor: `alpha`, or 0 when hollow (`filled`
+    // false). A line marker's stroke is its fill, so it keeps `alpha`.
+    template <class MarkerOptions>
+    inline float marker_face_alpha(const MarkerOptions& o) {
+        return o.filled || is_line_marker(o.marker) ? std::clamp(o.alpha, 0.0f, 1.0f) : 0.0f;
+    }
+
     inline float line_marker_width(float edge_linewidth) {
         return edge_linewidth > 0.0f ? edge_linewidth : kLineMarkerWidth;
     }

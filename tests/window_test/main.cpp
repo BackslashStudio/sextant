@@ -1034,7 +1034,7 @@ static void test_surface_tri() {
                         {
                             .color = sextant::Color::Orange, .name = "Mobius",
                             .shading = 0.75f, .edges = true,
-                            .edge_alpha = 0.7f, .edge_linewidth = 1.0f
+                            .edgecolor = {0.0f, 0.0f, 0.0f, 0.7f}, .edge_linewidth = 1.0f
                         });
         ax->legend();
     }

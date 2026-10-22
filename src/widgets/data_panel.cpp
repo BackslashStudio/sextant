@@ -750,7 +750,7 @@ namespace sextant {
         // resolves to; cap and box rows only show for data that draws them.
         template<class EB, class Push>
         void errorbar_style(EB& eb, Color fallback, bool has_cap, bool has_box, Push&& push) {
-            constexpr bool k3d = requires { eb.edge_alpha; };
+            constexpr bool k3d = std::is_same_v<EB, ErrorBar3DOptions>;
             ImGui::SeparatorText("Error bars");
             bool own = eb.color.has_value();
             if (ImGui::Checkbox("Own colour##ebown", &own)) {
@@ -775,10 +775,6 @@ namespace sextant {
                     if (drag_float("##ebbw", &eb.boxwidth, 0.0f, 100.0f, 0.1f, "%.1f px")) push();
                     field_row("Box alpha");
                     if (drag_float("##ebba", &eb.box_alpha, 0.0f, 1.0f, 0.005f, "%.2f")) push();
-                    if constexpr (k3d) {
-                        field_row("Edge alpha");
-                        if (drag_float("##ebea", &eb.edge_alpha, 0.0f, 1.0f, 0.005f, "%.2f")) push();
-                    }
                 }
                 end_field_table();
             }
@@ -830,12 +826,12 @@ namespace sextant {
             if (!p.err.empty()) errorbar_style(o.errorbar, *o.color, has_cap(p.err), has_box(p.err), push);
         }
 
-        // A marker's outline: width, its own colour or the fill's, and its alpha
-        // (alpha 0 on the fill, above, makes the marker hollow). `fallback` is what an
-        // unset colour resolves to when the box is ticked. A line marker has no
-        // outline: the width is its stroke's instead.
+        // A marker's outline: whether the marker is filled (unticked = hollow), width,
+        // and its own colour or the fill's. `fallback` is what an unset colour
+        // resolves to when the box is ticked. A line marker has no outline: the width
+        // is its stroke's instead.
         template<class Push>
-        void marker_outline(MarkerStyle marker, std::optional<Color>& edgecolor, float& edge_alpha,
+        void marker_outline(MarkerStyle marker, bool& filled, std::optional<Color>& edgecolor,
                             float& edge_linewidth, Color fallback, Push&& push) {
             if (is_line_marker(marker)) {
                 ImGui::SeparatorText("Stroke");
@@ -848,6 +844,7 @@ namespace sextant {
                 return;
             }
             ImGui::SeparatorText("Outline");
+            if (ImGui::Checkbox("Filled##moutfill", &filled)) push();
             if (begin_field_table("outline")) {
                 field_row("Width");
                 if (drag_float("##moutw", &edge_linewidth, 0.0f, 20.0f, 0.05f, "%.2f px")) push();
@@ -859,13 +856,9 @@ namespace sextant {
                 edgecolor = own ? std::optional<Color>(fallback) : std::nullopt;
                 push();
             }
-            if (begin_field_table("outline2")) {
-                if (edgecolor) {
-                    field_row("Color");
-                    if (color_swatch("##moutcol", *edgecolor)) push();
-                }
-                field_row("Alpha");
-                if (drag_float("##moutalpha", &edge_alpha, 0.0f, 1.0f, 0.005f, "%.2f")) push();
+            if (edgecolor && begin_field_table("outline2")) {
+                field_row("Color");
+                if (color_swatch("##moutcol", *edgecolor)) push();
                 end_field_table();
             }
         }
@@ -885,7 +878,7 @@ namespace sextant {
                 if (drag_float("##salpha", &o.alpha, 0.0f, 1.0f, 0.005f, "%.2f")) push();
                 end_field_table();
             }
-            marker_outline(o.marker, o.edgecolor, o.edge_alpha, o.edge_linewidth, *o.color, push);
+            marker_outline(o.marker, o.filled, o.edgecolor, o.edge_linewidth, *o.color, push);
             if (!p.err.empty()) errorbar_style(o.errorbar, *o.color, has_cap(p.err), has_box(p.err), push);
         }
 
@@ -909,7 +902,7 @@ namespace sextant {
                 if (drag_float("##zalpha", &o.alpha, 0.0f, 1.0f, 0.005f, "%.2f")) push();
                 end_field_table();
             }
-            marker_outline(o.marker, o.edgecolor, o.edge_alpha, o.edge_linewidth, Color::Black, push);
+            marker_outline(o.marker, o.filled, o.edgecolor, o.edge_linewidth, Color::Black, push);
             if (!p.err.empty()) errorbar_style(o.errorbar, Color::Black, has_cap(p.err), has_box(p.err), push);
         }
 
@@ -1364,8 +1357,6 @@ namespace sextant {
             if (begin_field_table("bar3de")) {
                 field_row("Color");
                 if (color_swatch("##becol", o.edgecolor)) push_bar();
-                field_row("Alpha");
-                if (drag_float("##bealpha", &o.edge_alpha, 0.0f, 1.0f, 0.005f, "%.2f")) push_bar();
                 field_row("Width");
                 if (drag_float("##bew", &o.edge_linewidth, 0.1f, 10.0f, 0.05f, "%.2f px")) push_bar();
                 end_field_table();
@@ -1430,8 +1421,6 @@ namespace sextant {
             if (begin_field_table("surfe")) {
                 field_row("Color");
                 if (color_swatch("##secol", o.edgecolor)) push_surf();
-                field_row("Alpha");
-                if (drag_float("##sealpha", &o.edge_alpha, 0.0f, 1.0f, 0.005f, "%.2f")) push_surf();
                 field_row("Width");
                 if (drag_float("##sew", &o.edge_linewidth, 0.1f, 10.0f, 0.05f, "%.2f px")) push_surf();
                 end_field_table();
@@ -1482,7 +1471,7 @@ namespace sextant {
                 if (drag_float("##cshade", &o.depthshade, 0.0f, 1.0f, 0.005f, "%.2f")) push_cloud();
                 end_field_table();
             }
-            marker_outline(o.marker, o.edgecolor, o.edge_alpha, o.edge_linewidth, *o.color, push_cloud);
+            marker_outline(o.marker, o.filled, o.edgecolor, o.edge_linewidth, *o.color, push_cloud);
             // vmin/vmax only with `colors`, both or neither (empty = data range).
             if (begin_field_table("cloudv")) {
                 field_row("Colormap");
@@ -1614,8 +1603,6 @@ namespace sextant {
             if (begin_field_table("meshe")) {
                 field_row("Color");
                 if (color_swatch("##mecol", o.edgecolor)) push_mesh();
-                field_row("Alpha");
-                if (drag_float("##mealpha", &o.edge_alpha, 0.0f, 1.0f, 0.005f, "%.2f")) push_mesh();
                 field_row("Width");
                 if (drag_float("##mew", &o.edge_linewidth, 0.1f, 10.0f, 0.05f, "%.2f px")) push_mesh();
                 end_field_table();

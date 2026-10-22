@@ -31,8 +31,7 @@ namespace sextant {
 
             Color face_c = color;
             face_c.a = color.a * std::max(style.box_alpha, 0.0f);
-            Color edge_c = color;
-            edge_c.a = color.a * std::max(style.edge_alpha, 0.0f);
+            const Color edge_c = color;
 
             const std::size_t n = std::min({xs.size(), ys.size(), zs.size()});
             for (std::size_t i = 0; i < n; ++i) {

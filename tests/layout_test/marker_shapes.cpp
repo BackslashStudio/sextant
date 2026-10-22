@@ -245,7 +245,7 @@ namespace lt {
         // Filled shapes take outlines as before: hollow leaves a ring of ink.
         for (const MarkerStyle m: kFilled) {
             ScatterOptions h = base(m);
-            h.alpha = 0.0f;
+            h.filled = false;
             h.edge_linewidth = 2.0f;
             const std::size_t full = ink(one(base(m))->render_rgba(), 0, 0, 255, 60).n;
             const std::size_t ring = ink(one(h)->render_rgba(), 0, 0, 255, 60).n;
@@ -361,7 +361,7 @@ namespace lt {
             Scatter3DPlot p;
             p.opts.marker = MarkerStyle::ThinCross;
             p.opts.edge_linewidth = 2.0f;
-            p.opts.edge_alpha = 0.4f;
+            p.opts.edgecolor = Color{0.0f, 0.0f, 0.0f, 0.4f};
             check(!scatter3d_translucent(p), "scatter3d: a line marker's edge alpha never forces compositing");
             p.opts.marker = MarkerStyle::Star;
             check(scatter3d_translucent(p), "scatter3d: a filled one's still does");
@@ -396,7 +396,7 @@ namespace lt {
                 f.edgecolor = Color{1.0f, 0.5f, 0.0f, 1.0f};
                 f.edge_linewidth = 3.0f;
                 ax->scatter(x, y1, f);
-                f.alpha = is_line_marker(all[i]) ? 1.0f : 0.0f;
+                f.filled = false; // a line marker has no fill and ignores it
                 f.edgecolor = std::nullopt;
                 ax->scatter(x, y2, f);
             }

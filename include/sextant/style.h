@@ -215,6 +215,7 @@ namespace sextant {
         float boxwidth = 10.0f;
 
         // Box fill opacity as a fraction of `color`'s alpha; 0 = outline only.
+        // The whole error bar also takes the series' `alpha`.
         float box_alpha = 0.25f;
     };
 
@@ -239,6 +240,7 @@ namespace sextant {
         // it; the legend and colorbars stay in call order. Finite. Axes::set_zorder() changes it
         // after the call; the Data panel has a field.
         double zorder = 0.0;
+        // Multiplies `color`'s own alpha, and the error bars'.
         float alpha = 1.0f;
 
         // Add a closing segment from the last point to the first. No point is
@@ -275,19 +277,21 @@ namespace sextant {
         bool visible = true;     // see LineOptions::visible
         double zorder = 0.0;     // see LineOptions::zorder
 
-        // Opacity of the marker's fill (on top of `color`'s own alpha). 0 leaves a
-        // hollow marker: only its outline, if `edge_linewidth` > 0, is drawn.
+        // Opacity of the whole marker (fill, outline, error bars), multiplying
+        // each color's own alpha.
         float alpha = 0.8f;
+
+        // False draws the outline only (`edge_linewidth` > 0), the fill left out:
+        // a hollow marker. A line marker has no fill and ignores it.
+        bool filled = true;
 
         // Marker outline, drawn inside the marker's boundary, so `size` stays the
         // outer diameter. Width in pixels; 0 (the default) draws none. Unset
         // `edgecolor` outlines in the fill's color (each point's own, for
-        // scatter_z); its alpha is the color's own times `edge_alpha`, independent
-        // of `alpha`. Every filled marker (Cross and Plus too) is outlined along
+        // scatter_z). Every filled marker (Cross and Plus too) is outlined along
         // its boundary. A line marker (ThinCross, ThinPlus, VLine, HLine) has no
         // outline: `edge_linewidth` is its stroke width instead.
         std::optional<Color> edgecolor;
-        float edge_alpha = 1.0f;
         float edge_linewidth = 0.0f;
 
         // Style of the error bars passed as an ErrorBar.
@@ -305,11 +309,11 @@ namespace sextant {
         std::vector<double> sizes; // see ScatterOptions::sizes
         MarkerStyle marker = MarkerStyle::Circle;
         float alpha = 0.8f;
+        bool filled = true; // see ScatterOptions::filled
 
         // Marker outline; see ScatterOptions::edgecolor. Unset color = each point's
         // own fill color.
         std::optional<Color> edgecolor;
-        float edge_alpha = 1.0f;
         float edge_linewidth = 0.0f;
 
         float vmin = 0.0f;
@@ -347,6 +351,7 @@ namespace sextant {
         std::vector<double> bottom;
 
         float width = 0.8f;
+        // Multiplies the own alpha of `color`, `edgecolor` and the error bars.
         float alpha = 1.0f;
         std::string name;
         bool show_legend = true; // see LineOptions::show_legend
@@ -399,7 +404,7 @@ namespace sextant {
         float alpha = 0.25f;
 
         // The band's outline, `linewidth` pixels wide (0, the default, draws
-        // none) in `edgecolor` (unset = `color`) at that color's own alpha.
+        // none) in `edgecolor` (unset = `color`); `alpha` fades both.
         std::optional<Color> edgecolor;
         float linewidth = 0.0f;
 
@@ -422,8 +427,8 @@ namespace sextant {
         float alpha = 1.0f;
 
         // The outline of each filled region, `linewidth` pixels wide (0, the
-        // default, draws none) in `edgecolor` (unset = `color`) at that color's
-        // own alpha, dashed by `linestyle`.
+        // default, draws none) in `edgecolor` (unset = `color`), dashed by
+        // `linestyle`; `alpha` fades both.
         std::optional<Color> edgecolor;
         float linewidth = 0.0f;
         LineStyle linestyle = LineStyle::Solid;
@@ -809,8 +814,8 @@ namespace sextant {
     enum class ArrowHead { None, Open, Filled, Bar };
 
     // A filled polygon (Axes::shape_poly()). The outline (`linewidth` > 0, none
-    // by default) is `edgecolor` (unset = `color`) at that color's own alpha,
-    // dashed by `linestyle`.
+    // by default) is `edgecolor` (unset = `color`), dashed by `linestyle`;
+    // `alpha` fades both.
     struct PolyOptions {
         std::optional<Color> color; // see LineOptions::color
         float alpha = 1.0f;

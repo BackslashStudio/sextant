@@ -352,7 +352,7 @@ void main() {
 }
 )";
 
-    // uEdge is the outline's final RGBA (edge_alpha applied); uEdgeW its width in
+    // uEdge is the outline's final RGBA (`alpha` applied); uEdgeW its width in
     // pixels, drawn inside the boundary. 0 = no outline.
     static constexpr char k_scatter_frag[] = R"(
 #version 410 core
@@ -1133,7 +1133,7 @@ void main() {
         bool face = false;
     };
 
-    static MarkerEdge marker_edge(const std::optional<Color>& edgecolor, float edge_alpha,
+    static MarkerEdge marker_edge(const std::optional<Color>& edgecolor, float alpha,
                                   float edge_linewidth, const Color& fill) {
         MarkerEdge e;
         if (!(edge_linewidth > 0.0f)) return e;
@@ -1141,7 +1141,7 @@ void main() {
         e.rgba[0] = c.r;
         e.rgba[1] = c.g;
         e.rgba[2] = c.b;
-        e.rgba[3] = c.a * edge_alpha;
+        e.rgba[3] = c.a * std::clamp(alpha, 0.0f, 1.0f);
         e.width = edge_linewidth;
         e.face = !edgecolor;
         return e;
@@ -2355,11 +2355,11 @@ void main() {
 
             const auto& c = *sp.opts.color;
             glUniform4f(scatter_u_.color,
-                        c.r, c.g, c.b, c.a * sp.opts.alpha);
+                        c.r, c.g, c.b, c.a * marker_face_alpha(sp.opts));
             glUniform1i(scatter_u_.marker,
                         static_cast<int>(sp.opts.marker));
             set_marker_edge(scatter_u_.edge, scatter_u_.edge_w, scatter_u_.edge_face,
-                            marker_edge(sp.opts.edgecolor, sp.opts.edge_alpha,
+                            marker_edge(sp.opts.edgecolor, sp.opts.alpha,
                                         sp.opts.edge_linewidth, c));
 
             glDrawArraysInstanced(GL_TRIANGLES, 0, 6, e.instances);
@@ -2404,7 +2404,7 @@ void main() {
                                 && e.size == sp.opts.size
                                 && e.cmap == sp.opts.cmap
                                 && e.vmin == sp.opts.vmin && e.vmax == sp.opts.vmax
-                                && e.alpha == sp.opts.alpha
+                                && e.alpha == marker_face_alpha(sp.opts)
                                 && (e.data_space
                                         ? precise
                                         : (!precise && same_view(e.tr, tr)));
@@ -2445,7 +2445,7 @@ void main() {
                     inst.push_back(static_cast<float>(c[0]) / 255.0f);
                     inst.push_back(static_cast<float>(c[1]) / 255.0f);
                     inst.push_back(static_cast<float>(c[2]) / 255.0f);
-                    inst.push_back(static_cast<float>(c[3]) / 255.0f * sp.opts.alpha);
+                    inst.push_back(static_cast<float>(c[3]) / 255.0f * marker_face_alpha(sp.opts));
                 }
 
                 if (e.vbo == 0) glGenBuffers(1, &e.vbo);
@@ -2460,7 +2460,7 @@ void main() {
                 e.cmap = sp.opts.cmap;
                 e.vmin = sp.opts.vmin;
                 e.vmax = sp.opts.vmax;
-                e.alpha = sp.opts.alpha;
+                e.alpha = marker_face_alpha(sp.opts);
                 e.tr = tr;
             }
 
@@ -2486,7 +2486,7 @@ void main() {
             glUniform1i(scatterz_u_.marker,
                         static_cast<int>(sp.opts.marker));
             set_marker_edge(scatterz_u_.edge, scatterz_u_.edge_w, scatterz_u_.edge_face,
-                            marker_edge(sp.opts.edgecolor, sp.opts.edge_alpha,
+                            marker_edge(sp.opts.edgecolor, sp.opts.alpha,
                                         sp.opts.edge_linewidth, Color{0.0f, 0.0f, 0.0f, 1.0f}));
 
             glDrawArraysInstanced(GL_TRIANGLES, 0, 6, e.instances);
@@ -2665,7 +2665,7 @@ void main() {
                     glUniform2fv(line_u_.scale, 1, k_identity_scale);
                     glUniform2fv(line_u_.offset, 1, k_identity_offset);
 
-                    const auto& ec = bp.opts.edgecolor;
+                    const Color ec = bar_edge(bp);
                     glUniform4f(line_u_.color,
                                 ec.r, ec.g, ec.b, ec.a);
                     glDrawArrays(GL_TRIANGLES, 0, e.edge_verts);
@@ -2702,7 +2702,7 @@ void main() {
         const std::size_t one[1] = {r.index};
         const auto draw_shape_of = [&](const auto& p, const CoordTransform& t, const PlotRect& rect) {
             draw_shape(shape_geometry(p, t), *p.opts.color, p.opts.alpha, p.opts.linewidth, p.opts.linestyle,
-                       p.opts.edgecolor.value_or(*p.opts.color), t, rect);
+                       shape_edge(p), t, rect);
         };
         switch (r.kind) {
             case PlotKind::Heatmap:
@@ -3309,7 +3309,9 @@ void main() {
                 e.horizontal = horizontal;
             }
 
-            const Color c = style.color.value_or(fallback);
+            // Faded by the series' `alpha`.
+            Color c = style.color.value_or(fallback);
+            c.a *= std::clamp(plot.opts.alpha, 0.0f, 1.0f);
 
             // Re-point the VAO attribute (see draw_bars).
             auto draw = [&](unsigned int vbo, int verts, float alpha) {
@@ -5008,7 +5010,7 @@ void main() {
             const bool stale = c.vbo == 0 || data_generation_ == 0 ||
                                c.data_generation != data_generation_ ||
                                c.size != s.opts.size ||
-                               c.alpha != s.opts.alpha ||
+                               c.alpha != marker_face_alpha(s.opts) ||
                                c.color.r != s.opts.color->r ||
                                c.color.g != s.opts.color->g ||
                                c.color.b != s.opts.color->b ||
@@ -5067,7 +5069,7 @@ void main() {
                 c.data_generation = data_generation_;
                 c.anchor = anchor;
                 c.size = s.opts.size;
-                c.alpha = s.opts.alpha;
+                c.alpha = marker_face_alpha(s.opts);
                 c.color = *s.opts.color;
                 c.colormapped = s.colormapped();
                 c.cmap = s.opts.cmap;
@@ -5090,7 +5092,7 @@ void main() {
                         static_cast<float>(ddir.z), dbase);
             glUniform3f(su.shade, std::clamp(s.opts.depthshade, 0.0f, 1.0f), dmin, dspan);
             set_marker_edge(su.edge, su.edge_w, su.edge_face,
-                            marker_edge(s.opts.edgecolor, s.opts.edge_alpha,
+                            marker_edge(s.opts.edgecolor, s.opts.alpha,
                                         s.opts.edge_linewidth,
                                         s.colormapped() ? Color{0.0f, 0.0f, 0.0f, 1.0f}
                                                         : *s.opts.color));
@@ -5499,7 +5501,6 @@ void main() {
                             static_cast<double>(st.capstyle),
                             static_cast<double>(st.boxwidth),
                             static_cast<double>(st.box_alpha),
-                            static_cast<double>(st.edge_alpha),
                             static_cast<double>(col.r), static_cast<double>(col.g),
                             static_cast<double>(col.b), static_cast<double>(col.a)
                         });

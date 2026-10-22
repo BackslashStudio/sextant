@@ -49,7 +49,7 @@ namespace sextant {
     }
 
     inline float surface_edge_alpha(const SurfacePlot& s) {
-        return std::clamp(s.opts.edgecolor.a * s.opts.edge_alpha, 0.0f, 1.0f);
+        return std::clamp(s.opts.edgecolor.a * s.opts.alpha, 0.0f, 1.0f);
     }
 
     // The four edges of one cell as data-space endpoint pairs. The GPU draws shared

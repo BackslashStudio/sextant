@@ -220,13 +220,13 @@ namespace sextant {
         };
 
         // One series' error bars: box first, then whiskers (whisker_segments()), as in
-        // 2D.
+        // 2D. `alpha` is the series'.
         void error_bars(GeometryBuilder& fills, GeometryBuilder& strokes,
                         const CowVec<double>& xs, const CowVec<double>& ys,
                         const ErrorBarData& err, const ErrorBarOptions& style,
-                        const Color& fallback, const ErrScale& sc) {
+                        const Color& fallback, float alpha, const ErrScale& sc) {
             if (err.empty() || style.linewidth <= 0.0f) return;
-            const Color c = style.color.value_or(fallback);
+            const Color c = with_alpha(style.color.value_or(fallback), alpha);
             const std::size_t n = std::min(xs.size(), ys.size());
             const double half_box = 0.5 * style.boxwidth;
             auto seg = [&](double u0, double v0, double u1, double v1) {
@@ -293,12 +293,12 @@ namespace sextant {
         // One object's error bars: boxes, then whiskers (error_bars()).
         auto errs = [&](const CowVec<double>& xs, const CowVec<double>& ys,
                         const ErrorBarData& err, const ErrorBarOptions& style,
-                        const Color& fallback) {
+                        const Color& fallback, float alpha) {
             if (err.empty()) return;
             GeometryBuilder fills, strokes;
             fills.orient = strokes.orient = p.orient;
             fills.offset = strokes.offset = p.offset;
-            error_bars(fills, strokes, xs, ys, err, style, fallback, ErrScale{px_u, px_v});
+            error_bars(fills, strokes, xs, ys, err, style, fallback, alpha, ErrScale{px_u, px_v});
             b.open(Kind::Tri);
             b.g.tris.insert(b.g.tris.end(), fills.g.tris.begin(), fills.g.tris.end());
             b.close();
@@ -338,14 +338,14 @@ namespace sextant {
                         b.open(Kind::Seg);
                         for (std::size_t i = 0; i < n; ++i) {
                             const auto [u0, v0, u1, v1] = corners(i);
-                            b.rect_outline(u0, v0, u1, v1, bp.opts.edgecolor, bp.opts.linewidth);
+                            b.rect_outline(u0, v0, u1, v1, bar_edge(bp), bp.opts.linewidth);
                         }
                         b.close();
                     }
                     // Error bars hang off the tip, not the base.
                     if (!bp.err.empty()) {
                         const XYColumns a = bar_anchors(bp);
-                        errs(a.x, a.y, bp.err, bp.opts.errorbar, bp.opts.edgecolor);
+                        errs(a.x, a.y, bp.err, bp.opts.errorbar, bp.opts.edgecolor, bp.opts.alpha);
                     }
                     break;
                 }
@@ -368,7 +368,7 @@ namespace sextant {
                         }
                         b.close();
                     }
-                    errs(lp.x, lp.y, lp.err, lp.opts.errorbar, *lp.opts.color);
+                    errs(lp.x, lp.y, lp.err, lp.opts.errorbar, *lp.opts.color, lp.opts.alpha);
                     break;
                 }
 
@@ -420,7 +420,7 @@ namespace sextant {
                     const auto take = [&](const auto& sp) {
                         g = shape_geometry(sp, st);
                         col = &*sp.opts.color; alpha = sp.opts.alpha; lw = sp.opts.linewidth; ls = sp.opts.linestyle;
-                        ec = sp.opts.edgecolor.value_or(*sp.opts.color);
+                        ec = shape_edge(sp);
                     };
                     if (r.kind == PlotKind::Poly) take(s.polys[r.index]);
                     else if (r.kind == PlotKind::Circle) take(s.circles[r.index]);
@@ -491,12 +491,12 @@ namespace sextant {
 
                 case PlotKind::Scatter: {
                     const auto& sp = s.scatters[r.index];
-                    errs(sp.x, sp.y, sp.err, sp.opts.errorbar, *sp.opts.color);
-                    const Color c = with_alpha(*sp.opts.color, sp.opts.alpha);
+                    errs(sp.x, sp.y, sp.err, sp.opts.errorbar, *sp.opts.color, sp.opts.alpha);
+                    const Color c = with_alpha(*sp.opts.color, marker_face_alpha(sp.opts));
                     const std::size_t n = std::min(sp.x.size(), sp.y.size());
-                    // Unset edgecolor = the fill's color; alpha is its own times edge_alpha.
-                    Color ec = sp.opts.edgecolor ? *sp.opts.edgecolor : *sp.opts.color;
-                    ec.a = std::clamp(ec.a * sp.opts.edge_alpha, 0.0f, 1.0f);
+                    // Unset edgecolor = the fill's color; alpha is its own times `alpha`.
+                    const Color ec = with_alpha(sp.opts.edgecolor ? *sp.opts.edgecolor : *sp.opts.color,
+                                                sp.opts.alpha);
                     const float ew = std::max(0.0f, sp.opts.edge_linewidth);
                     b.open(Kind::Marker);
                     for (std::size_t i = 0; i < n; ++i)
@@ -509,7 +509,7 @@ namespace sextant {
                 case PlotKind::ScatterZ: {
                     const auto& sp = s.scatter_z[r.index];
                     // scatter_z has no single color, so black (as in 2D).
-                    errs(sp.x, sp.y, sp.err, sp.opts.errorbar, Color::Black);
+                    errs(sp.x, sp.y, sp.err, sp.opts.errorbar, Color::Black, sp.opts.alpha);
                     const std::uint8_t* lut = colormaps::get(sp.opts.cmap);
                     const float vmin = sp.opts.vmin, vrange = sp.opts.vmax - sp.opts.vmin;
                     const std::size_t n = std::min({sp.x.size(), sp.y.size(), sp.z.size()});
@@ -520,9 +520,9 @@ namespace sextant {
                         const Color face = cell_color(lut, sp.opts.cmap.is_cyclic(),
                                                       static_cast<float>(sp.z[i]), vmin, vrange);
                         Color ec = sp.opts.edgecolor ? *sp.opts.edgecolor : face;
-                        ec.a = std::clamp((sp.opts.edgecolor ? ec.a : 1.0f) * sp.opts.edge_alpha,
+                        ec.a = std::clamp((sp.opts.edgecolor ? ec.a : 1.0f) * sp.opts.alpha,
                                           0.0f, 1.0f);
-                        b.marker(sp.x[i], sp.y[i], with_alpha(face, sp.opts.alpha),
+                        b.marker(sp.x[i], sp.y[i], with_alpha(face, marker_face_alpha(sp.opts)),
                                  marker_size_at(sp, i), sp.opts.marker, ec, ew);
                     }
                     b.close();

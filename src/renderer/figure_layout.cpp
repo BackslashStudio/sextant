@@ -723,13 +723,12 @@ namespace sextant {
     }
 
     // A scatter key's outline (alpha 0 = none): the series' `edgecolor`, or its
-    // color, at `edge_alpha`; drawn 1 px wide whatever `edge_linewidth` is.
+    // color, at that color's own alpha (`alpha` 0 hides it, as the fill's key);
+    // drawn 1 px wide whatever `edge_linewidth` is.
     static Color marker_key_edge(const Color& color, const std::optional<Color>& edgecolor,
-                                 float edge_alpha, float edge_linewidth) {
-        if (!(edge_linewidth > 0.0f)) return {0.0f, 0.0f, 0.0f, 0.0f};
-        Color c = edgecolor ? *edgecolor : color;
-        c.a = std::clamp(c.a * edge_alpha, 0.0f, 1.0f);
-        return c;
+                                 float alpha, float edge_linewidth) {
+        if (!(edge_linewidth > 0.0f) || alpha <= 0.0f) return {0.0f, 0.0f, 0.0f, 0.0f};
+        return edgecolor ? *edgecolor : color;
     }
 
     // A line marker's key is its stroke alone, in `ink` (the fill's color, or
@@ -758,9 +757,9 @@ namespace sextant {
                     const auto& sp = snap.scatters[r.index];
                     if (keyed(sp.opts)) {
                         entries.push_back({
-                            marker_key_fill(*sp.opts.color, sp.opts.alpha), sp.opts.name,
+                            marker_key_fill(*sp.opts.color, marker_face_alpha(sp.opts)), sp.opts.name,
                             LegendKind::Marker, LineStyle::Solid, sp.opts.marker,
-                            marker_key_edge(*sp.opts.color, sp.opts.edgecolor, sp.opts.edge_alpha,
+                            marker_key_edge(*sp.opts.color, sp.opts.edgecolor, sp.opts.alpha,
                                             sp.opts.edge_linewidth)
                         });
                         line_marker_key(entries.back(), entries.back().color);
@@ -773,7 +772,8 @@ namespace sextant {
                     const auto& zp = snap.scatter_z[r.index];
                     if (keyed(zp.opts)) {
                         entries.push_back({
-                            Color::White, zp.opts.name, LegendKind::Marker,
+                            marker_key_fill(Color::White, marker_face_alpha(zp.opts)), zp.opts.name,
+                            LegendKind::Marker,
                             LineStyle::Solid, zp.opts.marker, Color::Black
                         });
                         line_marker_key(entries.back(), Color::Black);
@@ -828,8 +828,10 @@ namespace sextant {
                         Color c = *o.color;
                         c.a *= o.alpha;
                         LegendEntry e{c, o.name, LegendKind::Bar, LineStyle::Solid};
-                        if (o.linewidth > 0.0f && o.linestyle != LineStyle::None)
+                        if (o.linewidth > 0.0f && o.linestyle != LineStyle::None) {
                             e.edge = o.edgecolor.value_or(*o.color);
+                            e.edge.a *= o.alpha;
+                        }
                         entries.push_back(std::move(e));
                     };
                     if (r.kind == PlotKind::Poly) key(snap.polys[r.index].opts);
@@ -924,14 +926,14 @@ namespace sextant {
                     const auto& sc = snap.scatter3d[r.index];
                     if (keyed(sc.opts) && sc.opts.marker != MarkerStyle::None) {
                         entries.push_back({
-                            sc.colormapped() ? Color::White
-                                             : marker_key_fill(*sc.opts.color, sc.opts.alpha),
+                            marker_key_fill(sc.colormapped() ? Color::White : *sc.opts.color,
+                                            marker_face_alpha(sc.opts)),
                             sc.opts.name, LegendKind::Marker, LineStyle::Solid,
                             sc.opts.marker,
                             sc.colormapped()
                                 ? Color::Black
                                 : marker_key_edge(*sc.opts.color, sc.opts.edgecolor,
-                                                  sc.opts.edge_alpha, sc.opts.edge_linewidth)
+                                                  sc.opts.alpha, sc.opts.edge_linewidth)
                         });
                         line_marker_key(entries.back(),
                                         sc.colormapped() ? Color::Black : entries.back().color);

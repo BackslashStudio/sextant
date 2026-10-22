@@ -48,9 +48,8 @@ inline bool bar3d_translucent(const Bar3DPlot& b) {
 inline float bar3d_alpha(const Bar3DPlot& b) {
     return std::clamp(b.opts.color->a * b.opts.alpha, 0.0f, 1.0f);
 }
-// Outline opacity, independent of the faces'.
 inline float bar3d_edge_alpha(const Bar3DPlot& b) {
-    return std::clamp(b.opts.edgecolor.a * b.opts.edge_alpha, 0.0f, 1.0f);
+    return std::clamp(b.opts.edgecolor.a * b.opts.alpha, 0.0f, 1.0f);
 }
 
 // The twelve edges of one bar as data-space endpoint pairs, each once, in a

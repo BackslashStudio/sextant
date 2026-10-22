@@ -809,6 +809,7 @@ if(SEXTANT_BUILD_TESTS)
             tests/layout_test/tick_style.cpp
             tests/layout_test/aspect.cpp
             tests/layout_test/edge_markers.cpp
+            tests/layout_test/alpha.cpp
             tests/layout_test/marker_shapes.cpp
             tests/layout_test/marker_sizes.cpp
             tests/layout_test/line_steps.cpp

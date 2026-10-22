@@ -204,6 +204,13 @@ inline XYColumns bar_anchors(const BarPlot& p) {
     return {p.centers, std::move(tips)};
 }
 
+// A bar's outline color: `edgecolor` faded by `alpha`.
+inline Color bar_edge(const BarPlot& p) {
+    Color c = p.opts.edgecolor;
+    c.a *= std::clamp(p.opts.alpha, 0.0f, 1.0f);
+    return c;
+}
+
 // Row-major rows x cols values, mapped through vmin/vmax and the colormap. The
 // grid spans xrange x yrange uniformly (ranges are outer edges); use the
 // accessors below for cell positions. Rows count from yrange.lo; the origin

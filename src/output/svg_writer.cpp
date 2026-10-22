@@ -358,14 +358,15 @@ static void emit_lines(std::ostringstream& o, const SvgAxesData& d,
             path.x.push_back(d.layout.tr.to_px(sp.x[i]));
             path.y.push_back(d.layout.tr.to_py(sp.y[i]));
         }
+        const float a = lp.opts.color->a * lp.opts.alpha;
         std::ostringstream stroke;
-        stroke << " stroke=\"" << rgb(*lp.opts.color) << "\" stroke-opacity=\"" << lp.opts.alpha
+        stroke << " stroke=\"" << rgb(*lp.opts.color) << "\" stroke-opacity=\"" << a
                << "\" stroke-width=\"" << lp.opts.linewidth << "\"";
 
         // Where the shader bevels a joint SVG would miter, the path is cut there.
         const std::vector<std::size_t> bevels = short_bevels(path, lp.opts.linewidth);
         if (!bevels.empty()) {
-            emit_beveled_stroke(o, path, bevels, rgb(*lp.opts.color), lp.opts.alpha, lp.opts.linewidth,
+            emit_beveled_stroke(o, path, bevels, rgb(*lp.opts.color), a, lp.opts.linewidth,
                                 lp.opts.linestyle);
             continue;
         }
@@ -383,24 +384,27 @@ static void emit_lines(std::ostringstream& o, const SvgAxesData& d,
 // capsize/boxwidth are total pixel lengths; linewidth is the stroke width.
 static void emit_whisker(std::ostringstream& o, float cx, float cy,
                          float lo, float hi, bool vertical,
-                         const ErrorBarOptions& style, const std::string& stroke)
+                         const ErrorBarOptions& style, const std::string& stroke, float opacity)
 {
     whisker_segments(cx, cy, lo, hi, vertical, 1.0, 1.0, style.capsize, style.capstyle,
                      [&](double ax, double ay, double bx, double by) {
         o << "    <line x1=\"" << static_cast<float>(ax) << "\" y1=\"" << static_cast<float>(ay)
           << "\" x2=\"" << static_cast<float>(bx) << "\" y2=\"" << static_cast<float>(by)
-          << "\" stroke=\"" << stroke << "\" stroke-width=\"" << style.linewidth << "\"/>\n";
+          << "\" stroke=\"" << stroke << "\" stroke-opacity=\"" << opacity
+          << "\" stroke-width=\"" << style.linewidth << "\"/>\n";
     });
 }
 
 static void emit_error_bars_for(std::ostringstream& o, const SvgAxesData& d,
                                 const CowVec<double>& xs, const CowVec<double>& ys,
                                 const ErrorBarData& err, const ErrorBarOptions& style,
-                                const Color& fallback)
+                                const Color& fallback, float alpha)
 {
     if (err.empty() || style.linewidth <= 0.0f) return;
     const auto& tr = d.layout.tr;
-    const Color c = style.color.value_or(fallback);
+    // Faded by the series' `alpha`.
+    Color c = style.color.value_or(fallback);
+    c.a *= std::clamp(alpha, 0.0f, 1.0f);
     const std::string stroke = rgb(c);
     const float halfbox = std::max(style.boxwidth, 0.0f) * 0.5f;
     const std::size_t n = std::min(xs.size(), ys.size());
@@ -411,12 +415,12 @@ static void emit_error_bars_for(std::ostringstream& o, const SvgAxesData& d,
         if (err.has_y_cap()) {
             const ErrOffsets e = err.y_cap(i);
             emit_whisker(o, cx, cy, tr.to_py(ys[i] + -e.lo), tr.to_py(ys[i] + e.hi),
-                         true, style, stroke);
+                         true, style, stroke, c.a);
         }
         if (err.has_x_cap()) {
             const ErrOffsets e = err.x_cap(i);
             emit_whisker(o, cx, cy, tr.to_px(xs[i] + -e.lo), tr.to_px(xs[i] + e.hi),
-                         false, style, stroke);
+                         false, style, stroke, c.a);
         }
 
         if (!err.has_y_box() && !err.has_x_box()) continue;
@@ -437,8 +441,8 @@ static void emit_error_bars_for(std::ostringstream& o, const SvgAxesData& d,
         o << "    <rect x=\"" << bx0 << "\" y=\"" << by0
           << "\" width=\"" << (bx1 - bx0) << "\" height=\"" << (by1 - by0)
           << "\" fill=\"" << stroke << "\" fill-opacity=\"" << (c.a * style.box_alpha)
-          << "\" stroke=\"" << stroke << "\" stroke-width=\"" << style.linewidth
-          << "\"/>\n";
+          << "\" stroke=\"" << stroke << "\" stroke-opacity=\"" << c.a
+          << "\" stroke-width=\"" << style.linewidth << "\"/>\n";
     }
 }
 
@@ -447,7 +451,7 @@ static void emit_error_bars(std::ostringstream& o, const SvgAxesData& d, ObjectR
     switch (r.kind) {
         case PlotKind::Line: {
             const auto& lp = d.lines[r.index];
-            emit_error_bars_for(o, d, lp.x, lp.y, lp.err, lp.opts.errorbar, *lp.opts.color);
+            emit_error_bars_for(o, d, lp.x, lp.y, lp.err, lp.opts.errorbar, *lp.opts.color, lp.opts.alpha);
             break;
         }
         case PlotKind::Bar: {
@@ -455,18 +459,18 @@ static void emit_error_bars(std::ostringstream& o, const SvgAxesData& d, ObjectR
             const auto& bp = d.bars[r.index];
             if (bp.err.empty()) break;
             const XYColumns a = bar_anchors(bp);
-            emit_error_bars_for(o, d, a.x, a.y, bp.err, bp.opts.errorbar, bp.opts.edgecolor);
+            emit_error_bars_for(o, d, a.x, a.y, bp.err, bp.opts.errorbar, bp.opts.edgecolor, bp.opts.alpha);
             break;
         }
         case PlotKind::Scatter: {
             const auto& sp = d.scatters[r.index];
-            emit_error_bars_for(o, d, sp.x, sp.y, sp.err, sp.opts.errorbar, *sp.opts.color);
+            emit_error_bars_for(o, d, sp.x, sp.y, sp.err, sp.opts.errorbar, *sp.opts.color, sp.opts.alpha);
             break;
         }
         case PlotKind::ScatterZ: {
             // scatter_z has no single color, so black (as in the raster path).
             const auto& sp = d.scatter_z[r.index];
-            emit_error_bars_for(o, d, sp.x, sp.y, sp.err, sp.opts.errorbar, Color::Black);
+            emit_error_bars_for(o, d, sp.x, sp.y, sp.err, sp.opts.errorbar, Color::Black, sp.opts.alpha);
             break;
         }
         default: break;
@@ -524,16 +528,18 @@ static void emit_scatter(std::ostringstream& o, const SvgAxesData& d,
         const auto& sp = d.scatters[k];
         if (sp.x.empty()) continue;
         const std::string fill = rgb(*sp.opts.color);
-        // Unset edgecolor = the fill's color; its alpha is the color's own times
-        // edge_alpha (not the fill's `alpha`), as on the GPU.
+        // Unset edgecolor = the fill's color; each part's alpha is its color's own
+        // times `alpha`, as on the GPU.
+        const float a = std::clamp(sp.opts.alpha, 0.0f, 1.0f);
         const bool edged = sp.opts.edge_linewidth > 0.0f;
         const Color ec = sp.opts.edgecolor ? *sp.opts.edgecolor : *sp.opts.color;
         const std::string stroke = edged ? rgb(ec) : std::string();
-        const float stroke_alpha = std::clamp(ec.a * sp.opts.edge_alpha, 0.0f, 1.0f);
+        const float stroke_alpha = ec.a * a;
         for (std::size_t i = 0; i < sp.x.size(); ++i) {
             if (marker_hidden(sp, i)) continue;
             emit_scatter_marker(o, d.layout.tr.to_px(sp.x[i]), d.layout.tr.to_py(sp.y[i]),
-                                marker_size_at(sp, i) * 0.5f, fill, sp.opts.alpha, sp.opts.marker,
+                                marker_size_at(sp, i) * 0.5f, fill, sp.opts.color->a * marker_face_alpha(sp.opts),
+                                sp.opts.marker,
                                 stroke, stroke_alpha, sp.opts.edge_linewidth, true);
         }
     }
@@ -559,9 +565,9 @@ static void emit_scatter_z(std::ostringstream& o, const SvgAxesData& d,
             if (sp.opts.edge_linewidth > 0.0f)
                 stroke = sp.opts.edgecolor ? rgb(*sp.opts.edgecolor) : std::string(buf);
             const float stroke_alpha = std::clamp(
-                (sp.opts.edgecolor ? sp.opts.edgecolor->a : 1.0f) * sp.opts.edge_alpha, 0.0f, 1.0f);
+                (sp.opts.edgecolor ? sp.opts.edgecolor->a : 1.0f) * sp.opts.alpha, 0.0f, 1.0f);
             emit_scatter_marker(o, d.layout.tr.to_px(sp.x[i]), d.layout.tr.to_py(sp.y[i]),
-                                r, buf, sp.opts.alpha, sp.opts.marker, stroke, stroke_alpha,
+                                r, buf, marker_face_alpha(sp.opts), sp.opts.marker, stroke, stroke_alpha,
                                 sp.opts.edge_linewidth, true);
         }
     }
@@ -634,7 +640,8 @@ static void emit_bars(std::ostringstream& o, const SvgAxesData& d,
         const auto& bp = d.bars[k];
         const float half = static_cast<float>(bp.bar_width * 0.5);
         const std::string fill  = rgb(*bp.opts.color);
-        const std::string edge  = rgb(bp.opts.edgecolor);
+        const Color ec = bar_edge(bp);
+        const std::string edge  = rgb(ec);
         for (std::size_t i = 0; i < bp.centers.size(); ++i) {
             // Standing: x from the category edges, y from base to tip. Lying: x
             // from base to tip, y from the category edges.
@@ -656,9 +663,10 @@ static void emit_bars(std::ostringstream& o, const SvgAxesData& d,
             }
             o << "    <rect x=\"" << xl << "\" y=\"" << ytop
               << "\" width=\"" << bw << "\" height=\"" << bh
-              << "\" fill=\"" << fill << "\" fill-opacity=\"" << bp.opts.alpha << "\"";
+              << "\" fill=\"" << fill << "\" fill-opacity=\"" << bp.opts.color->a * bp.opts.alpha << "\"";
             if (bp.opts.linewidth > 0.f)
-                o << " stroke=\"" << edge << "\" stroke-width=\"" << bp.opts.linewidth << "\"";
+                o << " stroke=\"" << edge << "\" stroke-opacity=\"" << ec.a
+                  << "\" stroke-width=\"" << bp.opts.linewidth << "\"";
             o << "/>\n";
         }
     }
@@ -808,7 +816,7 @@ static void emit_shape(std::ostringstream& o, const ShapeGeom& g, const Color& c
 template <class Shape>   // PolyPlot, CirclePlot or WedgePlot
 static void emit_shape_of(std::ostringstream& o, const SvgAxesData& d, const Shape& p) {
     emit_shape(o, shape_geometry(p, d.layout.tr), *p.opts.color, p.opts.alpha, p.opts.linewidth, p.opts.linestyle,
-               p.opts.edgecolor.value_or(*p.opts.color));
+               shape_edge(p));
 }
 
 // A quiver as one <polygon> per arrow (quiver_geometry.h, as the raster path),

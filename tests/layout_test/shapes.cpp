@@ -472,7 +472,7 @@ namespace lt {
             c.cy = Pos(7.0);
             c.r = Pos(2.0);
             c.opts.color = blue;
-            c.opts.alpha = 0.5f;
+            c.opts.color->a = 0.5f; // not `alpha`, which would fade the outline too
             c.opts.linewidth = 2.0f;
             c.opts.edgecolor = green;
             c.opts.linestyle = LineStyle::Dashed;

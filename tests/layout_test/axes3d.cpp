@@ -754,9 +754,8 @@ namespace lt {
         FigureSnapshot fs_caged = bar_snapshot(def, true); {
             Bar3DPlot& bp = fs_caged.axes[0].snap3d()->bars3d[0];
             bp.opts.alpha = 0.4f;
-            bp.opts.edgecolor = {0.0f, 0.0f, 0.0f, 1.0f};
-            // Not 0.4: the two opacities must differ to be told apart.
-            bp.opts.edge_alpha = 0.6f;
+            // Edge 0.5 * 0.4 = 0.2: the two opacities must differ to be told apart.
+            bp.opts.edgecolor = {0.0f, 0.0f, 0.0f, 0.5f};
         }
         render(fs_caged, "bar3d_alpha_edges");
         const std::string svg_caged = read_file("bar3d_alpha_edges.svg");
@@ -773,8 +772,8 @@ namespace lt {
                                plan_box3d(bb.proj, *fs_caged.axes[0].snap3d(),
                                           bb.xticks, bb.yticks, bb.zticks).tick_marks.size()),
               "bar3d alpha: a translucent outline reaches the SVG as its own twelve polylines");
-        check(count_of(svg_caged, "stroke-opacity=\"0.6\"") == static_cast<int>(caged_lines),
-              "bar3d alpha: at its own edge_alpha, on every one of them");
+        check(count_of(svg_caged, "stroke-opacity=\"0.2\"") == static_cast<int>(caged_lines),
+              "bar3d alpha: at edgecolor.a * alpha, on every one of them");
         check(count_of(svg_caged, "fill-opacity=\"0.4\"") ==
               static_cast<int>(caged_faces.size() - caged_lines),
               "bar3d alpha: while the faces underneath keep theirs, which is a different number");

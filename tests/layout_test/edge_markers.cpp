@@ -1,6 +1,6 @@
-// Marker outlines: edgecolor / edge_alpha / edge_linewidth on
-// scatter, scatter_z and scatter3d; a hollow marker (alpha 0) with only its
-// outline; Cross and Plus as filled shapes. GPU pixels, SVG, legend keys, and
+// Marker outlines: edgecolor / edge_linewidth / filled on
+// scatter, scatter_z and scatter3d; a hollow marker (filled false) with only its
+// outline; `alpha` fading fill and outline together; Cross and Plus as filled shapes. GPU pixels, SVG, legend keys, and
 // the shared marker_shape(). Part of sextant_layout_test; see layout_test.h.
 #include "layout_test.h"
 #include "renderer/marker_shape.h"
@@ -63,11 +63,13 @@ namespace lt {
         // Hollow with a 3 px outline in the fill's own color: the ring only.
         {
             ScatterOptions o = base();
-            o.alpha = 0.0f;
+            o.filled = false;
             o.edge_linewidth = 3.0f;
             const std::size_t ring = count_near(one(o)->render_rgba(), 0, 0, 255, 60);
-            check(ring > 220 && ring < 480, "alpha 0 + edge_linewidth leaves the ring (in the fill color)");
+            check(ring > 220 && ring < 480, "filled false + edge_linewidth leaves the ring (in the fill color)");
             check(ring < filled / 2, "...and the middle is empty");
+            o.alpha = 0.0f;
+            check(count_near(one(o)->render_rgba(), 0, 0, 255, 60) == 0, "alpha 0 hides the outline too");
         }
 
         // Outline in its own color over the fill, drawn inside the boundary.
@@ -82,15 +84,19 @@ namespace lt {
             check(red + blue < filled + 100, "the outline lies inside the marker's outer boundary");
         }
 
-        // edge_alpha dims the outline independently of the fill's alpha.
+        // The outline's alpha is edgecolor.a times `alpha`.
         {
             ScatterOptions o = base();
-            o.alpha = 0.0f;
+            o.filled = false;
             o.edgecolor = Color{1.0f, 0.0f, 0.0f, 1.0f};
-            o.edge_alpha = 0.5f;
+            o.alpha = 0.5f;
             o.edge_linewidth = 4.0f;
             const std::size_t half = count_near(one(o)->render_rgba(), 255, 128, 128, 25);
-            check(half > 250, "edge_alpha 0.5 over white is a pink ring");
+            check(half > 250, "alpha 0.5 over white is a pink ring");
+            o.alpha = 1.0f;
+            o.edgecolor = Color{1.0f, 0.0f, 0.0f, 0.5f};
+            check(count_near(one(o)->render_rgba(), 255, 128, 128, 25) > 250,
+                  "and so is an edgecolor at alpha 0.5");
         }
 
         // Every shape is a filled region: hollow, each leaves ink but less than
@@ -100,7 +106,7 @@ namespace lt {
             ScatterOptions f = base();
             f.marker = m;
             ScatterOptions h = f;
-            h.alpha = 0.0f;
+            h.filled = false;
             h.edge_linewidth = 2.0f;
             const std::size_t full = count_near(one(f)->render_rgba(), 0, 0, 255, 60);
             const std::size_t ring = count_near(one(h)->render_rgba(), 0, 0, 255, 60);
@@ -128,7 +134,7 @@ namespace lt {
                 f.edgecolor = Color{1.0f, 0.5f, 0.0f, 1.0f};
                 f.edge_linewidth = 4.0f;
                 ax->scatter(x, y1, f);                     // filled, orange outline
-                f.alpha = 0.0f;
+                f.filled = false;
                 f.edgecolor = std::nullopt;
                 ax->scatter(x, y2, f);                     // hollow, own-color outline
             }
@@ -146,7 +152,7 @@ namespace lt {
             ax->set_xlim(0, 10).set_ylim(0, 10);
             ScatterZOptions z;
             z.size = 40.0f;
-            z.alpha = 0.0f;
+            z.filled = false;
             z.edgecolor = Color{1.0f, 0.0f, 0.0f, 1.0f};
             z.edge_linewidth = 3.0f;
             ax->scatter_z(kX, kY, kZ, z);
@@ -159,9 +165,9 @@ namespace lt {
         // --- SVG -------------------------------------------------------------
         {
             ScatterOptions o = base();
-            o.alpha = 0.0f;
+            o.filled = false;
             o.edgecolor = Color{1.0f, 0.0f, 0.0f, 1.0f};
-            o.edge_alpha = 0.5f;
+            o.alpha = 0.5f;
             o.edge_linewidth = 3.0f;
             const std::string svg = one(o)->render_svg().svg;
             check(svg.find("fill-opacity=\"0\"") != std::string::npos &&
@@ -179,7 +185,7 @@ namespace lt {
         {
             ScatterOptions o = base();
             o.name = "pts";
-            o.alpha = 0.0f;
+            o.filled = false;
             o.edgecolor = Color{1.0f, 0.0f, 0.0f, 1.0f};
             o.edge_linewidth = 3.0f;
             const std::string svg = one(o, true)->render_svg().svg;
@@ -193,7 +199,7 @@ namespace lt {
             const std::vector<double> x{0.0, 1.0, 2.0}, y{0.0, 1.0, 0.5}, z{0.0, 1.0, 2.0};
             Scatter3DOptions o;
             o.size = 30.0f;
-            o.alpha = 0.0f;
+            o.filled = false;
             o.edgecolor = Color{1.0f, 0.0f, 0.0f, 1.0f};
             o.edge_linewidth = 3.0f;
             ax->scatter3d(x, y, z, o);
@@ -209,7 +215,7 @@ namespace lt {
             Scatter3DPlot p;
             p.opts.edge_linewidth = 2.0f;
             check(!scatter3d_translucent(p), "scatter3d: an opaque outline keeps the cheap path");
-            p.opts.edge_alpha = 0.4f;
+            p.opts.edgecolor = Color{0.0f, 0.0f, 0.0f, 0.4f};
             check(scatter3d_translucent(p), "scatter3d: a translucent outline takes the composited path");
             p.opts.edge_linewidth = 0.0f;
             check(!scatter3d_translucent(p), "scatter3d: no outline, no effect");

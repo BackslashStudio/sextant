@@ -311,6 +311,9 @@ int main() {
     test_marker_shapes();
     test_marker_sizes();
 
+    // alpha.cpp
+    test_alpha();
+
     // line_steps.cpp
     test_line_steps();
     test_line_steps_rendered();

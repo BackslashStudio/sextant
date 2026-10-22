@@ -76,9 +76,10 @@ namespace sextant {
         // Axes3D::set_color_cycle()). The Data panel shows the color taken.
         std::optional<Color> color;
 
-        // Below 1 bars are translucent and every face is drawn back to front. This
-        // needs per-camera ordering every frame; exactly 1 keeps the cheap
-        // depth-buffer path.
+        // Multiplies the own alpha of `color` and `edgecolor`. Below 1 bars are
+        // translucent and every face is drawn back to front. This needs
+        // per-camera ordering every frame; exactly 1 keeps the cheap depth-buffer
+        // path.
         float alpha = 1.0f;
 
         // Footprint as a fraction of the grid spacing in each direction; 1.0 makes
@@ -94,12 +95,10 @@ namespace sextant {
         float shading = 0.45f;
 
         // Bar outlines. Width is in pixels at the bar's depth (thinner when
-        // distant under perspective). `edge_alpha` is independent of `alpha`, so
-        // outlines stay readable on translucent bars; translucent bars show all
-        // twelve edges.
+        // distant under perspective). Translucent bars show all twelve edges;
+        // for solid outlines on faint bars, lower `color`'s alpha, not `alpha`.
         bool edges = false;
         Color edgecolor = Color::Black;
-        float edge_alpha = 1.0f;
         float edge_linewidth = 1.0f;
 
         // Legend key: a swatch of `color`. Empty draws no key.
@@ -137,8 +136,9 @@ namespace sextant {
         bool show_legend = true; // see LineOptions::show_legend
         bool visible = true;     // see LineOptions::visible
 
-        // Below 1 the surface is translucent. Against other translucent objects
-        // the ordering is a heuristic.
+        // Multiplies the own alpha of `color` and `edgecolor`. Below 1 the surface
+        // is translucent. Against other translucent objects the ordering is a
+        // heuristic.
         float alpha = 1.0f;
 
         // Per-cell flat shading from bar3d's box-space light. 0 = flat, 1 = unlit
@@ -149,7 +149,6 @@ namespace sextant {
         // and thins with distance.
         bool edges = false;
         Color edgecolor = Color::Black;
-        float edge_alpha = 1.0f;
         float edge_linewidth = 1.0f;
 
         // Optional hover text per sample (not per cell), below the default
@@ -185,8 +184,9 @@ namespace sextant {
         bool show_legend = true; // see LineOptions::show_legend
         bool visible = true;     // see LineOptions::visible
 
-        // Below 1 the mesh is translucent. A mesh can occlude itself; depth
-        // peeling resolves that exactly, the sorted fallback approximately.
+        // Multiplies the own alpha of `color` and `edgecolor`. Below 1 the mesh is
+        // translucent. A mesh can occlude itself; depth peeling resolves that
+        // exactly, the sorted fallback approximately.
         float alpha = 1.0f;
 
         // Per-face flat shading, as SurfaceOptions::shading. Two-sided (|n.l|) and
@@ -197,7 +197,6 @@ namespace sextant {
         // Width is in pixels at the box centre and thins with distance.
         bool edges = false;
         Color edgecolor = Color::Black;
-        float edge_alpha = 1.0f;
         float edge_linewidth = 1.0f;
 
         // Optional hover text per vertex, index-aligned with x/y/z, below the
@@ -257,10 +256,9 @@ namespace sextant {
         // Block extent on each axis without box data.
         float boxwidth = 10.0f;
 
-        // Opacity of the block's faces and edges, as fractions of `color`'s alpha.
-        // 0 drops that part.
+        // Opacity of the block's faces as a fraction of `color`'s alpha; 0 drops
+        // them. The whole error bar also takes the series' `alpha`.
         float box_alpha = 0.25f;
-        float edge_alpha = 0.5f;
     };
 
     // Markers at points in the scene: the 3D scatter() and scatter_z() in one. A
@@ -278,15 +276,16 @@ namespace sextant {
         std::vector<double> sizes;
         MarkerStyle marker = MarkerStyle::Circle;
 
-        // Below 1 markers are translucent (the expensive path). Defaults to 1,
-        // unlike ScatterOptions::alpha's 0.8.
+        // Multiplies the own alpha of every color (fill, outline, error bars), as
+        // ScatterOptions::alpha. Below 1 markers are translucent (the expensive
+        // path). Defaults to 1, unlike ScatterOptions::alpha's 0.8.
         float alpha = 1.0f;
+        bool filled = true; // see ScatterOptions::filled
 
         // Marker outline; see ScatterOptions::edgecolor. Unset color = the
         // marker's own fill color. `depthshade` darkens the outline with the fill;
         // a marker with an outline below full alpha takes the translucent path.
         std::optional<Color> edgecolor;
-        float edge_alpha = 1.0f;
         float edge_linewidth = 0.0f;
 
         // Darken markers toward black with distance: `depthshade * t`, t from 0 at
@@ -330,7 +329,8 @@ namespace sextant {
 
         // No `linestyle`: a world-space ribbon has no pixel arc length to dash.
 
-        // Below 1 the path is translucent (the expensive path).
+        // Multiplies `color`'s own alpha, and the error bars'. Below 1 the path
+        // is translucent (the expensive path).
         float alpha = 1.0f;
 
         // Add a closing segment from the last point to the first. No point is

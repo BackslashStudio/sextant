@@ -23,7 +23,7 @@ namespace sextant {
     }
 
     inline float surface_tri_edge_alpha(const SurfaceTriPlot& s) {
-        return std::clamp(s.opts.edgecolor.a * s.opts.edge_alpha, 0.0f, 1.0f);
+        return std::clamp(s.opts.edgecolor.a * s.opts.alpha, 0.0f, 1.0f);
     }
 
     // One face: corners in data space, normal in box space (as SurfaceCell), with

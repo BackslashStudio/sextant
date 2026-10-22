@@ -288,6 +288,14 @@ inline ShapeGeom shape_geometry(const WedgePlot& p, const CoordTransform& tr) {
     return wedge_geometry(p.cx, p.cy, p.r, p.theta1, p.theta2, shape_detail::pos_in(p.inner, p.r.space), tr);
 }
 
+// Any of the three's outline color: `edgecolor`, else the fill's, faded by `alpha`.
+template <class Shape>
+inline Color shape_edge(const Shape& p) {
+    Color c = p.opts.edgecolor.value_or(*p.opts.color);
+    c.a *= std::clamp(p.opts.alpha, 0.0f, 1.0f);
+    return c;
+}
+
 // Is the pixel inside the filled triangles (the hit test).
 inline bool shape_contains(const ShapeGeom& g, float x, float y) {
     using namespace shape_detail;
