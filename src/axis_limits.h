@@ -160,7 +160,7 @@ namespace sextant {
         // Only with shown data: an empty axes keeps its declared 0..1.
         bool has_data = any_shown(snap.bars3d) || any_shown(snap.surfaces) ||
                         any_shown(snap.scatter3d) || any_shown(snap.lines3d) ||
-                        any_shown(snap.surface_tri);
+                        any_shown(snap.surface_tri) || any_shown(snap.quivers3d);
         for (const auto& pl: snap.planes) has_data = has_data || plane_has_data(pl);
         // Origin pins on automatic axes are folded in before padding, as data
         // (as in 2D).
@@ -170,7 +170,8 @@ namespace sextant {
                                                 snap.lines3d, snap.surface_tri, kAutoScalePad,
                                                 {snap.xlim_auto ? st.origin_x : std::nullopt,
                                                  snap.ylim_auto ? st.origin_y : std::nullopt,
-                                                 snap.zlim_auto ? st.origin_z : std::nullopt});
+                                                 snap.zlim_auto ? st.origin_z : std::nullopt},
+                                                snap.quivers3d);
             if (snap.xlim_auto) {
                 xmin = b.xmin;
                 xmax = b.xmax;

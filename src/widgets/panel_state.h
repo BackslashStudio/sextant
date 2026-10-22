@@ -316,6 +316,7 @@ namespace sextant {
         std::vector<Line3DOptions> line3d_local;
         std::vector<SurfaceTriOptions> surface_tri_local;
         std::vector<TextStyle> texts_local;
+        std::vector<Quiver3DOptions> quiver3d_local;
         std::vector<ObjectId> scene_ids;   // seeded from, kind by kind
 
         // The 2D kinds' appearance, for a 2D axes' own sheet and for each plane's

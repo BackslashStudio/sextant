@@ -1854,6 +1854,12 @@ static void emit_box3d(std::ostringstream& o, const SvgAxesData& d, std::size_t 
                 o << " stroke-width=\"" << p.width << "\"/>\n";
                 break;
             }
+            case ScenePaint::Kind::Quiver: {
+                if (s.index >= d.quivers3d.size()) break;
+                const Quiver3DPolygon& p = d.quivers3d[s.index];
+                emit_ring(s.xy.empty() ? p.xy : s.xy, true, p.color, p.color, 0.0f);
+                break;
+            }
             case ScenePaint::Kind::Scatter: {
                 if (s.index >= d.markers3d.size()) break;
                 const Scatter3DMarker& m = d.markers3d[s.index];

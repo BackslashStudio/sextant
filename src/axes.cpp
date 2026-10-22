@@ -922,7 +922,11 @@ void Axes::Impl::ingest_quiver(std::span<const double> x, std::span<const double
                                std::span<const double> u, std::span<const double> v,
                                const std::span<const double>* c, QuiverOptions opts, const char* who) {
     read_back::check_zorder(opts.zorder, who);
-    read_back::check_quiver(x.size(), y.size(), u.size(), v.size(), who);
+    const read_back::QuiverAnchors grid = read_back::quiver_anchors(x, y, u.size(), v.size(), who);
+    if (grid.grid) {
+        x = grid.x;
+        y = grid.y;
+    }
     if (c && c->size() != x.size())
         throw std::invalid_argument(std::string(who) + ": c must have one value per arrow");
     if (c) check_norm(opts.norm, opts.vmin, opts.vmax, who);
@@ -1519,7 +1523,11 @@ void Axes::Impl::set_quiver_data(std::size_t i, std::span<const double> x, std::
                                  std::span<const double> u, std::span<const double> v,
                                  const std::vector<double>* c, const char* who) {
     QuiverPlot& p = read_back::at(quivers, i, who);
-    read_back::check_quiver(x.size(), y.size(), u.size(), v.size(), who);
+    const read_back::QuiverAnchors grid = read_back::quiver_anchors(x, y, u.size(), v.size(), who);
+    if (grid.grid) {
+        x = grid.x;
+        y = grid.y;
+    }
     if (c) read_back::check_quiver_c(c->size(), x.size(), who);
     if (c) p.c = read_back::own(std::span<const double>(*c));
     else if (x.size() != p.x.size()) p.c = CowVec<double>{};

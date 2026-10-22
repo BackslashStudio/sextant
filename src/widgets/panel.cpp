@@ -336,6 +336,9 @@ void sync_scene_objects(DataPanelState& d, const RenderSnapshot3D& sn) {
     for (const auto& m : sn.surface_tri) d.surface_tri_local.push_back(m.opts);
     d.texts_local.clear();
     for (const auto& t : sn.texts) d.texts_local.push_back(t.opts);
+    d.quiver3d_local.clear();
+    d.quiver3d_local.reserve(sn.quivers3d.size());
+    for (const auto& q : sn.quivers3d) d.quiver3d_local.push_back(q.opts);
     d.scene_ids = object_ids(sn, kPlotKinds3D);
 }
 

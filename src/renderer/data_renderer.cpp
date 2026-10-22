@@ -7,6 +7,7 @@
 #include "scatter3d.h"
 #include "line3d.h"
 #include "error_bar3d.h"
+#include "quiver3d.h"
 #include "plane2d.h"
 #include "../line_dash.h"
 #include "../line_steps.h"
@@ -2073,6 +2074,8 @@ void main() {
         if (line3d_cmap_tex_) glDeleteTextures(1, &line3d_cmap_tex_);
         if (line3d_program_) glDeleteProgram(line3d_program_);
         if (peel_line3d_program_) glDeleteProgram(peel_line3d_program_);
+        for (auto& [k, e]: quiver3d_cache_)
+            if (e.vbo) glDeleteBuffers(1, &e.vbo);
         for (auto& [k, e]: errbar3d_cache_) {
             if (e.opaque_vbo) glDeleteBuffers(1, &e.opaque_vbo);
             if (e.trans_vbo) glDeleteBuffers(1, &e.trans_vbo);
@@ -3879,6 +3882,7 @@ void main() {
         draw_scatter3d(snap.scatter3d, proj, pr, win_w, win_h, ScenePass::Opaque);
         draw_lines3d(snap.lines3d, proj, pr, win_w, win_h, ScenePass::Opaque);
         draw_errorbars3d(snap, proj, pr, win_w, win_h, ScenePass::Opaque);
+        draw_quivers3d(snap.quivers3d, proj, pr, win_w, win_h, ScenePass::Opaque);
 
         // ---- Phase 2, first choice: depth peeling (exact per pixel). Declines
         // only if disabled or its targets can't be built.
@@ -3899,12 +3903,14 @@ void main() {
             any_translucent = any_translucent || (object_shown(sc) && errorbar3d_translucent(sc));
         for (const Line3DPlot& ln: snap.lines3d)
             any_translucent = any_translucent || (object_shown(ln) && errorbar3d_translucent(ln));
+        for (const Quiver3DPlot& q: snap.quivers3d)
+            any_translucent = any_translucent || (object_shown(q) && quiver3d_translucent(q));
         if (!any_translucent) return;
         if (peel_translucent3d(snap, proj, pr, win_w, win_h)) return;
 
         // ---- Phase 2 fallback: all translucent objects far to near (exact only
         // for objects separated in depth).
-        enum class Kind { Plane, Bar, Surface, Mesh, Scatter, Line, ErrorBar };
+        enum class Kind { Plane, Bar, Surface, Mesh, Scatter, Line, ErrorBar, Quiver };
         struct Item {
             Kind kind;
             std::size_t index;
@@ -3953,6 +3959,9 @@ void main() {
                     Kind::ErrorBar, snap.scatter3d.size() + i,
                     line3d_plot_distance(snap.lines3d[i], proj)
                 });
+        for (std::size_t i = 0; i < snap.quivers3d.size(); ++i)
+            if (object_shown(snap.quivers3d[i]) && quiver3d_translucent(snap.quivers3d[i]))
+                list.push_back({Kind::Quiver, i, quiver3d_plot_distance(snap.quivers3d[i], proj)});
         if (list.empty()) return;
 
         // Stable, for deterministic frames.
@@ -3994,6 +4003,10 @@ void main() {
                 case Kind::ErrorBar:
                     draw_errorbars3d(snap, proj, pr, win_w, win_h,
                                      ScenePass::Translucent, &run);
+                    break;
+                case Kind::Quiver:
+                    draw_quivers3d(snap.quivers3d, proj, pr, win_w, win_h,
+                                   ScenePass::Translucent, &run);
                     break;
             }
         }
@@ -4241,6 +4254,7 @@ void main() {
             draw_scatter3d(snap.scatter3d, proj, pr, win_w, win_h, ScenePass::Translucent);
             draw_lines3d(snap.lines3d, proj, pr, win_w, win_h, ScenePass::Translucent);
             draw_errorbars3d(snap, proj, pr, win_w, win_h, ScenePass::Translucent);
+            draw_quivers3d(snap.quivers3d, proj, pr, win_w, win_h, ScenePass::Translucent);
             glEndQuery(GL_ANY_SAMPLES_PASSED);
             peel_.active = false;
 
@@ -5863,6 +5877,144 @@ void main() {
                                   reinterpret_cast<void *>(3 * sizeof(float)));
             if (want_translucent && !peel_.active) glDepthMask(GL_FALSE);
             glDrawArrays(GL_TRIANGLES, 0, verts);
+            glDepthMask(GL_TRUE);
+        }
+
+        glBindVertexArray(0);
+        glUseProgram(0);
+        glDisable(GL_DEPTH_TEST);
+        end_pass();
+    }
+
+    // 3D quivers. Arrows face the eye, so the buffer is keyed on the view too
+    // (see Quiver3DCache). One field's arrows never overlap themselves much;
+    // a translucent field's are sorted far to near by centroid when built.
+    void DataRenderer::draw_quivers3d(const std::vector<Quiver3DPlot>& quivers, const Projector3D& proj,
+                                      const PlotRect& pr, float win_w, float win_h, ScenePass pass,
+                                      const std::vector<std::size_t>* explicit_order) {
+        if (quivers.empty()) return;
+        const bool want_translucent = (pass == ScenePass::Translucent);
+
+        std::vector<std::size_t> fields;
+        if (explicit_order) {
+            fields = *explicit_order;
+        } else {
+            for (std::size_t k = 0; k < quivers.size(); ++k)
+                if (object_shown(quivers[k]) && quiver3d_translucent(quivers[k]) == want_translucent)
+                    fields.push_back(k);
+            if (want_translucent && !peel_.active)
+                std::stable_sort(fields.begin(), fields.end(), [&](std::size_t a, std::size_t b) {
+                    return quiver3d_plot_distance(quivers[a], proj) > quiver3d_plot_distance(quivers[b], proj);
+                });
+        }
+        if (fields.empty()) return;
+
+        const std::array<float, 16> clip = proj.clip_matrix(win_w, win_h);
+        const Vec3 eye = proj.has_eye_point() ? proj.eye_point() : proj.eye_dir();
+
+        float dmin = 0.0f, dmax = 1.0f;
+        box_depth_range(proj, dmin, dmax);
+        Vec3 ddir{};
+        float dbase = 0.0f;
+        depth_affine(proj, ddir, dbase);
+        const float dspan = (dmax - dmin) != 0.0f ? 1.0f / (dmax - dmin) : 0.0f;
+
+        begin_pass(pr, win_h);
+        glEnable(GL_DEPTH_TEST);
+        glDepthFunc(GL_LESS);
+        glDepthMask(GL_TRUE);
+
+        const ErrorBar3DUniforms& u = peel_.active ? peel_errbar3d_u_ : errbar3d_u_;
+        glUseProgram(peel_.active ? peel_errbar3d_program_ : errbar3d_program_);
+        glUniformMatrix4fv(u.clip, 1, GL_FALSE, clip.data());
+        glUniform4f(u.depth, static_cast<float>(ddir.x), static_cast<float>(ddir.y),
+                    static_cast<float>(ddir.z), dbase);
+        glBindVertexArray(errbar3d_vao_);
+
+        std::vector<Quiver3DArrow> arrows;
+        std::vector<float> host;
+        for (const std::size_t k: fields) {
+            if (k >= quivers.size() || !object_shown(quivers[k])) continue;
+            const Quiver3DPlot& q = quivers[k];
+            const bool translucent = quiver3d_translucent(q);
+
+            // Everything besides data the triangles depend on (view, style,
+            // colours), compared whole: a panel style edit leaves the data
+            // generation alone.
+            const Quiver3DOptions& o = q.opts;
+            std::vector<double> view;
+            view.reserve(48 + o.norm.bounds.size());
+            for (float v: clip) view.push_back(v);
+            view.insert(view.end(), {
+                            eye.x, eye.y, eye.z,
+                            proj.has_eye_point() ? 1.0 : 0.0,
+                            proj.box_units_per_pixel(Vec3{0.0, 0.0, 0.0}),
+                            translucent ? 1.0 : 0.0,
+                            static_cast<double>(o.color->r), static_cast<double>(o.color->g),
+                            static_cast<double>(o.color->b), static_cast<double>(o.color->a),
+                            static_cast<double>(o.alpha), static_cast<double>(o.cmap.id()), o.cmap.is_reversed() ? 1.0 : 0.0,
+                            static_cast<double>(o.vmin), static_cast<double>(o.vmax),
+                            static_cast<double>(o.norm.kind), static_cast<double>(o.norm.center),
+                            o.amp.value_or(1.0), static_cast<double>(o.pivot),
+                            static_cast<double>(o.width), static_cast<double>(o.head_width),
+                            static_cast<double>(o.head_length)
+                        });
+            view.insert(view.end(), o.norm.bounds.begin(), o.norm.bounds.end());
+
+            const CacheKey key{axes_index_, 0, static_cast<int>(k)};
+            Quiver3DCache& c = quiver3d_cache_[key];
+            const bool stale = data_generation_ == 0 || c.data_generation != data_generation_ || c.view != view;
+            if (stale) {
+                arrows.clear();
+                quiver3d_arrows(proj, q, k, arrows);
+                if (translucent) {
+                    std::vector<std::pair<float, std::size_t>> depth(arrows.size());
+                    for (std::size_t a = 0; a < arrows.size(); ++a) {
+                        Vec3 centre{};
+                        for (int r = 0; r < arrows[a].points; ++r) centre = centre + arrows[a].p[r];
+                        centre = centre * (1.0 / static_cast<double>(arrows[a].points));
+                        depth[a] = {proj.project_box(centre).depth, a};
+                    }
+                    std::stable_sort(depth.begin(), depth.end(),
+                                     [](const auto& a, const auto& b) { return a.first > b.first; });
+                    std::vector<Quiver3DArrow> sorted;
+                    sorted.reserve(arrows.size());
+                    for (const auto& d: depth) sorted.push_back(arrows[d.second]);
+                    arrows.swap(sorted);
+                }
+                host.clear();
+                for (const Quiver3DArrow& a: arrows) {
+                    if (!(a.color.a > 0.0f)) continue;
+                    arrow_triangles(a.points, [&](int i0, int i1, int i2) {
+                        for (int t: {i0, i1, i2})
+                            host.insert(host.end(), {
+                                            static_cast<float>(a.p[t].x), static_cast<float>(a.p[t].y),
+                                            static_cast<float>(a.p[t].z),
+                                            a.color.r, a.color.g, a.color.b, a.color.a
+                                        });
+                    });
+                }
+                c.verts = static_cast<int>(host.size() / 7);
+                if (!host.empty()) {
+                    if (!c.vbo) glGenBuffers(1, &c.vbo);
+                    glBindBuffer(GL_ARRAY_BUFFER, c.vbo);
+                    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(host.size() * sizeof(float)),
+                                 host.data(), GL_DYNAMIC_DRAW);
+                }
+                c.data_generation = data_generation_;
+                c.view = std::move(view);
+            }
+            if (!c.vbo || c.verts <= 0) continue;
+
+            glUniform3f(u.shade, std::clamp(q.opts.depthshade, 0.0f, 1.0f), dmin, dspan);
+            glBindBuffer(GL_ARRAY_BUFFER, c.vbo);
+            const GLsizei stride = static_cast<GLsizei>(7 * sizeof(float));
+            glEnableVertexAttribArray(0);
+            glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride, nullptr);
+            glEnableVertexAttribArray(1);
+            glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, stride, reinterpret_cast<void *>(3 * sizeof(float)));
+            if (want_translucent && !peel_.active) glDepthMask(GL_FALSE);
+            glDrawArrays(GL_TRIANGLES, 0, c.verts);
             glDepthMask(GL_TRUE);
         }
 

@@ -321,6 +321,7 @@ int main() {
     test_color_norm();
     test_boundary_norm();
     test_contour_kind();
+    test_quiver3d();
 
     // line_steps.cpp
     test_line_steps();

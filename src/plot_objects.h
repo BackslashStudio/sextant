@@ -29,10 +29,10 @@ namespace sextant {
 // always addressed at the axes (plane -1). Text is held by both 2D and 3D
 // axes (never by a plane); AxLine and AxSpan by 2D axes only (a plane's sheet
 // holds none); Fill, Quiver, Poly, Circle, Wedge, HeatmapTri and Contour by 2D
-// axes and planes. Append new kinds to keep values stable.
+// axes and planes; Quiver3D by 3D axes. Append new kinds to keep values stable.
 enum class PlotKind { Line, Scatter, Bar, Heatmap, ScatterZ, Bar3D, Surface, Scatter3D, Line3D,
                       SurfaceTri, Text, AxLine, AxSpan, Fill, Quiver, Poly, Circle, Wedge, HeatmapTri,
-                      Contour };
+                      Contour, Quiver3D };
 
 // A plot object's (or a plane's) identity, the public ObjectId
 // (sextant/object_id.h): kept by set_*_data(), unchanged by
@@ -565,6 +565,49 @@ inline void line3d_value_range(const Line3DPlot& l, double& vmin, double& vmax) 
     vmax = hi;
 }
 
+// Axes3D::quiver3d(): an arrow per point; quiver_geometry.h places them and
+// renderer/quiver3d.h shapes them. `c` is empty for a flat field.
+struct Quiver3DPlot {
+    CowVec<double> x, y, z, u, v, w;
+    CowVec<double> c;
+    Quiver3DOptions opts{.color = Color::Blue, .amp = 1.0};
+    unsigned long long data_stamp = 0;
+    ObjectId id = 0;
+
+    std::size_t count() const { return std::min({x.size(), y.size(), z.size(), u.size(), v.size(), w.size()}); }
+    double amp() const { return opts.amp.value_or(1.0); }
+    bool colormapped() const { return !c.empty(); }
+    double color_at(std::size_t i) const { return i < c.size() ? c[i] : 0.0; }
+
+    unsigned long long visible_stamp = 0;
+};
+
+// Colormap range for a quiver3d's `c` under options `o` (the panel passes its
+// own copy): vmin/vmax when they differ, else the finite values' own range
+// (under a log norm, from the smallest above 0).
+inline void quiver3d_value_range(const Quiver3DPlot& q, const Quiver3DOptions& o, double& vmin, double& vmax) {
+    if (o.vmin != o.vmax) {
+        vmin = o.vmin;
+        vmax = o.vmax;
+        return;
+    }
+    const bool log = o.norm.kind == ColorNorm::Kind::Log;
+    double lo =  std::numeric_limits<double>::max();
+    double hi = -std::numeric_limits<double>::max();
+    for (std::size_t i = 0; i < q.c.size(); ++i) {
+        const double c = q.c[i];
+        if (!std::isfinite(c) || (log && !(c > 0.0))) continue;
+        lo = std::min(lo, c);
+        hi = std::max(hi, c);
+    }
+    if (lo > hi) { lo = 0.0; hi = 1.0; }
+    vmin = lo;
+    vmax = hi;
+}
+inline void quiver3d_value_range(const Quiver3DPlot& q, double& vmin, double& vmax) {
+    quiver3d_value_range(q, q.opts, vmin, vmax);
+}
+
 // A text's string and placement, the part a Data-panel op replaces.
 //   2D:  (x, y) the text; with `arrow`, (px, py) the point it points at (data).
 //   3D:  (x, y, z) the data point it is drawn at (x and y in Coords::Data), or
@@ -946,6 +989,7 @@ struct RenderSnapshot3D {
     std::vector<Line3DPlot> lines3d;
     std::vector<SurfaceTriPlot> surface_tri;
     std::vector<TextPlot> texts;
+    std::vector<Quiver3DPlot> quivers3d;
     // In insertion order; draw order is resolved per frame, this only breaks ties.
     std::vector<PlaneSnapshot> planes;
 
@@ -1019,6 +1063,7 @@ inline std::optional<ObjectLocation> to_location(const std::optional<ObjectRef>&
         case PlotKind::Wedge:     k = PickKind::Wedge;     break;
         case PlotKind::HeatmapTri:k = PickKind::HeatmapTri;break;
         case PlotKind::Contour:   k = PickKind::Contour;   break;
+        case PlotKind::Quiver3D:  k = PickKind::Quiver3D;  break;
         case PlotKind::Text: case PlotKind::AxLine: case PlotKind::AxSpan: return std::nullopt;
     }
     return ObjectLocation{ k, r->index };
@@ -1031,7 +1076,8 @@ inline constexpr PlotKind kPlotKinds2D[] = { PlotKind::Line, PlotKind::Scatter, 
                                              PlotKind::Wedge, PlotKind::HeatmapTri, PlotKind::Contour };
 inline constexpr PlotKind kPlotKinds3D[] = { PlotKind::Bar3D, PlotKind::Surface,
                                              PlotKind::Scatter3D, PlotKind::Line3D,
-                                             PlotKind::SurfaceTri, PlotKind::Text };
+                                             PlotKind::SurfaceTri, PlotKind::Text,
+                                             PlotKind::Quiver3D };
 
 // Calls `f` with the vector holding `kind` in a 2D holder (RenderSnapshot,
 // Axes::Impl, a plane's sheet) and returns its result, or `none` for a kind
@@ -1070,6 +1116,7 @@ R with_kind(S& s, PlotKind kind, F&& f, R none) {
         case PlotKind::Line3D:     return f(s.lines3d);
         case PlotKind::SurfaceTri: return f(s.surface_tri);
         case PlotKind::Text:       return f(s.texts);
+        case PlotKind::Quiver3D:   return f(s.quivers3d);
         default:                   return none;
     }
 }
@@ -1153,7 +1200,7 @@ using PlotObject2D = std::variant<LinePlot, ScatterPlot, BarPlot, HeatmapPlot, S
                                   TextPlot, AxLinePlot, AxSpanPlot, FillPlot, QuiverPlot,
                                   PolyPlot, CirclePlot, WedgePlot, HeatmapTriPlot, ContourPlot>;
 using PlotObject3D = std::variant<Bar3DPlot, SurfacePlot, Scatter3DPlot, Line3DPlot,
-                                  SurfaceTriPlot, TextPlot>;
+                                  SurfaceTriPlot, TextPlot, Quiver3DPlot>;
 template <class Object>
 struct RemovedObject {
     std::size_t index = 0;
@@ -1381,12 +1428,13 @@ std::vector<LayerRef> layered_draw_order(std::span<const S* const> layers) {
 inline std::vector<ObjectRef> call_order(const RenderSnapshot3D& s) {
     std::vector<objects_detail::OrderKey> keys;
     keys.reserve(s.bars3d.size() + s.surfaces.size() + s.scatter3d.size() + s.lines3d.size()
-                 + s.surface_tri.size());
+                 + s.surface_tri.size() + s.quivers3d.size());
     objects_detail::add_order_keys(keys, PlotKind::Bar3D, s.bars3d);
     objects_detail::add_order_keys(keys, PlotKind::Surface, s.surfaces);
     objects_detail::add_order_keys(keys, PlotKind::Scatter3D, s.scatter3d);
     objects_detail::add_order_keys(keys, PlotKind::Line3D, s.lines3d);
     objects_detail::add_order_keys(keys, PlotKind::SurfaceTri, s.surface_tri);
+    objects_detail::add_order_keys(keys, PlotKind::Quiver3D, s.quivers3d);
     return objects_detail::sorted_refs(keys);
 }
 
@@ -1635,6 +1683,16 @@ inline std::vector<ColorbarRequest> find_colorbar_requests(const RenderSnapshot3
                 if (!sm.opts.colorbar || !sm.colormapped()) break;
                 surface_tri_value_range(sm, lo, hi);
                 add(sm.opts, lo, hi);
+                break;
+            }
+            case PlotKind::Quiver3D: {
+                // With `c`, over the resolved range; stepped under a boundary norm.
+                const auto& qp = snap.quivers3d[r.index];
+                if (!qp.opts.colorbar || !qp.colormapped()) break;
+                quiver3d_value_range(qp, lo, hi);
+                struct { Colormap cmap; float vmin, vmax; const std::string& name; const ColorNorm& norm; } o{
+                    qp.opts.cmap, static_cast<float>(lo), static_cast<float>(hi), qp.opts.name, qp.opts.norm };
+                reqs.push_back(colorbar_request(o));
                 break;
             }
             default: break;

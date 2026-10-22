@@ -1,5 +1,6 @@
-// Arrow fields: Axes::quiver() and Plane2D::quiver(). The call,
-// read-back, set_quiver_data(), the automatic amp and cla(); the arrows
+// Arrow fields: Axes::quiver() and Plane2D::quiver(). The call (both
+// forms: a point per arrow, and the grid), read-back, set_quiver_data(), the
+// automatic amp and cla(); the arrows
 // (pivots, what is left out, log), their outline and triangles, automatic
 // limits; the Data panel, its cell, row and style edits with undo, the
 // journal's replay; legend keys; hover and pick; planes; GL against SVG.
@@ -137,6 +138,7 @@ namespace lt {
     } // namespace
 
     static void quiver_api_checks();
+    static void quiver_grid_checks();
     static void quiver_geometry_checks();
     static void quiver_limit_checks();
     static void quiver_panel_checks();
@@ -146,6 +148,7 @@ namespace lt {
         std::printf("\n[2D quiver]\n");
         try {
             quiver_api_checks();
+            quiver_grid_checks();
             quiver_geometry_checks();
             quiver_limit_checks();
             quiver_panel_checks();
@@ -164,7 +167,7 @@ namespace lt {
         const QuiverData d = ax->quiver_data(0);
         check(ax->quiver_count() == 1 && d.x == x && d.y == y && d.u == u && d.v == v,
               "call: stores x, y, u and v, read back as given");
-        check(throws_invalid([&] { ax->quiver(x, V{1.0}, u, v); }) &&
+        check(throws_invalid([&] { ax->quiver(x, V{1.0, 2.0}, u, v); }) &&
                   throws_invalid([&] { ax->quiver(x, y, u, V{1.0, 2.0}); }) &&
                   throws_invalid([&] { ax->quiver(x, y, u, v, {.amp = 0.0}); }) &&
                   throws_invalid([&] { ax->quiver(x, y, u, v, {.amp = -1.0}); }) &&
@@ -271,6 +274,82 @@ namespace lt {
     }
 
     // --- Arrows, outline, triangles ----------------------------------------------
+    // --- The grid form: 1D x per column and y per row against u and v per point ---
+    static void quiver_grid_checks() {
+        auto fig = Figure::create();
+        auto ax = fig->add_subplot(1, 1, 1);
+        auto& fi = detail::FigureAccess::impl(*fig);
+        AxesImpl* a = fi.find_slot_impl(1);
+        // 2 columns x 3 rows: u[i * 2 + j] at (x[j], y[i]).
+        const V x{10.0, 20.0}, y{1.0, 2.0, 3.0};
+        const V u{0.0, 1.0, 2.0, 3.0, 4.0, 5.0}, v{5.0, 4.0, 3.0, 2.0, 1.0, 0.5};
+        const V px{10.0, 20.0, 10.0, 20.0, 10.0, 20.0}, py{1.0, 1.0, 2.0, 2.0, 3.0, 3.0};
+        ax->quiver(x, y, u, v);
+        const QuiverData d = ax->quiver_data(0);
+        check(ax->quiver_count() == 1 && d.x == px && d.y == py && d.u == u && d.v == v && d.c.empty(),
+              "grid: u and v one per grid point, row-major, expanded to a point per arrow");
+        ax->quiver(px, py, u, v);
+        check(a->quivers[0].amp() == a->quivers[1].amp() && a->quivers[0].x.get() == a->quivers[1].x.get() &&
+                  a->quivers[0].y.get() == a->quivers[1].y.get(),
+              "grid: the same object as the point form over the expanded points, amp included (" +
+                  std::to_string(a->quivers[0].amp()) + ")");
+        // x and y need no order (any meshgrid).
+        ax->quiver(V{3.0, 1.0, 2.0}, V{5.0, -5.0}, V(6, 1.0), V(6, 0.0), {.amp = 1.0});
+        check(ax->quiver_data(2).x == V({3.0, 1.0, 2.0, 3.0, 1.0, 2.0}) &&
+                  ax->quiver_data(2).y == V({5.0, 5.0, 5.0, -5.0, -5.0, -5.0}),
+              "grid: x and y unordered are taken as given");
+        // c one per grid point.
+        const V c{0.0, 0.2, 0.4, 0.6, 0.8, 1.0};
+        ax->quiver(x, y, u, v, c);
+        check(ax->quiver_data(3).c == c && ax->quiver_data(3).x == px, "grid: c one per grid point, with the arrows");
+        // 1 x 1: both forms at once, the same arrow.
+        ax->quiver(V{1.0}, V{2.0}, V{3.0}, V{4.0}, {.amp = 1.0});
+        check(ax->quiver_data(4).x == V{1.0} && ax->quiver_data(4).y == V{2.0} && ax->quiver_data(4).u == V{3.0},
+              "grid: a 1 x 1 grid is the one arrow");
+        // A row of one: 3 columns x 1 row is the point form only when y matches;
+        // with one y it is a grid.
+        ax->quiver(V{0.0, 1.0, 2.0}, V{7.0}, V(3, 1.0), V(3, 0.0), {.amp = 1.0});
+        check(ax->quiver_data(5).y == V({7.0, 7.0, 7.0}), "grid: one row (y one value) spreads y over the columns");
+
+        std::string msg;
+        try {
+            ax->quiver(x, y, V(5, 1.0), V(5, 1.0));
+        } catch (const std::invalid_argument& e) {
+            msg = e.what();
+        }
+        check(msg.find("x.size() * y.size()") != std::string::npos && msg.find("same length") != std::string::npos,
+              "grid: other lengths throw naming both forms (" + msg + ")");
+        check(throws_invalid([&] { ax->quiver(x, y, u, V(5, 1.0)); }) &&
+                  throws_invalid([&] { ax->quiver(x, y, u, v, V(2, 1.0)); }) &&
+                  throws_invalid([&] { ax->quiver(V{}, y, u, v); }) &&
+                  throws_invalid([&] { ax->quiver(x, V{}, u, v); }) && ax->quiver_count() == 6,
+              "grid: v or c not one per grid point, or an empty x or y, throw and add nothing");
+
+        // set_quiver_data() takes the grid too; the amp stays, c stays while the count holds.
+        const double amp3 = a->quivers[3].amp();
+        ax->set_quiver_data(3, x, y, v, u);
+        check(ax->quiver_data(3).x == px && ax->quiver_data(3).u == v && ax->quiver_data(3).c == c &&
+                  a->quivers[3].amp() == amp3,
+              "set_quiver_data(spans): the grid form, expanded; amp and c kept");
+        ax->set_quiver_data(0, QuiverData{V{0.0, 1.0}, V{4.0}, V{1.0, 1.0}, V{0.0, 0.0}, {}});
+        check(ax->quiver_data(0).y == V({4.0, 4.0}), "set_quiver_data(QuiverData): the grid form too");
+        check(throws_invalid([&] { ax->set_quiver_data(0, x, y, V(4, 1.0), V(4, 1.0)); }) &&
+                  ax->quiver_data(0).y == V({4.0, 4.0}),
+              "set_quiver_data: other lengths throw and change nothing");
+
+        // Planes take it the same way.
+        {
+            auto f3 = Figure::create();
+            auto a3 = f3->add_subplot3d(1, 1, 1);
+            auto pl = a3->plane(PlaneOrientation::XY, 0.5);
+            pl->quiver(x, y, u, v);
+            check(pl->quiver_count() == 1 && pl->quiver_data(0).x == px && pl->quiver_data(0).y == py,
+                  "grid: Plane2D::quiver() expands the grid");
+            pl->set_quiver_data(0, x, y, v, u);
+            check(pl->quiver_data(0).u == v, "grid: Plane2D::set_quiver_data() takes the grid");
+        }
+    }
+
     static void quiver_geometry_checks() {
         // Pivots: the vector times the amp, put down at (x, y) by its tail,
         // middle or tip.

@@ -375,6 +375,7 @@ set(SEXTANT_SOURCES
     src/renderer/scatter3d.cpp
     src/renderer/line3d.cpp
     src/renderer/error_bar3d.cpp
+    src/renderer/quiver3d.cpp
     src/renderer/text_plan.cpp
     src/renderer/painter3d.cpp
     src/output/file_write.cpp
@@ -817,6 +818,7 @@ if(SEXTANT_BUILD_TESTS)
             tests/layout_test/color_norm.cpp
             tests/layout_test/boundary_norm.cpp
             tests/layout_test/contour_kind.cpp
+            tests/layout_test/quiver3d.cpp
             tests/layout_test/marker_shapes.cpp
             tests/layout_test/marker_sizes.cpp
             tests/layout_test/line_steps.cpp

@@ -219,6 +219,18 @@ std::string fmt_line3d(const Line3DPlot& l, std::size_t i) {
     return buf;
 }
 
+// A 3D arrow at its anchor: the point, then the vector (and c).
+std::string fmt_quiver3d(const Quiver3DPlot& q, std::size_t i) {
+    char buf[240];
+    if (q.colormapped() && i < q.c.size())
+        std::snprintf(buf, sizeof(buf), "x=%.4g, y=%.4g, z=%.4g\nu=%.4g, v=%.4g, w=%.4g, c=%.4g", q.x[i], q.y[i],
+                      q.z[i], q.u[i], q.v[i], q.w[i], q.c[i]);
+    else
+        std::snprintf(buf, sizeof(buf), "x=%.4g, y=%.4g, z=%.4g\nu=%.4g, v=%.4g, w=%.4g", q.x[i], q.y[i], q.z[i],
+                      q.u[i], q.v[i], q.w[i]);
+    return buf;
+}
+
 } // namespace
 
 const AxesLayout* find_hint_cell(const std::vector<AxesLayout>& layout,
@@ -525,6 +537,7 @@ ObjectId pick_object_id(const RenderSnapshot3D& s, PickKind kind, std::size_t i)
         case PickKind::SurfaceTri: return s.surface_tri[i].id;
         case PickKind::Scatter3D:  return s.scatter3d[i].id;
         case PickKind::Line3D:     return s.lines3d[i].id;
+        case PickKind::Quiver3D:   return s.quivers3d[i].id;
         default: return 0;
     }
 }
@@ -660,7 +673,7 @@ std::optional<PickHit> find_pick3d(const RenderSnapshot3D& snap, const Projector
     // Nearest surface first, by the depth of the cursor ray's own hit; misses
     // drop out here. `what` says which vector `object` indexes; `element` is
     // the bar index or nearest surface sample (unused for planes).
-    enum class What { Plane, Bar, Surface, Mesh, Marker, Vertex };
+    enum class What { Plane, Bar, Surface, Mesh, Marker, Vertex, Arrow };
     struct Candidate { What what; std::size_t object, element; float depth; };
     std::vector<Candidate> hits;
 
@@ -750,6 +763,23 @@ std::optional<PickHit> find_pick3d(const RenderSnapshot3D& snap, const Projector
         }
     }
 
+    // Every 3D arrow drawn, at its anchor (x, y, z) in screen space. Radius:
+    // half the shaft, at least `radius`.
+    for (std::size_t o = 0; o < snap.quivers3d.size(); ++o) {
+        const Quiver3DPlot& qp = snap.quivers3d[o];
+        if (!object_shown(qp)) continue;
+        const float r = std::max(qp.opts.width * 0.5f, radius);
+        const Transform3D& tf = proj.transform();
+        for_each_quiver3d_arrow(qp, [&](std::size_t i, Vec3, Vec3) {
+            const Vec3 b = tf.to_box(qp.x[i], qp.y[i], qp.z[i]);
+            if (!proj.in_front(b)) return;
+            const Px3 q = proj.project_box(b);
+            const float dx = q.x - cursor_x, dy = q.y - cursor_y;
+            if (dx * dx + dy * dy > r * r) return;
+            hits.push_back({ What::Arrow, o, i, q.depth });
+        });
+    }
+
     std::stable_sort(hits.begin(), hits.end(),
                      [](const Candidate& a, const Candidate& b) { return a.depth < b.depth; });
 
@@ -763,6 +793,7 @@ std::optional<PickHit> find_pick3d(const RenderSnapshot3D& snap, const Projector
                 case What::Surface: hit.kind = PickKind::Surface; break;
                 case What::Mesh:    hit.kind = PickKind::SurfaceTri; break;
                 case What::Marker:  hit.kind = PickKind::Scatter3D; break;
+                case What::Arrow:   hit.kind = PickKind::Quiver3D; break;
                 default:            hit.kind = PickKind::Line3D; break;
             }
             hit.object = c.object;
@@ -815,6 +846,10 @@ std::string format_pick3d(const RenderSnapshot3D& snap, const PickHit& hit) {
         case PickKind::Line3D: {
             const Line3DPlot& l = snap.lines3d[hit.object];
             return append_label(fmt_line3d(l, i), l.opts.hint_labels, i);
+        }
+        case PickKind::Quiver3D: {
+            const Quiver3DPlot& q = snap.quivers3d[hit.object];
+            return append_label(fmt_quiver3d(q, i), q.opts.hint_labels, i);
         }
         default:
             return {};

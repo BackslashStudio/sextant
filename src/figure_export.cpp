@@ -150,12 +150,13 @@ std::string render_figure_svg(const FigureSnapshot& fsnap,
             sd.lines3d         = plan_lines3d(b.proj, s3->lines3d);
             sd.meshes3d        = plan_surface_tri3d(b.proj, s3->surface_tri);
             sd.errbars3d       = plan_errorbars3d(b.proj, s3->scatter3d, s3->lines3d);
+            sd.quivers3d       = plan_quivers3d(b.proj, s3->quivers3d);
             // One order across all kinds by Newell's algorithm with splits;
             // done here because splits must be re-projected.
             PaintOrderStats paint_stats;
             sd.scene3d         = plan_scene3d(b.proj, sd.bars3d, sd.surfaces3d,
                                               sd.planes3d, sd.markers3d, sd.lines3d,
-                                              sd.meshes3d, sd.errbars3d,
+                                              sd.meshes3d, sd.errbars3d, sd.quivers3d,
                                               &paint_stats,
                                               opts.max_tests, opts.max_splits);
             // Bounds are per cell; report the worst cell's counts.

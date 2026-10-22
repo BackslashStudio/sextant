@@ -193,11 +193,36 @@ namespace sextant::read_back {
         return { p.x.get(), p.y1.get(), p.y2.get(), std::move(exclude) };
     }
 
-    // A quiver's four columns, one value each per arrow.
-    inline void check_quiver(std::size_t nx, std::size_t ny, std::size_t nu, std::size_t nv,
-                             const char* who) {
-        if (ny != nx || nu != nx || nv != nx)
-            throw std::invalid_argument(std::string(who) + ": x, y, u and v must have the same length");
+    // A quiver's anchors in one of two forms: x, y, u and v one value each per
+    // arrow; or the grid, matplotlib's 1D X and Y against 2D U and V: x one value
+    // per column, y one per row, u and v row-major, `u[i * cols + j]` at
+    // `(x[j], y[i])`. The grid is expanded into one anchor per arrow (`x`, `y`);
+    // the point form leaves them empty (`grid` false). The two forms agree only
+    // on a 1x1 grid, which is the same arrow either way. Other lengths throw.
+    struct QuiverAnchors {
+        bool grid = false;
+        std::vector<double> x, y;
+    };
+
+    inline QuiverAnchors quiver_anchors(std::span<const double> x, std::span<const double> y,
+                                        std::size_t nu, std::size_t nv, const char* who) {
+        QuiverAnchors a;
+        if (y.size() == x.size() && nu == x.size() && nv == x.size()) return a;
+        if (nv == nu && !x.empty() && !y.empty() && nu / x.size() == y.size() && nu % x.size() == 0) {
+            a.grid = true;
+            a.x.reserve(nu);
+            a.y.reserve(nu);
+            for (const double yi: y)
+                for (const double xj: x) {
+                    a.x.push_back(xj);
+                    a.y.push_back(yi);
+                }
+            return a;
+        }
+        throw std::invalid_argument(std::string(who) + ": x, y, u and v must have the same length, or u and v "
+                                    "one value per grid point (x.size() * y.size()) for x per column and y per "
+                                    "row (got " + std::to_string(x.size()) + ", " + std::to_string(y.size()) + ", "
+                                    + std::to_string(nu) + ", " + std::to_string(nv) + ")");
     }
 
     // A quiver's colour values: none, or one per arrow.
@@ -205,6 +230,10 @@ namespace sextant::read_back {
         if (nc != 0 && nc != n)
             throw std::invalid_argument(std::string(who) + ": c must be empty or one per arrow (got "
                                         + std::to_string(nc) + " for " + std::to_string(n) + " arrows)");
+    }
+
+    inline Quiver3DData to_data(const Quiver3DPlot& p) {
+        return { p.x.get(), p.y.get(), p.z.get(), p.u.get(), p.v.get(), p.w.get(), p.c.get() };
     }
 
     inline QuiverData to_data(const QuiverPlot& p) {

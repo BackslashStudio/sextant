@@ -331,6 +331,26 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot3D& snap
         out.push_back(std::move(t));
     }
 
+    // 3D quivers: each arrow's anchor and vector, then its colour value when
+    // colormapped (one row per arrow).
+    for (std::size_t i = 0; i < snap.quivers3d.size(); ++i) {
+        const auto& qp = snap.quivers3d[i];
+        PlotDataTable t;
+        t.kind = PlotKind::Quiver3D;
+        t.plot_index = static_cast<int>(i);
+        t.data_stamp = qp.data_stamp;
+        t.id = qp.id;
+        t.label = pick_label(qp.opts.name, "quiver3d", static_cast<int>(i));
+        t.columns.push_back({"x", qp.x.data(), qp.x.size()});
+        t.columns.push_back({"y", qp.y.data(), qp.y.size()});
+        t.columns.push_back({"z", qp.z.data(), qp.z.size()});
+        t.columns.push_back({"u", qp.u.data(), qp.u.size()});
+        t.columns.push_back({"v", qp.v.data(), qp.v.size()});
+        t.columns.push_back({"w", qp.w.data(), qp.w.size()});
+        if (qp.colormapped()) t.columns.push_back({"c", qp.c.data(), qp.c.size()});
+        out.push_back(std::move(t));
+    }
+
     // Meshes: one row per vertex, as clouds; topology rides along in `mesh`.
     for (std::size_t i = 0; i < snap.surface_tri.size(); ++i) {
         const auto& sm = snap.surface_tri[i];

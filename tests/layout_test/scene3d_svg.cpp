@@ -96,7 +96,7 @@ namespace lt {
             const std::vector<Surface3DPolygon> sp = plan_surfaces3d(pj, s->surfaces);
             const std::vector<PlanePlanItem> pp = plan_planes3d(pj, s->planes);
             PaintOrderStats st;
-            const std::vector<ScenePaint> scene = plan_scene3d(pj, bp, sp, pp, {}, {}, {}, {}, &st);
+            const std::vector<ScenePaint> scene = plan_scene3d(pj, bp, sp, pp, {}, {}, {}, {}, {}, &st);
 
             std::vector<Emitted> em;
             em.reserve(scene.size());
@@ -287,7 +287,7 @@ namespace lt {
             const FigureLayout lay = compute_figure_layout(fs, W, H);
             const Projector3D& pj = lay.cells[0].box3d->proj;
             PaintOrderStats st;
-            plan_scene3d(pj, {}, plan_surfaces3d(pj, s->surfaces), {}, {}, {}, {}, {}, &st);
+            plan_scene3d(pj, {}, plan_surfaces3d(pj, s->surfaces), {}, {}, {}, {}, {}, {}, &st);
             std::printf("  lone smooth sheet %zu polys -> %zu, %zu splits\n",
                         st.input, st.output, st.splits);
             bool newell_on = true;
@@ -389,7 +389,7 @@ namespace lt {
             check(counts_ok, std::string(what) + ": every grid edge is emitted exactly once");
 
             PaintOrderStats st;
-            const std::vector<ScenePaint> scene = plan_scene3d(pj, bp, sp, {}, {}, {}, {}, {}, &st);
+            const std::vector<ScenePaint> scene = plan_scene3d(pj, bp, sp, {}, {}, {}, {}, {}, {}, &st);
 
             // Every emitted polygon, with its parent's plane.
             struct Poly {
@@ -559,7 +559,7 @@ namespace lt {
             const FigureLayout lay = compute_figure_layout(fs, W, H);
             const Projector3D& pj = lay.cells[0].box3d->proj;
             PaintOrderStats st;
-            plan_scene3d(pj, {}, plan_surfaces3d(pj, s->surfaces), {}, {}, {}, {}, {}, &st);
+            plan_scene3d(pj, {}, plan_surfaces3d(pj, s->surfaces), {}, {}, {}, {}, {}, {}, &st);
             std::printf("  lone wired sheet %zu polys -> %zu, %zu splits\n",
                         st.input, st.output, st.splits);
             bool newell_on = true;
@@ -938,7 +938,7 @@ namespace lt {
             const std::vector<Surface3DPolygon> splan = plan_surfaces3d(pj, s->surfaces);
             const std::vector<PlanePlanItem> pplan = plan_planes3d(pj, s->planes);
             PaintOrderStats st;
-            const std::vector<ScenePaint> scene = plan_scene3d(pj, bplan, splan, pplan, {}, {}, {}, {}, &st);
+            const std::vector<ScenePaint> scene = plan_scene3d(pj, bplan, splan, pplan, {}, {}, {}, {}, {}, &st);
             std::printf("  plane through a grid: %zu polys in, %zu out, %zu splits, %zu tests\n",
                         st.input, st.output, st.splits, st.tests);
             check(!st.bailed, "newell: the plane-through-a-grid scene stays inside the work bound");

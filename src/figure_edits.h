@@ -390,6 +390,7 @@ struct AxesEdit3D {
     using Scatter3DEdit  = ObjectEdit<Scatter3DOptions>;
     using Line3DEdit     = ObjectEdit<Line3DOptions>;
     using SurfaceTriEdit = ObjectEdit<SurfaceTriOptions>;
+    using Quiver3DEdit   = ObjectEdit<Quiver3DOptions>;
     // A text's look (its content is a TextDataEdit in plot_ops).
     using TextEdit       = ObjectEdit<TextStyle>;
     std::vector<Bar3DEdit>     bars3d;
@@ -398,6 +399,7 @@ struct AxesEdit3D {
     std::vector<Line3DEdit>    lines3d;
     std::vector<SurfaceTriEdit> surface_tri;
     std::vector<TextEdit>      texts;
+    std::vector<Quiver3DEdit>  quivers3d;
 
     // Data panel ops, appended in order.
     std::vector<PlotDataOp> plot_ops;
@@ -459,7 +461,7 @@ inline bool is_navigation_only(const FigureEdits& f) {
             || e.colorbar_opts || e.box_style || e.aspect || !e.planes.empty()
             || !e.bars3d.empty() || !e.surfaces.empty() || !e.scatter3d.empty()
             || !e.lines3d.empty() || !e.surface_tri.empty() || !e.texts.empty()
-            || !e.plot_ops.empty() || !e.plot_styles.empty())
+            || !e.quivers3d.empty() || !e.plot_ops.empty() || !e.plot_styles.empty())
             return false;
     }
     return true;
@@ -650,6 +652,7 @@ std::optional<PlotDataOp> apply_plot_data_op(T& t, const PlotCellEdit& e) {
         case PlotKind::Scatter3D:
         case PlotKind::Line3D:
         case PlotKind::SurfaceTri:
+        case PlotKind::Quiver3D:
             // 3D-native; see apply_axes3d_data_op().
             return std::nullopt;
         case PlotKind::Text:
@@ -972,6 +975,7 @@ std::optional<PlotDataOp> apply_plot_data_op(T& t, const PlotRowEdit& e) {
         case PlotKind::Scatter3D:
         case PlotKind::Line3D:
         case PlotKind::SurfaceTri:
+        case PlotKind::Quiver3D:
             // 3D-native; see apply_axes3d_data_op().
             return std::nullopt;
         case PlotKind::Text:
@@ -1193,6 +1197,20 @@ std::optional<PlotDataOp> apply_axes3d_data_op(T& t, const PlotCellEdit& e) {
     if (e.kind == PlotKind::Line3D)    return cell(t.lines3d, op_target(t.lines3d, e), xyzc);
     if (e.kind == PlotKind::SurfaceTri)
         return cell(t.surface_tri, op_target(t.surface_tri, e), xyzc);
+    // Quiver3D: x, y, z, u, v, w, then c (empty for a flat field).
+    if (e.kind == PlotKind::Quiver3D)
+        return cell(t.quivers3d, op_target(t.quivers3d, e), [&e](auto& q) -> CowVec<double>* {
+            switch (e.column) {
+                case 0: return &q.x;
+                case 1: return &q.y;
+                case 2: return &q.z;
+                case 3: return &q.u;
+                case 4: return &q.v;
+                case 5: return &q.w;
+                case 6: return &q.c;
+                default: return nullptr;
+            }
+        });
     return std::nullopt;
 }
 
@@ -1584,6 +1602,7 @@ void apply_axes3d_edit(T& dst, const AxesEdit3D& e, AxesEdit3D* inv = nullptr) {
     objects(dst.lines3d, e.lines3d, inv ? &inv->lines3d : nullptr);
     objects(dst.surface_tri, e.surface_tri, inv ? &inv->surface_tri : nullptr);
     objects(dst.texts, e.texts, inv ? &inv->texts : nullptr);
+    objects(dst.quivers3d, e.quivers3d, inv ? &inv->quivers3d : nullptr);
     apply_plot_data_ops(dst, e.plot_ops, inv ? &inv->plot_ops : nullptr);
 }
 
@@ -1671,6 +1690,7 @@ void merge_style_edits(E& dst, const E& src) {
         for (const auto& o : src.lines3d)     upsert(dst.lines3d, o, by_object);
         for (const auto& o : src.surface_tri) upsert(dst.surface_tri, o, by_object);
         for (const auto& o : src.texts)       upsert(dst.texts, o, by_object);
+        for (const auto& o : src.quivers3d)   upsert(dst.quivers3d, o, by_object);
     }
 }
 
@@ -1685,7 +1705,8 @@ bool style_edits_empty(const E& e) {
     if constexpr (requires { e.box_style; })
         empty = empty && !e.zticks_override && !e.box_style && e.planes.empty()
                 && e.bars3d.empty() && e.surfaces.empty() && e.scatter3d.empty()
-                && e.lines3d.empty() && e.surface_tri.empty() && e.texts.empty();
+                && e.lines3d.empty() && e.surface_tri.empty() && e.texts.empty()
+                && e.quivers3d.empty();
     return empty;
 }
 
@@ -1830,6 +1851,7 @@ void compose_axes_inverse(E& older, const E& newer) {
         edits_detail::compose_entries(older.lines3d, newer.lines3d, by_object);
         edits_detail::compose_entries(older.surface_tri, newer.surface_tri, by_object);
         edits_detail::compose_entries(older.texts, newer.texts, by_object);
+        edits_detail::compose_entries(older.quivers3d, newer.quivers3d, by_object);
     }
 }
 

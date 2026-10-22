@@ -40,7 +40,8 @@ namespace sextant {
         Fill,                                                 // 2D (fill(), stack()), appended
         Poly, Circle, Wedge,                                  // 2D (shape_poly(), shape_circle(), shape_wedge()), appended
         HeatmapTri,                                           // 2D (heatmap_tri()), appended
-        Contour                                               // 2D (contour(), contourf()), appended
+        Contour,                                              // 2D (contour(), contourf()), appended
+        Quiver3D                                              // 3D (Axes3D::quiver3d()), appended
     };
 
     // Where an object is now: its kind and its index within the kind, the `i` of

@@ -122,6 +122,13 @@ private:
                           const PlotRect& pr, float win_w, float win_h, ScenePass pass,
                           const std::vector<std::size_t>* order = nullptr);
 
+    // 3D quivers as quiver3d_arrows() triangles, through the error-bar
+    // programs. Opaque pass: opaque fields; translucent pass: the rest, arrows
+    // far to near when unpeeled.
+    void draw_quivers3d(const std::vector<Quiver3DPlot>& quivers, const Projector3D& proj,
+                        const PlotRect& pr, float win_w, float win_h, ScenePass pass,
+                        const std::vector<std::size_t>* order = nullptr);
+
     // Common per-draw GL state for the data pass (see begin_pass() in the .cpp).
     void begin_pass(const PlotRect& pr, float win_h) const;
     void end_pass() const;
@@ -495,6 +502,17 @@ private:
         std::vector<double> view;
     };
     std::unordered_map<CacheKey, ErrorBar3DCache, CacheKeyHash> errbar3d_cache_;
+
+    // One 3D quiver's arrows as box-space triangles (pos, colour), keyed on
+    // the view as ErrorBar3DCache (arrows face the eye); the translucent
+    // buffer is sorted far to near when built.
+    struct Quiver3DCache {
+        unsigned int        vbo = 0;
+        int                 verts = 0;
+        unsigned long long  data_generation = 0;
+        std::vector<double> view;
+    };
+    std::unordered_map<CacheKey, Quiver3DCache, CacheKeyHash> quiver3d_cache_;
 
     // Traced contours (see contour.h); CPU only.
     ContourCache contour_cache_;

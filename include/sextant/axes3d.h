@@ -362,6 +362,64 @@ namespace sextant {
         std::vector<std::string> hint_labels;
     };
 
+    // An arrow field in the scene: the 3D quiver() (Axes3D::quiver3d()).
+    struct Quiver3DOptions {
+        // Unset: see SurfaceTriOptions::color. With a `c` per arrow each arrow is
+        // its c through cmap/vmin/vmax/norm instead, `color` is unused, and the
+        // cycle is not advanced (as QuiverOptions::color).
+        std::optional<Color> color;
+
+        // Multiplies the colour's own alpha. Below 1 the arrows are translucent
+        // (the expensive path).
+        float alpha = 1.0f;
+
+        // Colormap for `c`; read only by the overload that takes it.
+        Colormap cmap = Colormap::Viridis;
+
+        // Colormap range. Equal (default) means the arrows' own c range (under
+        // log, from the smallest c above 0).
+        float vmin = 0.0f, vmax = 0.0f;
+
+        // See ColorNorm; over the resolved range. Under log an arrow with c <= 0
+        // is not drawn, under boundaries one outside them.
+        ColorNorm norm;
+
+        // A colorbar for the mapped colours (only with `c`); `name` labels it.
+        bool colorbar = false;
+
+        // Data units of arrow per unit of vector, as QuiverOptions::amp: an arrow
+        // runs from (x, y, z) to (x, y, z) + amp * (u, v, w), so it points along
+        // (u, v, w) only where one unit is as long on every axis (see
+        // BoxAspect). Unset = chosen at the call from the data, as 2D's (the x
+        // extent of the anchors, else y, else z, over the mean 3D length) and
+        // kept.
+        std::optional<double> amp;
+        QuiverPivot pivot = QuiverPivot::Tail;
+
+        // The arrow's shape in pixels at the box centre (converted once to box
+        // lengths, as Line3DOptions::linewidth): a shaft `width` wide, then a
+        // triangular head `head_length` long and `head_width` across. An arrow
+        // shorter than its head is all head, scaled down to its length. The
+        // arrow is flat and turned to face the eye, so one pointing straight at
+        // the eye draws nothing.
+        float width = 2.0f;
+        float head_width = 7.0f;
+        float head_length = 8.0f;
+
+        // Darken toward black with distance, as Scatter3DOptions::depthshade.
+        float depthshade = 0.0f;
+
+        // Legend key: an arrow in `color`, or for a `c` field white with a black
+        // edge (the colorbar explains the colours).
+        std::string name;
+        bool show_legend = true; // see LineOptions::show_legend
+        bool visible = true;     // see LineOptions::visible
+
+        // Optional hover text per arrow, below the default
+        // "x=.., y=.., z=..\nu=.., v=.., w=.." (plus ", c=.." with `c`).
+        std::vector<std::string> hint_labels;
+    };
+
     // The box's own furniture; axis annotation is AxesStyle, shared with 2D.
     struct Box3DStyle {
         bool panes = true;
@@ -407,6 +465,12 @@ namespace sextant {
         std::vector<double> x, y, z;
         // Empty for a flat path.
         std::vector<double> colors;
+    };
+
+    struct Quiver3DData {
+        std::vector<double> x, y, z, u, v, w;
+        // Empty for a flat field.
+        std::vector<double> c;
     };
 
     // Axes3D::text(), text2d() and annotate(): the string and where it is.
@@ -826,6 +890,25 @@ namespace sextant {
                        std::span<const double> z, std::span<const double> colors,
                        const ErrorBar3D& err, Line3DOptions opts = {});
 
+        // An arrow per point (matplotlib's 3D quiver): from (x, y, z) along
+        // (u, v, w) times Quiver3DOptions::amp, in data units, shifted by
+        // Quiver3DOptions::pivot. One value each per arrow, else
+        // std::invalid_argument; so is a norm that doesn't fit the resolved
+        // range (with `c`). An arrow with a NaN or a zero vector is not drawn.
+        // Automatic limits take both ends of every arrow drawn. Hovered at
+        // (x, y, z).
+        Axes3D& quiver3d(std::span<const double> x, std::span<const double> y,
+                         std::span<const double> z, std::span<const double> u,
+                         std::span<const double> v, std::span<const double> w,
+                         Quiver3DOptions opts = {});
+
+        // The same, each arrow coloured by its value in `c` (one per arrow)
+        // through cmap/vmin/vmax/norm. An arrow whose c is NaN is not drawn.
+        Axes3D& quiver3d(std::span<const double> x, std::span<const double> y,
+                         std::span<const double> z, std::span<const double> u,
+                         std::span<const double> v, std::span<const double> w,
+                         std::span<const double> c, Quiver3DOptions opts = {});
+
         // A 2D plane spanning the two axes `orient` names, at `offset` (data units)
         // along the third. Returns the plane for drawing on:
         //
@@ -989,6 +1072,9 @@ namespace sextant {
         std::size_t line3d_count() const;
         Line3DData line3d_data(std::size_t i) const;
 
+        std::size_t quiver3d_count() const;
+        Quiver3DData quiver3d_data(std::size_t i) const;
+
         // text(), text2d() and annotate() alike.
         std::size_t text_count() const;
         Text3DData text_data(std::size_t i) const;
@@ -1051,6 +1137,16 @@ namespace sextant {
                                 std::span<const double> y, std::span<const double> z,
                                 std::span<const double> colors);
 
+        // A 3D quiver's arrows, validated as quiver3d(). The amp stays; `c`
+        // follows Quiver3DData::c (the span overload keeps it while the count
+        // holds).
+        Axes3D& set_quiver3d_data(std::size_t i, const Quiver3DData& data);
+
+        Axes3D& set_quiver3d_data(std::size_t i, std::span<const double> x,
+                                  std::span<const double> y, std::span<const double> z,
+                                  std::span<const double> u, std::span<const double> v,
+                                  std::span<const double> w);
+
         // A text's string and placement, which may turn it into any of the
         // three (setting `arrow` on a text gives it default ArrowOptions).
         // Throws std::invalid_argument for a non-finite number, or `arrow` with
@@ -1080,6 +1176,9 @@ namespace sextant {
 
         Axes3D& set_line3d_visible(std::size_t i, bool visible);
         bool line3d_visible(std::size_t i) const;
+
+        Axes3D& set_quiver3d_visible(std::size_t i, bool visible);
+        bool quiver3d_visible(std::size_t i) const;
 
         Axes3D& set_text_visible(std::size_t i, bool visible);
         bool text_visible(std::size_t i) const;

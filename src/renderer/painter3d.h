@@ -7,6 +7,7 @@
 #include "scatter3d.h"
 #include "line3d.h"
 #include "error_bar3d.h"
+#include "quiver3d.h"
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -26,7 +27,7 @@ namespace sextant {
 
         // Provenance (kind, object, element): finds the payload after a split and
         // makes the order checkable.
-        enum class Kind { Plane, Bar, Surface, Scatter, Line, Mesh, ErrorBar };
+        enum class Kind { Plane, Bar, Surface, Scatter, Line, Mesh, ErrorBar, Quiver };
 
         Kind kind = Kind::Bar;
         std::size_t object = 0; // index within its kind
@@ -106,7 +107,7 @@ namespace sextant {
     // a projector, so it happens here in the plan layer; the SVG writer receives an
     // order plus the pixels of split pieces.
     struct ScenePaint {
-        enum class Kind { Bar, Surface, Plane, Scatter, Line, Mesh, ErrorBar };
+        enum class Kind { Bar, Surface, Plane, Scatter, Line, Mesh, ErrorBar, Quiver };
 
         Kind kind = Kind::Bar;
 
@@ -129,6 +130,7 @@ namespace sextant {
                                          const std::vector<Line3DSegment>& segments,
                                          const std::vector<SurfaceTriPolygon>& meshes,
                                          const std::vector<ErrorBar3DPolygon>& errbars,
+                                         const std::vector<Quiver3DPolygon>& quivers,
                                          PaintOrderStats* stats = nullptr,
                                          std::size_t max_work = 0,
                                          std::size_t max_splits = 0);

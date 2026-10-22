@@ -115,6 +115,7 @@ inline void stamp_edit(AxesEdit3D& e, const RenderSnapshot3D& s) {
     objects(e.lines3d, PlotKind::Line3D);
     objects(e.surface_tri, PlotKind::SurfaceTri);
     objects(e.texts, PlotKind::Text);
+    objects(e.quivers3d, PlotKind::Quiver3D);
 }
 
 // The stamps a push site records itself (titles, limits, the camera), from

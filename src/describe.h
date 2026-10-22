@@ -172,6 +172,10 @@ namespace sextant {
     SEXTANT_DESCRIBE(Line3DOptions,
                      F(color) F(linewidth) F(alpha) F(loop) F(depthshade) F(cmap) F(vmin) F(vmax)
                      F(colorbar) F(name) F(show_legend) F(visible) F(errorbar) F(hint_labels))
+    SEXTANT_DESCRIBE(Quiver3DOptions,
+                     F(color) F(alpha) F(cmap) F(vmin) F(vmax) F(norm) F(colorbar) F(amp) F(pivot) F(width)
+                     F(head_width) F(head_length) F(depthshade) F(name) F(show_legend) F(visible)
+                     F(hint_labels))
     SEXTANT_DESCRIBE(Box3DStyle, F(panes) F(pane_color) F(pane_edge_color) F(margin))
 
 #undef F

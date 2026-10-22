@@ -256,8 +256,9 @@ struct Axes::Impl {
                        std::span<const double> y2, const std::vector<bool>* exclude,
                        const char* who);
 
-    // quiver() for Axes and Plane2D: x, y, u and v one value each per arrow,
-    // `c` (null = flat) one per arrow too; an unset amp is resolved here
+    // quiver() for Axes and Plane2D: x, y, u and v one value each per arrow, or
+    // the grid form (read_back::quiver_anchors(), expanded here), `c` (null =
+    // flat) one per arrow too; an unset amp is resolved here
     // (quiver_auto_amp()). set_quiver_data() keeps the amp; `c` the new values
     // (QuiverData, empty = flat), or null to keep them while the count holds.
     void ingest_quiver(std::span<const double> x, std::span<const double> y,

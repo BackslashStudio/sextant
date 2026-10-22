@@ -102,7 +102,7 @@ namespace sextant {
 
     // `pins` (origin pins, per box axis) are folded in before padding, like data.
     // Heatmaps on planes are not padded along their plane's two axes; see
-    // AutoAxis.
+    // AutoAxis. `quivers` last, so callers without one leave it out.
     inline DataBounds3D auto_scale3d(const std::vector<Bar3DPlot>& bars,
                                      const std::vector<PlaneSnapshot>& planes,
                                      const std::vector<SurfacePlot>& surfaces,
@@ -110,7 +110,8 @@ namespace sextant {
                                      const std::vector<Line3DPlot>& lines,
                                      const std::vector<SurfaceTriPlot>& meshes,
                                      double pad = kAutoScalePad,
-                                     const std::array<std::optional<double>, 3>& pins = {}) {
+                                     const std::array<std::optional<double>, 3>& pins = {},
+                                     const std::vector<Quiver3DPlot>& quivers = {}) {
         double lo[3] = {
             std::numeric_limits<double>::max(),
             std::numeric_limits<double>::max(),
@@ -225,6 +226,19 @@ namespace sextant {
                 lo[2] = std::min(lo[2], m.z[i]);
                 hi[2] = std::max(hi[2], m.z[i]);
             }
+        }
+
+        // A 3D quiver: both ends of every arrow drawn (its width and head depend
+        // on the box, so they are not included).
+        for (const Quiver3DPlot& q: quivers) {
+            if (!object_shown(q)) continue;
+            for_each_quiver3d_arrow(q, [&](std::size_t, Vec3 t, Vec3 h) {
+                const double tv[3] = {t.x, t.y, t.z}, hv[3] = {h.x, h.y, h.z};
+                for (int a = 0; a < 3; ++a) {
+                    lo[a] = std::min({lo[a], tv[a], hv[a]});
+                    hi[a] = std::max({hi[a], tv[a], hv[a]});
+                }
+            });
         }
 
         AutoAxis axes[3];

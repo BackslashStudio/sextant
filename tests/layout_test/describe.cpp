@@ -271,7 +271,7 @@ namespace lt {
         STRUCT(FigureOptions) STRUCT(SvgExportOptions) STRUCT(PngExportOptions)
         STRUCT(Camera3D) STRUCT(Plane2DOptions) STRUCT(Bar3DOptions) STRUCT(SurfaceOptions)
         STRUCT(SurfaceTriOptions) STRUCT(ErrorBar3DOptions) STRUCT(Scatter3DOptions)
-        STRUCT(Line3DOptions) STRUCT(Box3DStyle)
+        STRUCT(Line3DOptions) STRUCT(Quiver3DOptions) STRUCT(Box3DStyle)
 #undef STRUCT
 
 #define ENUM(E) check_enum<E>(#E);

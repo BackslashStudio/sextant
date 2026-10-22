@@ -946,18 +946,20 @@ namespace sextant {
         // one seeds six even boundaries over vmin..vmax; the list is text,
         // applied on Enter, kept when it isn't usable). One that doesn't fit
         // draws as linear, which a note says.
+        // `lo`..`hi`: the range the norm works over (vmin/vmax, or a 3D
+        // field's resolved range when they are equal).
         template<class O, class Push>
-        void norm_rows(const char* id, O& o, Push& push) {
+        void norm_rows(const char* id, O& o, Push& push, double lo_range, double hi_range) {
             field_row("Norm");
             static const char* kNorms[] = {"linear", "log", "two-slope", "boundaries"};
             int k = static_cast<int>(o.norm.kind);
             ImGui::PushID(id);
             if (ImGui::Combo("##norm", &k, kNorms, IM_ARRAYSIZE(kNorms))) {
                 o.norm.kind = static_cast<ColorNorm::Kind>(k);
-                if (o.norm.kind == ColorNorm::Kind::TwoSlope && !norm_fits(o.norm, o.vmin, o.vmax))
-                    o.norm.center = 0.5f * (o.vmin + o.vmax);
+                if (o.norm.kind == ColorNorm::Kind::TwoSlope && !norm_fits(o.norm, lo_range, hi_range))
+                    o.norm.center = 0.5f * static_cast<float>(lo_range + hi_range);
                 if (o.norm.kind == ColorNorm::Kind::Boundaries && !norm_bounds_ok(o.norm.bounds)) {
-                    double lo = std::min(o.vmin, o.vmax), hi = std::max(o.vmin, o.vmax);
+                    double lo = std::min(lo_range, hi_range), hi = std::max(lo_range, hi_range);
                     if (!(hi > lo)) hi = lo + 1.0;
                     o.norm.bounds.resize(6);
                     for (int i = 0; i < 6; ++i) o.norm.bounds[static_cast<std::size_t>(i)] = lo + (hi - lo) * i / 5.0;
@@ -986,13 +988,17 @@ namespace sextant {
                 field_row("");
                 ImGui::TextDisabled("vmin/vmax unused");
             }
-            if (!norm_fits(o.norm, o.vmin, o.vmax)) {
+            if (!norm_fits(o.norm, lo_range, hi_range)) {
                 field_row("");
                 ImGui::TextDisabled(o.norm.kind == ColorNorm::Kind::Log          ? "needs vmin, vmax > 0: drawn linear"
                                     : o.norm.kind == ColorNorm::Kind::Boundaries ? "bounds not usable: drawn linear"
                                                                                  : "centre not inside: drawn linear");
             }
             ImGui::PopID();
+        }
+        template<class O, class Push>
+        void norm_rows(const char* id, O& o, Push& push) {
+            norm_rows(id, o, push, o.vmin, o.vmax);
         }
 
         template<class Push>
@@ -1194,9 +1200,10 @@ namespace sextant {
         }
 
         // A quiver's amp is always set (resolved at the call); kept > 0. A
-        // colormapped one (`p` has c) shows its map instead of the color.
-        template<class Push>
-        void quiver_style(DataPanelState& st, QuiverOptions& o, const QuiverPlot& p, Push&& push) {
+        // colormapped one (`p` has c) shows its map instead of the color. 2D
+        // (QuiverOptions) and 3D (Quiver3DOptions) alike.
+        template<class O, class P, class Push>
+        void quiver_style(DataPanelState& st, O& o, const P& p, Push&& push) {
             name_and_key(st, o, push);
             if (p.colormapped() && ImGui::Checkbox("Colorbar##qcb", &o.colorbar)) push();
             if (begin_field_table("quiver")) {
@@ -1207,7 +1214,13 @@ namespace sextant {
                     if (drag_float("##qvmin", &o.vmin, -FLT_MAX, FLT_MAX, 0.01f, "%.4g")) push();
                     field_row("vmax");
                     if (drag_float("##qvmax", &o.vmax, -FLT_MAX, FLT_MAX, 0.01f, "%.4g")) push();
-                    norm_rows("qn", o, push);
+                    if constexpr (std::is_same_v<P, Quiver3DPlot>) {
+                        double lo = 0.0, hi = 1.0;
+                        quiver3d_value_range(p, o, lo, hi);
+                        norm_rows("qn", o, push, lo, hi);
+                    } else {
+                        norm_rows("qn", o, push);
+                    }
                 } else {
                     field_row("Color");
                     if (color_swatch("##qcol", *o.color)) push();
@@ -1796,6 +1809,36 @@ namespace sextant {
             ImGui::Separator();
         }
 
+        // A 3D quiver's appearance: the 2D quiver's block, then the depth shade.
+        // `p` is the snapshot's field (null: nothing to show).
+        void draw_quiver3d_appearance(DataPanelState& st, FigureEditBox& edit_box, int idx, int qi,
+                                      const Quiver3DPlot* p) {
+            if (qi < 0 || qi >= static_cast<int>(st.quiver3d_local.size()) || !p) return;
+            if (!section("Appearance", true)) return;
+            Quiver3DOptions& o = st.quiver3d_local[static_cast<std::size_t>(qi)];
+            auto push_field = [&] {
+                edit_box.update3d(idx, [&](AxesEdit3D& e) {
+                    for (auto& qe: e.quivers3d)
+                        if (qe.plot_index == qi) {
+                            qe.opts = o;
+                            return;
+                        }
+                    e.quivers3d.push_back({qi, o});
+                });
+            };
+            visible_toggle(o.visible, push_field);
+            quiver_style(st, o, *p, push_field);
+            if (begin_field_table("quiver3d")) {
+                field_row("Depth shade");
+                if (drag_float("##qshade", &o.depthshade, 0.0f, 1.0f, 0.005f, "%.2f")) push_field();
+                end_field_table();
+            }
+            if (p->colormapped() && o.vmin == o.vmax)
+                ImGui::TextDisabled("vmin == vmax: coloured over the arrows' own range.");
+            ImGui::TextDisabled("Sizes are pixels at the box centre; thinner with distance.");
+            ImGui::Separator();
+        }
+
         // A mesh's appearance: as a surface without "Colour by height" (a mesh is
         // colormapped by having `colors`); vmin/vmax always shown.
         void draw_surface_tri_appearance(DataPanelState& st, FigureEditBox& edit_box,
@@ -2344,7 +2387,7 @@ namespace sextant {
         const RenderSnapshot3D* cur3d = cur->snap3d();
         if (cur3d && cur3d->planes.empty() && cur3d->bars3d.empty() && cur3d->surfaces.empty()
             && cur3d->scatter3d.empty() && cur3d->lines3d.empty()
-            && cur3d->surface_tri.empty() && cur3d->texts.empty()) {
+            && cur3d->surface_tri.empty() && cur3d->texts.empty() && cur3d->quivers3d.empty()) {
             ImGui::TextDisabled("3D axes: no plot data.");
             return;
         }
@@ -2454,6 +2497,9 @@ namespace sextant {
                                                cur3d ? obj(cur3d->lines3d) : nullptr);
                     else if (t.kind == PlotKind::SurfaceTri)
                         draw_surface_tri_appearance(st, edit_box, idx, t.plot_index);
+                    else if (t.kind == PlotKind::Quiver3D)
+                        draw_quiver3d_appearance(st, edit_box, idx, t.plot_index,
+                                                 cur3d ? obj(cur3d->quivers3d) : nullptr);
                     else {
                         // A 2D kind on an axes or a plane; the sheet carries its
                         // options.

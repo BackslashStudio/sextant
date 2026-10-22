@@ -533,7 +533,7 @@ namespace lt {
             const std::vector<SurfaceTriPolygon> mplan = plan_surface_tri3d(pj, s->surface_tri);
             PaintOrderStats st;
             const std::vector<ScenePaint> scene =
-                    plan_scene3d(pj, {}, splan, {}, {}, {}, mplan, {}, &st);
+                    plan_scene3d(pj, {}, splan, {}, {}, {}, mplan, {}, {}, &st);
 
             check(mplan.size() == 6,
                   "surface_tri/svg: every face of the mesh is planned, and only the faces");

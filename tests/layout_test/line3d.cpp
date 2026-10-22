@@ -579,7 +579,7 @@ namespace lt {
             const std::vector<Line3DSegment> lplan = plan_lines3d(pj, s->lines3d);
             PaintOrderStats st;
             const std::vector<ScenePaint> scene =
-                    plan_scene3d(pj, {}, splan, {}, {}, lplan, {}, {}, &st);
+                    plan_scene3d(pj, {}, splan, {}, {}, lplan, {}, {}, {}, &st);
 
             check(lplan.size() == 8,
                   "line3d/svg: every segment of the path is planned, and only the segments");

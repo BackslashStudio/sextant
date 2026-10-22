@@ -130,6 +130,34 @@ namespace sextant {
             return colors.empty() ? CowVec<double>{}
                                   : CowVec<double>(std::vector<double>(colors.begin(), colors.end()));
         }
+
+        // quiver3d(): the six columns one value each per arrow (NaN allowed: that
+        // arrow is not drawn).
+        void check_quiver3d(const char* who, std::span<const double> x, std::span<const double> y,
+                            std::span<const double> z, std::span<const double> u,
+                            std::span<const double> v, std::span<const double> w) {
+            const std::size_t n = x.size();
+            if (y.size() != n || z.size() != n || u.size() != n || v.size() != n || w.size() != n)
+                throw std::invalid_argument(std::string(who) + ": x, y, z, u, v and w must have the same length");
+        }
+
+        // A quiver3d's new arrows, validated as quiver3d(). `c`: the new values
+        // (empty = flat), or null to keep them while the count holds. The amp stays.
+        void set_quiver3d(Quiver3DPlot& p, std::span<const double> x, std::span<const double> y,
+                          std::span<const double> z, std::span<const double> u, std::span<const double> v,
+                          std::span<const double> w, const std::vector<double>* c, const char* who) {
+            check_quiver3d(who, x, y, z, u, v, w);
+            if (c) read_back::check_quiver_c(c->size(), x.size(), who);
+            if (c) p.c = read_back::own(std::span<const double>(*c));
+            else if (x.size() != p.count()) p.c = CowVec<double>{};
+            read_back::keep_aligned(p, x.size() == p.count());
+            p.x = read_back::own(x);
+            p.y = read_back::own(y);
+            p.z = read_back::own(z);
+            p.u = read_back::own(u);
+            p.v = read_back::own(v);
+            p.w = read_back::own(w);
+        }
     } // namespace
 
     Axes3D& Axes3D::bar3d(PlaneOrientation orient,
@@ -383,6 +411,61 @@ namespace sextant {
         l.data_stamp = next_snapshot_generation();
         l.id = d->new_id();
         d->lines3d.push_back(std::move(l));
+        return *this;
+    }
+
+    // An unset amp is chosen from the data here and kept, as 2D's. A colormapped
+    // field keeps a cycle color without using one up.
+    void Axes3D::Impl::ingest_quiver3d(std::span<const double> x, std::span<const double> y,
+                                       std::span<const double> z, std::span<const double> u,
+                                       std::span<const double> v, std::span<const double> w,
+                                       const std::span<const double>* c, Quiver3DOptions opts,
+                                       const char* who) {
+        check_quiver3d(who, x, y, z, u, v, w);
+        if (c && c->size() != x.size())
+            throw std::invalid_argument(std::string(who) + ": c must have one value per arrow");
+        if (!std::isfinite(opts.vmin) || !std::isfinite(opts.vmax))
+            throw std::invalid_argument(std::string(who) + ": vmin and vmax must be finite");
+        if (opts.amp && !(std::isfinite(*opts.amp) && *opts.amp > 0.0))
+            throw std::invalid_argument(std::string(who) + ": amp must be finite and > 0");
+        Quiver3DPlot q;
+        q.x = read_back::own(x);
+        q.y = read_back::own(y);
+        q.z = read_back::own(z);
+        q.u = read_back::own(u);
+        q.v = read_back::own(v);
+        q.w = read_back::own(w);
+        if (c) {
+            q.c = read_back::own(*c);
+            q.opts.norm = opts.norm;
+            q.opts.vmin = opts.vmin;
+            q.opts.vmax = opts.vmax;
+            double lo = 0.0, hi = 1.0;
+            quiver3d_value_range(q, lo, hi);
+            check_norm(opts.norm, lo, hi, who);
+        }
+        if (!opts.amp) opts.amp = quiver3d_auto_amp(x, y, z, u, v, w);
+        warn_math(mathtext, who, opts.name);
+        cycle->resolve(opts.color, !c);
+        q.opts = std::move(opts);
+        q.data_stamp = next_snapshot_generation();
+        q.id = new_id();
+        quivers3d.push_back(std::move(q));
+    }
+
+    Axes3D& Axes3D::quiver3d(std::span<const double> x, std::span<const double> y,
+                             std::span<const double> z, std::span<const double> u,
+                             std::span<const double> v, std::span<const double> w,
+                             Quiver3DOptions opts) {
+        d->ingest_quiver3d(x, y, z, u, v, w, nullptr, std::move(opts), "Axes3D::quiver3d");
+        return *this;
+    }
+
+    Axes3D& Axes3D::quiver3d(std::span<const double> x, std::span<const double> y,
+                             std::span<const double> z, std::span<const double> u,
+                             std::span<const double> v, std::span<const double> w,
+                             std::span<const double> c, Quiver3DOptions opts) {
+        d->ingest_quiver3d(x, y, z, u, v, w, &c, std::move(opts), "Axes3D::quiver3d");
         return *this;
     }
 
@@ -661,6 +744,7 @@ namespace sextant {
     std::size_t Axes3D::surface_tri_count() const { return d->surface_tri.size(); }
     std::size_t Axes3D::scatter3d_count() const   { return d->scatter3d.size(); }
     std::size_t Axes3D::line3d_count() const      { return d->lines3d.size(); }
+    std::size_t Axes3D::quiver3d_count() const    { return d->quivers3d.size(); }
 
     Bar3DData Axes3D::bar3d_data(std::size_t i) const {
         return read_back::to_data(read_back::at(d->bars3d, i, "bar3d_data"));
@@ -676,6 +760,9 @@ namespace sextant {
     }
     Line3DData Axes3D::line3d_data(std::size_t i) const {
         return read_back::to_data(read_back::at(d->lines3d, i, "line3d_data"));
+    }
+    Quiver3DData Axes3D::quiver3d_data(std::size_t i) const {
+        return read_back::to_data(read_back::at(d->quivers3d, i, "quiver3d_data"));
     }
 
     std::size_t Axes3D::text_count() const { return d->texts.size(); }
@@ -826,6 +913,20 @@ namespace sextant {
         return set_line3d_data(i, v.x, v.y, v.z, v.colors);
     }
 
+    Axes3D& Axes3D::set_quiver3d_data(std::size_t i, const Quiver3DData& data) {
+        const char* who = "Axes3D::set_quiver3d_data";
+        set_quiver3d(read_back::at(d->quivers3d, i, who), data.x, data.y, data.z, data.u, data.v, data.w,
+                     &data.c, who);
+        return *this;
+    }
+    Axes3D& Axes3D::set_quiver3d_data(std::size_t i, std::span<const double> x, std::span<const double> y,
+                                      std::span<const double> z, std::span<const double> u,
+                                      std::span<const double> v, std::span<const double> w) {
+        const char* who = "Axes3D::set_quiver3d_data";
+        set_quiver3d(read_back::at(d->quivers3d, i, who), x, y, z, u, v, w, nullptr, who);
+        return *this;
+    }
+
     // --- Hiding plot objects ------------------------------------------------
 
     Axes3D& Axes3D::set_bar3d_visible(std::size_t i, bool visible) {
@@ -848,6 +949,10 @@ namespace sextant {
         read_back::set_visible(d->lines3d, i, visible, "Axes3D::set_line3d_visible");
         return *this;
     }
+    Axes3D& Axes3D::set_quiver3d_visible(std::size_t i, bool visible) {
+        read_back::set_visible(d->quivers3d, i, visible, "Axes3D::set_quiver3d_visible");
+        return *this;
+    }
     Axes3D& Axes3D::set_text_visible(std::size_t i, bool visible) {
         read_back::set_visible(d->texts, i, visible, "Axes3D::set_text_visible");
         return *this;
@@ -867,6 +972,9 @@ namespace sextant {
     }
     bool Axes3D::line3d_visible(std::size_t i) const {
         return read_back::visible(d->lines3d, i, "Axes3D::line3d_visible");
+    }
+    bool Axes3D::quiver3d_visible(std::size_t i) const {
+        return read_back::visible(d->quivers3d, i, "Axes3D::quiver3d_visible");
     }
     bool Axes3D::text_visible(std::size_t i) const {
         return read_back::visible(d->texts, i, "Axes3D::text_visible");

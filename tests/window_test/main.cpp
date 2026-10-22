@@ -2285,7 +2285,7 @@ static void part_stack() {
 // three pivots, explicit amp and shape over a heatmap, a log axis, a plane
 // colored by speed. Hover shows x, y, u, v (and c); the Data panel edits the
 // arrows, their c and their appearance.
-static void test_quiver() {
+static void part_quiver2d() {
     using V = std::vector<double>;
     auto fig = sextant::Figure::create({.width = 1500, .height = 900, .title = "Arrow fields"});
     fig->suptitle("Arrow fields (Axes::quiver, Plane2D::quiver)");
@@ -2385,6 +2385,147 @@ static void test_quiver() {
     fig->show(true);
 }
 
+// v1.3 stage 3f: quiver()'s grid form (1D x and y against u and v per grid
+// point, row-major) and Axes3D::quiver3d(): flat arrows turned to face the eye,
+// sized in pixels at the box centre (a far arrow is thinner under
+// perspective). Hover shows x, y, z, u, v, w (and c); the Data panel edits the
+// arrows and their appearance (amp, pivot, shape, depth shade, norm).
+static void part_quiver_grid3d() {
+    using V = std::vector<double>;
+    using sextant::Color;
+    auto fig = sextant::Figure::create({.width = 1500, .height = 900, .title = "Arrow fields: grid form and 3D"});
+    fig->suptitle("quiver(x, y, U, V) grid form; Axes3D::quiver3d");
+
+    // A saddle (x, -y) from 1D x (12 columns) and y (9 rows).
+    auto a1 = fig->add_subplot(2, 3, 1);
+    {
+        V x, y, u, v;
+        for (int j = 0; j < 12; ++j) x.push_back(-2.0 + 4.0 * j / 11.0);
+        for (int i = 0; i < 9; ++i) y.push_back(-1.5 + 3.0 * i / 8.0);
+        for (int i = 0; i < 9; ++i)
+            for (int j = 0; j < 12; ++j) {
+                u.push_back(x[static_cast<std::size_t>(j)]);
+                v.push_back(-y[static_cast<std::size_t>(i)]);
+            }
+        a1->quiver(x, y, u, v, {.name = "saddle (x, -y)"});
+        a1->set_aspect(1.0);
+        a1->legend();
+        a1->set_title("grid form: x (12) per column, y (9) per row, u and v 9 x 12");
+    }
+
+    // Tangents along a helix, perspective, with depth shade.
+    auto a2 = fig->add_subplot3d(2, 3, 2);
+    {
+        V x, y, z, u, v, w;
+        for (int k = 0; k < 36; ++k) {
+            const double t = 4.0 * 3.14159265358979 * k / 35.0;
+            x.push_back(std::cos(t));
+            y.push_back(std::sin(t));
+            z.push_back(t / 6.0);
+            u.push_back(-std::sin(t));
+            v.push_back(std::cos(t));
+            w.push_back(1.0 / 6.0);
+        }
+        a2->line3d(x, y, z, {.color = Color{0.6f, 0.6f, 0.6f, 1.0f}, .linewidth = 1.0f, .name = "helix"});
+        a2->quiver3d(x, y, z, u, v, w, {.amp = 0.45, .depthshade = 0.6f, .name = "tangent"});
+        a2->set_projection(sextant::Projection::Perspective);
+        a2->legend();
+        a2->set_title("tangents on a helix: perspective, depth shade 0.6");
+    }
+
+    // A vortex rising in z, coloured by speed.
+    auto a3 = fig->add_subplot3d(2, 3, 3);
+    {
+        V x, y, z, u, v, w, c;
+        for (int k = 0; k < 3; ++k)
+            for (int i = 0; i < 5; ++i)
+                for (int j = 0; j < 5; ++j) {
+                    const double px = -1.0 + 0.5 * j, py = -1.0 + 0.5 * i, pz = 0.5 * k;
+                    x.push_back(px);
+                    y.push_back(py);
+                    z.push_back(pz);
+                    u.push_back(-py);
+                    v.push_back(px);
+                    w.push_back(0.3 + 0.3 * pz);
+                    c.push_back(std::sqrt(px * px + py * py + w.back() * w.back()));
+                }
+        a3->quiver3d(x, y, z, u, v, w, c, {.cmap = sextant::Colormap::Plasma, .colorbar = true, .amp = 0.3, .name = "speed"});
+        a3->set_title("c = speed through plasma over its own range, amp 0.3");
+    }
+
+    // Pivots: the same vectors by tail, middle and tip, the anchors in black.
+    auto a4 = fig->add_subplot3d(2, 3, 4);
+    {
+        const V px{0, 1, 2, 3}, pu{0.0, 0.5, 0.5, 0.0}, pv{0.0, 0.0, 0.5, 0.5}, pw{0.8, 0.6, 0.4, 0.8};
+        const std::pair<sextant::QuiverPivot, const char*> pivots[] = {
+            {sextant::QuiverPivot::Tail, "Tail"}, {sextant::QuiverPivot::Middle, "Middle"},
+            {sextant::QuiverPivot::Tip, "Tip"}};
+        for (int k = 0; k < 3; ++k) {
+            const V py(px.size(), 1.5 * k), pz(px.size(), 0.0);
+            a4->quiver3d(px, py, pz, pu, pv, pw, {.amp = 1.0, .pivot = pivots[k].first, .name = pivots[k].second});
+            a4->scatter3d(px, py, pz, {.color = Color::Black, .size = 6.0f, .show_legend = false});
+        }
+        a4->legend();
+        a4->set_title("pivot: Tail, Middle, Tip (anchors in black)");
+    }
+
+    // Normals of a bump, translucent, over its surface.
+    auto a5 = fig->add_subplot3d(2, 3, 5);
+    {
+        const int n = 21;
+        V g, h;
+        for (int i = 0; i < n; ++i) g.push_back(-2.0 + 4.0 * i / (n - 1));
+        for (int i = 0; i < n; ++i)
+            for (int j = 0; j < n; ++j) h.push_back(std::exp(-(g[i] * g[i] + g[j] * g[j])));
+        a5->surface(sextant::PlaneOrientation::XY, g, g, h,
+                    {.colormap = true, .cmap = sextant::Colormap::Viridis, .alpha = 0.85f});
+        V x, y, z, u, v, w;
+        for (int i = 0; i < n; i += 2)
+            for (int j = 0; j < n; j += 2) {
+                const double px = g[i], py = g[j], e = std::exp(-(px * px + py * py));
+                x.push_back(px);
+                y.push_back(py);
+                z.push_back(e);
+                u.push_back(2.0 * px * e);
+                v.push_back(2.0 * py * e);
+                w.push_back(1.0);
+            }
+        a5->quiver3d(x, y, z, u, v, w, {.color = Color{0.85f, 0.1f, 0.1f, 1.0f}, .alpha = 0.6f, .amp = 0.35,
+                                        .width = 1.5f, .head_width = 5.0f, .head_length = 6.0f, .name = "normal"});
+        a5->legend();
+        a5->set_title("normals over the surface: alpha 0.6, thin arrows");
+    }
+
+    // A boundary norm: radial arrows banded by length, orthographic.
+    auto a6 = fig->add_subplot3d(2, 3, 6);
+    {
+        V x, y, z, u, v, w, c;
+        for (int k = 0; k < 40; ++k) {
+            const double t = 2.0 * 3.14159265358979 * k / 40.0, r = 0.3 + 1.7 * k / 39.0;
+            x.push_back(0.0);
+            y.push_back(0.0);
+            z.push_back(0.05 * k);
+            u.push_back(r * std::cos(t));
+            v.push_back(r * std::sin(t));
+            w.push_back(0.0);
+            c.push_back(r);
+        }
+        a6->quiver3d(x, y, z, u, v, w, c,
+                     {.cmap = sextant::Colormap::Viridis, .norm = sextant::ColorNorm::boundaries({0.0, 0.5, 1.0, 1.5, 2.0}),
+                      .colorbar = true, .amp = 1.0, .name = "length"});
+        a6->set_projection(sextant::Projection::Orthographic);
+        a6->set_title("boundary norm on length: stepped colorbar, orthographic");
+    }
+
+    savefig_and_check_memory(fig, "test_quiver_3d");
+    fig->show(true);
+}
+
+static void test_quiver() {
+    part_quiver2d();
+    part_quiver_grid3d();
+}
+
 // -------------------------------------------------------------------------
 // Interactive events. Click, scroll, press keys and resize the window;
 // each event is printed on this thread (the one blocked in wait_closed()). The
@@ -2399,7 +2540,8 @@ static void test_events() {
     const char* kinds[] = {"close", "down", "up", "move", "scroll", "key-down", "key-up", "resize", "pick"};
     const char* pick_names[] = {"none", "line", "scatter", "scatter_z", "bar", "heatmap",
                                 "bar3d", "surface", "surface_tri", "scatter3d", "line3d",
-                                "quiver", "fill"};
+                                "quiver", "fill", "poly", "circle", "wedge", "heatmap_tri", "contour",
+                                "quiver3d"};
 
     auto fig = sextant::Figure::create({.width = 1350, .height = 450, .title = "events"});
     constexpr int N = 60;
@@ -3494,9 +3636,9 @@ int main() {
     // test_line();
     // test_scatter();
     // test_bar();
-    test_heatmap();
+    // test_heatmap();
     // test_fill();
-    // test_quiver();
+    test_quiver();
     // test_bar3d();
     // test_surface();
     // test_surface_tri();

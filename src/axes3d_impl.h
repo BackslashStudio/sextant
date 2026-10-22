@@ -20,6 +20,7 @@ namespace sextant {
         std::vector<Line3DPlot> lines3d;
         std::vector<SurfaceTriPlot> surface_tri;
         std::vector<TextPlot> texts;
+        std::vector<Quiver3DPlot> quivers3d;
 
         // The figure's FigureOptions::mathtext, set when the figure makes this
         // axes; only warn_math() reads it (drawing reads the snapshot's).
@@ -117,6 +118,13 @@ namespace sextant {
             return i;
         }
 
+        // quiver3d(), both forms: `c` null = flat. Resolves an unset amp
+        // (quiver3d_auto_amp()).
+        void ingest_quiver3d(std::span<const double> x, std::span<const double> y,
+                             std::span<const double> z, std::span<const double> u,
+                             std::span<const double> v, std::span<const double> w,
+                             const std::span<const double>* c, Quiver3DOptions opts, const char* who);
+
         // Text, as Axes::Impl's. Throw on a non-finite number.
         void ingest_text(TextContent c, TextStyle style, const char* who);
         void set_text_data(std::size_t i, TextContent c, const char* who);
@@ -129,6 +137,7 @@ namespace sextant {
             s.lines3d = lines3d;
             s.surface_tri = surface_tri;
             s.texts = texts;
+            s.quivers3d = quivers3d;
             s.planes.reserve(planes.size());
             for (const auto& p: planes) s.planes.push_back(p->d->build_snapshot());
             s.title = title;

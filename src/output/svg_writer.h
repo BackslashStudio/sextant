@@ -75,8 +75,10 @@ namespace sextant {
         std::vector<Scatter3DMarker> markers3d;
         // line3d segments as strokes (plan_lines3d(); see Line3DSegment),
         std::vector<Line3DSegment> lines3d;
-        // and error bars (plan_errorbars3d()).
+        // error bars (plan_errorbars3d()),
         std::vector<ErrorBar3DPolygon> errbars3d;
+        // and 3D quiver arrows, a polygon per convex piece (plan_quivers3d()).
+        std::vector<Quiver3DPolygon> quivers3d;
         // Emission order from Newell's algorithm, plus the pixels of split
         // polygons. Empty = fall back to the whole-object depth interleave.
         std::vector<ScenePaint> scene3d;

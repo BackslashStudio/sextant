@@ -506,7 +506,7 @@ namespace lt {
             const std::vector<Surface3DPolygon> splan = plan_surfaces3d(pj, s->surfaces);
             const std::vector<Scatter3DMarker> mplan = plan_scatter3d(pj, s->scatter3d);
             PaintOrderStats st;
-            const std::vector<ScenePaint> scene = plan_scene3d(pj, {}, splan, {}, mplan, {}, {}, {}, &st);
+            const std::vector<ScenePaint> scene = plan_scene3d(pj, {}, splan, {}, mplan, {}, {}, {}, {}, &st);
 
             check(mplan.size() == 50,
                   "scatter3d/svg: every point of the cloud is planned as a marker");

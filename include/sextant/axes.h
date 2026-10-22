@@ -225,7 +225,12 @@ namespace sextant {
         // An arrow per point (matplotlib's quiver with angles='xy' and
         // scale_units='xy'): from (x, y) along (u, v) times QuiverOptions::amp,
         // in data units, shifted by QuiverOptions::pivot. One value each per
-        // arrow, any other lengths throw std::invalid_argument. An arrow with a
+        // arrow; or the grid form, matplotlib's 1D X and Y against 2D U and V: x
+        // one value per column, y one per row, and u, v (and c) row-major, one
+        // per grid point, `u[i * x.size() + j]` at `(x[j], y[i])`, taken when u's
+        // length is x.size() * y.size() rather than x's (stored as one point per
+        // arrow, which quiver_data() reads back). Any other lengths throw
+        // std::invalid_argument. An arrow with a
         // NaN, a zero vector, or an end at or below 0 on a log axis is not drawn.
         // The arrow is sized in pixels across (QuiverOptions::width and the head)
         // and in data units along, so it points the way the data does only at
@@ -587,7 +592,7 @@ namespace sextant {
         Axes& set_contour_data(std::size_t i, std::span<const double> x, std::span<const double> y,
                                std::span<const double> z);
 
-        // A quiver's arrows, validated as quiver(). The amp stays; `c` follows
+        // A quiver's arrows, validated as quiver() (the grid form too). The amp stays; `c` follows
         // QuiverData::c (the span overload keeps it while the count holds).
         Axes& set_quiver_data(std::size_t i, const QuiverData& data);
 

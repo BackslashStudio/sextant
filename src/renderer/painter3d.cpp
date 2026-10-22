@@ -674,7 +674,8 @@ std::vector<ScenePaint> whole_object_order(const std::vector<Bar3DPolygon>& bars
                                            const std::vector<Scatter3DMarker>& markers,
                                            const std::vector<Line3DSegment>& segments,
                                            const std::vector<SurfaceTriPolygon>& meshes,
-                                           const std::vector<ErrorBar3DPolygon>& errbars) {
+                                           const std::vector<ErrorBar3DPolygon>& errbars,
+                                           const std::vector<Quiver3DPolygon>& quivers) {
     std::vector<std::size_t> plane_ids;
     std::vector<float> plane_depth;
     for (const PlanePlanItem& it : planes)
@@ -684,7 +685,7 @@ std::vector<ScenePaint> whole_object_order(const std::vector<Bar3DPolygon>& bars
         }
 
     std::vector<ScenePaint> out;
-    std::size_t np = 0, ns = 0, nm = 0, nl = 0, nt = 0, ne = 0;
+    std::size_t np = 0, ns = 0, nm = 0, nl = 0, nt = 0, ne = 0, nq = 0;
     // Markers merge as a stream (already far to near), not appended at the end.
     auto flush_before = [&](float depth) {
         for (;;) {
@@ -695,25 +696,30 @@ std::vector<ScenePaint> whole_object_order(const std::vector<Bar3DPolygon>& bars
             const bool t = nt < meshes.size() && meshes[nt].plot_depth > depth;
             // Error-bar pieces merge per piece (already far to near).
             const bool e = ne < errbars.size() && errbars[ne].depth > depth;
-            if (!p && !s && !m && !g && !t && !e) break;
+            // Quiver pieces too.
+            const bool q = nq < quivers.size() && quivers[nq].depth > depth;
+            if (!p && !s && !m && !g && !t && !e && !q) break;
             const float pd = p ? plane_depth[np] : -std::numeric_limits<float>::max();
             const float sd = s ? surfaces[ns].plot_depth : -std::numeric_limits<float>::max();
             const float md = m ? markers[nm].depth : -std::numeric_limits<float>::max();
             const float gd = g ? segments[nl].depth : -std::numeric_limits<float>::max();
             const float td = t ? meshes[nt].plot_depth : -std::numeric_limits<float>::max();
             const float ed = e ? errbars[ne].depth : -std::numeric_limits<float>::max();
-            if (p && pd >= sd && pd >= md && pd >= gd && pd >= td && pd >= ed)
+            const float qd = q ? quivers[nq].depth : -std::numeric_limits<float>::max();
+            if (p && pd >= sd && pd >= md && pd >= gd && pd >= td && pd >= ed && pd >= qd)
                 out.push_back({ ScenePaint::Kind::Plane, plane_ids[np++], {} });
-            else if (s && sd >= md && sd >= gd && sd >= td && sd >= ed)
+            else if (s && sd >= md && sd >= gd && sd >= td && sd >= ed && sd >= qd)
                 out.push_back({ ScenePaint::Kind::Surface, ns++, {} });
-            else if (t && td >= md && td >= gd && td >= ed)
+            else if (t && td >= md && td >= gd && td >= ed && td >= qd)
                 out.push_back({ ScenePaint::Kind::Mesh, nt++, {} });
-            else if (m && md >= gd && md >= ed)
+            else if (m && md >= gd && md >= ed && md >= qd)
                 out.push_back({ ScenePaint::Kind::Scatter, nm++, {} });
-            else if (g && gd >= ed)
+            else if (g && gd >= ed && gd >= qd)
                 out.push_back({ ScenePaint::Kind::Line, nl++, {} });
-            else
+            else if (e && ed >= qd)
                 out.push_back({ ScenePaint::Kind::ErrorBar, ne++, {} });
+            else
+                out.push_back({ ScenePaint::Kind::Quiver, nq++, {} });
         }
     };
     for (std::size_t i = 0; i < bars.size(); ++i) {
@@ -742,12 +748,13 @@ std::vector<ScenePaint> plan_scene3d(const Projector3D& proj,
                                      const std::vector<Line3DSegment>& segments,
                                      const std::vector<SurfaceTriPolygon>& meshes,
                                      const std::vector<ErrorBar3DPolygon>& errbars,
+                                     const std::vector<Quiver3DPolygon>& quivers,
                                      PaintOrderStats* stats,
                                      std::size_t max_work,
                                      std::size_t max_splits) {
     if (!newell_enabled()) {
         if (stats) *stats = PaintOrderStats{};
-        return whole_object_order(bars, surfaces, planes, markers, segments, meshes, errbars);
+        return whole_object_order(bars, surfaces, planes, markers, segments, meshes, errbars, quivers);
     }
 
     std::vector<PaintPoly> soup;
@@ -832,6 +839,19 @@ std::vector<ScenePaint> plan_scene3d(const Projector3D& proj,
         soup.push_back(std::move(p));
     }
 
+    // A quiver arrow's convex pieces (shaft, head), ordinary rings.
+    for (std::size_t i = 0; i < quivers.size(); ++i) {
+        if (quivers[i].box.size() < 3) continue;
+        PaintPoly p;
+        p.ring    = quivers[i].box;
+        p.kind    = PaintPoly::Kind::Quiver;
+        p.object  = quivers[i].plot;
+        p.element = quivers[i].arrow;
+        p.rank    = i;
+        p.source  = i;
+        soup.push_back(std::move(p));
+    }
+
     // One polygon per plane (its forms are coplanar layers). The plan is sorted
     // by plane distance; each plane's first item fixes the order.
     std::vector<std::size_t> plane_ids;
@@ -864,6 +884,7 @@ std::vector<ScenePaint> plan_scene3d(const Projector3D& proj,
             case PaintPoly::Kind::Line:    s.kind = ScenePaint::Kind::Line;    break;
             case PaintPoly::Kind::Mesh:    s.kind = ScenePaint::Kind::Mesh;    break;
             case PaintPoly::Kind::ErrorBar: s.kind = ScenePaint::Kind::ErrorBar; break;
+            case PaintPoly::Kind::Quiver:  s.kind = ScenePaint::Kind::Quiver;  break;
         }
         s.index = p.source;
         // Only split pieces carry pixels; unsplit polygons are emitted as

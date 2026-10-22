@@ -638,6 +638,9 @@ namespace lt {
     // contour_kind.cpp
     void test_contour_kind();
 
+    // quiver3d.cpp
+    void test_quiver3d();
+
     // line_steps.cpp
     void test_line_steps();
     void test_line_steps_rendered();
