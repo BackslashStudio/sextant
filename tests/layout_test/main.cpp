@@ -308,6 +308,8 @@ int main() {
     // axis_off.cpp
     test_axis_off();
     test_pie();
+    // polar.cpp
+    test_polar();
 
     // edge_markers.cpp
     test_edge_markers();

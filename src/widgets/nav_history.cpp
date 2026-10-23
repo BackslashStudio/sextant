@@ -40,9 +40,12 @@ NavView capture_view(const FigureSnapshot& fsnap) {
     fsnap.for_each2d([&](int key, const RenderSnapshot& s) {
         v.limits.push_back(take_limits(key, s));
     });
-    for (const FigureAxesSnapshot& fa : fsnap.axes)
+    for (const FigureAxesSnapshot& fa : fsnap.axes) {
         if (const RenderSnapshot3D* s = fa.snap3d())
             v.cameras.push_back({fa.slot.index, s->camera, s->camera_stamp});
+        if (const RenderSnapshot* s = fa.snap2d(); s && s->polar)
+            v.polars.push_back({fa.slot.index, s->polar->theta_offset, s->style_stamps.polar});
+    }
     return v;
 }
 
@@ -56,6 +59,11 @@ bool same_view(const NavView& a, const NavView& b, int slot) {
         if (slot >= 0 && ca.slot != slot) continue;
         for (const NavCamera& cb : b.cameras)
             if (cb.slot == ca.slot && !same_camera(ca.camera, cb.camera)) return false;
+    }
+    for (const NavPolar& pa : a.polars) {
+        if (slot >= 0 && pa.slot != slot) continue;
+        for (const NavPolar& pb : b.polars)
+            if (pb.slot == pa.slot && pb.theta_offset != pa.theta_offset) return false;
     }
     return true;
 }
@@ -92,6 +100,11 @@ void nav_track_home(NavHistory& h, const FigureSnapshot& fsnap) {
             c.stamp = s->camera_stamp;
         }
         next.cameras.push_back(c);
+    }
+    for (const NavPolar& n : now.polars) {
+        const auto it = std::find_if(h.home.polars.begin(), h.home.polars.end(),
+                                     [&](const NavPolar& o) { return o.slot == n.slot; });
+        next.polars.push_back(it == h.home.polars.end() || it->stamp != n.stamp ? n : *it);
     }
     h.home = std::move(next);
 }
@@ -176,6 +189,18 @@ bool nav_restore(const NavView& view, FigureContext& ctx, int slot) {
             e.camera_seen = s->camera_stamp;
         });
         if (c.slot == ctx.selection.slot) sv.camera_local = c.camera;
+        pushed = true;
+    }
+    for (const NavPolar& p : view.polars) {
+        if (slot >= 0 && p.slot != slot) continue;
+        const RenderSnapshot* s = ctx.snap.find2d(p.slot);
+        if (!s || !s->polar || s->style_stamps.polar != p.stamp) continue;
+        PolarState st = *s->polar;
+        st.theta_offset = p.theta_offset;
+        ctx.edits.update(p.slot, [&](AxesEdit& e) {
+            e.polar = st;
+            e.style_seen.polar = s->style_stamps.polar;
+        });
         pushed = true;
     }
     return pushed;

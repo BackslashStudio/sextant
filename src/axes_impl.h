@@ -127,6 +127,9 @@ struct Axes::Impl {
     // widget panel's tick table). Absent = auto-generated ticks.
     std::optional<std::vector<Tick>> xticks_override, yticks_override;
 
+    // Set on the hidden Axes of a PolarAxes (see PolarState), never otherwise.
+    std::optional<PolarState> polar;
+
     // Every plotting call takes its object's id here, so last_object() can
     // answer; a call that makes several objects leaves the last one's.
     ObjectId last_id = 0;
@@ -184,6 +187,7 @@ struct Axes::Impl {
         s.axis_on = axis_on;
         s.xticks_override = xticks_override;
         s.yticks_override = yticks_override;
+        s.polar = polar;
         return s;
     }
 

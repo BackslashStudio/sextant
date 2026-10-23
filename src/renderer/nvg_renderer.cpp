@@ -48,6 +48,46 @@ namespace sextant {
         }
     }
 
+    // A polyline split into the "on" runs of its LineStyle, the dash phase
+    // carried across vertices; the caller strokes.
+    static void begin_styled_polyline(NVGcontext* vg, const std::vector<float>& x,
+                                      const std::vector<float>& y, LineStyle ls) {
+        nvgBeginPath(vg);
+        if (ls == LineStyle::None || x.size() < 2) return;
+        const DashPattern d = dash_pattern(ls);
+        if (!d.dashed()) {
+            nvgMoveTo(vg, x[0], y[0]);
+            for (std::size_t i = 1; i < x.size(); ++i) nvgLineTo(vg, x[i], y[i]);
+            return;
+        }
+        int seg = 0;
+        bool on = true;
+        float left = d.seg[0];   // of the current dash arm
+        bool pen = false;
+        for (std::size_t i = 0; i + 1 < x.size(); ++i) {
+            const float dx = x[i + 1] - x[i], dy = y[i + 1] - y[i];
+            const float len = std::hypot(dx, dy);
+            if (len <= 0.0f) continue;
+            float t = 0.0f;
+            while (t < len) {
+                const float end = std::min(t + left, len);
+                if (on) {
+                    if (!pen) nvgMoveTo(vg, x[i] + dx * (t / len), y[i] + dy * (t / len));
+                    nvgLineTo(vg, x[i] + dx * (end / len), y[i] + dy * (end / len));
+                    pen = true;
+                }
+                left -= end - t;
+                t = end;
+                if (left <= 0.0f) {
+                    seg = (seg + 1) % d.count;
+                    on = !on;
+                    left = d.seg[seg];
+                    pen = false;
+                }
+            }
+        }
+    }
+
     static int load_default_font(NVGcontext* vg) {
         const FontEntry* pick = pick_default_font();
         if (!pick) return -1;
@@ -186,6 +226,72 @@ namespace sextant {
 
     // Four segments (each edge has its own visibility flag): one stroke in
     // spine_color, then one per edge in an axis color of its own.
+    void NvgRenderer::draw_polar_background(const PolarPlan& plan, const Color& c) {
+        if (c.a <= 0.0f) return;
+        std::vector<float> x, y;
+        plan.outline(x, y);
+        if (x.size() < 3) return;
+        nvgBeginPath(vg_);
+        nvgMoveTo(vg_, x[0], y[0]);
+        for (std::size_t i = 1; i < x.size(); ++i) nvgLineTo(vg_, x[i], y[i]);
+        nvgClosePath(vg_);
+        nvgFillColor(vg_, nvgRGBAf(c.r, c.g, c.b, c.a));
+        nvgFill(vg_);
+    }
+
+    // Grid (rings then spokes), the outline in spine_color, then the θ labels
+    // (spokes) and r labels (rings) centred where layout put them.
+    void NvgRenderer::draw_polar_frame(const PolarPlan& plan, const AxesStyle& style,
+                                       bool grid_enabled, const GridOptions& grid_opts) {
+        std::vector<float> x, y;
+        if (grid_enabled) {
+            const auto& gc = grid_opts.color;
+            const auto stroke = [&] {
+                nvgStrokeColor(vg_, nvgRGBAf(gc.r, gc.g, gc.b, gc.a));
+                nvgStrokeWidth(vg_, grid_opts.linewidth);
+                nvgStroke(vg_);
+            };
+            for (const PolarGridLine& g: plan.rings) {
+                if (g.value >= plan.map.rmax) continue;   // the outline is drawn below
+                plan.ring(g.value, x, y);
+                begin_styled_polyline(vg_, x, y, grid_opts.linestyle);
+                stroke();
+            }
+            for (const PolarGridLine& g: plan.spokes) {
+                const double t = g.value * kPolarDeg;
+                begin_styled_segment(vg_, plan.cx, plan.cy, plan.px(t, plan.map.rmax),
+                                     plan.py(t, plan.map.rmax), grid_opts.linestyle);
+                stroke();
+            }
+        }
+        if (style.spine_linewidth > 0.0f && style.spine_color.a > 0.0f) {
+            plan.outline(x, y);
+            if (x.size() >= 2) {
+                nvgBeginPath(vg_);
+                nvgMoveTo(vg_, x[0], y[0]);
+                for (std::size_t i = 1; i < x.size(); ++i) nvgLineTo(vg_, x[i], y[i]);
+                nvgClosePath(vg_);
+                const auto& c = style.spine_color;
+                nvgStrokeColor(vg_, nvgRGBAf(c.r, c.g, c.b, c.a));
+                nvgStrokeWidth(vg_, style.spine_linewidth);
+                nvgStroke(vg_);
+            }
+        }
+        if (font_ == -1) return;
+        nvgFontFaceId(vg_, font_for_path(style.font_path));
+        const auto draw = [&](const std::vector<PolarGridLine>& v, const TickLook& k) {
+            nvgFontSize(vg_, k.label_fontsize);
+            const auto& c = k.label_color;
+            nvgFillColor(vg_, nvgRGBAf(c.r, c.g, c.b, c.a));
+            for (const PolarGridLine& g: v)
+                if (!g.label.empty())
+                    label(g.lx, g.ly, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE, g.label, style.font_path,
+                          k.label_fontsize);
+        };
+        if (plan.tlabels) draw(plan.spokes, tick_look(style, TickAxis::X));
+        if (plan.rlabels) draw(plan.rings, tick_look(style, TickAxis::Y));
+    }
+
     void NvgRenderer::draw_axes_border(const PlotRect& r, const AxesStyle& style, const EdgeColors& edges) {
         struct Edge { bool on; const std::optional<Color>* own; float x0, y0, x1, y1; };
         const Edge all[4] = {

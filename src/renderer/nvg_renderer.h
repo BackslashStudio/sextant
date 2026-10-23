@@ -33,6 +33,12 @@ public:
     // Outline only, call after data. `edges`: a twinned cell's axis colors.
     void draw_axes_border(const PlotRect& r, const AxesStyle& style, const EdgeColors& edges = {});
 
+    // A polar cell (PolarAxes): its disc or sector filled in pass 1; rings,
+    // spokes, the outline and their labels in pass 3.
+    void draw_polar_background(const PolarPlan& plan, const Color& fill);
+    void draw_polar_frame(const PolarPlan& plan, const AxesStyle& style,
+                          bool grid_enabled, const GridOptions& grid_opts);
+
     // A 3D box from plan_box3d(): panes in pass 1 (they are back walls, so no
     // depth test is needed), frame and annotation in pass 3.
     void draw_box3d_panes(const Box3DPlan& plan, const RenderSnapshot3D& snap,

@@ -1576,6 +1576,14 @@ static void emit_defs(std::ostringstream& o, const std::vector<SvgAxesData>& axe
     o << "<defs>\n";
     for (std::size_t i = 0; i < axes.size(); ++i) {
         const auto& d = axes[i];
+        if (d.layout.polar) {
+            std::vector<float> x, y;
+            d.layout.polar->outline(x, y);
+            o << "  <clipPath id=\"plotArea" << i << "\"><polygon points=\"";
+            for (std::size_t k = 0; k < x.size(); ++k) o << x[k] << "," << y[k] << " ";
+            o << "\"/></clipPath>\n";
+            continue;
+        }
         o << "  <clipPath id=\"plotArea" << i << "\">"
           << "<rect x=\"" << d.layout.frame.x << "\" y=\"" << d.layout.frame.y
           << "\" width=\"" << d.layout.frame.w << "\" height=\"" << d.layout.frame.h << "\"/>"
@@ -1999,7 +2007,76 @@ static std::vector<const SvgAxesData*> layers_of(const SvgAxesData& d) {
     return out;
 }
 
+// A polar cell (PolarAxes), as NvgRenderer: its disc or sector filled, the
+// lines clipped to it, then rings, spokes, the outline and their labels.
+static void emit_polar(std::ostringstream& o, const SvgAxesData& d, std::size_t idx) {
+    const PolarPlan& plan = *d.layout.polar;
+    const AxesStyle& st = d.axes_style;
+    std::vector<float> x, y;
+    const auto points = [&](const char* tag, const std::string& attrs) {
+        o << "  <" << tag << attrs << " points=\"";
+        for (std::size_t k = 0; k < x.size(); ++k) o << x[k] << "," << y[k] << " ";
+        o << "\"/>\n";
+    };
+    if (d.axis_on && st.background.a > 0.0f) {
+        plan.outline(x, y);
+        points("polygon", background_fill(st.background));
+    }
+
+    o << "  <g clip-path=\"url(#plotArea" << idx << ")\">\n";
+    emit_plots(o, d);
+    o << "  </g>\n";
+
+    if (d.axis_on) {
+        if (d.grid_enabled) {
+            const GridOptions& g = d.grid_opts;
+            std::ostringstream a;
+            a << " fill=\"none\" stroke=\"" << rgb(g.color) << "\" stroke-opacity=\"" << g.color.a
+              << "\" stroke-width=\"" << g.linewidth << "\"" << dash_attr(g.linestyle);
+            if (g.linestyle != LineStyle::None) {
+                o << "  <g" << a.str() << ">\n";
+                for (const PolarGridLine& r : plan.rings) {
+                    if (r.value >= plan.map.rmax) continue;
+                    plan.ring(r.value, x, y);
+                    points("polyline", "");
+                }
+                for (const PolarGridLine& s : plan.spokes) {
+                    const double t = s.value * kPolarDeg;
+                    o << "  <line x1=\"" << plan.cx << "\" y1=\"" << plan.cy << "\" x2=\""
+                      << plan.px(t, plan.map.rmax) << "\" y2=\"" << plan.py(t, plan.map.rmax) << "\"/>\n";
+                }
+                o << "  </g>\n";
+            }
+        }
+        if (st.spine_linewidth > 0.0f && st.spine_color.a > 0.0f) {
+            plan.outline(x, y);
+            std::ostringstream a;
+            a << " fill=\"none\" stroke=\"" << rgb(st.spine_color) << "\" stroke-opacity=\""
+              << st.spine_color.a << "\" stroke-width=\"" << st.spine_linewidth << "\"";
+            points("polygon", a.str());
+        }
+        const std::string& fp = st.font_path;
+        const auto labels = [&](const std::vector<PolarGridLine>& v, const TickLook& k) {
+            o << "  <g font-family=\"" << svg_font_family(st) << "\" font-size=\"" << k.label_fontsize
+              << "\" fill=\"" << rgb(k.label_color) << "\">\n";
+            for (const PolarGridLine& g : v)
+                if (!g.label.empty())
+                    emit_text(o, "    ", g.lx, g.ly + middle_baseline_offset(fp, k.label_fontsize, g.label),
+                              "middle", "", g.label, fp, k.label_fontsize);
+            o << "  </g>\n";
+        };
+        if (plan.tlabels && !plan.spokes.empty()) labels(plan.spokes, tick_look(st, TickAxis::X));
+        if (plan.rlabels && !plan.rings.empty()) labels(plan.rings, tick_look(st, TickAxis::Y));
+    }
+    emit_titles(o, d);
+    emit_legend(o, d, idx);
+}
+
 static void emit_one_axes(std::ostringstream& o, const SvgAxesData& d, std::size_t idx) {
+    if (d.layout.polar) {
+        emit_polar(o, d, idx);
+        return;
+    }
     if (d.box3d) {
         emit_box3d(o, d, idx);
         // The axes title uses the shared 2D path; axis titles are in the plan.

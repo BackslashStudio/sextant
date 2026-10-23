@@ -704,6 +704,8 @@ namespace sextant {
         friend class Figure;
         // A Plane2D holds an Axes::Impl rather than being an Axes.
         friend class Plane2D;
+        // A PolarAxes is a hidden Axes with a polar frame.
+        friend class PolarAxes;
 
         explicit Axes();
     };

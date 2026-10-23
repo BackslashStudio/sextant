@@ -3,6 +3,7 @@
 #include "figure_context.h"
 #include "../figure_edits.h"
 #include "../edit_box.h"
+#include "../polar_geometry.h"
 #include "../plot_objects.h"
 #include "../render_frame.h"
 #include "../hint.h"
@@ -233,6 +234,7 @@ PlotViewInfo PlotView::draw(FigureContext& fig, RenderDevice& dev, PlotViewState
             const RenderSnapshot* s = nullptr;
             for (const auto& a : fsnap.axes)
                 if (a.slot.index == al.slot.index) { s = a.snap2d(); break; }
+            if (s && s->polar) break;
             const CoordTransform& tr = al.tr;
             const auto b = box_pixels(tr, pv.box.x0, pv.box.y0, pv.box.x1, pv.box.y1,
                                       s && s->aspect.ratio > 0.0);
@@ -374,6 +376,58 @@ PlotViewInfo PlotView::draw(FigureContext& fig, RenderDevice& dev, PlotViewState
                     e.camera_seen = sel3d->camera_stamp;
                 });
             }
+        } else if (cur && sel2d && sel2d->polar) {
+            // A polar cell (PolarAxes): a drag turns the frame about its
+            // centre (θ offset), Shift-drag moves r (rmin and rmax together),
+            // the wheel scales rmax about rmin. Box zoom has no meaning here.
+            const ImGuiIO& io = ImGui::GetIO();
+            const PolarMap m = polar_map(*sel2d);
+            const CoordTransform& tr = cur->tr;
+            const float cx = tr.to_px(0.0), cy = tr.to_py(0.0);
+            const float radius = tr.to_px(1.0) - cx;
+            const bool moved = io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f;
+            const auto set_r = [&](double lo, double hi) {
+                if (!(hi - lo > 0.0) || !std::isfinite(lo) || !std::isfinite(hi)) return;
+                if (cur->slot.index == fig.selection.key()) {
+                    sv.ymin_local = lo; sv.ymax_local = hi;
+                    sv.yauto_local = false;
+                }
+                edit_box.update(cur->slot.index, [&](AxesEdit& e) {
+                    e.ymin = lo; e.ymax = hi; e.ylim_auto = false;
+                    e.lim_seen = sel2d->limit_stamps;
+                });
+            };
+            nav_in.drag = gate.drag || gate.box;
+            nav_in.moved = nav_in.drag && moved;
+            nav_in.wheel = gate.wheel && io.MouseWheel != 0.0f;
+            if (gate.drag && moved && radius > 0.0f) {
+                const float x1 = (io.MousePos.x - image_pos.x) * to_plot;
+                const float y1 = (io.MousePos.y - image_pos.y) * to_plot;
+                const float x0 = x1 - io.MouseDelta.x * to_plot, y0 = y1 - io.MouseDelta.y * to_plot;
+                // Screen angles, counterclockwise (y up).
+                const double a0 = std::atan2(cy - y0, x0 - cx), a1 = std::atan2(cy - y1, x1 - cx);
+                double da = (a1 - a0) / kPolarDeg;
+                if (da > 180.0) da -= 360.0;
+                if (da < -180.0) da += 360.0;
+                PolarState p = *sel2d->polar;
+                p.theta_offset = std::fmod(p.theta_offset + da, 360.0);
+                edit_box.update(cur->slot.index, [&](AxesEdit& e) {
+                    e.polar = p;
+                    e.style_seen.polar = sel2d->style_stamps.polar;
+                });
+            }
+            if (gate.box && moved && radius > 0.0f) {
+                // Dragging outward pulls the data out: r under the cursor follows it.
+                const float dx = io.MouseDelta.x * to_plot, dy = io.MouseDelta.y * to_plot;
+                const float x1 = (io.MousePos.x - image_pos.x) * to_plot;
+                const float y1 = (io.MousePos.y - image_pos.y) * to_plot;
+                const float ux = x1 - cx, uy = y1 - cy, len = std::hypot(ux, uy);
+                const float out = len > 0.0f ? (dx * ux + dy * uy) / len : -dy;
+                const double dr = -static_cast<double>(out) / radius * (m.rmax - m.rmin);
+                set_r(m.rmin + dr, m.rmax + dr);
+            }
+            if (nav_in.wheel)
+                set_r(m.rmin, m.rmin + (m.rmax - m.rmin) * std::pow(0.9, io.MouseWheel));
         } else if (cur && sel2d) {
             const ImGuiIO& io = ImGui::GetIO();
 

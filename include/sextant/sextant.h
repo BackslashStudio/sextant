@@ -9,4 +9,5 @@
 #include "export.h"
 #include "style.h"
 #include "axes.h"
+#include "polar_axes.h"
 #include "figure.h"

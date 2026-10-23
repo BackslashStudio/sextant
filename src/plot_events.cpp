@@ -2,6 +2,7 @@
 #include "coord_transform3d.h"
 #include "hint.h"
 #include "key_names.h"
+#include "polar_geometry.h"
 #include <optional>
 
 namespace sextant {
@@ -35,6 +36,16 @@ PointLocation locate_point(const FigureSnapshot& fsnap,
     const FigureAxesSnapshot* fa = find_axes(fsnap, cell->slot.index);
     if (!fa) return loc;
 
+    if (const RenderSnapshot* s2 = fa->snap2d(); s2 && s2->polar) {
+        // A polar cell: θ (radians) and r, inside its frame only.
+        const PolarMap m = polar_map(*s2);
+        const double ux = cell->tr.to_data_x(x), uy = cell->tr.to_data_y(y);
+        if (!m.inside(ux, uy)) return loc;
+        loc.has_data = true;
+        m.from_unit(ux, uy, loc.x, loc.y);
+        loc.z = std::numeric_limits<double>::quiet_NaN();
+        return loc;
+    }
     if (fa->snap2d()) {
         loc.has_data = true;
         loc.x = cell->tr.to_data_x(x);

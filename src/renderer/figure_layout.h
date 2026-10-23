@@ -1,5 +1,6 @@
 #pragma once
 #include "plot_rect.h"
+#include "polar_layout.h"
 #include "../coord_transform.h"
 #include "../coord_transform3d.h"
 #include "../plot_objects.h"
@@ -304,6 +305,11 @@ namespace sextant {
         // 3D cells only (`tr`, tick lists and x/y title anchors are 2D only).
         std::optional<Box3DLayout> box3d;
         bool is_3d() const { return box3d.has_value(); }
+
+        // Polar cells only (PolarAxes): the frame, its grid and labels. `tr`
+        // maps the frame's box in unit space (polar_sheet()); the tick lists
+        // are empty.
+        std::optional<PolarPlan> polar;
 
         // cell_o + frame_margin (see CellMeasure): what outside legends and
         // colorbars are placed against.

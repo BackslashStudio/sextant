@@ -875,10 +875,11 @@ struct StyleStamps {
     unsigned long long box = 0;     // 3D only
     unsigned long long aspect = 0;  // 3D set_box_aspect(), 2D set_aspect()
     unsigned long long axis = 0;    // 2D only: set_axis_visible()
+    unsigned long long polar = 0;   // PolarAxes only: its PolarState
 
     static constexpr StyleStamps any() {
         constexpr auto m = ~0ull;
-        return { m, m, m, m, m, m, m, m, m, m };
+        return { m, m, m, m, m, m, m, m, m, m, m };
     }
 };
 
@@ -902,6 +903,20 @@ struct AxesAspect {
     // Whether layout widens limits for it (Adjustable::Datalim with a ratio).
     bool datalim() const { return ratio > 0.0 && adjustable == Adjustable::Datalim; }
     bool operator==(const AxesAspect&) const = default;
+};
+
+// A polar axes' frame (PolarAxes): what turns its sheet's (θ, r) data into a
+// disc. The sheet's y limits are r's, its yticks the rings and its xticks the
+// spokes (in degrees); these are the rest. Angles in degrees.
+struct PolarState {
+    // The screen angle of θ = 0, counterclockwise from east.
+    double theta_offset = 0.0;
+    // +1 counterclockwise, -1 clockwise.
+    int    direction = 1;
+    double thetamin = 0.0, thetamax = 360.0;
+    // The θ the r labels sit along.
+    double rlabel_position = 22.5;
+    bool operator==(const PolarState&) const = default;
 };
 
 // Everything the render thread needs from Axes::Impl: decoration and limits
@@ -964,6 +979,9 @@ struct RenderSnapshot {
 
     // Explicit ticks; absent = generate_ticks().
     std::optional<std::vector<Tick>> xticks_override, yticks_override;
+
+    // A PolarAxes' sheet only; empty everywhere else.
+    std::optional<PolarState> polar;
 
     AllPlotData all() const {
         return { lines, scatters, bars, heatmaps, scatter_z, &axlines, &axspans, &fills, &quivers, &polys, &circles, &wedges, &heatmap_tris, &contours, &pies };

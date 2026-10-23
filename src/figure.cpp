@@ -125,6 +125,11 @@ std::shared_ptr<A> Figure::Impl::add_impl(const char* who, const char* other,
     if (Slot* s = find_or_reserve_slot(who, rows, cols, first, last)) {
         auto p = std::get_if<std::shared_ptr<A>>(&s->axes);
         // A cell holding the other kind throws rather than being replaced.
+        if (s->polar)
+            throw std::invalid_argument(
+                std::string(who) + ": " + describe(first, last)
+                + (first == last ? " already holds a " : " already hold a ")
+                + "polar axes");
         if (!p)
             throw std::invalid_argument(
                 std::string(who) + ": " + describe(first, last)
@@ -144,6 +149,22 @@ std::shared_ptr<Axes> Figure::Impl::add_subplot_impl(int rows, int cols, int fir
 }
 std::shared_ptr<Axes3D> Figure::Impl::add_subplot3d_impl(int rows, int cols, int first, int last) {
     return add_impl<Axes3D>("Figure::add_subplot3d", "2D", rows, cols, first, last);
+}
+std::shared_ptr<PolarAxes> Figure::Impl::add_subplot_polar_impl(int rows, int cols, int first, int last) {
+    const char* who = "Figure::add_subplot_polar";
+    if (Slot* s = find_or_reserve_slot(who, rows, cols, first, last)) {
+        if (s->polar) return s->polar;
+        throw std::invalid_argument(
+            std::string(who) + ": " + describe(first, last)
+            + (first == last ? " already holds a " : " already hold a ")
+            + (s->as3d() ? "3D" : "2D") + " axes");
+    }
+    auto sheet = std::shared_ptr<Axes>(new Axes());
+    sheet->d->mathtext = opts.mathtext;
+    sheet->d->owner = window_state.figure_id;
+    auto pa = std::shared_ptr<PolarAxes>(new PolarAxes(sheet));
+    slots.push_back({rows, cols, first, last, sheet, pa});
+    return pa;
 }
 
 FigureSnapshot Figure::Impl::build_figure_snapshot() const {
@@ -463,6 +484,21 @@ std::shared_ptr<Axes3D> Figure::add_subplot3d(int index) {
 std::shared_ptr<Axes3D> Figure::add_subplot3d(SubplotSpan span) {
     const auto g = d->require_shape("Figure::add_subplot3d");
     return d->add_subplot3d_impl(g.rows, g.cols, span.first, span.last);
+}
+
+std::shared_ptr<PolarAxes> Figure::add_subplot_polar(int rows, int cols, int index) {
+    return d->add_subplot_polar_impl(rows, cols, index, index);
+}
+std::shared_ptr<PolarAxes> Figure::add_subplot_polar(int rows, int cols, SubplotSpan span) {
+    return d->add_subplot_polar_impl(rows, cols, span.first, span.last);
+}
+std::shared_ptr<PolarAxes> Figure::add_subplot_polar(int index) {
+    const auto g = d->require_shape("Figure::add_subplot_polar");
+    return d->add_subplot_polar_impl(g.rows, g.cols, index, index);
+}
+std::shared_ptr<PolarAxes> Figure::add_subplot_polar(SubplotSpan span) {
+    const auto g = d->require_shape("Figure::add_subplot_polar");
+    return d->add_subplot_polar_impl(g.rows, g.cols, span.first, span.last);
 }
 
 // -------------------------------------------------------------------------

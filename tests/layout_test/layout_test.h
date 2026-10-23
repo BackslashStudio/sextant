@@ -615,6 +615,8 @@ namespace lt {
     // axis_off.cpp
     void test_axis_off();
     void test_pie();
+    // polar.cpp
+    void test_polar();
 
     // edge_markers.cpp
     void test_edge_markers();

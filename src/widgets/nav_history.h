@@ -27,9 +27,18 @@ namespace sextant {
         unsigned long long stamp = 0;
     };
 
+    // One polar axes' turn (PolarState::theta_offset, degrees) in a view; its
+    // r is in `limits`. The stamp is StyleStamps::polar.
+    struct NavPolar {
+        int slot = 0;
+        double theta_offset = 0.0;
+        unsigned long long stamp = 0;
+    };
+
     struct NavView {
         std::vector<NavLimits> limits;
         std::vector<NavCamera> cameras;
+        std::vector<NavPolar>  polars;
     };
 
     // What the plot view saw this frame, for gesture detection.

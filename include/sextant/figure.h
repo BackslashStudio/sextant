@@ -2,6 +2,7 @@
 #include "export.h"
 #include "axes.h"
 #include "axes3d.h"
+#include "polar_axes.h"
 #include "events.h"
 #include <cstddef>
 #include <cstdint>
@@ -220,6 +221,15 @@ namespace sextant {
         std::shared_ptr<Axes3D> add_subplot3d(int index);
 
         std::shared_ptr<Axes3D> add_subplot3d(SubplotSpan span);
+
+        // A polar axes (PolarAxes) on the same grid, same rules.
+        std::shared_ptr<PolarAxes> add_subplot_polar(int rows, int cols, int index);
+
+        std::shared_ptr<PolarAxes> add_subplot_polar(int rows, int cols, SubplotSpan span);
+
+        std::shared_ptr<PolarAxes> add_subplot_polar(int index);
+
+        std::shared_ptr<PolarAxes> add_subplot_polar(SubplotSpan span);
 
         // Display. The window always runs on its own background thread.
         // pause: block the caller until ENTER is pressed on the console. The window

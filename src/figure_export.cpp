@@ -1,5 +1,6 @@
 #include "figure_export.h"
 #include "pie_geometry.h"
+#include "polar_geometry.h"
 #include "render_frame.h"
 #include "coord_transform.h"
 #include "renderer/render_device.h"
@@ -236,6 +237,28 @@ std::string render_figure_svg(const FigureSnapshot& fsnap,
             }
         };
         fill2d(sd, *fsnap.axes[i].snap2d());
+        if (layout.cells[i].polar) {
+            // The lines in unit space, one per run (SVG has no break in a
+            // polyline); the legend comes from the layout.
+            const RenderSnapshot sheet = polar_sheet(*fsnap.axes[i].snap2d(), layout.cells[i].polar->map);
+            sd.lines.clear();
+            for (const LinePlot& l : sheet.lines) {
+                std::size_t a = 0;
+                const std::size_t n = l.x.size();
+                while (a < n) {
+                    while (a < n && std::isnan(l.x[a])) ++a;
+                    std::size_t b = a;
+                    while (b < n && !std::isnan(l.x[b])) ++b;
+                    if (b > a) {
+                        LinePlot run = l;
+                        run.x = CowVec<double>(std::vector<double>(l.x.data() + a, l.x.data() + b));
+                        run.y = CowVec<double>(std::vector<double>(l.y.data() + a, l.y.data() + b));
+                        sd.lines.push_back(std::move(run));
+                    }
+                    a = b;
+                }
+            }
+        }
         const auto& twins = fsnap.axes[i].twins;
         for (std::size_t k = 0; k < twins.size(); ++k) {
             SvgAxesData td;

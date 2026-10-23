@@ -7,6 +7,7 @@
 #include "fill_geometry.h"
 #include "shape_geometry.h"
 #include "pie_geometry.h"
+#include "polar_geometry.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -57,6 +58,14 @@ std::string fmt_err_pair(const char* xname, double x, const char* yname, double 
     return fmt_value(xname, x, err.has_x_box(), err.x_box(i), err.has_x_cap(), err.x_cap(i))
          + ", "
          + fmt_value(yname, y, err.has_y_box(), err.y_box(i), err.has_y_cap(), err.y_cap(i));
+}
+
+// A polar line's point: θ in degrees as given (not wrapped), then r. "theta"
+// spelled out (θ isn't in the hover font).
+std::string fmt_polar(double theta, double r) {
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "theta=%.4g\xC2\xB0, r=%.4g", theta / kPolarDeg, r);
+    return buf;
 }
 
 std::string fmt_point_err(double x, double y, const ErrorBarData& err, std::size_t i) {
@@ -425,6 +434,38 @@ std::optional<PickHit> find_pick(const RenderSnapshot& snap, const HintProjector
     // whatever the draw order; only without one do the areas answer.
     const std::vector<ObjectRef> order = draw_order(snap);
 
+    // A polar sheet (PolarAxes): its lines' points through the polar map, a
+    // linear scan (no index: the grid is over θ/r, not the screen); points
+    // outside the frame aren't drawn, so aren't found. No areas.
+    if (snap.polar) {
+        const PolarMap m = polar_map(snap);
+        float best = radius * radius;
+        std::optional<PickHit> hit;
+        for (const ObjectRef& r : order) {
+            if (r.kind != PlotKind::Line) continue;
+            const LinePlot& lp = snap.lines[r.index];
+            if (!object_shown(lp)) continue;
+            for (std::size_t i = 0; i < lp.x.size(); ++i) {
+                const double t = lp.x[i], rr = lp.y[i];
+                if (!std::isfinite(t) || !std::isfinite(rr) || rr < m.rmin || rr > m.rmax) continue;
+                const double ux = m.unit_x(t, rr), uy = m.unit_y(t, rr);
+                if (!m.inside(ux, uy)) continue;
+                const HintProjector::Pt p = tr.at(ux, uy);
+                const float dx = p.x - cursor_x, dy = p.y - cursor_y;
+                const float d2 = dx * dx + dy * dy;
+                if (d2 > best) continue;
+                best = d2;
+                hit = PickHit{};
+                hit->kind = PickKind::Line;
+                hit->object = r.index;
+                hit->element = i;
+                hit->anchor_x = p.x;
+                hit->anchor_y = p.y;
+            }
+        }
+        return hit;
+    }
+
     // A surface with no candidate box (a plane seen edge-on) has no point to find.
     double x_lo = 0.0, x_hi = 0.0, y_lo = 0.0, y_hi = 0.0;
     if (!tr.data_box(cursor_x, cursor_y, radius, x_lo, x_hi, y_lo, y_hi))
@@ -593,6 +634,7 @@ std::string format_pick(const RenderSnapshot& snap, const PickHit& hit) {
     switch (hit.kind) {
         case PickKind::Line: {
             const auto& lp = snap.lines[hit.object];
+            if (snap.polar) return append_label(fmt_polar(lp.x[i], lp.y[i]), lp.opts.hint_labels, i);
             return append_label(fmt_point_err(lp.x[i], lp.y[i], lp.err, i), lp.opts.hint_labels, i);
         }
         case PickKind::Scatter: {

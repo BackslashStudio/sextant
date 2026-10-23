@@ -72,7 +72,9 @@ void render_frame(RenderDevice& dev, DataRenderer& data,
         const auto& c = layout.cells[i];
         if (const RenderSnapshot3D* s3 = fsnap.axes[i].snap3d())
             nvg.draw_box3d_panes(box_plans[i], *s3, c.frame);
-        else if (const RenderSnapshot* s2 = fsnap.axes[i].snap2d(); s2 && s2->axis_on)
+        else if (const RenderSnapshot* s2 = fsnap.axes[i].snap2d(); s2 && s2->axis_on && c.polar)
+            nvg.draw_polar_background(*c.polar, s2->axes_style.background);
+        else if (s2 && s2->axis_on)
             nvg.draw_axes_background(c.frame, s2->axes_style.background);
     }
     dev.end_nvg_frame();
@@ -91,6 +93,13 @@ void render_frame(RenderDevice& dev, DataRenderer& data,
         }
         const RenderSnapshot* s2 = fsnap.axes[i].snap2d();
         if (!s2) continue;
+        if (c.polar) {
+            // Lines in unit space through c.tr; the map changes with every
+            // rotate/zoom, so no cached buffers (key 0).
+            data.set_frame_key(0, c.slot.index);
+            data.draw_plots(polar_sheet(*s2, c.polar->map), c.tr, c.frame);
+            continue;
+        }
         const auto& twins = fsnap.axes[i].twins;
         if (!twins.empty()) {
             // A twinned cell: one call order across its layers.
@@ -131,6 +140,12 @@ void render_frame(RenderDevice& dev, DataRenderer& data,
             continue;
         }
         const RenderSnapshot& snap = *fsnap.axes[i].snap2d();
+        if (c.polar) {
+            if (snap.axis_on) nvg.draw_polar_frame(*c.polar, snap.axes_style, snap.grid_enabled, snap.grid_opts);
+            nvg.draw_titles(c, snap);
+            if (c.has_legend()) nvg.draw_legend(c, snap.legend_opts);
+            continue;
+        }
         const auto& twins = fsnap.axes[i].twins;
         // Contours first: over the data, under border/grid/ticks. Cached on
         // the data generation.

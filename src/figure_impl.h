@@ -33,6 +33,8 @@ struct Figure::Impl {
         int rows, cols, index;
         int last;   // bottom-right cell; == index for a single cell
         std::variant<std::shared_ptr<Axes>, std::shared_ptr<Axes3D>> axes;
+        // Set for a polar cell, whose `axes` is the PolarAxes' hidden sheet.
+        std::shared_ptr<PolarAxes> polar;
 
         Axes*   as2d() const {
             auto p = std::get_if<std::shared_ptr<Axes>>(&axes);
@@ -115,6 +117,10 @@ struct Figure::Impl {
             throw std::invalid_argument(
                 "Figure::axes: this Figure's first cell holds a 3D axes; "
                 "reach it through the add_subplot3d() that created it");
+        if (slots.front().polar)
+            throw std::invalid_argument(
+                "Figure::axes: this Figure's first cell holds a polar axes; "
+                "reach it through the add_subplot_polar() that created it");
         return *ax;
     }
 
@@ -152,6 +158,7 @@ struct Figure::Impl {
 
     std::shared_ptr<Axes>   add_subplot_impl(int rows, int cols, int first, int last);
     std::shared_ptr<Axes3D> add_subplot3d_impl(int rows, int cols, int first, int last);
+    std::shared_ptr<PolarAxes> add_subplot_polar_impl(int rows, int cols, int first, int last);
 
     FigureSnapshot build_figure_snapshot() const;
 

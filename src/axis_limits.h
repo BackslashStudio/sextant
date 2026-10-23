@@ -6,6 +6,7 @@
 #include "coord_transform.h"
 #include "coord_transform3d.h"
 #include "plot_objects.h"
+#include "polar_geometry.h"
 #include <optional>
 #include <utility>
 #include <vector>
@@ -45,6 +46,11 @@ namespace sextant {
     // axis' own bounds and pin with its share group's.
     inline ResolvedLimits resolve_limits(const RenderSnapshot& snap, const AutoBounds* own,
                                          const SharedAuto* gx, const SharedAuto* gy) {
+        // A polar sheet: x is θ's span (radians), y is r's (polar_rlim()).
+        if (snap.polar) {
+            const Range rl = polar_rlim(snap);
+            return {snap.polar->thetamin * kPolarDeg, snap.polar->thetamax * kPolarDeg, rl.lo, rl.hi};
+        }
         ResolvedLimits r{snap.xmin, snap.xmax, snap.ymin, snap.ymax};
         const AxisScale& xs = snap.xscale;
         const AxisScale& ys = snap.yscale;

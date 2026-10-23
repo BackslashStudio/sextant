@@ -2115,6 +2115,66 @@ static void part_pie() {
     fig->show(true);
 }
 
+// Step 4b: PolarAxes. A spiral, a rose with a legend, a clockwise half
+// sector from north, and dashed steps with set r limits and labelled rings.
+// Drag turns a frame, Shift-drag moves r, the wheel zooms r; the panel's Axis
+// group holds the polar fields, the Data panel the θ/r table.
+static void part_polar() {
+    auto fig = sextant::Figure::create({.width = 1400, .height = 900, .title = "Polar"});
+    fig->suptitle("add_subplot_polar() and plot()");
+    const double pi = 3.14159265358979323846;
+
+    auto a1 = fig->add_subplot_polar(2, 2, 1);
+    std::vector<double> th, r;
+    for (int i = 0; i < 400; ++i) {
+        th.push_back(4.0 * pi * i / 399.0);
+        r.push_back(0.1 + 0.9 * i / 399.0);
+    }
+    a1->plot(th, r, {.name = "spiral"});
+    a1->set_title("spiral: two turns, defaults");
+
+    auto a2 = fig->add_subplot_polar(2, 2, 2);
+    std::vector<double> rt, rose3, rose4;
+    for (int i = 0; i <= 720; ++i) {
+        const double t = 2.0 * pi * i / 720.0;
+        rt.push_back(t);
+        rose3.push_back(std::abs(std::cos(3.0 * t)));
+        rose4.push_back(0.5 * std::abs(std::sin(2.0 * t)) + 0.2);
+    }
+    a2->plot(rt, rose3, {.name = "|cos 3t|"});
+    a2->plot(rt, rose4, {.linewidth = 2.0f, .name = "0.5|sin 2t| + 0.2"});
+    a2->legend();
+    a2->set_title("roses, legend");
+
+    auto a3 = fig->add_subplot_polar(2, 2, 3);
+    std::vector<double> ht, hr;
+    for (int i = 0; i <= 180; ++i) {
+        ht.push_back(pi * i / 180.0);
+        hr.push_back(1.0 + std::sin(4.0 * pi * i / 180.0));
+    }
+    a3->plot(ht, hr, {.linestyle = sextant::LineStyle::Dashed});
+    a3->set_theta_zero_location(sextant::ThetaZero::N);
+    a3->set_theta_direction(-1);
+    a3->set_thetalim(0, 180);
+    a3->set_title("sector 0-180, clockwise from N");
+
+    auto a4 = fig->add_subplot_polar(2, 2, 4);
+    std::vector<double> st, sr;
+    for (int i = 0; i < 12; ++i) {
+        st.push_back(2.0 * pi * i / 12.0);
+        sr.push_back(2.0 + std::sin(i * 1.3));
+    }
+    a4->plot(st, sr, {.linestyle = sextant::LineStyle::Dashed, .loop = true,
+                      .drawstyle = sextant::DrawStyle::StepsPost});
+    a4->set_rlim(0.5, 3.5);
+    a4->set_rticks(std::vector<double>{1, 2, 3}, {"low", "mid", "high"});
+    a4->set_rlabel_position(-45);
+    a4->set_title("steps, loop, r from 0.5, named rings");
+
+    savefig_and_check_memory(fig, "part_polar");
+    fig->show(true);
+}
+
 // Step 36d-1: Axes::fill_between() and Plane2D::fill_between(): areas under a
 // curve and bands, exclude and interpolate, steps, the Vertical orientation
 // with an outline, log axes and NaN gaps, planes; the Data panel edits them.
@@ -3626,6 +3686,10 @@ static void test_decorations() { // text, annotate (2D and 3D), axline, axspan, 
     part_pie();
 }
 
+static void test_polar() {
+    part_polar();
+}
+
 static void test_legend_colorbar() {
     part_legend();
     part_colorbar();
@@ -3667,7 +3731,8 @@ int main() {
     // test_figure_layout();
     // test_aspect_scales();
     // test_mathtext_gallery();
-    test_decorations();
+    // test_decorations();
+    test_polar();
     // test_legend_colorbar();
     // test_line();
     // test_scatter();

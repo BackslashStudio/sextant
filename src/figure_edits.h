@@ -334,6 +334,9 @@ struct AxesEdit {
     std::optional<AxesAspect> aspect;
     // Axes::set_axis_visible() (StyleStamps::axis).
     std::optional<bool> axis_on;
+    // A polar axes' frame: rotating it, or the panel's polar fields
+    // (StyleStamps::polar). Skipped on an axes that isn't polar.
+    std::optional<PolarState> polar;
     std::optional<AxesStyle> axes_style;
 
     // Whole options structs; the panel republishes its local copy on change.
@@ -462,7 +465,7 @@ inline bool is_navigation_only(const FigureEdits& f) {
     for (const auto& [idx, e] : f.per_axes) {
         if (e.title || e.xtitle || e.ytitle || e.grid_enabled || e.axes_style || e.grid_opts
             || e.xscale || e.yscale || e.xtick_format || e.ytick_format || e.aspect || e.axis_on
-            || e.legend_enabled || e.legend_opts || e.colorbar_opts
+            || e.polar || e.legend_enabled || e.legend_opts || e.colorbar_opts
             || !e.plot_ops.empty() || !e.plot_styles.empty())
             return false;
     }
@@ -1591,6 +1594,7 @@ void apply_style_edits(T& dst, const E& e, E* inv = nullptr) {
         if (e.aspect && have.aspect <= seen.aspect && !(e.aspect->datalim() && dst.xshare && dst.yshare))
             put(dst.aspect, e.aspect, undo(&E::aspect));
         if (have.axis <= seen.axis) put(dst.axis_on, e.axis_on, undo(&E::axis_on));
+        if (dst.polar && have.polar <= seen.polar) put(dst.polar, e.polar, undo(&E::polar));
     }
     if constexpr (requires { dst.zticks_override; e.zticks_override; })
         if (have.zticks <= seen.zticks)
@@ -1721,6 +1725,7 @@ void merge_style_edits(E& dst, const E& src) {
         take_latest(dst.xtick_format, src.xtick_format, ds.xticks, ss.xticks);
         take_latest(dst.ytick_format, src.ytick_format, ds.yticks, ss.yticks);
         take_latest(dst.axis_on, src.axis_on, ds.axis, ss.axis);
+        take_latest(dst.polar, src.polar, ds.polar, ss.polar);
     }
     // The 2D aspect, or the 3D box aspect.
     take_latest(dst.aspect, src.aspect, ds.aspect, ss.aspect);
@@ -1763,7 +1768,8 @@ bool style_edits_empty(const E& e) {
                  && !e.legend_opts && !e.colorbar_opts && !e.xticks_override
                  && !e.yticks_override && !e.aspect && e.plot_styles.empty();
     if constexpr (requires { e.xscale; })
-        empty = empty && !e.xscale && !e.yscale && !e.xtick_format && !e.ytick_format && !e.axis_on;
+        empty = empty && !e.xscale && !e.yscale && !e.xtick_format && !e.ytick_format && !e.axis_on
+                && !e.polar;
     if constexpr (requires { e.box_style; })
         empty = empty && !e.zticks_override && !e.box_style && e.planes.empty()
                 && e.bars3d.empty() && e.surfaces.empty() && e.scatter3d.empty()

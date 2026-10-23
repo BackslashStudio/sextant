@@ -94,6 +94,11 @@ namespace sextant {
             bool is_3d = false;
             std::vector<Tick> zticks;
             Transform3D tf3;
+
+            // Polar only: the frame's map; xticks are the spokes (degrees),
+            // yticks the rings.
+            bool polar = false;
+            PolarMap pmap;
         };
 
         // An axis forced to a frame edge, whatever its AxisPosition and pin say
@@ -109,6 +114,14 @@ namespace sextant {
         CellPrep prepare(const RenderSnapshot& snap, const ResolvedLimits& limits) {
             CellPrep p;
             p.limits = limits;
+            if (snap.polar) {
+                const Range rl{limits.ymin, limits.ymax};
+                p.polar = true;
+                p.pmap = polar_map(*snap.polar, rl);
+                p.xticks = polar_theta_ticks(snap);
+                p.yticks = polar_r_ticks(snap, rl);
+                return p;
+            }
             p.xticks = ticks_for(snap.xticks_override, p.limits.xmin, p.limits.xmax, snap.xscale,
                                  snap.xtick_format);
             p.yticks = ticks_for(snap.yticks_override, p.limits.ymin, p.limits.ymax, snap.yscale,
@@ -187,7 +200,26 @@ namespace sextant {
         // (cell_o). The axes title is a separate band (title_band()). A 3D cell
         // has neither: its labels sit inside the frame, in the Box3DStyle::margin
         // fraction (their position depends on the camera fit).
+        // A polar cell's: the θ labels all round the frame (the r labels
+        // sit inside it).
+        void add_polar_furniture(const RenderSnapshot& snap, const CellPrep& prep, CellMeasure& m) {
+            const auto& st = snap.axes_style;
+            if (!snap.axis_on || !st.show_xticks || prep.xticks.empty()) return;
+            const TickLook k = tick_look(st, TickAxis::X);
+            const float w = widest_label(prep.xticks, st.font_path, k.label_fontsize);
+            const float h = tallest_label(prep.xticks, st.font_path, k.label_fontsize);
+            const auto grow = [](float& to, float v) { to = std::max(to, v); };
+            grow(m.reach_l.fixed, kPolarLabelGap + w);
+            grow(m.reach_r.fixed, kPolarLabelGap + w);
+            grow(m.reach_t.fixed, kPolarLabelGap + h);
+            grow(m.reach_b.fixed, kPolarLabelGap + h);
+        }
+
         void add_furniture(const RenderSnapshot& snap, const CellPrep& prep, CellMeasure& m) {
+            if (prep.polar) {
+                add_polar_furniture(snap, prep, m);
+                return;
+            }
             const auto& st = snap.axes_style;
             // Axes::set_axis_visible(false): no ticks, labels or x/y titles.
             const bool sx = snap.axis_on && st.show_xticks, sy = snap.axis_on && st.show_yticks;
@@ -293,7 +325,7 @@ namespace sextant {
         // set on a twin).
         bool may_align(const FigureAxesSnapshot& fa) {
             const RenderSnapshot* s = fa.snap2d();
-            return s && !(s->aspect.ratio > 0.0);
+            return s && !(s->aspect.ratio > 0.0) && !s->polar;
         }
 
         // Frames that keep one edge together, as a group id per cell (a cell
@@ -1453,6 +1485,42 @@ namespace sextant {
             c.ytitle_y = c.frame.y + c.frame.h * 0.5f;
         }
 
+        // A polar cell's part, its frame already placed: the transform for its
+        // unit-space lines and the plan both drawers draw the frame from.
+        void layout_polar(CellLayout& c, const RenderSnapshot& s2, const CellPrep& p, float fw, float fh) {
+            const AxesStyle& st = s2.axes_style;
+            const PolarMap& m = p.pmap;
+            c.tr = polar_transform(c.frame, m, fw, fh);
+            PolarPlan pl;
+            pl.map = m;
+            pl.cx = static_cast<float>(c.tr.to_px(0.0));
+            pl.cy = static_cast<float>(c.tr.to_py(0.0));
+            const PolarBox b = polar_box(m);
+            pl.radius = c.frame.w / static_cast<float>(b.xmax - b.xmin);
+            pl.tlabels = s2.axis_on && st.show_xticks;
+            pl.rlabels = s2.axis_on && st.show_yticks;
+
+            const TickLook xk = tick_look(st, TickAxis::X);
+            for (const Tick& t: p.xticks) {
+                const double a = m.angle(t.value * kPolarDeg);
+                const float w = label_width(st.font_path, xk.label_fontsize, t.label);
+                const float h = label_vmetrics(st.font_path, xk.label_fontsize, t.label).line_height;
+                const float d = pl.radius + kPolarLabelGap + polar_box_reach(w, h, a);
+                pl.spokes.push_back({t.value, t.label, pl.cx + d * static_cast<float>(std::cos(a)),
+                                     pl.cy - d * static_cast<float>(std::sin(a))});
+            }
+            // Along rlabel_position, kept inside a sector's span.
+            double at = s2.polar->rlabel_position;
+            if (!m.full()) at = std::clamp(at, s2.polar->thetamin, s2.polar->thetamax);
+            const double ra = m.angle(at * kPolarDeg);
+            for (const Tick& t: p.yticks) {
+                const float rr = pl.radius * static_cast<float>(m.rho(t.value));
+                pl.rings.push_back({t.value, t.label, pl.cx + rr * static_cast<float>(std::cos(ra)),
+                                    pl.cy - rr * static_cast<float>(std::sin(ra))});
+            }
+            c.polar = std::move(pl);
+        }
+
         // Layout from stored measurements plus this frame's limits and ticks.
         FigureLayout layout_with(const FigureSnapshot& fsnap, const std::vector<CellPrep>& prep,
                                  const FigureMeasure& measure, int fig_w, int fig_h) {
@@ -1494,6 +1562,8 @@ namespace sextant {
                 const RenderSnapshot* own2d = fa.snap2d();
                 if (own2d && own2d->aspect.ratio > 0.0 && own2d->aspect.adjustable == Adjustable::Box)
                     c.frame = aspect_frame(c.frame, *own2d, prep[i].limits);
+                // A polar frame is as round as its box.
+                if (prep[i].polar) c.frame = polar_frame(c.frame, prep[i].pmap);
 
                 // cell_o around the frame, the cell's own: everything else hugs
                 // it, so an aligned group's slack lies at the cell edge.
@@ -1554,6 +1624,8 @@ namespace sextant {
                         Projector3D(prep[i].tf3, s3->camera, c.frame, s3->box_style.margin),
                         prep[i].xticks, prep[i].yticks, prep[i].zticks
                     };
+                } else if (prep[i].polar) {
+                    layout_polar(c, *own2d, prep[i], fw, fh);
                 } else {
                     // Empty for 3D: its ticks are in `box3d`. The transform
                     // carries Datalim's widened limits, so a pan keeps them.

@@ -347,6 +347,7 @@ set(SEXTANT_SOURCES
     src/axes.cpp
     src/axes3d.cpp
     src/plane2d.cpp
+    src/polar_axes.cpp
     src/style.cpp
     src/colormaps.cpp
     src/contour.cpp
@@ -812,6 +813,7 @@ if(SEXTANT_BUILD_TESTS)
             tests/layout_test/aspect.cpp
             tests/layout_test/axis_off.cpp
             tests/layout_test/pie.cpp
+            tests/layout_test/polar.cpp
             tests/layout_test/edge_markers.cpp
             tests/layout_test/alpha.cpp
             tests/layout_test/heatmap_rgb.cpp

@@ -118,18 +118,20 @@ bool sheet_objects_differ(const DataPanelState::SheetStyles& s, const RenderSnap
 // Ticks & labels' look, 2D and 3D: the shared fields under Both, each axis'
 // own beside them (AxesStyle::xtick_color ..., see tick_look()). `axes`: 2 or
 // 3 columns (x, y[, z]); `locked`: an axis column that is another layer's (a
-// twin's shared axis, its host's), or -1; `minor`: a minor length row (2D).
-// True when anything changed.
-bool tick_look_table(AxesStyle& s, int axes, int locked, bool minor, bool is3d) {
+// twin's shared axis, its host's), or -1; `minor`: a minor length row (2D);
+// `polar`: a polar frame's columns, Theta and R, with the label rows only (it
+// draws no tick marks). True when anything changed.
+bool tick_look_table(AxesStyle& s, int axes, int locked, bool minor, bool is3d, bool polar = false) {
     if (!ImGui::BeginTable("ticklook", 2 + axes, ImGuiTableFlags_SizingFixedFit)) return false;
     ImGui::TableSetupColumn("##label", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 4.5f);
     for (int c = 0; c < 1 + axes; ++c) ImGui::TableSetupColumn("##v", ImGuiTableColumnFlags_WidthStretch, 1.0f);
     static const char* kHead[] = {"Both", "X", "Y", "Z"};
+    static const char* kPolarHead[] = {"Both", "Theta", "R"};
     ImGui::TableNextRow();
     ImGui::TableNextColumn();
     for (int c = 0; c < 1 + axes; ++c) {
         ImGui::TableNextColumn();
-        ImGui::TextDisabled("%s", kHead[c]);
+        ImGui::TextDisabled("%s", polar ? kPolarHead[c] : kHead[c]);
         if (c > 0 && c - 1 == locked && ImGui::IsItemHovered())
             ImGui::SetTooltip("This axis is the host's: see Host.");
     }
@@ -197,10 +199,12 @@ bool tick_look_table(AxesStyle& s, int axes, int locked, bool minor, bool is3d) 
         }
         ImGui::PopID();
     };
-    color_row(mark);
-    float_row(len);
-    float_row(width);
-    if (minor) float_row(minor_len);
+    if (!polar) {
+        color_row(mark);
+        float_row(len);
+        float_row(width);
+        if (minor) float_row(minor_len);
+    }
     color_row(label);
     float_row(size);
     ImGui::EndTable();
@@ -1448,8 +1452,9 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
                 end_field_table();
             }
         }
-        // Frame edges, independent of ticks.
-        if (host && begin_field_table("spines", 2)) {
+        // Frame edges, independent of ticks. A polar frame is one outline.
+        const bool polar = cur2d->polar.has_value();
+        if (host && !polar && begin_field_table("spines", 2)) {
             field_row("Bottom");
             if (ImGui::Checkbox("##spinebottom", &sty.spine_bottom)) push_style();
             field_next("Top");
@@ -1461,8 +1466,8 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
             end_field_table();
         }
 
-        ImGui::SeparatorText("Axis position");
-        {
+        if (!polar) {
+            ImGui::SeparatorText("Axis position");
             // One row per axis: its placement, then the origin component
             // ("X axis ... at y"). `scratch` survives un-ticking the pin.
             struct AxisPos {
@@ -1545,6 +1550,9 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
 
     // ==== Ticks ===========================================================
     if (section("Ticks", true)) {
+        // A polar axes (PolarAxes): x is θ, y is r. θ's limits are the
+        // sector in degrees (PolarState), r's the sheet's y limits.
+        const bool polar = cur2d->polar.has_value();
         ImGui::SeparatorText("Limits");
         struct AxisLim {
             const char* label;
@@ -1556,11 +1564,29 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
         const AxisLim axes[2] = {
             { "X", &st.slot_view.xauto_local, &st.slot_view.xmin_local, &st.slot_view.xmax_local,
               &AxesEdit::xmin, &AxesEdit::xmax, &AxesEdit::xlim_auto },
-            { "Y", &st.slot_view.yauto_local, &st.slot_view.ymin_local, &st.slot_view.ymax_local,
+            { polar ? "R" : "Y", &st.slot_view.yauto_local, &st.slot_view.ymin_local, &st.slot_view.ymax_local,
               &AxesEdit::ymin, &AxesEdit::ymax, &AxesEdit::ylim_auto },
         };
         if (begin_field_table("lim")) {
+            if (polar) {
+                // As PolarAxes::set_thetalim() accepts it: lo < hi, span <= 360.
+                PolarState p = *cur2d->polar;
+                field_row("Theta");
+                split_begin(2);
+                bool changed = drag_double("##tmin", &p.thetamin, 1.0f, "%.0f\xC2\xB0");
+                split_next();
+                changed |= drag_double("##tmax", &p.thetamax, 1.0f, "%.0f\xC2\xB0");
+                split_end();
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("The sector drawn, degrees (at most 360 apart).");
+                if (changed && std::isfinite(p.thetamin) && std::isfinite(p.thetamax) && p.thetamin < p.thetamax
+                    && p.thetamax - p.thetamin <= 360.0)
+                    edit_box.update(idx, [&](AxesEdit& e) {
+                        e.polar = p;
+                        e.style_seen.polar = cur2d->style_stamps.polar;
+                    });
+            }
             for (const AxisLim& a : axes) {
+                if (polar && a.lo_field == &AxesEdit::xmin) continue;
                 ImGui::PushID(a.label);
                 // One row per axis: Auto, then low and high.
                 field_row(a.label);
@@ -1601,9 +1627,34 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
                 ImGui::SetTooltip("Off hides the spines, ticks, axis titles, grid and background.");
             end_field_table();
         }
+        // A polar axes' frame (PolarAxes): where θ = 0 sits and turns, and the
+        // r labels' angle; the sector and r are the Limits above.
+        if (polar && begin_field_table("polar", 2)) {
+            PolarState p = *cur2d->polar;
+            bool changed = false;
+            field_row("Zero at");
+            changed |= drag_double("##poloffset", &p.theta_offset, 0.5f, "%.1f\xC2\xB0");
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("The screen angle of theta = 0, counterclockwise from east.");
+            field_next("Clockwise");
+            bool cw = p.direction < 0;
+            if (ImGui::Checkbox("##polcw", &cw)) {
+                p.direction = cw ? -1 : 1;
+                changed = true;
+            }
+            field_row("R labels");
+            changed |= drag_double("##polrlabel", &p.rlabel_position, 0.5f, "%.1f\xC2\xB0");
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("The theta the r labels sit along.");
+            if (changed && std::isfinite(p.theta_offset) && std::isfinite(p.rlabel_position))
+                edit_box.update(idx, [&](AxesEdit& e) {
+                    e.polar = p;
+                    e.style_seen.polar = cur2d->style_stamps.polar;
+                });
+            end_field_table();
+        }
         // Axes::set_aspect(), the cell's own axes' only: a twin draws in its
-        // host's frame.
-        if (host && begin_field_table("aspect", 2)) {
+        // host's frame. A polar frame is round: no aspect.
+        if (host && !polar && begin_field_table("aspect", 2)) {
             AxesAspect& asp = st.cosmetic.aspect2d_local;
             int& mode = st.cosmetic.aspect_mode;
             const auto push_aspect = [&] {
@@ -1646,7 +1697,15 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
         ImGui::SeparatorText("Ticks & labels");
         // Per axis: marks and labels together (the grid stays). A twin's
         // shared axis is its host's, greyed here.
-        if (begin_field_table("tickshow", 2)) {
+        if (polar && begin_field_table("tickshow", 2)) {
+            // Labels only: a polar frame draws no tick marks or minor ticks.
+            field_row("Show Theta");
+            if (ImGui::Checkbox("##showx", &sty.show_xticks)) push_style();
+            field_next("Show R");
+            if (ImGui::Checkbox("##showy", &sty.show_yticks)) push_style();
+            end_field_table();
+        }
+        if (!polar && begin_field_table("tickshow", 2)) {
             const auto axis_cell = [&](int axis, const char* label, bool first) {
                 if (first) field_row(label);
                 else field_next(label);
@@ -1675,10 +1734,10 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
             end_field_table();
         }
         // The look: Both, then each axis' own.
-        if (tick_look_table(sty, 2, host_axis, true, false)) push_style();
+        if (tick_look_table(sty, 2, host_axis, !polar, false, polar)) push_style();
 
         // Scale and label format, per axis.
-        ImGui::SeparatorText("Scale & format");
+        ImGui::SeparatorText(polar ? "Format" : "Scale & format");
         {
             struct ScaleAxis {
                 const char* id;
@@ -1697,21 +1756,25 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
                  &c.yfmt_bad, &AxesEdit::ytick_format},
             };
             for (ScaleAxis& a : axes) {
+                // A polar θ is labelled in degrees ("45°"), its r linear.
+                if (polar && a.id[0] == 'X') continue;
                 // A twin's shared axis: its scale and format are the host's.
                 if ((a.id[0] == 'X' ? 0 : 1) == host_axis) {
                     ImGui::TextDisabled("%s axis: see Host", a.id);
                     continue;
                 }
                 ImGui::PushID(a.id);
-                ImGui::TextDisabled("%s axis", a.id);
+                ImGui::TextDisabled("%s axis", polar ? "R" : a.id);
                 if (begin_field_table("scale", 2)) {
                     auto push_scale = [&]{
                         const AxisScale v = *a.scale;
                         edit_box.update(idx, [&](AxesEdit& e){ e.*a.field = v; });
                     };
-                    field_row("Scale");
-                    if (scale_combo("##scale", a.scale->kind)) push_scale();
-                    if (!a.scale->linear()) {
+                    if (!polar) {
+                        field_row("Scale");
+                        if (scale_combo("##scale", a.scale->kind)) push_scale();
+                    }
+                    if (!polar && !a.scale->linear()) {
                         field_row("Base");
                         double b = a.scale->base;
                         if (drag_double("##base", &b, 0.05f, "%.4g") && std::isfinite(b) && b > 1.0) {
@@ -1747,12 +1810,12 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
 
         // Tick positions; a twin's shared axis takes the host's.
         if (host_axis != 0) {
-            ImGui::TextDisabled("X ticks");
+            ImGui::TextDisabled(polar ? "Theta grids (degrees)" : "X ticks");
             if (draw_tick_table("xticks", st.cosmetic.xticks_scratch))
                 edit_box.update(idx, [&](AxesEdit& e){ e.xticks_override = st.cosmetic.xticks_scratch; });
         }
         if (host_axis != 1) {
-            ImGui::TextDisabled("Y ticks");
+            ImGui::TextDisabled(polar ? "R ticks" : "Y ticks");
             if (draw_tick_table("yticks", st.cosmetic.yticks_scratch))
                 edit_box.update(idx, [&](AxesEdit& e){ e.yticks_override = st.cosmetic.yticks_scratch; });
         }

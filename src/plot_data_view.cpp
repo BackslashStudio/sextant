@@ -45,8 +45,9 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot& snap) 
         t.data_stamp = snap.lines[i].data_stamp;
         t.id = snap.lines[i].id;
         t.label = pick_label(lp.opts.name, "line", static_cast<int>(i));
-        t.columns.push_back({"x", lp.x.data(), lp.x.size()});
-        t.columns.push_back({"y", lp.y.data(), lp.y.size()});
+        // A polar axes' line: θ in radians, r.
+        t.columns.push_back({snap.polar ? "theta" : "x", lp.x.data(), lp.x.size()});
+        t.columns.push_back({snap.polar ? "r" : "y", lp.y.data(), lp.y.size()});
         out.push_back(std::move(t));
     }
 
