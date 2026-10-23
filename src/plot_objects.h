@@ -29,10 +29,11 @@ namespace sextant {
 // always addressed at the axes (plane -1). Text is held by both 2D and 3D
 // axes (never by a plane); AxLine and AxSpan by 2D axes only (a plane's sheet
 // holds none); Fill, Quiver, Poly, Circle, Wedge, HeatmapTri and Contour by 2D
-// axes and planes; Quiver3D by 3D axes. Append new kinds to keep values stable.
+// axes and planes; Quiver3D by 3D axes; Pie by 2D axes only (a plane's sheet
+// holds none). Append new kinds to keep values stable.
 enum class PlotKind { Line, Scatter, Bar, Heatmap, ScatterZ, Bar3D, Surface, Scatter3D, Line3D,
                       SurfaceTri, Text, AxLine, AxSpan, Fill, Quiver, Poly, Circle, Wedge, HeatmapTri,
-                      Contour, Quiver3D };
+                      Contour, Quiver3D, Pie };
 
 // A plot object's (or a plane's) identity, the public ObjectId
 // (sextant/object_id.h): kept by set_*_data(), unchanged by
@@ -758,6 +759,21 @@ struct WedgePlot {
     unsigned long long zorder_stamp = 0;
 };
 
+// Axes::pie(): the slices' values, labels and explodes (each empty or one per
+// value), kept out of opts as a wedge's inner is; opts.colors holds at least
+// one color (the cycle's, resolved at the call).
+struct PiePlot {
+    CowVec<double> values;
+    std::vector<std::string> labels;
+    std::vector<double> explode;
+    PieOptions opts;
+    unsigned long long data_stamp = 0;
+    ObjectId id = 0;
+
+    unsigned long long visible_stamp = 0;
+    unsigned long long zorder_stamp = 0;
+};
+
 // Axes::heatmap_tri(): one value per vertex over triangles (three vertex
 // indices each into x / y / values), coloured per pixel through opts.cmap.
 struct HeatmapTriPlot {
@@ -818,6 +834,7 @@ struct AllPlotData {
     const std::vector<WedgePlot>*    wedges = nullptr;
     const std::vector<HeatmapTriPlot>* heatmap_tris = nullptr;
     const std::vector<ContourPlot>*    contours = nullptr;
+    const std::vector<PiePlot>*        pies = nullptr;
 };
 
 // Caller-side stamps of an axes' titles: each set_*title() takes a fresh
@@ -857,10 +874,11 @@ struct StyleStamps {
     unsigned long long xticks = 0, yticks = 0, zticks = 0;
     unsigned long long box = 0;     // 3D only
     unsigned long long aspect = 0;  // 3D set_box_aspect(), 2D set_aspect()
+    unsigned long long axis = 0;    // 2D only: set_axis_visible()
 
     static constexpr StyleStamps any() {
         constexpr auto m = ~0ull;
-        return { m, m, m, m, m, m, m, m, m };
+        return { m, m, m, m, m, m, m, m, m, m };
     }
 };
 
@@ -911,6 +929,8 @@ struct RenderSnapshot {
     std::vector<HeatmapTriPlot> heatmap_tris;
     // Axes::contour() / contourf(), likewise.
     std::vector<ContourPlot> contours;
+    // Axes::pie(), likewise; always empty on a plane's sheet.
+    std::vector<PiePlot> pies;
 
     // Font sizes live in axes_style.
     std::string title, xtitle, ytitle;
@@ -937,12 +957,16 @@ struct RenderSnapshot {
     std::string xtick_format, ytick_format;
     // Axes::set_aspect(); a twin's is never set (layout reads the cell's own).
     AxesAspect aspect;
+    // Axes::set_axis_visible(): false hides the spines, ticks and their labels,
+    // the x/y titles, the grid and the background fill; axes_style keeps what
+    // was set, so turning it back on restores it.
+    bool axis_on = true;
 
     // Explicit ticks; absent = generate_ticks().
     std::optional<std::vector<Tick>> xticks_override, yticks_override;
 
     AllPlotData all() const {
-        return { lines, scatters, bars, heatmaps, scatter_z, &axlines, &axspans, &fills, &quivers, &polys, &circles, &wedges, &heatmap_tris, &contours };
+        return { lines, scatters, bars, heatmaps, scatter_z, &axlines, &axspans, &fills, &quivers, &polys, &circles, &wedges, &heatmap_tris, &contours, &pies };
     }
 };
 
@@ -1064,6 +1088,7 @@ inline std::optional<ObjectLocation> to_location(const std::optional<ObjectRef>&
         case PlotKind::HeatmapTri:k = PickKind::HeatmapTri;break;
         case PlotKind::Contour:   k = PickKind::Contour;   break;
         case PlotKind::Quiver3D:  k = PickKind::Quiver3D;  break;
+        case PlotKind::Pie:       k = PickKind::Pie;       break;
         case PlotKind::Text: case PlotKind::AxLine: case PlotKind::AxSpan: return std::nullopt;
     }
     return ObjectLocation{ k, r->index };
@@ -1073,7 +1098,8 @@ inline constexpr PlotKind kPlotKinds2D[] = { PlotKind::Line, PlotKind::Scatter, 
                                              PlotKind::Heatmap, PlotKind::ScatterZ, PlotKind::Text,
                                              PlotKind::AxLine, PlotKind::AxSpan, PlotKind::Fill,
                                              PlotKind::Quiver, PlotKind::Poly, PlotKind::Circle,
-                                             PlotKind::Wedge, PlotKind::HeatmapTri, PlotKind::Contour };
+                                             PlotKind::Wedge, PlotKind::HeatmapTri, PlotKind::Contour,
+                                             PlotKind::Pie };
 inline constexpr PlotKind kPlotKinds3D[] = { PlotKind::Bar3D, PlotKind::Surface,
                                              PlotKind::Scatter3D, PlotKind::Line3D,
                                              PlotKind::SurfaceTri, PlotKind::Text,
@@ -1101,6 +1127,7 @@ R with_kind(S& s, PlotKind kind, F&& f, R none) {
         case PlotKind::Wedge:    return f(s.wedges);
         case PlotKind::HeatmapTri: return f(s.heatmap_tris);
         case PlotKind::Contour:  return f(s.contours);
+        case PlotKind::Pie:      return f(s.pies);
         default:                 return none;
     }
 }
@@ -1198,7 +1225,7 @@ std::optional<ObjectRef> find_object_in(const S& s, const PlotKind (&kinds)[N], 
 // where it was among its kind, and the whole object, its id included.
 using PlotObject2D = std::variant<LinePlot, ScatterPlot, BarPlot, HeatmapPlot, ScatterZPlot,
                                   TextPlot, AxLinePlot, AxSpanPlot, FillPlot, QuiverPlot,
-                                  PolyPlot, CirclePlot, WedgePlot, HeatmapTriPlot, ContourPlot>;
+                                  PolyPlot, CirclePlot, WedgePlot, HeatmapTriPlot, ContourPlot, PiePlot>;
 using PlotObject3D = std::variant<Bar3DPlot, SurfacePlot, Scatter3DPlot, Line3DPlot,
                                   SurfaceTriPlot, TextPlot, Quiver3DPlot>;
 template <class Object>
@@ -1342,6 +1369,7 @@ std::vector<ObjectRef> ordered_2d(const S& s, bool by_z) {
     }
     if constexpr (requires { s.heatmap_tris; }) add_order_keys(keys, PlotKind::HeatmapTri, s.heatmap_tris);
     if constexpr (requires { s.contours; }) add_order_keys(keys, PlotKind::Contour, s.contours);
+    if constexpr (requires { s.pies; }) add_order_keys(keys, PlotKind::Pie, s.pies);
     return sorted_refs(keys, by_z);
 }
 } // namespace objects_detail
@@ -1397,6 +1425,7 @@ std::vector<LayerRef> ordered_layers(std::span<const S* const> layers, bool by_z
         }
         if constexpr (requires { s.heatmap_tris; }) add(PlotKind::HeatmapTri, s.heatmap_tris);
         if constexpr (requires { s.contours; }) add(PlotKind::Contour, s.contours);
+        if constexpr (requires { s.pies; }) add(PlotKind::Pie, s.pies);
     }
     std::stable_sort(keys.begin(), keys.end(), [by_z](const Key& a, const Key& b) {
         if (by_z && a.z != b.z) return a.z < b.z;

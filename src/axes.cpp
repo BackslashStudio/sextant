@@ -1,5 +1,6 @@
 #include "axes_impl.h"
 #include "object_remove.h"
+#include "pie_geometry.h"
 #include "axis_limits.h"
 #include "color_norm.h"
 #include "delaunay.h"
@@ -178,6 +179,14 @@ void Axes::Impl::set_twin_style(const AxesStyle& s) {
     style_stamps.style = next_snapshot_generation();
     host->style_stamps.style = next_snapshot_generation();
 }
+
+Axes& Axes::set_axis_visible(bool on) {
+    d->axis_on = on;
+    d->style_stamps.axis = next_snapshot_generation();
+    return *this;
+}
+
+bool Axes::axis_visible() const { return d->axis_on; }
 
 std::shared_ptr<Axes> Axes::twinx() { return d->make_twin(true, "Axes::twinx"); }
 std::shared_ptr<Axes> Axes::twiny() { return d->make_twin(false, "Axes::twiny"); }
@@ -882,6 +891,57 @@ void Axes::Impl::set_wedge_data(std::size_t i, const WedgeData& w, const char* w
     p.data_stamp = next_snapshot_generation();
 }
 
+// One color per slice from the cycle, as matplotlib's pie() takes them; labels
+// and explode leave the options for the pie's data, as a wedge's hole does.
+void Axes::Impl::ingest_pie(std::span<const double> values, PieOptions opts, const char* who) {
+    const std::string w(who);
+    read_back::check_zorder(opts.zorder, who);
+    read_back::check_pie(values, opts.labels, opts.explode, opts.normalize, who);
+    if (!std::isfinite(opts.radius) || !(opts.radius > 0.0))
+        throw std::invalid_argument(w + ": radius must be finite and > 0");
+    if (!std::isfinite(opts.inner) || opts.inner < 0.0 || opts.inner >= opts.radius)
+        throw std::invalid_argument(w + ": inner must be in [0, radius)");
+    if (!std::isfinite(opts.cx) || !std::isfinite(opts.cy) || !std::isfinite(opts.startangle))
+        throw std::invalid_argument(w + ": the centre and startangle must be finite");
+    if (!std::isfinite(opts.pctdistance) || (opts.labeldistance && !std::isfinite(*opts.labeldistance)))
+        throw std::invalid_argument(w + ": pctdistance and labeldistance must be finite");
+    if (!parse_autopct(opts.autopct))
+        throw std::invalid_argument(w + ": autopct must hold one %[flags][width][.precision](f|F|g|G|e|E|d|i) "
+                                        "conversion, with %% for a percent sign");
+    warn_math(mathtext, who, opts.name);
+    for (const std::string& l : opts.labels) warn_math(mathtext, who, l);
+    if (opts.colors.empty())
+        for (std::size_t k = 0; k < values.size(); ++k) {
+            std::optional<Color> c;
+            cycle->resolve(c);
+            opts.colors.push_back(*c);
+        }
+    std::vector<std::string> labels = std::move(opts.labels);
+    std::vector<double> explode = std::move(opts.explode);
+    opts.labels.clear();
+    opts.explode.clear();
+    pies.push_back({ read_back::own(values), std::move(labels), std::move(explode), std::move(opts),
+                     next_snapshot_generation(), new_id() });
+}
+
+void Axes::Impl::set_pie_data(std::size_t i, const PieData& p, const char* who) {
+    PiePlot& pie = read_back::at(pies, i, who);
+    read_back::check_pie(p.values, p.labels, p.explode, pie.opts.normalize, who);
+    for (const std::string& l : p.labels) warn_math(mathtext, who, l);
+    pie.values = read_back::own(std::span<const double>(p.values));
+    pie.labels = p.labels;
+    pie.explode = p.explode;
+    pie.data_stamp = next_snapshot_generation();
+}
+
+Axes& Axes::pie(std::span<const double> values, PieOptions opts) {
+    d->ingest_pie(values, std::move(opts), "pie");
+    // As matplotlib's pie(frame=False); a program can turn either back after.
+    set_axis_visible(false);
+    if (!d->host) set_aspect(1.0);
+    return *this;
+}
+
 void Axes::Impl::ingest_stack(std::span<const double> x, std::span<const std::vector<double>> ys,
                               const StackOptions& opts, const char* who) {
     for (const std::vector<double>& y : ys)
@@ -1247,6 +1307,7 @@ FillData Axes::fill_data(std::size_t i) const {
 std::size_t Axes::shape_poly_count() const   { return d->polys.size(); }
 std::size_t Axes::shape_circle_count() const { return d->circles.size(); }
 std::size_t Axes::shape_wedge_count() const  { return d->wedges.size(); }
+std::size_t Axes::pie_count() const          { return d->pies.size(); }
 
 PolyData Axes::shape_poly_data(std::size_t i) const {
     return read_back::to_data(read_back::at(d->polys, i, "shape_poly_data"));
@@ -1256,6 +1317,10 @@ CircleData Axes::shape_circle_data(std::size_t i) const {
 }
 WedgeData Axes::shape_wedge_data(std::size_t i) const {
     return read_back::to_data(read_back::at(d->wedges, i, "shape_wedge_data"));
+}
+
+PieData Axes::pie_data(std::size_t i) const {
+    return read_back::to_data(read_back::at(d->pies, i, "pie_data"));
 }
 
 Axes& Axes::set_shape_poly_data(std::size_t i, const PolyData& data) {
@@ -1270,6 +1335,11 @@ Axes& Axes::set_shape_circle_data(std::size_t i, const CircleData& data) {
     d->set_circle_data(i, data, "set_shape_circle_data");
     return *this;
 }
+Axes& Axes::set_pie_data(std::size_t i, const PieData& data) {
+    d->set_pie_data(i, data, "set_pie_data");
+    return *this;
+}
+
 Axes& Axes::set_shape_wedge_data(std::size_t i, const WedgeData& data) {
     d->set_wedge_data(i, data, "set_shape_wedge_data");
     return *this;
@@ -1405,6 +1475,11 @@ Axes& Axes::set_shape_circle_visible(std::size_t i, bool visible) {
     read_back::set_visible(d->circles, i, visible, "set_shape_circle_visible");
     return *this;
 }
+Axes& Axes::set_pie_visible(std::size_t i, bool visible) {
+    read_back::set_visible(d->pies, i, visible, "set_pie_visible");
+    return *this;
+}
+
 Axes& Axes::set_shape_wedge_visible(std::size_t i, bool visible) {
     read_back::set_visible(d->wedges, i, visible, "set_shape_wedge_visible");
     return *this;
@@ -1444,6 +1519,7 @@ bool Axes::fill_visible(std::size_t i) const      { return read_back::visible(d-
 bool Axes::shape_poly_visible(std::size_t i) const   { return read_back::visible(d->polys, i, "shape_poly_visible"); }
 bool Axes::shape_circle_visible(std::size_t i) const { return read_back::visible(d->circles, i, "shape_circle_visible"); }
 bool Axes::shape_wedge_visible(std::size_t i) const  { return read_back::visible(d->wedges, i, "shape_wedge_visible"); }
+bool Axes::pie_visible(std::size_t i) const          { return read_back::visible(d->pies, i, "pie_visible"); }
 bool Axes::heatmap_tri_visible(std::size_t i) const  { return read_back::visible(d->heatmap_tris, i, "heatmap_tri_visible"); }
 bool Axes::quiver_visible(std::size_t i) const    { return read_back::visible(d->quivers, i, "quiver_visible"); }
 bool Axes::axline_visible(std::size_t i) const    { return read_back::visible(d->axlines, i, "axline_visible"); }

@@ -70,6 +70,9 @@ struct PlotDataTable {
     // over its numbers (a polygon is a table of vertices).
     const CirclePlot* circle = nullptr;
     const WedgePlot*  wedge = nullptr;
+
+    // Non-null => a pie: its own table of value, label and explode.
+    const PiePlot*    pie = nullptr;
     const AxLinePlot* sloped_axline = nullptr;
 };
 

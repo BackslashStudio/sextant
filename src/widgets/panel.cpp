@@ -105,6 +105,7 @@ void sync_sheet(DataPanelState::SheetStyles& dst, const RenderSnapshot& sn) {
     copy(dst.wedges, sn.wedges);
     copy(dst.heatmap_tris, sn.heatmap_tris);
     copy(dst.contours, sn.contours);
+    copy(dst.pies, sn.pies);
     dst.ids = object_ids(sn, kPlotKinds2D);
 }
 
@@ -1588,6 +1589,16 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
                 ImGui::EndDisabled();
                 ImGui::PopID();
             }
+            end_field_table();
+        }
+        // Axes::set_axis_visible(), this layer's own.
+        if (begin_field_table("axison", 2)) {
+            field_row("Axis");
+            bool on = cur2d->axis_on;
+            if (ImGui::Checkbox("##axison", &on))
+                edit_box.update(idx, [&](AxesEdit& e) { e.axis_on = on; });
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Off hides the spines, ticks, axis titles, grid and background.");
             end_field_table();
         }
         // Axes::set_aspect(), the cell's own axes' only: a twin draws in its

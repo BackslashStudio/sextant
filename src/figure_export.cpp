@@ -1,4 +1,5 @@
 #include "figure_export.h"
+#include "pie_geometry.h"
 #include "render_frame.h"
 #include "coord_transform.h"
 #include "renderer/render_device.h"
@@ -211,18 +212,28 @@ std::string render_figure_svg(const FigureSnapshot& fsnap,
             sd.polys     = snap.polys;
             sd.circles   = snap.circles;
             sd.wedges    = snap.wedges;
+            sd.pies      = snap.pies;
             sd.heatmap_tris = snap.heatmap_tris;
             sd.contours     = snap.contours;
 
             sd.title           = snap.title;
-            sd.xtitle          = snap.xtitle;
-            sd.ytitle          = snap.ytitle;
+            // Axes::set_axis_visible(false) drops the x/y titles with the axis.
+            sd.xtitle          = snap.axis_on ? snap.xtitle : std::string{};
+            sd.ytitle          = snap.axis_on ? snap.ytitle : std::string{};
             sd.grid_enabled    = snap.grid_enabled;
+            sd.axis_on         = snap.axis_on;
             sd.grid_opts       = snap.grid_opts;
             sd.axes_style      = snap.axes_style;
             sd.legend_opts     = snap.legend_opts;
             sd.colorbar_opts   = snap.colorbar_opts;
             sd.texts           = plan_texts(snap.texts, sd.layout.tr, sd.layout.frame);
+            // Pies' labels and percents under the axes' own texts, as on screen.
+            if (!snap.pies.empty()) {
+                std::vector<TextDraw> pt = plan_texts(pie_texts(snap.pies, snap.axes_style.label_fontsize),
+                                                      sd.layout.tr, sd.layout.frame);
+                sd.texts.insert(sd.texts.begin(), std::make_move_iterator(pt.begin()),
+                                std::make_move_iterator(pt.end()));
+            }
         };
         fill2d(sd, *fsnap.axes[i].snap2d());
         const auto& twins = fsnap.axes[i].twins;

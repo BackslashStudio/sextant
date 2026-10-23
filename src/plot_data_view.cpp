@@ -217,6 +217,17 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot& snap) 
         t.wedge = &wp;
         out.push_back(std::move(t));
     }
+    for (std::size_t i = 0; i < snap.pies.size(); ++i) {
+        const auto& pp = snap.pies[i];
+        PlotDataTable t;
+        t.kind = PlotKind::Pie;
+        t.plot_index = static_cast<int>(i);
+        t.data_stamp = pp.data_stamp;
+        t.id = pp.id;
+        t.label = pick_label(pp.opts.name, "pie", static_cast<int>(i));
+        t.pie = &pp;
+        out.push_back(std::move(t));
+    }
 
     // heatmap_tri: one row per vertex, the triangles read only beside them. As a
     // heatmap, its name labels the colorbar, so the tab is always synthesized.

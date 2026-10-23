@@ -31,6 +31,7 @@ struct Axes::Impl {
     std::vector<PolyPlot>     polys;
     std::vector<CirclePlot>   circles;
     std::vector<WedgePlot>    wedges;
+    std::vector<PiePlot>      pies;      // Axes only (a plane has none)
     std::vector<HeatmapTriPlot> heatmap_tris;
     std::vector<ContourPlot>    contours;
 
@@ -119,6 +120,8 @@ struct Axes::Impl {
     std::string xtick_format, ytick_format;
     // set_aspect().
     AxesAspect aspect;
+    // set_axis_visible().
+    bool axis_on = true;
 
     // Explicit tick override set via Axes::set_xticks/set_yticks (or the
     // widget panel's tick table). Absent = auto-generated ticks.
@@ -160,7 +163,7 @@ struct Axes::Impl {
         s.axlines = axlines; s.axspans = axspans;
         s.fills = fills;
         s.quivers = quivers;
-        s.polys = polys; s.circles = circles; s.wedges = wedges;
+        s.polys = polys; s.circles = circles; s.wedges = wedges; s.pies = pies;
         s.heatmap_tris = heatmap_tris;
         s.contours = contours;
         s.title = title; s.xtitle = xtitle; s.ytitle = ytitle;
@@ -178,6 +181,7 @@ struct Axes::Impl {
         s.yshare = yshare ? yshare->id : 0;
         s.xtick_format = xtick_format; s.ytick_format = ytick_format;
         s.aspect = aspect;
+        s.axis_on = axis_on;
         s.xticks_override = xticks_override;
         s.yticks_override = yticks_override;
         return s;
@@ -282,6 +286,11 @@ struct Axes::Impl {
                        const char* who);
     void set_circle_data(std::size_t i, const CircleData& d, const char* who);
     void set_wedge_data(std::size_t i, const WedgeData& d, const char* who);
+
+    // pie() (Axes only): checks, takes one cycle color per slice when
+    // PieOptions::colors is empty, and keeps labels and explode as data.
+    void ingest_pie(std::span<const double> values, PieOptions opts, const char* who);
+    void set_pie_data(std::size_t i, const PieData& d, const char* who);
 
     // Reference lines and spans (Axes only). Throw on a non-finite number.
     void ingest_axline(double value, AxLineOptions opts, const char* who);

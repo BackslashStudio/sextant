@@ -71,7 +71,8 @@ struct PlotStyleEdit {
     std::variant<LineOptions, ScatterOptions, BarOptions,
                  HeatmapOptions, ScatterZOptions, TextStyle,
                  AxLineOptions, AxSpanOptions, FillOptions, QuiverOptions,
-                 PolyOptions, CircleOptions, WedgeOptions, HeatmapTriOptions, ContourOptions> opts;
+                 PolyOptions, CircleOptions, WedgeOptions, HeatmapTriOptions, ContourOptions,
+                 PieOptions> opts;
     ObjectId id = 0, plane_id = 0;   // see PlotCellEdit
     // The object's visible_stamp when the panel drew; filled in by
     // FigureEditBox. A set_<kind>_visible() since keeps its `visible`.
@@ -146,6 +147,17 @@ struct ShapeDataEdit {
     ObjectId id = 0, plane_id = 0;    // see PlotCellEdit
 };
 
+// A pie's values, labels and explode, replaced whole from its Data-panel tab
+// (a row edit, add or remove is one of these) and journaled like other data.
+struct PieDataEdit {
+    int         plot_index  = 0;
+    PieData     data;
+    int         plane_index = -1;   // see PlotCellEdit
+    PlotKind    kind        = PlotKind::Pie;
+    unsigned long long seen = ~0ull;   // see PlotCellEdit
+    ObjectId id = 0, plane_id = 0;    // see PlotCellEdit
+};
+
 // A reference line's numbers, replaced whole: its mode and the sloped line's
 // points and slope (a value line is also a PlotCellEdit). An axes' own object,
 // never a plane's.
@@ -161,7 +173,7 @@ struct AxLineDataEdit {
 // One op in a plot's edit stream. Order matters: indices refer to the arrays
 // as they were when recorded, so ops must replay in sequence.
 using PlotDataOp = std::variant<PlotCellEdit, PlotRowEdit, MatrixLineEdit, BarWidthEdit,
-                                TextDataEdit, ShapeDataEdit, AxLineDataEdit>;
+                                TextDataEdit, ShapeDataEdit, AxLineDataEdit, PieDataEdit>;
 
 // The plane_index every op carries.
 inline int plot_op_plane(const PlotDataOp& op) {
@@ -320,6 +332,8 @@ struct AxesEdit {
     // Axes::set_aspect() (StyleStamps::aspect). Datalim with a ratio is skipped
     // on an axes whose two axes are both shared, as the setter refuses it.
     std::optional<AxesAspect> aspect;
+    // Axes::set_axis_visible() (StyleStamps::axis).
+    std::optional<bool> axis_on;
     std::optional<AxesStyle> axes_style;
 
     // Whole options structs; the panel republishes its local copy on change.
@@ -447,7 +461,7 @@ inline bool is_navigation_only(const FigureEdits& f) {
         return false;
     for (const auto& [idx, e] : f.per_axes) {
         if (e.title || e.xtitle || e.ytitle || e.grid_enabled || e.axes_style || e.grid_opts
-            || e.xscale || e.yscale || e.xtick_format || e.ytick_format || e.aspect
+            || e.xscale || e.yscale || e.xtick_format || e.ytick_format || e.aspect || e.axis_on
             || e.legend_enabled || e.legend_opts || e.colorbar_opts
             || !e.plot_ops.empty() || !e.plot_styles.empty())
             return false;
@@ -717,6 +731,9 @@ std::optional<PlotDataOp> apply_plot_data_op(T& t, const PlotCellEdit& e) {
         case PlotKind::Wedge:
             // One row; see ShapeDataEdit.
             return std::nullopt;
+        case PlotKind::Pie:
+            // Replaced whole; see PieDataEdit.
+            return std::nullopt;
     }
     return std::nullopt;
 }
@@ -799,6 +816,42 @@ std::optional<PlotDataOp> apply_plot_data_op(T& t, const ShapeDataEdit& e) {
         return inv;
     }
     return std::nullopt;
+}
+
+namespace edits_detail {
+
+// read_back::check_pie()'s rules, for numbers a panel typed.
+inline bool pie_numbers_ok(const PieData& d, bool normalize) {
+    double sum = 0.0;
+    for (const double v : d.values) {
+        if (!std::isfinite(v) || v < 0.0) return false;
+        sum += v;
+    }
+    if (!(sum > 0.0) || (!normalize && sum > 1.0 + 1e-9)) return false;
+    if (!d.labels.empty() && d.labels.size() != d.values.size()) return false;
+    if (!d.explode.empty() && d.explode.size() != d.values.size()) return false;
+    for (const double x : d.explode)
+        if (!std::isfinite(x) || x < 0.0) return false;
+    return true;
+}
+
+} // namespace edits_detail
+
+template <class T>
+std::optional<PlotDataOp> apply_plot_data_op(T& t, const PieDataEdit& e) {
+    if constexpr (requires { t.pies; }) {
+        if (e.kind != PlotKind::Pie) return std::nullopt;
+        auto* p = edits_detail::op_target(t.pies, e);
+        if (!p || !edits_detail::pie_numbers_ok(e.data, p->opts.normalize)) return std::nullopt;
+        PieDataEdit inv = edits_detail::retarget(e, t.pies, *p);
+        inv.data = PieData{p->values.get(), p->labels, p->explode};
+        p->values = e.data.values;
+        p->labels = e.data.labels;
+        p->explode = e.data.explode;
+        return inv;
+    } else {
+        return std::nullopt;
+    }
 }
 
 template <class T>
@@ -966,6 +1019,9 @@ std::optional<PlotDataOp> apply_plot_data_op(T& t, const PlotRowEdit& e) {
         case PlotKind::Circle:
         case PlotKind::Wedge:
             // One row; see ShapeDataEdit.
+            return std::nullopt;
+        case PlotKind::Pie:
+            // Replaced whole; see PieDataEdit.
             return std::nullopt;
         case PlotKind::Heatmap:
         case PlotKind::Bar3D:
@@ -1283,6 +1339,9 @@ std::optional<PlotDataOp> apply_axes3d_data_op(T&, const ShapeDataEdit&) { retur
 template <class T>
 std::optional<PlotDataOp> apply_axes3d_data_op(T&, const AxLineDataEdit&) { return std::nullopt; }
 
+template <class T>
+std::optional<PlotDataOp> apply_axes3d_data_op(T&, const PieDataEdit&) { return std::nullopt; }
+
 // Applies an ordered op stream, prepending each op's inverse to `inv` (so it
 // runs last-first). The 2D overload skips plane-addressed ops; the 3D overload
 // (targets with planes) routes plane -1 to the axes' own objects and others to
@@ -1406,6 +1465,7 @@ auto& styled_vector(T& t) {
     else if constexpr (std::is_same_v<O, WedgeOptions>)   return t.wedges;
     else if constexpr (std::is_same_v<O, HeatmapTriOptions>) return t.heatmap_tris;
     else if constexpr (std::is_same_v<O, ContourOptions>) return t.contours;
+    else if constexpr (std::is_same_v<O, PieOptions>)     return t.pies;
     else                                                  return t.scatter_z;
 }
 
@@ -1530,6 +1590,7 @@ void apply_style_edits(T& dst, const E& e, E* inv = nullptr) {
         // Both shared (a share id or group on each): no axis left to widen.
         if (e.aspect && have.aspect <= seen.aspect && !(e.aspect->datalim() && dst.xshare && dst.yshare))
             put(dst.aspect, e.aspect, undo(&E::aspect));
+        if (have.axis <= seen.axis) put(dst.axis_on, e.axis_on, undo(&E::axis_on));
     }
     if constexpr (requires { dst.zticks_override; e.zticks_override; })
         if (have.zticks <= seen.zticks)
@@ -1659,6 +1720,7 @@ void merge_style_edits(E& dst, const E& src) {
         take_latest(dst.yscale, src.yscale, ds.yticks, ss.yticks);
         take_latest(dst.xtick_format, src.xtick_format, ds.xticks, ss.xticks);
         take_latest(dst.ytick_format, src.ytick_format, ds.yticks, ss.yticks);
+        take_latest(dst.axis_on, src.axis_on, ds.axis, ss.axis);
     }
     // The 2D aspect, or the 3D box aspect.
     take_latest(dst.aspect, src.aspect, ds.aspect, ss.aspect);
@@ -1701,7 +1763,7 @@ bool style_edits_empty(const E& e) {
                  && !e.legend_opts && !e.colorbar_opts && !e.xticks_override
                  && !e.yticks_override && !e.aspect && e.plot_styles.empty();
     if constexpr (requires { e.xscale; })
-        empty = empty && !e.xscale && !e.yscale && !e.xtick_format && !e.ytick_format;
+        empty = empty && !e.xscale && !e.yscale && !e.xtick_format && !e.ytick_format && !e.axis_on;
     if constexpr (requires { e.box_style; })
         empty = empty && !e.zticks_override && !e.box_style && e.planes.empty()
                 && e.bars3d.empty() && e.surfaces.empty() && e.scatter3d.empty()
@@ -1818,6 +1880,7 @@ void compose_axes_inverse(E& older, const E& newer) {
         keep_older(older.yscale, newer.yscale);
         keep_older(older.xtick_format, newer.xtick_format);
         keep_older(older.ytick_format, newer.ytick_format);
+        keep_older(older.axis_on, newer.axis_on);
     }
     older.plot_ops.insert(older.plot_ops.begin(), newer.plot_ops.begin(), newer.plot_ops.end());
     edits_detail::compose_entries(older.plot_styles, newer.plot_styles,

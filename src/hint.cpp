@@ -6,6 +6,7 @@
 #include "renderer/surface.h"
 #include "fill_geometry.h"
 #include "shape_geometry.h"
+#include "pie_geometry.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -351,6 +352,18 @@ std::optional<PickHit> find_area(const RenderSnapshot& snap, const HintProjector
                 hit.element = 0;
                 return hit;
             }
+            case PlotKind::Pie: {
+                // The slice under the cursor (pies are on Axes only, never a plane).
+                const CoordTransform* t = tr.transform();
+                if (!t) break;
+                const auto k = pie_slice_at(snap.pies[o], *t, cursor_x, cursor_y);
+                if (!k) break;
+                hit.kind = PickKind::Pie;
+                hit.object = o;
+                hit.element = *k;
+                hit.value = snap.pies[o].values[*k];
+                return hit;
+            }
             case PlotKind::Contour: {
                 // A contourf's band under the cursor (its drawn triangles).
                 const auto f = contour_fill_at(snap.contours[o], xs, ys, cx, cy);
@@ -524,6 +537,7 @@ ObjectId pick_object_id(const RenderSnapshot& s, PickKind kind, std::size_t i) {
         case PickKind::Poly:     return s.polys[i].id;
         case PickKind::Circle:   return s.circles[i].id;
         case PickKind::Wedge:    return s.wedges[i].id;
+        case PickKind::Pie:      return s.pies[i].id;
         case PickKind::HeatmapTri: return s.heatmap_tris[i].id;
         case PickKind::Contour:  return s.contours[i].id;
         default: return 0;
@@ -643,6 +657,20 @@ std::string format_pick(const RenderSnapshot& snap, const PickHit& hit) {
                 s = "level=" + format_contour_level(cp.geom->levels[hit.element]);
             }
             if (!cp.opts.name.empty()) s += '\n' + cp.opts.name;
+            return s;
+        }
+        case PickKind::Pie: {
+            // "label: value (pct%)", then the pie's name.
+            const PiePlot& p = snap.pies[hit.object];
+            const std::vector<PieSlice> slices = pie_slices(p);
+            if (hit.element >= slices.size()) return {};
+            const PieSlice& sl = slices[hit.element];
+            char buf[96];
+            std::snprintf(buf, sizeof(buf), "%.6g (%.1f%%)", sl.value, 100.0 * sl.frac);
+            std::string s;
+            if (hit.element < p.labels.size() && !p.labels[hit.element].empty()) s = p.labels[hit.element] + ": ";
+            s += buf;
+            if (!p.opts.name.empty()) s += '\n' + p.opts.name;
             return s;
         }
         case PickKind::Poly: case PickKind::Circle: case PickKind::Wedge: {

@@ -1028,6 +1028,63 @@ namespace sextant {
         double zorder = 0.0;     // see LineOptions::zorder
     };
 
+    // A pie chart (Axes::pie()), as matplotlib's pie(). Slice k spans
+    // values[k] / sum of the circle (normalize), or values[k] of it (not).
+    struct PieOptions {
+        // One label and one explode per slice, or empty. Kept as the pie's data,
+        // read back and replaced through PieData, not through these options.
+        std::vector<std::string> labels;
+        // Each slice's offset from the centre along its middle, as a fraction of
+        // `radius` (0 = none).
+        std::vector<double> explode;
+
+        // Empty = one color from the cycle per slice, taken at the call; else
+        // slice k is colors[k % colors.size()].
+        std::vector<Color> colors;
+
+        // Each slice's percentage drawn on it, matplotlib's autopct: one printf
+        // conversion %[flags][width][.precision](f|F|g|G|e|E|d|i) of the percent,
+        // "%%" for a percent sign, anything else as written ("%1.1f%%"). Empty =
+        // none. Anything else throws std::invalid_argument at the call.
+        std::string autopct;
+        // Where percents and labels sit, in radii from the centre; an unset
+        // labeldistance draws no labels (they are still the legend's names).
+        double pctdistance = 0.6;
+        std::optional<double> labeldistance = 1.1;
+
+        // Degrees counter-clockwise from +x where the first slice starts; the
+        // slices follow counter-clockwise, or clockwise when not counterclock.
+        double startangle = 0.0;
+        bool counterclock = true;
+
+        // In data units: a circle where the axes' units are equal (pie() sets
+        // aspect 1), an ellipse otherwise.
+        double radius = 1.0;
+        double cx = 0.0, cy = 0.0;
+        // false: values are fractions of the circle (summing to at most 1),
+        // leaving a gap where they fall short.
+        bool normalize = true;
+        // The hole's radius, in data units, < radius (0 = none): a ring.
+        double inner = 0.0;
+
+        // Each slice's look, as WedgeOptions: an outline when linewidth > 0, in
+        // edgecolor (unset = the slice's own color).
+        std::optional<Color> edgecolor;
+        float linewidth = 0.0f;
+        float alpha = 1.0f;
+        // Labels' and percents' size in pixels (unset = AxesStyle::label_fontsize,
+        // the tick labels') and color.
+        std::optional<float> fontsize;
+        Color textcolor = Color::Black;
+
+        // `name` is the pie's (hover, find); the legend lists each labelled
+        // slice by its label.
+        std::string name;
+        bool show_legend = true; // see LineOptions::show_legend
+        bool visible = true;     // see LineOptions::visible
+        double zorder = 0.0;     // see LineOptions::zorder
+    };
+
     // A text's look (Axes::text(), annotate(), and the Axes3D ones). Sizes are
     // pixels as drawn; a text keeps its size under zoom and in 3D at any
     // distance.
@@ -1245,6 +1302,14 @@ namespace sextant {
     struct WedgeData {
         Pos cx, cy, r;
         double theta1 = 0.0, theta2 = 90.0, inner = 0.0;
+    };
+
+    // Axes::pie(): one value per slice, and one label and one explode per slice
+    // or none (see PieOptions).
+    struct PieData {
+        std::vector<double> values;
+        std::vector<std::string> labels;
+        std::vector<double> explode;
     };
 
     // Axes::text() and annotate(): the string and where it is. `arrow` is set

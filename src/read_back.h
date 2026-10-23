@@ -319,6 +319,32 @@ namespace sextant::read_back {
             throw std::invalid_argument(std::string(who) + ": the inner radius must be in [0, r)");
     }
 
+    // A pie's data: values finite and >= 0 with a positive sum (at most 1 when
+    // not normalized), labels and explode empty or one per value, explode
+    // finite and >= 0.
+    inline void check_pie(std::span<const double> values, std::span<const std::string> labels,
+                          std::span<const double> explode, bool normalize, const char* who) {
+        const std::string w(who);
+        double sum = 0.0;
+        for (const double v : values) {
+            if (!std::isfinite(v) || v < 0.0)
+                throw std::invalid_argument(w + ": every value must be finite and >= 0");
+            sum += v;
+        }
+        if (!(sum > 0.0)) throw std::invalid_argument(w + ": the values must sum to more than 0");
+        if (!normalize && sum > 1.0 + 1e-9)
+            throw std::invalid_argument(w + ": without normalize the values are fractions, summing to at most 1");
+        if (!labels.empty() && labels.size() != values.size())
+            throw std::invalid_argument(w + ": labels needs one per value, or none");
+        if (!explode.empty() && explode.size() != values.size())
+            throw std::invalid_argument(w + ": explode needs one per value, or none");
+        for (const double e : explode)
+            if (!std::isfinite(e) || e < 0.0)
+                throw std::invalid_argument(w + ": every explode must be finite and >= 0");
+    }
+
+    inline PieData to_data(const PiePlot& p) { return { p.values.get(), p.labels, p.explode }; }
+
     inline PolyData   to_data(const PolyPlot& p)   { return { p.x.get(), p.y.get() }; }
     inline HeatmapTriData to_data(const HeatmapTriPlot& p) {
         return { p.x.get(), p.y.get(), p.values.get(), p.tri.get() };

@@ -1,4 +1,5 @@
 #include "data_panel.h"
+#include "../pie_geometry.h"
 #include "panel.h"
 #include "panel_state.h"
 #include "figure_context.h"
@@ -1313,6 +1314,90 @@ namespace sextant {
             }
         }
 
+        // A pie: its name, slice colors, geometry, label and percent text, and outline.
+        template<class Push>
+        void pie_style(DataPanelState& st, PieOptions& o, Push&& push) {
+            name_and_key(st, o, push);
+            if (!o.colors.empty()) {
+                ImGui::SeparatorText("Slice colors");
+                ImGui::TextDisabled("Slice k takes color k, wrapping round.");
+                for (std::size_t k = 0; k < o.colors.size(); ++k) {
+                    ImGui::PushID(static_cast<int>(k));
+                    if (k % 8 != 0) ImGui::SameLine();
+                    if (color_swatch("##piecol", o.colors[k])) push();
+                    ImGui::PopID();
+                }
+            }
+            if (begin_field_table("piegeom")) {
+                field_row("Alpha");
+                if (drag_float("##piealpha", &o.alpha, 0.0f, 1.0f, 0.005f, "%.2f")) push();
+                field_row("Start");
+                if (drag_double("##piestart", &o.startangle, 0.5f, "%.1f deg")) push();
+                field_row("Radius");
+                if (drag_double("##pierad", &o.radius, 0.005f, "%.4g")) {
+                    o.radius = std::max(o.radius, 1e-6);
+                    o.inner = std::min(o.inner, o.radius * 0.999);
+                    push();
+                }
+                field_row("Hole");
+                if (drag_double("##pieinner", &o.inner, 0.005f, "%.4g")) {
+                    o.inner = std::clamp(o.inner, 0.0, o.radius * 0.999);
+                    push();
+                }
+                field_row("Center X");
+                if (drag_double("##piecx", &o.cx, 0.01f, "%.4g")) push();
+                field_row("Center Y");
+                if (drag_double("##piecy", &o.cy, 0.01f, "%.4g")) push();
+                end_field_table();
+            }
+            if (ImGui::Checkbox("Counter-clockwise##pieccw", &o.counterclock)) push();
+            ImGui::SeparatorText("Labels");
+            bool labels = o.labeldistance.has_value();
+            if (ImGui::Checkbox("Beside the slices##pielab", &labels)) {
+                o.labeldistance = labels ? std::optional<double>(1.1) : std::nullopt;
+                push();
+            }
+            if (begin_field_table("pietext")) {
+                if (o.labeldistance) {
+                    field_row("Distance");
+                    if (drag_double("##pield", &*o.labeldistance, 0.005f, "%.3g")) push();
+                }
+                field_row("Percent");
+                char buf[64];
+                std::snprintf(buf, sizeof buf, "%s", o.autopct.c_str());
+                if (ImGui::InputText("##pieapct", buf, sizeof buf)) {
+                    // Taken only when pie() would take it.
+                    if (parse_autopct(buf)) {
+                        o.autopct = buf;
+                        push();
+                    }
+                }
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("matplotlib's autopct, e.g. %%1.1f%%%%; empty = none");
+                field_row("Pct dist.");
+                if (drag_double("##piepd", &o.pctdistance, 0.005f, "%.3g")) push();
+                field_row("Text");
+                if (color_swatch("##pietc", o.textcolor)) push();
+                end_field_table();
+            }
+            ImGui::SeparatorText("Outline");
+            if (begin_field_table("pieedge")) {
+                field_row("Width");
+                if (drag_float("##pieew", &o.linewidth, 0.0f, 10.0f, 0.05f, "%.2f px")) push();
+                end_field_table();
+            }
+            if (o.linewidth <= 0.0f) return;
+            bool own = o.edgecolor.has_value();
+            if (ImGui::Checkbox("Own colour##pieeown", &own)) {
+                o.edgecolor = own ? std::optional<Color>(Color::White) : std::nullopt;
+                push();
+            }
+            if (o.edgecolor && begin_field_table("pieedge2")) {
+                field_row("Color");
+                if (color_swatch("##pieecol", *o.edgecolor)) push();
+                end_field_table();
+            }
+        }
+
         // A contour or contourf (`p` the snapshot's, for its resolved limits):
         // filled, levels (given, or a count of nice ones), colours through a
         // norm over vmin/vmax (auto: the first and last level), and the lines'
@@ -1500,6 +1585,7 @@ namespace sextant {
                 case PlotKind::Wedge:    if (!both(ss->wedges, sheet.wedges)) return; break;
                 case PlotKind::HeatmapTri: if (!both(ss->heatmap_tris, sheet.heatmap_tris)) return; break;
                 case PlotKind::Contour:  if (!both(ss->contours, sheet.contours)) return; break;
+                case PlotKind::Pie:      if (!both(ss->pies, sheet.pies)) return; break;
                 default: return; // the 3D kinds have blocks of their own
             }
             if (!section("Appearance", true)) return;
@@ -1554,6 +1640,9 @@ namespace sextant {
                     break;
                 case PlotKind::Contour:
                     contour_style(st, ss->contours[i], sheet.contours[i], push_of(ss->contours[i]));
+                    break;
+                case PlotKind::Pie:
+                    pie_style(st, ss->pies[i], push_of(ss->pies[i]));
                     break;
                 default: break;
             }
@@ -2058,6 +2147,84 @@ namespace sextant {
             if (t.wedge) ImGui::TextDisabled("Angles run counter-clockwise from +x; the hole is in the radius' units, below it.");
         }
 
+        // A pie's tab: one row per slice (value, label, explode), with a row added
+        // or removed as one PieDataEdit. While a field is active it edits
+        // DataPanelState::pie_local; the snapshot is read otherwise.
+        void draw_pie_form(DataPanelState& st, FigureEditBox& edit_box, int idx, bool is3d,
+                           const PlotDataTable& t) {
+            if (t.plot_index < 0 || !t.pie) return;
+            if (!ImGui::IsAnyItemActive())
+                st.pie_local = PieData{t.pie->values.get(), t.pie->labels, t.pie->explode};
+            PieData& d = st.pie_local;
+            const std::size_t n = d.values.size();
+            // Labels and explode one per value once any row is edited.
+            d.labels.resize(n);
+            d.explode.resize(n, 0.0);
+            const auto push = [&] {
+                PieDataEdit op;
+                op.data = d;
+                const bool any_label = std::any_of(d.labels.begin(), d.labels.end(),
+                                                   [](const std::string& l) { return !l.empty(); });
+                const bool any_explode = std::any_of(d.explode.begin(), d.explode.end(),
+                                                     [](double x) { return x != 0.0; });
+                if (!any_label) op.data.labels.clear();
+                if (!any_explode) op.data.explode.clear();
+                push_form_op(edit_box, idx, is3d, t, op);
+            };
+            std::optional<std::size_t> remove;
+            if (ImGui::BeginTable("pietable", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg
+                                                     | ImGuiTableFlags_SizingStretchProp)) {
+                ImGui::TableSetupColumn("value");
+                ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthStretch, 1.5f);
+                ImGui::TableSetupColumn("explode");
+                ImGui::TableSetupColumn("##rm", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFrameHeight());
+                ImGui::TableHeadersRow();
+                for (std::size_t k = 0; k < n; ++k) {
+                    ImGui::PushID(static_cast<int>(k));
+                    ImGui::TableNextRow();
+                    ImGui::TableNextColumn();
+                    ImGui::SetNextItemWidth(-FLT_MIN);
+                    if (drag_double("##pv", &d.values[k], static_cast<float>(std::max(d.values[k], 1.0) * 0.005))) {
+                        d.values[k] = std::max(d.values[k], 0.0);
+                        push();
+                    }
+                    ImGui::TableNextColumn();
+                    ImGui::SetNextItemWidth(-FLT_MIN);
+                    char buf[256];
+                    std::snprintf(buf, sizeof buf, "%s", d.labels[k].c_str());
+                    if (ImGui::InputText("##pl", buf, sizeof buf)) {
+                        d.labels[k] = buf;
+                        push();
+                    }
+                    ImGui::TableNextColumn();
+                    ImGui::SetNextItemWidth(-FLT_MIN);
+                    if (drag_double("##pe", &d.explode[k], 0.005f, "%.3g")) {
+                        d.explode[k] = std::max(d.explode[k], 0.0);
+                        push();
+                    }
+                    ImGui::TableNextColumn();
+                    ImGui::BeginDisabled(n <= 1);
+                    if (ImGui::SmallButton("x")) remove = k;
+                    ImGui::EndDisabled();
+                    ImGui::PopID();
+                }
+                ImGui::EndTable();
+            }
+            if (remove) {
+                d.values.erase(d.values.begin() + static_cast<std::ptrdiff_t>(*remove));
+                d.labels.erase(d.labels.begin() + static_cast<std::ptrdiff_t>(*remove));
+                d.explode.erase(d.explode.begin() + static_cast<std::ptrdiff_t>(*remove));
+                push();
+            }
+            if (ImGui::Button("Add slice##pieadd")) {
+                d.values.push_back(n ? d.values.back() : 1.0);
+                d.labels.emplace_back();
+                d.explode.push_back(0.0);
+                push();
+            }
+            ImGui::TextDisabled("Values are shares of their sum; explode is a fraction of the radius.");
+        }
+
         // A sloped reference line's tab: through a point with a slope, or through
         // two points; points in data units draw the line of the data (it bends
         // on a log axis), frame positions a straight line on screen.
@@ -2510,6 +2677,11 @@ namespace sextant {
                                            ? &cur3d->planes[static_cast<std::size_t>(t.plane_index)].sheet
                                            : nullptr);
                         if (sheet) draw_plot_appearance(st, *sheet, t, edit_box, idx, is3d, sink);
+                    }
+                    if (t.pie) {
+                        draw_pie_form(st, edit_box, idx, is3d, t);
+                        ImGui::EndTabItem();
+                        continue;
                     }
                     if (t.circle || t.wedge || t.sloped_axline) {
                         // A form over the object's numbers, not a table.

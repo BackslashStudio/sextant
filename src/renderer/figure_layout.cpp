@@ -6,6 +6,7 @@
 #include "../tick_style.h"
 #include "../ticker.h"
 #include "marker_shape.h"
+#include "../pie_geometry.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -188,7 +189,8 @@ namespace sextant {
         // fraction (their position depends on the camera fit).
         void add_furniture(const RenderSnapshot& snap, const CellPrep& prep, CellMeasure& m) {
             const auto& st = snap.axes_style;
-            const bool sx = st.show_xticks, sy = st.show_yticks;
+            // Axes::set_axis_visible(false): no ticks, labels or x/y titles.
+            const bool sx = snap.axis_on && st.show_xticks, sy = snap.axis_on && st.show_yticks;
             const bool xl = sx && prep.xlabels, yl = sy && prep.ylabels;
             const TickLook xk = tick_look(st, TickAxis::X), yk = tick_look(st, TickAxis::Y);
             const float xlabel_lh = xl ? tallest_label(prep.xticks, st.font_path, xk.label_fontsize) : 0.0f;
@@ -232,6 +234,7 @@ namespace sextant {
             }
 
             // Titles don't move with an interior axis: they stay outside cell_a.
+            if (!snap.axis_on) return;
             if (!snap.ytitle.empty())
                 grow(prep.ytitle_right ? m.titles.right : m.titles.left,
                      kTitleGap + title_height(snap.ytitle, st.font_path, st.ytitle_fontsize));
@@ -842,6 +845,20 @@ namespace sextant {
                     if (r.kind == PlotKind::Poly) key(snap.polys[r.index].opts);
                     else if (r.kind == PlotKind::Circle) key(snap.circles[r.index].opts);
                     else key(snap.wedges[r.index].opts);
+                    break;
+                }
+                case PlotKind::Pie: {
+                    // One patch per labelled slice, named by its label.
+                    const PiePlot& p = snap.pies[r.index];
+                    if (!p.opts.show_legend) break;
+                    for (std::size_t k = 0; k < p.labels.size() && k < p.values.size(); ++k) {
+                        if (p.labels[k].empty()) continue;
+                        Color c = pie_color(p.opts, k);
+                        c.a *= p.opts.alpha;
+                        LegendEntry e{c, p.labels[k], LegendKind::Bar, LineStyle::Solid};
+                        if (p.opts.linewidth > 0.0f) e.edge = pie_edge(p.opts, k);
+                        entries.push_back(std::move(e));
+                    }
                     break;
                 }
                 case PlotKind::Quiver: {

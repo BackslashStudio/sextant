@@ -612,6 +612,10 @@ namespace lt {
     // aspect.cpp
     void test_aspect();
 
+    // axis_off.cpp
+    void test_axis_off();
+    void test_pie();
+
     // edge_markers.cpp
     void test_edge_markers();
     void test_marker_shapes();

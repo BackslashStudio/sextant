@@ -6,6 +6,7 @@
 #include "renderer/figure_layout.h"
 #include "renderer/box3d.h"
 #include "renderer/text_plan.h"
+#include "pie_geometry.h"
 #include "rich_text.h"
 #include <cmath>
 #include <glad/glad.h>
@@ -71,7 +72,7 @@ void render_frame(RenderDevice& dev, DataRenderer& data,
         const auto& c = layout.cells[i];
         if (const RenderSnapshot3D* s3 = fsnap.axes[i].snap3d())
             nvg.draw_box3d_panes(box_plans[i], *s3, c.frame);
-        else if (const RenderSnapshot* s2 = fsnap.axes[i].snap2d())
+        else if (const RenderSnapshot* s2 = fsnap.axes[i].snap2d(); s2 && s2->axis_on)
             nvg.draw_axes_background(c.frame, s2->axes_style.background);
     }
     dev.end_nvg_frame();
@@ -141,19 +142,26 @@ void render_frame(RenderDevice& dev, DataRenderer& data,
         for (std::size_t k = 0; k < twins.size(); ++k) nvg.draw_contour_labels(c.twins[k], twins[k].snap);
         // A twin's frame is its host's: drawn once, the twinned edges in their
         // axes' colors.
-        nvg.draw_axes_border(c.frame, snap.axes_style, twin_edge_colors(fsnap.axes[i]));
-        nvg.draw_ticks(c, snap.axes_style, snap.grid_enabled, snap.grid_opts);
+        // Axes::set_axis_visible(false) skips a layer's border, ticks and grid.
+        if (snap.axis_on) {
+            nvg.draw_axes_border(c.frame, snap.axes_style, twin_edge_colors(fsnap.axes[i]));
+            nvg.draw_ticks(c, snap.axes_style, snap.grid_enabled, snap.grid_opts);
+        }
         for (std::size_t k = 0; k < twins.size(); ++k) {
             const RenderSnapshot& t = twins[k].snap;
-            nvg.draw_ticks(c.twins[k], t.axes_style, t.grid_enabled, t.grid_opts);
+            if (t.axis_on) nvg.draw_ticks(c.twins[k], t.axes_style, t.grid_enabled, t.grid_opts);
         }
         nvg.draw_titles(c, snap);
         for (std::size_t k = 0; k < twins.size(); ++k) nvg.draw_titles(c.twins[k], twins[k].snap);
-        // Texts over the frame furniture, under the legend and colorbar.
-        if (!snap.texts.empty()) nvg.draw_texts(plan_texts(snap.texts, c.tr, c.frame), c.frame);
-        for (std::size_t k = 0; k < twins.size(); ++k)
-            if (!twins[k].snap.texts.empty())
-                nvg.draw_texts(plan_texts(twins[k].snap.texts, c.twins[k].tr, c.frame), c.frame);
+        // Texts over the frame furniture, under the legend and colorbar; a
+        // layer's pie labels and percents under its own texts.
+        const auto draw_texts_of = [&](const RenderSnapshot& s, const CoordTransform& tr) {
+            if (!s.pies.empty())
+                nvg.draw_texts(plan_texts(pie_texts(s.pies, s.axes_style.label_fontsize), tr, c.frame), c.frame);
+            if (!s.texts.empty()) nvg.draw_texts(plan_texts(s.texts, tr, c.frame), c.frame);
+        };
+        draw_texts_of(snap, c.tr);
+        for (std::size_t k = 0; k < twins.size(); ++k) draw_texts_of(twins[k].snap, c.twins[k].tr);
         if (c.has_legend())   nvg.draw_legend(c, snap.legend_opts);
         for (const auto& cb : c.colorbars) nvg.draw_colorbar(cb, snap.colorbar_opts);
     }

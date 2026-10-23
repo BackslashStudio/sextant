@@ -305,6 +305,9 @@ int main() {
 
     // aspect.cpp
     test_aspect();
+    // axis_off.cpp
+    test_axis_off();
+    test_pie();
 
     // edge_markers.cpp
     test_edge_markers();

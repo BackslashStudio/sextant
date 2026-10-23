@@ -17,6 +17,7 @@
 #include "../quiver_geometry.h"
 #include "../reference_lines.h"
 #include "../shape_geometry.h"
+#include "../pie_geometry.h"
 #include "error_bar_shape.h"
 #include <glad/glad.h>
 #include <vector>
@@ -2834,6 +2835,13 @@ void main() {
             case PlotKind::Poly: draw_shape_of(snap.polys[r.index], tr, pr); break;
             case PlotKind::Circle: draw_shape_of(snap.circles[r.index], tr, pr); break;
             case PlotKind::Wedge: draw_shape_of(snap.wedges[r.index], tr, pr); break;
+            case PlotKind::Pie: {
+                const PiePlot& p = snap.pies[r.index];
+                for (const PieSlice& s : pie_slices(p))
+                    draw_shape(pie_slice_geometry(s, p.opts, tr), pie_color(p.opts, s.k), p.opts.alpha,
+                               p.opts.linewidth, LineStyle::Solid, pie_edge(p.opts, s.k), tr, pr);
+                break;
+            }
             case PlotKind::HeatmapTri: draw_heatmap_tri(snap.heatmap_tris[r.index], tr, pr); break;
             case PlotKind::Contour:
                 draw_contour(snap.contours[r.index], snap.axes_style.font_path, tr, pr);

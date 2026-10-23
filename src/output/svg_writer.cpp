@@ -13,6 +13,7 @@
 #include "../contour_plot.h"
 #include "../quiver_geometry.h"
 #include "../shape_geometry.h"
+#include "../pie_geometry.h"
 #include "../renderer/marker_shape.h"
 #include "../renderer/error_bar_shape.h"
 #include "png_writer.h"
@@ -1039,6 +1040,14 @@ static void emit_object(std::ostringstream& o, const SvgAxesData& d, const Objec
         case PlotKind::Wedge:
             emit_shape_of(o, d, d.wedges[r.index]);
             break;
+        case PlotKind::Pie: {
+            // One shape per slice, as the raster path draws them.
+            const PiePlot& p = d.pies[r.index];
+            for (const PieSlice& s : pie_slices(p))
+                emit_shape(o, pie_slice_geometry(s, p.opts, d.layout.tr), pie_color(p.opts, s.k), p.opts.alpha,
+                           p.opts.linewidth, LineStyle::Solid, pie_edge(p.opts, s.k));
+            break;
+        }
         case PlotKind::HeatmapTri:
             emit_heatmap_tri(o, d, d.heatmap_tris[r.index]);
             break;
@@ -2002,7 +2011,7 @@ static void emit_one_axes(std::ostringstream& o, const SvgAxesData& d, std::size
         return;
     }
 
-    if (d.axes_style.background.a > 0.0f)
+    if (d.axis_on && d.axes_style.background.a > 0.0f)
         o << "  <rect x=\"" << d.layout.frame.x << "\" y=\"" << d.layout.frame.y
           << "\" width=\"" << d.layout.frame.w << "\" height=\"" << d.layout.frame.h
           << "\"" << background_fill(d.axes_style.background) << "/>\n";
@@ -2021,8 +2030,9 @@ static void emit_one_axes(std::ostringstream& o, const SvgAxesData& d, std::size
         }
 
     // A twin's frame is its host's: drawn once.
-    emit_spines(o, d);
+    if (d.axis_on) emit_spines(o, d);
     for (const SvgAxesData* l : layers_of(d)) {
+        if (!l->axis_on) continue;
         emit_grid(o, *l);
         emit_ticks_and_labels(o, *l);
         // After the grid, as in NanoVG: an interior axis line goes over the grid.

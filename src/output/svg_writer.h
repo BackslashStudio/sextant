@@ -36,11 +36,15 @@ namespace sextant {
         std::vector<PolyPlot> polys;
         std::vector<CirclePlot> circles;
         std::vector<WedgePlot> wedges;
+        std::vector<PiePlot> pies;
         std::vector<HeatmapTriPlot> heatmap_tris;
         std::vector<ContourPlot> contours;
         // Font sizes come from axes_style.
         std::string title, xtitle, ytitle;
         bool grid_enabled = false;
+        // Axes::set_axis_visible(); off skips the background, spines, grid,
+        // ticks and x/y titles.
+        bool axis_on = true;
         GridOptions grid_opts;
         AxesStyle axes_style;
         // Presence and boxes are in `layout`; only the cosmetics are here.

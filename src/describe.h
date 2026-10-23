@@ -14,7 +14,7 @@
 // Leaf types: bool, int, float, double, std::size_t, std::string, Color,
 // std::optional<Color>, std::optional<double>, std::optional<float>,
 // std::optional<bool>, std::optional<Range>, std::vector<double>, std::vector<bool>,
-// std::vector<std::string>, Colormap
+// std::vector<std::string>, std::vector<Color>, Colormap
 // (named by its name() and from_name(), since registered maps make it
 // open-ended), and the enums below, whose names enum_name() and
 // enum_from_name() give.
@@ -82,6 +82,10 @@ namespace sextant {
     SEXTANT_DESCRIBE(WedgeOptions,
                      F(color) F(alpha) F(edgecolor) F(linewidth) F(linestyle) F(inner) F(name)
                      F(show_legend) F(visible) F(zorder))
+    SEXTANT_DESCRIBE(PieOptions,
+                     F(labels) F(explode) F(colors) F(autopct) F(pctdistance) F(labeldistance) F(startangle)
+                     F(counterclock) F(radius) F(cx) F(cy) F(normalize) F(inner) F(edgecolor) F(linewidth)
+                     F(alpha) F(fontsize) F(textcolor) F(name) F(show_legend) F(visible) F(zorder))
     SEXTANT_DESCRIBE(QuiverOptions,
                      F(color) F(alpha) F(cmap) F(vmin) F(vmax) F(norm) F(colorbar) F(amp) F(pivot) F(width) F(head_width) F(head_length) F(name)
                      F(show_legend) F(visible) F(zorder) F(hint_labels))

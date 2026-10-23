@@ -2080,6 +2080,41 @@ static void part_shapes() {
     fig->show(true);
 }
 
+// v1.3 stage 4a: Axes::pie() and set_axis_visible(). Hover a slice (label,
+// value, percent), edit the slices in the Data panel's pie tab (value, label,
+// explode; add and remove rows) and its appearance, toggle "Axis" in the axes'
+// style block; a pie turns the axis off and the aspect to 1.
+static void part_pie() {
+    auto fig = sextant::Figure::create({.width = 1400, .height = 900, .title = "Pie"});
+    fig->suptitle("pie() and set_axis_visible()");
+    const std::vector<double> shares{35, 25, 20, 15, 5};
+    const std::vector<std::string> names{"Rust", "C++", "Go", "Zig", "other"};
+
+    auto a1 = fig->add_subplot(2, 2, 1);
+    a1->pie(shares, {.labels = names});
+    a1->set_title("plain: cycle colors, labels at 1.1 radius");
+
+    auto a2 = fig->add_subplot(2, 2, 2);
+    a2->pie(shares, {.labels = names, .explode = {0.1, 0, 0, 0, 0}, .autopct = "%1.1f%%", .startangle = 90,
+                     .edgecolor = sextant::Color::White, .linewidth = 1.5f, .textcolor = sextant::Color::Black});
+    a2->set_title("exploded, autopct, start 90, white edges");
+
+    auto a3 = fig->add_subplot(2, 2, 3);
+    a3->pie(shares, {.labels = names, .autopct = "%d%%", .pctdistance = 0.8, .labeldistance = std::nullopt,
+                     .counterclock = false, .inner = 0.55, .name = "donut"});
+    a3->legend();
+    a3->set_title("ring (inner 0.55), clockwise, labels in the legend");
+
+    auto a4 = fig->add_subplot(2, 2, 4);
+    a4->pie(std::vector<double>{0.3, 0.2, 0.1}, {.labels = {"30%", "20%", "10%"}, .normalize = false});
+    a4->set_axis_visible(true);
+    a4->grid(true);
+    a4->set_title("partial (normalize=false), axis turned back on");
+
+    savefig_and_check_memory(fig, "part_pie");
+    fig->show(true);
+}
+
 // Step 36d-1: Axes::fill_between() and Plane2D::fill_between(): areas under a
 // curve and bands, exclude and interpolate, steps, the Vertical orientation
 // with an outline, log axes and NaN gaps, planes; the Data panel edits them.
@@ -3584,10 +3619,11 @@ static void test_aspect_scales() {
     part_scales();
 }
 
-static void test_decorations() { // text, annotate (2D and 3D), axline, axspan
+static void test_decorations() { // text, annotate (2D and 3D), axline, axspan, shapes, pie
     part_text();
     part_reference_lines();
     part_shapes();
+    part_pie();
 }
 
 static void test_legend_colorbar() {
@@ -3631,14 +3667,14 @@ int main() {
     // test_figure_layout();
     // test_aspect_scales();
     // test_mathtext_gallery();
-    // test_decorations();
+    test_decorations();
     // test_legend_colorbar();
     // test_line();
     // test_scatter();
     // test_bar();
     // test_heatmap();
     // test_fill();
-    test_quiver();
+    // test_quiver();
     // test_bar3d();
     // test_surface();
     // test_surface_tri();

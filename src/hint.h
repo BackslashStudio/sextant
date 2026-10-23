@@ -124,7 +124,7 @@ struct PickHit {
 inline bool pick_is_area(PickKind k) {
     return k == PickKind::Bar || k == PickKind::Fill || k == PickKind::Heatmap
            || k == PickKind::Poly || k == PickKind::Circle || k == PickKind::Wedge
-           || k == PickKind::HeatmapTri;
+           || k == PickKind::HeatmapTri || k == PickKind::Pie;
 }
 
 // The same for a hit: a contour is an area when filled.

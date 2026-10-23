@@ -85,6 +85,10 @@ namespace lt {
                 std::string s = std::to_string(x.size());
                 for (const auto& e : x) s += kSep + e;
                 return s;
+            } else if constexpr (std::is_same_v<X, std::vector<Color>>) {
+                std::string s = std::to_string(x.size());
+                for (const auto& c : x) s += kSep + encode_color(c);
+                return s;
             } else static_assert(kAlwaysFalse<X>, "describe.h: a leaf type the list does not name");
         }
 
@@ -126,6 +130,9 @@ namespace lt {
                 for (const auto& e : split(s)) x.push_back(e == "1");
             } else if constexpr (std::is_same_v<X, std::vector<std::string>>) {
                 x = split(s);
+            } else if constexpr (std::is_same_v<X, std::vector<Color>>) {
+                x.clear();
+                for (const auto& e : split(s)) x.push_back(decode_color(e));
             } else static_assert(kAlwaysFalse<X>, "describe.h: a leaf type the list does not name");
         }
 
@@ -185,6 +192,9 @@ namespace lt {
                 x.push_back("h" + std::to_string(k));
                 x.push_back("");
                 x.push_back("a b");
+            } else if constexpr (std::is_same_v<X, std::vector<Color>>) {
+                x.push_back(Color{f, 0.25f, 0.5f, 1.0f});
+                x.push_back(Color::Red);
             } else static_assert(kAlwaysFalse<X>, "describe.h: a leaf type the list does not name");
         }
 
@@ -265,7 +275,7 @@ namespace lt {
         STRUCT(FillOptions) STRUCT(QuiverOptions)
         STRUCT(HeatmapOptions) STRUCT(ImageOptions) STRUCT(HeatmapRecOptions) STRUCT(HeatmapTriOptions) STRUCT(Hist2dOptions) STRUCT(ContourOptions)
         STRUCT(GridOptions)
-        STRUCT(PolyOptions) STRUCT(CircleOptions) STRUCT(WedgeOptions)
+        STRUCT(PolyOptions) STRUCT(CircleOptions) STRUCT(WedgeOptions) STRUCT(PieOptions)
         STRUCT(AxesStyle) STRUCT(LegendOptions) STRUCT(ColorbarOptions) STRUCT(SuptitleOptions)
         STRUCT(FigureMargins) STRUCT(TextOptions) STRUCT(ArrowOptions)
         STRUCT(FigureOptions) STRUCT(SvgExportOptions) STRUCT(PngExportOptions)

@@ -206,6 +206,18 @@ namespace sextant {
         // finite angles and 0 <= inner < r.
         Axes& shape_wedge(Pos cx, Pos cy, Pos r, double theta1, double theta2, WedgeOptions opts = {});
 
+        // A pie chart (matplotlib's pie()): slice k is values[k]'s share of the
+        // circle (of the sum, or of 1 when not PieOptions::normalize), from
+        // `startangle`, centred at (cx, cy) in data units, with labels, percents
+        // and explode as PieOptions says; one legend entry per labelled slice;
+        // a press on slice k picks the pie with Event::pick_index k. Turns the
+        // axis off (set_axis_visible(false)) and, on a host, sets aspect 1, as
+        // matplotlib's does. Throws std::invalid_argument for a negative or
+        // non-finite value, a sum of 0 (over 1 without normalize), labels or
+        // explode of another length, a negative explode, radius <= 0, inner
+        // outside [0, radius), or an autopct PieOptions does not describe.
+        Axes& pie(std::span<const double> values, PieOptions opts = {});
+
         // Stacked areas (matplotlib's stackplot): layer k fills from the top of
         // the layers below it (the baseline, StackOptions::baseline, for the
         // first) up by ys[k], one value per point of `x` (any other length
@@ -376,6 +388,17 @@ namespace sextant {
         // and twiny() throw when they would make that so. cla() resets it.
         Axes& set_aspect(double ratio, Adjustable adjustable = Adjustable::Box);
 
+        // Draw the axis or not, as matplotlib's axis('off'): off hides the
+        // spines, tick marks and labels, the x/y titles, the grid and the
+        // background fill, and the layout gives their room to the frame. The
+        // data, title, legend, colorbars and texts stay, as do pan, zoom and
+        // hover. The style setters keep their values, so on again draws what
+        // was set. On a twin, its own layer only. pie() turns it off; cla()
+        // turns it back on.
+        Axes& set_axis_visible(bool on = true);
+
+        bool axis_visible() const;
+
         Axes& grid(bool enable = true, GridOptions opts = {});
 
         Axes& set_axes_style(AxesStyle opts = {});
@@ -494,6 +517,9 @@ namespace sextant {
         std::size_t shape_wedge_count() const;
         WedgeData shape_wedge_data(std::size_t i) const;
 
+        std::size_t pie_count() const;
+        PieData pie_data(std::size_t i) const;
+
         std::size_t heatmap_tri_count() const;
         HeatmapTriData heatmap_tri_data(std::size_t i) const;
 
@@ -572,6 +598,10 @@ namespace sextant {
 
         Axes& set_shape_wedge_data(std::size_t i, const WedgeData& data);
 
+        // A pie's values, labels and explode, checked as pie() checks them; the
+        // slices' angles follow, the options are kept.
+        Axes& set_pie_data(std::size_t i, const PieData& data);
+
         // A heatmap_tri()'s vertices, values and triangles, checked as the explicit
         // form of heatmap_tri() checks them (`tri` is required; nothing re-triangulates).
         // The span form without `tri` keeps the triangles, so the vertex count must
@@ -647,6 +677,8 @@ namespace sextant {
 
         Axes& set_shape_wedge_visible(std::size_t i, bool visible);
         bool shape_wedge_visible(std::size_t i) const;
+        Axes& set_pie_visible(std::size_t i, bool visible);
+        bool pie_visible(std::size_t i) const;
         Axes& set_heatmap_tri_visible(std::size_t i, bool visible);
         bool heatmap_tri_visible(std::size_t i) const;
 

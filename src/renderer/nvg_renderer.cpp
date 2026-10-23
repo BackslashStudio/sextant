@@ -569,14 +569,14 @@ namespace sextant {
             label(cell.title_x, cell.title_y, kCentred, snap.title, fp, style.title_fontsize);
         }
 
-        if (!snap.xtitle.empty()) {
+        if (snap.axis_on && !snap.xtitle.empty()) {
             const auto& c = style.xtitle_color;
             nvgFillColor(vg_, nvgRGBAf(c.r, c.g, c.b, c.a));
             nvgFontSize(vg_, style.xtitle_fontsize);
             label(cell.xtitle_x, cell.xtitle_y, kCentred, snap.xtitle, fp, style.xtitle_fontsize);
         }
 
-        if (!snap.ytitle.empty()) {
+        if (snap.axis_on && !snap.ytitle.empty()) {
             const auto& c = style.ytitle_color;
             nvgFillColor(vg_, nvgRGBAf(c.r, c.g, c.b, c.a));
             nvgFontSize(vg_, style.ytitle_fontsize);

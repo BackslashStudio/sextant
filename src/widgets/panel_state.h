@@ -338,6 +338,7 @@ namespace sextant {
             std::vector<WedgeOptions> wedges;
             std::vector<HeatmapTriOptions> heatmap_tris;
             std::vector<ContourOptions> contours;
+            std::vector<PieOptions> pies;
             std::vector<ObjectId> ids;   // seeded from, kind by kind
         };
 
@@ -357,6 +358,8 @@ namespace sextant {
         // The open circle/wedge tab's numbers and the sloped reference line's, while one
         // of their fields is active (the snapshot otherwise).
         WedgeData shape_local;
+        // The open pie tab's table, the same way.
+        PieData pie_local;
         AxLineData axline_local;
 
         // The Selection generation the per-object scratch was seeded at; changed

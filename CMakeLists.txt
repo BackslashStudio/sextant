@@ -810,6 +810,8 @@ if(SEXTANT_BUILD_TESTS)
             tests/layout_test/twin.cpp
             tests/layout_test/tick_style.cpp
             tests/layout_test/aspect.cpp
+            tests/layout_test/axis_off.cpp
+            tests/layout_test/pie.cpp
             tests/layout_test/edge_markers.cpp
             tests/layout_test/alpha.cpp
             tests/layout_test/heatmap_rgb.cpp
