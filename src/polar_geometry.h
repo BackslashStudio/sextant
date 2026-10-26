@@ -1,9 +1,9 @@
 #pragma once
 // A polar axes' geometry (PolarAxes), shared by layout, both drawers, hover
-// and navigation. Its lines are drawn by the 2D line code: polar_sheet()
-// turns them into "unit" space -- the disc of radius 1 about the origin, x
-// east and y north -- and the cell's CoordTransform maps the frame's box in
-// that space onto the frame, so the frame is round.
+// and navigation. Its objects are drawn by the 2D code: polar_sheet() turns
+// lines, markers and bars into "unit" space -- the disc of radius 1 about the
+// origin, x east and y north -- and the cell's CoordTransform maps the frame's
+// box in that space onto the frame, so the frame is round.
 #include "coord_transform.h"
 #include "line_steps.h"
 #include "plot_objects.h"
@@ -66,16 +66,29 @@ namespace sextant {
     };
 
     // r's limits as drawn: set ones, or automatic (see PolarAxes::rlim()).
-    // Only shown lines count; non-finite points are skipped.
+    // Shown lines' and markers' r count, and bars' bases and tips; non-finite
+    // points are skipped.
     inline Range polar_auto_rlim(const RenderSnapshot& s) {
         double lo = std::numeric_limits<double>::infinity(), hi = -lo;
-        for (const LinePlot& l: s.lines) {
-            if (!l.opts.visible) continue;
-            for (std::size_t i = 0; i < l.y.size(); ++i) {
-                const double r = l.y[i];
-                if (!std::isfinite(r) || !std::isfinite(l.x[i])) continue;
-                lo = std::min(lo, r);
-                hi = std::max(hi, r);
+        const auto add = [&](double t, double r) {
+            if (!std::isfinite(r) || !std::isfinite(t)) return;
+            lo = std::min(lo, r);
+            hi = std::max(hi, r);
+        };
+        const auto points = [&](const auto& v) {
+            for (const auto& p: v) {
+                if (!object_shown(p)) continue;
+                for (std::size_t i = 0; i < p.y.size(); ++i) add(p.x[i], p.y[i]);
+            }
+        };
+        points(s.lines);
+        points(s.scatters);
+        points(s.scatter_z);
+        for (const BarPlot& b: s.bars) {
+            if (!object_shown(b)) continue;
+            for (std::size_t i = 0; i < b.centers.size(); ++i) {
+                add(b.centers[i], b.base_at(i));
+                add(b.centers[i], b.tip_at(i));
             }
         }
         if (!(lo <= hi)) return {0.0, 1.0};
@@ -236,9 +249,58 @@ namespace sextant {
         }
     }
 
-    // The sheet as the 2D line code draws it: every line in unit space
-    // (polar_polyline(), plain style, no loop), the limits the frame's box.
-    // Polar axes hold lines only.
+    // Whether the point (θ, r) is drawn: r within the limits and the point,
+    // where it lands, inside the frame (a sector's θ is taken modulo 2π, as
+    // hover reads it back).
+    inline bool polar_point_shown(const PolarMap& m, double theta, double r) {
+        if (!std::isfinite(theta) || !std::isfinite(r)) return false;
+        if (r < std::min(m.rmin, m.rmax) || r > std::max(m.rmin, m.rmax)) return false;
+        return m.inside(m.unit_x(theta, r), m.unit_y(theta, r));
+    }
+
+    // One polar bar as drawn: an annulus sector about the unit origin, its
+    // radii (unit) and screen angles (degrees counter-clockwise from +x) as
+    // WedgePlot takes them.
+    struct PolarBarSector {
+        double inner = 0.0, outer = 0.0;
+        double theta1 = 0.0, theta2 = 0.0;
+    };
+
+    // The bar centred on θ `centre`, `width` radians wide, r from `base` to
+    // `tip`, as drawn: r clipped to the limits, θ to a sector (modulo 2π, so a
+    // bar across a sector's start may give two pieces; a full circle never
+    // cuts). Appends nothing when nothing shows. Width >= 2π is the whole ring.
+    inline void polar_bar_sectors(const PolarMap& m, double centre, double width, double base, double tip,
+                                  std::vector<PolarBarSector>& out) {
+        if (!std::isfinite(centre) || !std::isfinite(width) || !std::isfinite(base) || !std::isfinite(tip)) return;
+        const double two_pi = 2.0 * std::numbers::pi;
+        const double rlo = std::min(m.rmin, m.rmax), rhi = std::max(m.rmin, m.rmax);
+        const double r0 = std::clamp(std::min(base, tip), rlo, rhi);
+        const double r1 = std::clamp(std::max(base, tip), rlo, rhi);
+        if (!(r1 > r0) || !(width > 0.0)) return;
+        const double ra = m.rho(r0), rb = m.rho(r1);
+        const double inner = std::min(ra, rb), outer = std::max(ra, rb);
+        const auto put = [&](double t0, double t1) {
+            const double a0 = m.angle(t0) / kPolarDeg, a1 = m.angle(t1) / kPolarDeg;
+            out.push_back({inner, outer, std::min(a0, a1), std::max(a0, a1)});
+        };
+        const double w = std::min(width, two_pi);
+        if (m.full()) {
+            put(centre - w / 2.0, centre + w / 2.0);
+            return;
+        }
+        // The bar's start, moved by whole turns into [tmin, tmin + 2π).
+        const double s0 = m.tmin + std::fmod(std::fmod(centre - w / 2.0 - m.tmin, two_pi) + two_pi, two_pi);
+        for (const double st: {s0 - two_pi, s0}) {
+            const double t0 = std::max(st, m.tmin), t1 = std::min(st + w, m.tmax);
+            if (t1 > t0) put(t0, t1);
+        }
+    }
+
+    // The sheet as the 2D code draws it, the limits the frame's box: every
+    // line in unit space (polar_polyline(), plain style, no loop), the
+    // markers that show (polar_point_shown()) at their unit points, and each
+    // bar as wedges (polar_bar_sectors()) keeping its id, zorder and colours.
     inline RenderSnapshot polar_sheet(const RenderSnapshot& s, const PolarMap& m) {
         RenderSnapshot out = s;
         const PolarBox b = polar_box(m);
@@ -257,6 +319,51 @@ namespace sextant {
             l.opts.drawstyle = DrawStyle::Default;
             l.opts.loop = false;
         }
+        // Points in unit space, their sizes (and z) kept in step.
+        const auto points = [&](auto& p) {
+            std::vector<double> px, py, pz, psz;
+            for (std::size_t i = 0; i < p.x.size(); ++i) {
+                if (!polar_point_shown(m, p.x[i], p.y[i])) continue;
+                px.push_back(m.unit_x(p.x[i], p.y[i]));
+                py.push_back(m.unit_y(p.x[i], p.y[i]));
+                if (i < p.sizes.size()) psz.push_back(p.sizes[i]);
+                if constexpr (requires { p.z; })
+                    if (i < p.z.size()) pz.push_back(p.z[i]);
+            }
+            p.x = CowVec<double>(std::move(px));
+            p.y = CowVec<double>(std::move(py));
+            if (!p.sizes.empty()) p.sizes = CowVec<double>(std::move(psz));
+            if constexpr (requires { p.z; }) p.z = CowVec<double>(std::move(pz));
+        };
+        for (ScatterPlot& p: out.scatters) points(p);
+        for (ScatterZPlot& p: out.scatter_z) points(p);
+        std::vector<PolarBarSector> sec;
+        for (const BarPlot& b: out.bars) {
+            for (std::size_t i = 0; i < b.centers.size(); ++i) {
+                sec.clear();
+                polar_bar_sectors(m, b.centers[i], b.bar_width, b.base_at(i), b.tip_at(i), sec);
+                for (const PolarBarSector& q: sec) {
+                    WedgePlot w;
+                    w.cx = Pos(0.0);
+                    w.cy = Pos(0.0);
+                    w.r = Pos(q.outer);
+                    w.theta1 = q.theta1;
+                    w.theta2 = q.theta2;
+                    w.inner = q.inner;
+                    w.opts.color = b.opts.color;
+                    w.opts.alpha = b.opts.alpha;
+                    w.opts.edgecolor = b.opts.edgecolor;
+                    w.opts.linewidth = b.opts.linewidth;
+                    w.opts.visible = b.opts.visible;
+                    w.opts.zorder = b.opts.zorder;
+                    w.opts.show_legend = false;
+                    w.data_stamp = b.data_stamp;
+                    w.id = b.id;
+                    out.wedges.push_back(std::move(w));
+                }
+            }
+        }
+        out.bars.clear();
         return out;
     }
 

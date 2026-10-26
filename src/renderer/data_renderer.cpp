@@ -331,6 +331,23 @@ float marker_sd(int m, vec2 p, float hw) {
 }
 )";
 
+    // A polar cell's disc or sector (PolarAxes), for its markers: uPolarClip is
+    // the centre and radius in pixels (y down) and the sector's start angle in
+    // radians counter-clockwise from +x; uPolarSweep its sweep, >= 2 pi a disc.
+    // A radius <= 0 clips nothing (every 2D axes).
+    static constexpr char k_polar_clip[] = R"(
+uniform vec4 uPolarClip;
+uniform float uPolarSweep;
+bool polar_clipped(vec2 p) {
+    if (uPolarClip.z <= 0.0) return false;
+    vec2 v = vec2(p.x - uPolarClip.x, uPolarClip.y - p.y);
+    if (dot(v, v) > uPolarClip.z * uPolarClip.z) return true;
+    if (uPolarSweep >= 6.2831853) return false;
+    float a = mod(atan(v.y, v.x) - uPolarClip.w, 6.2831853);
+    return a > uPolarSweep;
+}
+)";
+
     // Scatter: instanced quads clipped by a marker-shape SDF. aCenter is in data
     // space minus an anchor with the transform in uScale/uOffset (survives
     // pan/zoom); the pixel half-extent is added after it, so markers don't scale.
@@ -342,12 +359,14 @@ layout(location = 1) in vec2 aCenter;    // instance: data-space center (anchore
 layout(location = 2) in float aSize;     // instance: pixel diameter
 out vec2 vUV;
 out float vHalf;                          // half the marker's pixel size
+out vec2 vPx;                             // the pixel, for the polar clip
 uniform vec2 uResolution;
 uniform vec2 uScale;
 uniform vec2 uOffset;
 void main() {
     vec2 px = uScale * aCenter + uOffset;
     px += aQuadPos * (aSize * 0.5);
+    vPx = px;
     vec2 ndc = (px / uResolution) * 2.0 - 1.0;
     ndc.y = -ndc.y;
     gl_Position = vec4(ndc, 0.0, 1.0);
@@ -362,13 +381,16 @@ void main() {
 #version 410 core
 in vec2 vUV;
 in float vHalf;
+in vec2 vPx;
 uniform vec4 uColor;
 uniform vec4 uEdge;
 uniform float uEdgeW;
 uniform int  uMarker;
 out vec4 FragColor;
 MARKER_SDF
+POLAR_CLIP
 void main() {
+    if (polar_clipped(vPx)) discard;
     float d = marker_sd(uMarker, vUV, marker_line_hw(uEdgeW, vHalf));
     if (d > 0.0) discard;
     bool edge = uEdgeW > 0.0 && !marker_is_line(uMarker) && d > -uEdgeW / max(vHalf, 1e-3);
@@ -389,12 +411,14 @@ layout(location = 3) in vec4 aColor;     // instance: per-point RGBA
 out vec2 vUV;
 out vec4 vColor;
 out float vHalf;
+out vec2 vPx;                             // the pixel, for the polar clip
 uniform vec2 uResolution;
 uniform vec2 uScale;
 uniform vec2 uOffset;
 void main() {
     vec2 px = uScale * aCenter + uOffset;
     px += aQuadPos * (aSize * 0.5);
+    vPx = px;
     vec2 ndc = (px / uResolution) * 2.0 - 1.0;
     ndc.y = -ndc.y;
     gl_Position = vec4(ndc, 0.0, 1.0);
@@ -410,13 +434,16 @@ void main() {
 in vec2 vUV;
 in vec4 vColor;
 in float vHalf;
+in vec2 vPx;
 uniform vec4 uEdge;
 uniform float uEdgeW;
 uniform int  uEdgeFace;
 uniform int  uMarker;
 out vec4 FragColor;
 MARKER_SDF
+POLAR_CLIP
 void main() {
+    if (polar_clipped(vPx)) discard;
     float d = marker_sd(uMarker, vUV, marker_line_hw(uEdgeW, vHalf));
     if (d > 0.0) discard;
     vec4 c = vColor;
@@ -1216,6 +1243,12 @@ void main() {
         if (u_face >= 0) glUniform1i(u_face, e.face ? 1 : 0);
     }
 
+    // A 2D scatter fragment shader with its marker SDF and polar clip pasted in.
+    static std::string marker_frag(const char* src) {
+        return expand_shader(expand_shader(src, "MARKER_SDF", k_marker_sdf).c_str(),
+                             "POLAR_CLIP", k_polar_clip);
+    }
+
     // A 3D scatter fragment shader with its marker SDF and outline blend pasted in.
     static std::string scatter3d_marker_source(const char* src) {
         return expand_shader(expand_shader(src, "MARKER_SDF", k_marker_sdf).c_str(),
@@ -1544,7 +1577,7 @@ void main() {
 
         // --- scatter ---
         scatter_program_ = build_program(
-            k_scatter_vert, expand_shader(k_scatter_frag, "MARKER_SDF", k_marker_sdf).c_str());
+            k_scatter_vert, marker_frag(k_scatter_frag).c_str());
         glGenVertexArrays(1, &scatter_vao_);
         glGenBuffers(1, &scatter_quad_vbo_);
         glGenBuffers(1, &scatter_inst_vbo_);
@@ -1576,7 +1609,7 @@ void main() {
 
         // --- scatter_z (continuous-color scatter) ---
         scatterz_program_ = build_program(
-            k_scatterz_vert, expand_shader(k_scatterz_frag, "MARKER_SDF", k_marker_sdf).c_str());
+            k_scatterz_vert, marker_frag(k_scatterz_frag).c_str());
         glGenVertexArrays(1, &scatterz_vao_);
         glGenBuffers(1, &scatterz_quad_vbo_);
         glGenBuffers(1, &scatterz_inst_vbo_);
@@ -1868,6 +1901,10 @@ void main() {
             loc(scatterz_program_, "uEdge"), loc(scatterz_program_, "uEdgeW"),
             loc(scatterz_program_, "uEdgeFace")
         };
+        for (auto [u, prog] : {std::pair{&scatter_u_, scatter_program_}, std::pair{&scatterz_u_, scatterz_program_}}) {
+            u->polar_clip = loc(prog, "uPolarClip");
+            u->polar_sweep = loc(prog, "uPolarSweep");
+        }
         heatmap_u_ = {loc(heatmap_program_, "uResolution"), loc(heatmap_program_, "uTex")};
         heattri_u_ = {loc(heattri_program_, "uResolution"), loc(heattri_program_, "uCmap"),
                       loc(heattri_program_, "uCyclic"), loc(heattri_program_, "uNorm"),
@@ -2362,6 +2399,8 @@ void main() {
         glUseProgram(scatter_program_);
         const float res[2] = {tr.win_w, tr.win_h};
         glUniform2fv(scatter_u_.resolution, 1, res);
+        glUniform4fv(scatter_u_.polar_clip, 1, polar_clip_);
+        glUniform1f(scatter_u_.polar_sweep, polar_sweep_);
         glBindVertexArray(scatter_vao_);
 
         std::vector<float> inst;
@@ -2474,6 +2513,8 @@ void main() {
         glUseProgram(scatterz_program_);
         const float res[2] = {tr.win_w, tr.win_h};
         glUniform2fv(scatterz_u_.resolution, 1, res);
+        glUniform4fv(scatterz_u_.polar_clip, 1, polar_clip_);
+        glUniform1f(scatterz_u_.polar_sweep, polar_sweep_);
         glBindVertexArray(scatterz_vao_);
 
         std::vector<float> inst;

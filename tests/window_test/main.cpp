@@ -2175,6 +2175,82 @@ static void part_polar() {
     fig->show(true);
 }
 
+// Step 4c: PolarAxes::scatter(), scatter_z() and bar(). A wind rose stacked
+// through `bottom`, markers coloured by z with a colorbar and sized per point,
+// markers on a half sector (the rim clips them), and bars on a ring with
+// a marker over them. Hover a bar or a marker for θ and r; the Data panel
+// holds each as a θ/r table.
+static void part_polar_kinds() {
+    auto fig = sextant::Figure::create({.width = 1400, .height = 900, .title = "Polar kinds"});
+    fig->suptitle("PolarAxes: scatter(), scatter_z() and bar()");
+    const double pi = 3.14159265358979323846;
+
+    auto a1 = fig->add_subplot_polar(2, 2, 1);
+    std::vector<double> dir, calm, breeze, gale, base2, base3;
+    for (int i = 0; i < 16; ++i) {
+        dir.push_back(2.0 * pi * i / 16.0);
+        const double w = 1.0 + 0.8 * std::cos(2.0 * pi * i / 16.0 - 0.7);
+        calm.push_back(1.0 + 0.3 * w);
+        breeze.push_back(0.8 * w);
+        gale.push_back(0.4 * w * w);
+    }
+    for (int i = 0; i < 16; ++i) {
+        base2.push_back(calm[i]);
+        base3.push_back(calm[i] + breeze[i]);
+    }
+    a1->bar(dir, calm, {.width = 0.9f, .name = "< 4 m/s", .hint_labels = {"N"}});
+    a1->bar(dir, breeze, {.bottom = base2, .width = 0.9f, .name = "4-8 m/s"});
+    a1->bar(dir, gale, {.bottom = base3, .width = 0.9f, .name = "> 8 m/s"});
+    a1->set_theta_zero_location(sextant::ThetaZero::N);
+    a1->set_theta_direction(-1);
+    a1->set_thetagrids(std::vector<double>{0, 45, 90, 135, 180, 225, 270, 315},
+                       {"N", "NE", "E", "SE", "S", "SW", "W", "NW"});
+    a1->legend();
+    a1->set_title("wind rose: 16 sectors stacked through bottom, N clockwise");
+
+    auto a2 = fig->add_subplot_polar(2, 2, 2);
+    std::vector<double> zt, zr, zz, zs;
+    for (int i = 0; i < 150; ++i) {
+        const double t = 2.0 * pi * std::fmod(i * 0.618034, 1.0);
+        const double rr = std::sqrt((i + 0.5) / 150.0) * 2.0;
+        zt.push_back(t);
+        zr.push_back(rr);
+        zz.push_back(std::sin(t) * rr);
+        zs.push_back(10.0 + 30.0 * rr / 2.0);
+    }
+    a2->scatter_z(zt, zr, zz, {.cmap = sextant::Colormap::Plasma, .sizes = zs, .vmin = -2.0f, .vmax = 2.0f,
+                               .colorbar = true, .name = "r sin θ"});
+    a2->set_title("scatter_z: colour r sin θ, size by r, colorbar");
+
+    auto a3 = fig->add_subplot_polar(2, 2, 3);
+    std::vector<double> st, sr;
+    for (int i = 0; i < 60; ++i) {
+        st.push_back(-0.3 + (pi + 0.6) * i / 59.0);
+        sr.push_back(0.5 + 0.5 * std::abs(std::sin(3.0 * st.back())) + (i % 2) * 0.55);
+    }
+    a3->scatter(st, sr, {.size = 28.0f, .marker = sextant::MarkerStyle::Square, .name = "points"});
+    a3->set_thetalim(0, 180);
+    a3->set_rlim(0, 1.5);
+    a3->set_title("scatter on 0-180, r to 1.5: outside dropped, rim clips");
+
+    auto a4 = fig->add_subplot_polar(2, 2, 4);
+    std::vector<double> bt, bh;
+    for (int i = 0; i < 8; ++i) {
+        bt.push_back(2.0 * pi * i / 8.0);
+        bh.push_back(0.5 + 0.25 * (i % 4));
+    }
+    a4->bar(bt, bh, {.bottom = std::vector<double>(8, 1.0), .width = 1.0f, .alpha = 0.7f, .name = "ring"});
+    a4->scatter(std::vector<double>{pi / 8.0, 5.0 * pi / 8.0}, std::vector<double>{1.4, 1.7},
+                {.color = sextant::Color::Black, .size = 40.0f, .marker = sextant::MarkerStyle::Star,
+                 .name = "marks", .zorder = 2.0});
+    a4->set_rlim(0, 2);
+    a4->legend();
+    a4->set_title("bars from r=1, touching; stars above");
+
+    savefig_and_check_memory(fig, "part_polar_kinds");
+    fig->show(true);
+}
+
 // Step 36d-1: Axes::fill_between() and Plane2D::fill_between(): areas under a
 // curve and bands, exclude and interpolate, steps, the Vertical orientation
 // with an outline, log axes and NaN gaps, planes; the Data panel edits them.
@@ -3688,6 +3764,7 @@ static void test_decorations() { // text, annotate (2D and 3D), axline, axspan, 
 
 static void test_polar() {
     part_polar();
+    part_polar_kinds();
 }
 
 static void test_legend_colorbar() {

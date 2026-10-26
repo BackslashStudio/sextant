@@ -56,6 +56,24 @@ PolarAxes& PolarAxes::plot(std::span<const double> r, LineOptions opts) {
     return plot(theta, r, std::move(opts));
 }
 
+PolarAxes& PolarAxes::scatter(std::span<const double> theta, std::span<const double> r, ScatterOptions opts) {
+    d->ax().ingest_scatter(theta, r, ErrorBar{}, std::move(opts), "scatter");
+    return *this;
+}
+
+PolarAxes& PolarAxes::scatter_z(std::span<const double> theta, std::span<const double> r,
+                                std::span<const double> z, ScatterZOptions opts) {
+    d->ax().ingest_scatter_z(theta, r, z, ErrorBar{}, std::move(opts), "scatter_z");
+    return *this;
+}
+
+PolarAxes& PolarAxes::bar(std::span<const double> theta, std::span<const double> height, BarOptions opts) {
+    if (opts.orientation != Orientation::Vertical)
+        throw std::invalid_argument("PolarAxes::bar: a polar bar runs along r (Orientation::Vertical only)");
+    d->ax().ingest_bar(theta, height, ErrorBar{}, std::move(opts), "bar");
+    return *this;
+}
+
 std::size_t PolarAxes::line_count() const { return d->sheet->line_count(); }
 LineData PolarAxes::line_data(std::size_t i) const { return d->sheet->line_data(i); }
 PolarAxes& PolarAxes::set_line_data(std::size_t i, const LineData& data) {
@@ -71,6 +89,55 @@ PolarAxes& PolarAxes::set_line_visible(std::size_t i, bool visible) {
     return *this;
 }
 bool PolarAxes::line_visible(std::size_t i) const { return d->sheet->line_visible(i); }
+
+std::size_t PolarAxes::scatter_count() const { return d->sheet->scatter_count(); }
+ScatterData PolarAxes::scatter_data(std::size_t i) const { return d->sheet->scatter_data(i); }
+PolarAxes& PolarAxes::set_scatter_data(std::size_t i, const ScatterData& data) {
+    d->sheet->set_scatter_data(i, data);
+    return *this;
+}
+PolarAxes& PolarAxes::set_scatter_data(std::size_t i, std::span<const double> theta, std::span<const double> r) {
+    d->sheet->set_scatter_data(i, theta, r);
+    return *this;
+}
+PolarAxes& PolarAxes::set_scatter_visible(std::size_t i, bool visible) {
+    d->sheet->set_scatter_visible(i, visible);
+    return *this;
+}
+bool PolarAxes::scatter_visible(std::size_t i) const { return d->sheet->scatter_visible(i); }
+
+std::size_t PolarAxes::scatter_z_count() const { return d->sheet->scatter_z_count(); }
+ScatterZData PolarAxes::scatter_z_data(std::size_t i) const { return d->sheet->scatter_z_data(i); }
+PolarAxes& PolarAxes::set_scatter_z_data(std::size_t i, const ScatterZData& data) {
+    d->sheet->set_scatter_z_data(i, data);
+    return *this;
+}
+PolarAxes& PolarAxes::set_scatter_z_data(std::size_t i, std::span<const double> theta, std::span<const double> r,
+                                         std::span<const double> z) {
+    d->sheet->set_scatter_z_data(i, theta, r, z);
+    return *this;
+}
+PolarAxes& PolarAxes::set_scatter_z_visible(std::size_t i, bool visible) {
+    d->sheet->set_scatter_z_visible(i, visible);
+    return *this;
+}
+bool PolarAxes::scatter_z_visible(std::size_t i) const { return d->sheet->scatter_z_visible(i); }
+
+std::size_t PolarAxes::bar_count() const { return d->sheet->bar_count(); }
+BarData PolarAxes::bar_data(std::size_t i) const { return d->sheet->bar_data(i); }
+PolarAxes& PolarAxes::set_bar_data(std::size_t i, const BarData& data) {
+    d->sheet->set_bar_data(i, data);
+    return *this;
+}
+PolarAxes& PolarAxes::set_bar_data(std::size_t i, std::span<const double> theta, std::span<const double> height) {
+    d->sheet->set_bar_data(i, theta, height);
+    return *this;
+}
+PolarAxes& PolarAxes::set_bar_visible(std::size_t i, bool visible) {
+    d->sheet->set_bar_visible(i, visible);
+    return *this;
+}
+bool PolarAxes::bar_visible(std::size_t i) const { return d->sheet->bar_visible(i); }
 
 ObjectId PolarAxes::last_object() const { return d->sheet->last_object(); }
 bool PolarAxes::remove(ObjectId id) { return d->sheet->remove(id); }
@@ -97,6 +164,10 @@ PolarAxes& PolarAxes::grid(bool enable, GridOptions opts) {
 }
 PolarAxes& PolarAxes::set_axes_style(AxesStyle opts) {
     d->sheet->set_axes_style(opts);
+    return *this;
+}
+PolarAxes& PolarAxes::set_colorbar_style(ColorbarOptions opts) {
+    d->sheet->set_colorbar_style(std::move(opts));
     return *this;
 }
 PolarAxes& PolarAxes::cla() {

@@ -37,6 +37,23 @@ namespace sextant {
         // theta = 0, 1, 2, ... radians.
         PolarAxes& plot(std::span<const double> r, LineOptions opts = {});
 
+        // Markers at (theta[i], r[i]), ScatterOptions as Axes::scatter(). A
+        // point outside the r limits or the θ span isn't drawn.
+        PolarAxes& scatter(std::span<const double> theta, std::span<const double> r,
+                           ScatterOptions opts = {});
+
+        // Markers colored by z through a colormap, ScatterZOptions as
+        // Axes::scatter_z() (its colorbar beside the frame).
+        PolarAxes& scatter_z(std::span<const double> theta, std::span<const double> r,
+                             std::span<const double> z, ScatterZOptions opts = {});
+
+        // Ring sectors: bar i spans θ = theta[i] ± width/2 (radians; width as
+        // Axes::bar(), a fraction of the θ spacing) and r from bottom[i] to
+        // bottom[i] + height[i], cut to the r limits and the θ span. Horizontal
+        // bars throw std::invalid_argument.
+        PolarAxes& bar(std::span<const double> theta, std::span<const double> height,
+                       BarOptions opts = {});
+
         // ----------------------------------------------------------------
         // Objects, as Axes's
         // ----------------------------------------------------------------
@@ -49,6 +66,33 @@ namespace sextant {
                                  std::span<const double> r);
         PolarAxes& set_line_visible(std::size_t i, bool visible);
         bool line_visible(std::size_t i) const;
+
+        // x is θ (radians), y is r.
+        std::size_t scatter_count() const;
+        ScatterData scatter_data(std::size_t i) const;
+        PolarAxes& set_scatter_data(std::size_t i, const ScatterData& data);
+        PolarAxes& set_scatter_data(std::size_t i, std::span<const double> theta,
+                                    std::span<const double> r);
+        PolarAxes& set_scatter_visible(std::size_t i, bool visible);
+        bool scatter_visible(std::size_t i) const;
+
+        std::size_t scatter_z_count() const;
+        ScatterZData scatter_z_data(std::size_t i) const;
+        PolarAxes& set_scatter_z_data(std::size_t i, const ScatterZData& data);
+        PolarAxes& set_scatter_z_data(std::size_t i, std::span<const double> theta,
+                                      std::span<const double> r, std::span<const double> z);
+        PolarAxes& set_scatter_z_visible(std::size_t i, bool visible);
+        bool scatter_z_visible(std::size_t i) const;
+
+        // Centres are θ (radians), heights and bottoms r; as Axes::set_bar_data()
+        // a change of centres re-derives the width.
+        std::size_t bar_count() const;
+        BarData bar_data(std::size_t i) const;
+        PolarAxes& set_bar_data(std::size_t i, const BarData& data);
+        PolarAxes& set_bar_data(std::size_t i, std::span<const double> theta,
+                                std::span<const double> height);
+        PolarAxes& set_bar_visible(std::size_t i, bool visible);
+        bool bar_visible(std::size_t i) const;
 
         ObjectId last_object() const;
         bool remove(ObjectId id);
@@ -72,6 +116,9 @@ namespace sextant {
         // the θ labels and show_yticks the r labels. Axis positions, origins,
         // tick lengths and minor ticks don't apply.
         PolarAxes& set_axes_style(AxesStyle opts);
+        // As Axes::set_colorbar_style(): a colorbar comes from
+        // ScatterZOptions::colorbar.
+        PolarAxes& set_colorbar_style(ColorbarOptions opts = {});
         // Everything back to a new polar axes' defaults (the plot objects too).
         PolarAxes& cla();
 

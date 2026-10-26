@@ -45,7 +45,8 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot& snap) 
         t.data_stamp = snap.lines[i].data_stamp;
         t.id = snap.lines[i].id;
         t.label = pick_label(lp.opts.name, "line", static_cast<int>(i));
-        // A polar axes' line: θ in radians, r.
+        // A polar axes' objects: θ in radians, r (as their bars' centres and
+        // heights).
         t.columns.push_back({snap.polar ? "theta" : "x", lp.x.data(), lp.x.size()});
         t.columns.push_back({snap.polar ? "r" : "y", lp.y.data(), lp.y.size()});
         out.push_back(std::move(t));
@@ -59,8 +60,8 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot& snap) 
         t.data_stamp = snap.scatters[i].data_stamp;
         t.id = snap.scatters[i].id;
         t.label = pick_label(sp.opts.name, "scatter", static_cast<int>(i));
-        t.columns.push_back({"x", sp.x.data(), sp.x.size()});
-        t.columns.push_back({"y", sp.y.data(), sp.y.size()});
+        t.columns.push_back({snap.polar ? "theta" : "x", sp.x.data(), sp.x.size()});
+        t.columns.push_back({snap.polar ? "r" : "y", sp.y.data(), sp.y.size()});
         if (!sp.sizes.empty())
             t.columns.push_back({"size", sp.sizes.data(), sp.sizes.size()});
         out.push_back(std::move(t));
@@ -76,7 +77,7 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot& snap) 
         t.label = pick_label(bp.opts.name, "bar", static_cast<int>(i));
         // Named for the orientation, as barh(y, width, left) for a lying bar.
         const bool lying = bp.horizontal();
-        t.columns.push_back({"center", bp.centers.data(), bp.centers.size()});
+        t.columns.push_back({snap.polar ? "theta" : "center", bp.centers.data(), bp.centers.size()});
         t.columns.push_back({lying ? "width" : "height", bp.heights.data(), bp.heights.size()});
         if (!bp.bottom.empty())
             t.columns.push_back({lying ? "left" : "bottom", bp.bottom.data(), bp.bottom.size()});
@@ -104,8 +105,8 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot& snap) 
         t.data_stamp = snap.scatter_z[i].data_stamp;
         t.id = snap.scatter_z[i].id;
         t.label = synth_label("scatter_z", static_cast<int>(i));
-        t.columns.push_back({"x", sp.x.data(), sp.x.size()});
-        t.columns.push_back({"y", sp.y.data(), sp.y.size()});
+        t.columns.push_back({snap.polar ? "theta" : "x", sp.x.data(), sp.x.size()});
+        t.columns.push_back({snap.polar ? "r" : "y", sp.y.data(), sp.y.size()});
         t.columns.push_back({"z", sp.z.data(), sp.z.size()});
         if (!sp.sizes.empty())
             t.columns.push_back({"size", sp.sizes.data(), sp.sizes.size()});

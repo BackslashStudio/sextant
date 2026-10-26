@@ -238,9 +238,14 @@ std::string render_figure_svg(const FigureSnapshot& fsnap,
         };
         fill2d(sd, *fsnap.axes[i].snap2d());
         if (layout.cells[i].polar) {
-            // The lines in unit space, one per run (SVG has no break in a
-            // polyline); the legend comes from the layout.
+            // The objects in unit space, the lines one per run (SVG has no
+            // break in a polyline), the bars as wedges; the legend and
+            // colorbars come from the layout.
             const RenderSnapshot sheet = polar_sheet(*fsnap.axes[i].snap2d(), layout.cells[i].polar->map);
+            sd.scatters  = sheet.scatters;
+            sd.scatter_z = sheet.scatter_z;
+            sd.bars      = sheet.bars;
+            sd.wedges    = sheet.wedges;
             sd.lines.clear();
             for (const LinePlot& l : sheet.lines) {
                 std::size_t a = 0;

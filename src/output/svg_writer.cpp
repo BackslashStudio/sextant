@@ -1582,12 +1582,12 @@ static void emit_defs(std::ostringstream& o, const std::vector<SvgAxesData>& axe
             o << "  <clipPath id=\"plotArea" << i << "\"><polygon points=\"";
             for (std::size_t k = 0; k < x.size(); ++k) o << x[k] << "," << y[k] << " ";
             o << "\"/></clipPath>\n";
-            continue;
+        } else {
+            o << "  <clipPath id=\"plotArea" << i << "\">"
+              << "<rect x=\"" << d.layout.frame.x << "\" y=\"" << d.layout.frame.y
+              << "\" width=\"" << d.layout.frame.w << "\" height=\"" << d.layout.frame.h << "\"/>"
+              << "</clipPath>\n";
         }
-        o << "  <clipPath id=\"plotArea" << i << "\">"
-          << "<rect x=\"" << d.layout.frame.x << "\" y=\"" << d.layout.frame.y
-          << "\" width=\"" << d.layout.frame.w << "\" height=\"" << d.layout.frame.h << "\"/>"
-          << "</clipPath>\n";
 
         if (!d.layout.has_colorbar()) continue;
         // Vertical: offset 0% (top) = vmax. All 256 LUT entries become stops
@@ -2008,7 +2008,8 @@ static std::vector<const SvgAxesData*> layers_of(const SvgAxesData& d) {
 }
 
 // A polar cell (PolarAxes), as NvgRenderer: its disc or sector filled, the
-// lines clipped to it, then rings, spokes, the outline and their labels.
+// objects clipped to it, then rings, spokes, the outline, their labels, the
+// titles, legend and colorbars.
 static void emit_polar(std::ostringstream& o, const SvgAxesData& d, std::size_t idx) {
     const PolarPlan& plan = *d.layout.polar;
     const AxesStyle& st = d.axes_style;
@@ -2070,6 +2071,7 @@ static void emit_polar(std::ostringstream& o, const SvgAxesData& d, std::size_t 
     }
     emit_titles(o, d);
     emit_legend(o, d, idx);
+    emit_colorbar(o, d, idx);
 }
 
 static void emit_one_axes(std::ostringstream& o, const SvgAxesData& d, std::size_t idx) {

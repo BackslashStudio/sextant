@@ -68,6 +68,22 @@ std::string fmt_polar(double theta, double r) {
     return buf;
 }
 
+std::string fmt_polar_z(double theta, double r, double z) {
+    char buf[48];
+    std::snprintf(buf, sizeof(buf), ", z=%.4g", z);
+    return fmt_polar(theta, r) + buf;
+}
+
+// A polar bar: its centre's θ and its height, a set base adding "bottom=..".
+std::string fmt_polar_bar(const BarPlot& bp, std::size_t i) {
+    char buf[96];
+    int n = std::snprintf(buf, sizeof(buf), "theta=%.4g\xC2\xB0, height=%.4g", bp.centers[i] / kPolarDeg,
+                          bp.heights[i]);
+    if (!bp.bottom.empty() && n > 0 && static_cast<std::size_t>(n) < sizeof(buf))
+        std::snprintf(buf + n, sizeof(buf) - n, ", bottom=%.4g", bp.base_at(i));
+    return buf;
+}
+
 std::string fmt_point_err(double x, double y, const ErrorBarData& err, std::size_t i) {
     if (err.empty()) return fmt_point(x, y);
     return fmt_err_pair("x", x, "y", y, err, i);
@@ -434,36 +450,75 @@ std::optional<PickHit> find_pick(const RenderSnapshot& snap, const HintProjector
     // whatever the draw order; only without one do the areas answer.
     const std::vector<ObjectRef> order = draw_order(snap);
 
-    // A polar sheet (PolarAxes): its lines' points through the polar map, a
-    // linear scan (no index: the grid is over θ/r, not the screen); points
-    // outside the frame aren't drawn, so aren't found. No areas.
+    // A polar sheet (PolarAxes): its lines' and markers' points through the
+    // polar map, a linear scan (no index: the grid is over θ/r, not the
+    // screen); points outside the frame aren't drawn (polar_point_shown()),
+    // so aren't found. Without one, the bars answer as areas: the cursor's
+    // (θ, r) inside one, the top one first.
     if (snap.polar) {
         const PolarMap m = polar_map(snap);
         float best = radius * radius;
         std::optional<PickHit> hit;
-        for (const ObjectRef& r : order) {
-            if (r.kind != PlotKind::Line) continue;
-            const LinePlot& lp = snap.lines[r.index];
-            if (!object_shown(lp)) continue;
-            for (std::size_t i = 0; i < lp.x.size(); ++i) {
-                const double t = lp.x[i], rr = lp.y[i];
-                if (!std::isfinite(t) || !std::isfinite(rr) || rr < m.rmin || rr > m.rmax) continue;
-                const double ux = m.unit_x(t, rr), uy = m.unit_y(t, rr);
-                if (!m.inside(ux, uy)) continue;
-                const HintProjector::Pt p = tr.at(ux, uy);
-                const float dx = p.x - cursor_x, dy = p.y - cursor_y;
+        const auto points = [&](PickKind kind, std::size_t o, const auto& p) {
+            if (!object_shown(p)) return;
+            for (std::size_t i = 0; i < p.x.size(); ++i) {
+                const double t = p.x[i], rr = p.y[i];
+                if (!polar_point_shown(m, t, rr)) continue;
+                if constexpr (requires { p.sizes; })
+                    if (marker_hidden(p, i)) continue;
+                const HintProjector::Pt q = tr.at(m.unit_x(t, rr), m.unit_y(t, rr));
+                const float dx = q.x - cursor_x, dy = q.y - cursor_y;
                 const float d2 = dx * dx + dy * dy;
                 if (d2 > best) continue;
                 best = d2;
                 hit = PickHit{};
-                hit->kind = PickKind::Line;
-                hit->object = r.index;
+                hit->kind = kind;
+                hit->object = o;
                 hit->element = i;
-                hit->anchor_x = p.x;
-                hit->anchor_y = p.y;
+                hit->anchor_x = q.x;
+                hit->anchor_y = q.y;
+            }
+        };
+        for (const ObjectRef& r : order) {
+            switch (r.kind) {
+                case PlotKind::Line: points(PickKind::Line, r.index, snap.lines[r.index]); break;
+                case PlotKind::Scatter: points(PickKind::Scatter, r.index, snap.scatters[r.index]); break;
+                case PlotKind::ScatterZ: points(PickKind::ScatterZ, r.index, snap.scatter_z[r.index]); break;
+                default: break;
             }
         }
-        return hit;
+        if (hit) return hit;
+
+        double ux = 0.0, uy = 0.0;
+        if (!tr.at_pixel(cursor_x, cursor_y, ux, uy) || !m.inside(ux, uy)) return std::nullopt;
+        double ct = 0.0, cr = 0.0;
+        m.from_unit(ux, uy, ct, cr);
+        const double two_pi = 2.0 * std::numbers::pi;
+        for (std::size_t rank = order.size(); rank-- > 0;) {
+            if (order[rank].kind != PlotKind::Bar) continue;
+            const BarPlot& bp = snap.bars[order[rank].index];
+            const double half = std::abs(bp.bar_width) * 0.5;
+            const std::size_t n = std::min(bp.centers.size(), bp.heights.size());
+            for (std::size_t i = n; i-- > 0;) {
+                const double c = bp.centers[i], b = bp.base_at(i), t = bp.tip_at(i);
+                if (!std::isfinite(c) || !std::isfinite(b) || !std::isfinite(t)) continue;
+                if (cr < std::min(b, t) || cr > std::max(b, t)) continue;
+                // The cursor's θ from the centre, in [-π, π).
+                const double d = std::fmod(std::fmod(ct - c + std::numbers::pi, two_pi) + two_pi, two_pi)
+                                 - std::numbers::pi;
+                if (half < std::numbers::pi && std::abs(d) > half) continue;
+                PickHit h;
+                h.kind = PickKind::Bar;
+                h.object = order[rank].index;
+                h.element = i;
+                h.anchor_x = cursor_x;
+                h.anchor_y = cursor_y;
+                h.data_x = ct;
+                h.data_y = cr;
+                return h;
+            }
+        }
+        return std::nullopt;
     }
 
     // A surface with no candidate box (a plane seen edge-on) has no point to find.
@@ -639,15 +694,18 @@ std::string format_pick(const RenderSnapshot& snap, const PickHit& hit) {
         }
         case PickKind::Scatter: {
             const auto& sp = snap.scatters[hit.object];
+            if (snap.polar) return append_label(fmt_polar(sp.x[i], sp.y[i]), sp.opts.hint_labels, i);
             return append_label(fmt_point_err(sp.x[i], sp.y[i], sp.err, i), sp.opts.hint_labels, i);
         }
         case PickKind::ScatterZ: {
             const auto& sp = snap.scatter_z[hit.object];
+            if (snap.polar) return append_label(fmt_polar_z(sp.x[i], sp.y[i], sp.z[i]), sp.opts.hint_labels, i);
             return append_label(fmt_z_err(sp.x[i], sp.y[i], sp.z[i], sp.err, i),
                                 sp.opts.hint_labels, i);
         }
         case PickKind::Bar: {
             const auto& bp = snap.bars[hit.object];
+            if (snap.polar) return append_label(fmt_polar_bar(bp, i), bp.opts.hint_labels, i);
             return append_label(fmt_bar(bp, i), bp.opts.hint_labels, i);
         }
         case PickKind::Heatmap: {

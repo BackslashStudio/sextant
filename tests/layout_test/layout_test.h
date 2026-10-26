@@ -617,6 +617,8 @@ namespace lt {
     void test_pie();
     // polar.cpp
     void test_polar();
+    // polar_kinds.cpp
+    void test_polar_kinds();
 
     // edge_markers.cpp
     void test_edge_markers();

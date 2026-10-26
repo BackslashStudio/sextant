@@ -310,6 +310,8 @@ int main() {
     test_pie();
     // polar.cpp
     test_polar();
+    // polar_kinds.cpp
+    test_polar_kinds();
 
     // edge_markers.cpp
     test_edge_markers();

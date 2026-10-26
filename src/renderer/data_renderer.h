@@ -33,6 +33,17 @@ public:
         axes_index_ = axes_index;
     }
 
+    // A polar cell's disc or sector the following markers are clipped to:
+    // centre and radius in logical pixels, the sector's start angle (radians
+    // counter-clockwise from +x on screen) and sweep (>= 2 pi: the disc).
+    // Lines and shapes arrive clipped on the CPU; markers have area. Cleared
+    // with clear_polar_clip() (a radius of 0 clips nothing).
+    void set_polar_clip(float cx, float cy, float radius, float start, float sweep) {
+        polar_clip_[0] = cx; polar_clip_[1] = cy; polar_clip_[2] = radius; polar_clip_[3] = start;
+        polar_sweep_ = sweep;
+    }
+    void clear_polar_clip() { polar_clip_[2] = 0.0f; }
+
     // A 2D sheet's plot objects (an axes', or a plane's into its raster), each
     // with its error bars, in draw_order(): by zorder, a later call over an earlier
     // one whatever their kinds. A bar or line object's error bars go over it, a
@@ -214,6 +225,8 @@ private:
     // Keyed on (data generation, axes, plot index) plus whatever else is baked
     // into the result.
     unsigned long long data_generation_ = 0;
+    float polar_clip_[4] = {0.0f, 0.0f, 0.0f, 0.0f};   // set_polar_clip()
+    float polar_sweep_ = 0.0f;
     int                axes_index_ = -1;
     // The plane the 2D draws are currently targeting (-1 = the axes); part of
     // every 2D cache key.
@@ -539,7 +552,8 @@ private:
 
     struct Scatter3DUniforms { int clip = -1, box_scale = -1, box_offset = -1,
                                    resolution = -1, marker = -1, depth = -1, shade = -1,
-                                   edge = -1, edge_w = -1, edge_face = -1; };
+                                   edge = -1, edge_w = -1, edge_face = -1,
+                                polar_clip = -1, polar_sweep = -1; };
     Scatter3DUniforms scatter3d_u_{};
     Scatter3DUniforms peel_scatter3d_u_{};
     unsigned int scatter3d_program_ = 0;
@@ -666,7 +680,8 @@ private:
     QuiverUniforms quiver_u_{};
     struct MarkerUniforms { int resolution = -1, color = -1, marker = -1,
                                 scale = -1, offset = -1,
-                                edge = -1, edge_w = -1, edge_face = -1; };
+                                edge = -1, edge_w = -1, edge_face = -1,
+                                polar_clip = -1, polar_sweep = -1; };
     struct HeatUniforms   { int resolution = -1, tex = -1; };
     LineUniforms   line_u_{};       // shared by draw_lines and draw_bars
     MarkerUniforms scatter_u_{};
