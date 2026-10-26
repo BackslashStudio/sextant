@@ -2575,9 +2575,10 @@ namespace sextant {
         char fmt_buf[16];
         const char* fmt = format_spec(st.value_format, fmt_buf, sizeof(fmt_buf));
 
-        const auto tables = cur2d
-                                ? collect_plot_data_tables(*cur2d)
-                                : collect_plot_data_tables(*cur3d);
+        const RenderSnapshotPolar* curp = cur->snappolar();
+        const auto tables = curp    ? collect_plot_data_tables(*curp)
+                            : cur2d ? collect_plot_data_tables(*cur2d)
+                                    : collect_plot_data_tables(*cur3d);
         // A 3D slot with a plane always has something to show (the plane's tab).
         const std::size_t nplanes = cur3d ? cur3d->planes.size() : 0;
         if (tables.empty() && nplanes == 0) {

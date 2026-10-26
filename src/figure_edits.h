@@ -334,9 +334,12 @@ struct AxesEdit {
     std::optional<AxesAspect> aspect;
     // Axes::set_axis_visible() (StyleStamps::axis).
     std::optional<bool> axis_on;
-    // A polar axes' frame: rotating it, or the panel's polar fields
-    // (StyleStamps::polar). Skipped on an axes that isn't polar.
-    std::optional<PolarState> polar;
+    // A polar axes' view (rotating it, the panel's θ and r fields) and its
+    // rings and spokes, each whole, against polar_seen. Skipped on an axes
+    // that isn't polar.
+    std::optional<PolarView>  polar_view;
+    std::optional<PolarStyle> polar_style;
+    PolarStamps polar_seen = PolarStamps::any();
     std::optional<AxesStyle> axes_style;
 
     // Whole options structs; the panel republishes its local copy on change.
@@ -465,7 +468,7 @@ inline bool is_navigation_only(const FigureEdits& f) {
     for (const auto& [idx, e] : f.per_axes) {
         if (e.title || e.xtitle || e.ytitle || e.grid_enabled || e.axes_style || e.grid_opts
             || e.xscale || e.yscale || e.xtick_format || e.ytick_format || e.aspect || e.axis_on
-            || e.polar || e.legend_enabled || e.legend_opts || e.colorbar_opts
+            || e.legend_enabled || e.legend_opts || e.colorbar_opts
             || !e.plot_ops.empty() || !e.plot_styles.empty())
             return false;
     }
@@ -1594,7 +1597,6 @@ void apply_style_edits(T& dst, const E& e, E* inv = nullptr) {
         if (e.aspect && have.aspect <= seen.aspect && !(e.aspect->datalim() && dst.xshare && dst.yshare))
             put(dst.aspect, e.aspect, undo(&E::aspect));
         if (have.axis <= seen.axis) put(dst.axis_on, e.axis_on, undo(&E::axis_on));
-        if (dst.polar && have.polar <= seen.polar) put(dst.polar, e.polar, undo(&E::polar));
     }
     if constexpr (requires { dst.zticks_override; e.zticks_override; })
         if (have.zticks <= seen.zticks)
@@ -1616,6 +1618,35 @@ void apply_axes_edit(T& dst, const AxesEdit& e, AxesEdit* inv = nullptr) {
     apply_style_edits(dst, e, inv);
     apply_plot_data_ops(dst, e.plot_ops, inv ? &inv->plot_ops : nullptr);
     apply_plot_style_edits(dst, e.plot_styles, inv ? &inv->plot_styles : nullptr);
+}
+
+// A 2D edit's polar view and style, onto PolarAxes::Impl (caller thread) or
+// RenderSnapshotPolar (render thread); the rest goes to their objects through
+// apply_axes_edit().
+template <typename P>
+void apply_polar_edit(P& dst, const AxesEdit& e, AxesEdit* inv = nullptr) {
+    if (e.polar_view && dst.stamps.view <= e.polar_seen.view) {
+        if (inv) inv->polar_view = dst.view;
+        dst.view = *e.polar_view;
+    }
+    if (e.polar_style && dst.stamps.style <= e.polar_seen.style) {
+        if (inv) inv->polar_style = dst.style;
+        dst.style = *e.polar_style;
+    }
+}
+
+// True if a polar edit moves the frame's labels (its θ fields, or the r
+// labels' angle or format), which re-measures; r limits and tick overrides
+// are navigation, as in 2D.
+inline bool polar_relayouts(const AxesEdit& e, const RenderSnapshotPolar& s) {
+    if (const auto& v = e.polar_view)
+        if (v->theta_offset != s.view.theta_offset || v->direction != s.view.direction
+            || v->thetamin != s.view.thetamin || v->thetamax != s.view.thetamax)
+            return true;
+    if (const auto& p = e.polar_style)
+        if (p->rlabel_position != s.style.rlabel_position || p->rtick_format != s.style.rtick_format)
+            return true;
+    return false;
 }
 
 // Apply a 3D edit to Axes3D::Impl (caller thread) or RenderSnapshot3D (render
@@ -1725,7 +1756,8 @@ void merge_style_edits(E& dst, const E& src) {
         take_latest(dst.xtick_format, src.xtick_format, ds.xticks, ss.xticks);
         take_latest(dst.ytick_format, src.ytick_format, ds.yticks, ss.yticks);
         take_latest(dst.axis_on, src.axis_on, ds.axis, ss.axis);
-        take_latest(dst.polar, src.polar, ds.polar, ss.polar);
+        take_latest(dst.polar_view, src.polar_view, dst.polar_seen.view, src.polar_seen.view);
+        take_latest(dst.polar_style, src.polar_style, dst.polar_seen.style, src.polar_seen.style);
     }
     // The 2D aspect, or the 3D box aspect.
     take_latest(dst.aspect, src.aspect, ds.aspect, ss.aspect);
@@ -1769,7 +1801,7 @@ bool style_edits_empty(const E& e) {
                  && !e.yticks_override && !e.aspect && e.plot_styles.empty();
     if constexpr (requires { e.xscale; })
         empty = empty && !e.xscale && !e.yscale && !e.xtick_format && !e.ytick_format && !e.axis_on
-                && !e.polar;
+                && !e.polar_view && !e.polar_style;
     if constexpr (requires { e.box_style; })
         empty = empty && !e.zticks_override && !e.box_style && e.planes.empty()
                 && e.bars3d.empty() && e.surfaces.empty() && e.scatter3d.empty()
@@ -1887,6 +1919,8 @@ void compose_axes_inverse(E& older, const E& newer) {
         keep_older(older.xtick_format, newer.xtick_format);
         keep_older(older.ytick_format, newer.ytick_format);
         keep_older(older.axis_on, newer.axis_on);
+        keep_older(older.polar_view, newer.polar_view);
+        keep_older(older.polar_style, newer.polar_style);
     }
     older.plot_ops.insert(older.plot_ops.begin(), newer.plot_ops.begin(), newer.plot_ops.end());
     edits_detail::compose_entries(older.plot_styles, newer.plot_styles,

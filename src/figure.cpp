@@ -125,7 +125,7 @@ std::shared_ptr<A> Figure::Impl::add_impl(const char* who, const char* other,
     if (Slot* s = find_or_reserve_slot(who, rows, cols, first, last)) {
         auto p = std::get_if<std::shared_ptr<A>>(&s->axes);
         // A cell holding the other kind throws rather than being replaced.
-        if (s->polar)
+        if (s->aspolar())
             throw std::invalid_argument(
                 std::string(who) + ": " + describe(first, last)
                 + (first == last ? " already holds a " : " already hold a ")
@@ -153,17 +153,16 @@ std::shared_ptr<Axes3D> Figure::Impl::add_subplot3d_impl(int rows, int cols, int
 std::shared_ptr<PolarAxes> Figure::Impl::add_subplot_polar_impl(int rows, int cols, int first, int last) {
     const char* who = "Figure::add_subplot_polar";
     if (Slot* s = find_or_reserve_slot(who, rows, cols, first, last)) {
-        if (s->polar) return s->polar;
+        if (auto p = std::get_if<std::shared_ptr<PolarAxes>>(&s->axes)) return *p;
         throw std::invalid_argument(
             std::string(who) + ": " + describe(first, last)
             + (first == last ? " already holds a " : " already hold a ")
             + (s->as3d() ? "3D" : "2D") + " axes");
     }
-    auto sheet = std::shared_ptr<Axes>(new Axes());
-    sheet->d->mathtext = opts.mathtext;
-    sheet->d->owner = window_state.figure_id;
-    auto pa = std::shared_ptr<PolarAxes>(new PolarAxes(sheet));
-    slots.push_back({rows, cols, first, last, sheet, pa});
+    auto pa = std::shared_ptr<PolarAxes>(new PolarAxes());
+    pa->d->sheet.mathtext = opts.mathtext;
+    pa->d->sheet.owner = window_state.figure_id;
+    slots.push_back({rows, cols, first, last, pa});
     return pa;
 }
 
@@ -191,6 +190,10 @@ FigureSnapshot Figure::Impl::build_figure_snapshot() const {
         const AxesSlot slot{ s.rows, s.cols, s.index, s.last };
         if (const Axes3D* a3 = s.as3d()) {
             fs.axes.push_back({ slot, a3->d->build_snapshot() });
+            continue;
+        }
+        if (const PolarImpl* p = polar_impl(s)) {
+            fs.axes.push_back({ slot, p->build_snapshot() });
             continue;
         }
         const Axes::Impl& d2 = *s.as2d()->d;
@@ -250,8 +253,10 @@ void Figure::Impl::apply_edits_and_publish() {
                 if (d3->camera_stamp <= c.seen) d3->camera = c.camera;
         // The style lane holds no titles, limits, camera or ops, so the
         // whole-edit appliers apply just its styles.
-        for (const auto& [idx, e] : journal->styles)
+        for (const auto& [idx, e] : journal->styles) {
             if (Axes::Impl* d2 = find_slot_impl(idx)) d2->apply_shared_edit(e);
+            if (PolarImpl* p = find_slot_polar(idx)) apply_polar_edit(*p, e);
+        }
         for (const auto& [idx, e] : journal->styles3d)
             if (Axes3D::Impl* d3 = find_slot_impl3d(idx)) apply_axes3d_edit(*d3, e);
         apply_figure_level(journal->figure);
@@ -259,8 +264,10 @@ void Figure::Impl::apply_edits_and_publish() {
     }
 
     if (auto edits = edit_box.load_and_clear()) {
-        for (const auto& [idx, e] : edits->per_axes)
+        for (const auto& [idx, e] : edits->per_axes) {
             if (Axes::Impl* d2 = find_slot_impl(idx)) d2->apply_shared_edit(e);
+            if (PolarImpl* p = find_slot_polar(idx)) apply_polar_edit(*p, e);
+        }
         for (const auto& [idx, e] : edits->per_axes3d)
             if (Axes3D::Impl* d3 = find_slot_impl3d(idx)) apply_axes3d_edit(*d3, e);
         // Figure-level, outside the per-axes loop.
@@ -293,7 +300,10 @@ void Figure::Impl::patch_snapshot(const FigureEdits& edits, FigureEdits* inv) {
         for (const auto& [idx, e] : edits.per_axes3d)
             if (!e.plot_ops.empty()) { data_changed = true; break; }
     if (data_changed) next->data_generation = next_snapshot_generation();
-    if (!is_navigation_only(edits)) next->layout_generation = next_snapshot_generation();
+    bool relayout = !is_navigation_only(edits);
+    for (const auto& [idx, e] : edits.per_axes)
+        if (const RenderSnapshotPolar* p = prev->findpolar(idx); p && polar_relayouts(e, *p)) relayout = true;
+    if (relayout) next->layout_generation = next_snapshot_generation();
 
     for (const auto& [idx, e] : edits.per_axes) {
         // A 3D slot is addressed on the other lane.
@@ -301,6 +311,7 @@ void Figure::Impl::patch_snapshot(const FigureEdits& edits, FigureEdits* inv) {
         if (!sp) continue;
         AxesEdit undo;
         apply_axes_edit(*sp, e, inv ? &undo : nullptr);
+        if (RenderSnapshotPolar* p = next->findpolar(idx)) apply_polar_edit(*p, e, inv ? &undo : nullptr);
         // The group follows; the inverse, applied to this axes, brings it back the same way.
         sync_snapshot_groups(*next, *sp);
         if (inv && !axes_edit_empty(undo)) inv->per_axes.push_back({idx, std::move(undo)});

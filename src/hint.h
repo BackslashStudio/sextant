@@ -142,6 +142,13 @@ std::optional<PickHit> find_pick(const RenderSnapshot& snap, const HintProjector
                                  HintIndexCache* index = nullptr,
                                  float radius = kHintHitRadiusPx);
 
+// A polar axes: its lines' and markers' points through its polar map (a
+// linear scan, no index), else the bar, fill or polygon the cursor's (θ, r)
+// is inside, the top one first.
+std::optional<PickHit> find_pick(const RenderSnapshotPolar& snap, const HintProjector& proj,
+                                 float cursor_x, float cursor_y,
+                                 float radius = kHintHitRadiusPx);
+
 // A 2D cell's layers (Axes::twinx()) as drawn: its own axes, then its twins,
 // each with its transform, edit key (axes_key()) and layer number.
 struct CellLayers {
@@ -177,6 +184,7 @@ ObjectId pick_object_id(const RenderSnapshot& snap, PickKind kind, std::size_t o
 ObjectId pick_object_id(const RenderSnapshot3D& snap, PickKind kind, std::size_t object);
 
 std::string format_pick(const RenderSnapshot& snap, const PickHit& hit);
+std::string format_pick(const RenderSnapshotPolar& snap, const PickHit& hit);   // θ and r
 std::string format_pick3d(const RenderSnapshot3D& snap, const PickHit& hit);
 
 // The text for find_pick()'s hit. nullopt = nothing. `index` (optional,
@@ -185,6 +193,10 @@ std::optional<HintResult> find_hint(const RenderSnapshot& snap,
                                     const HintProjector& proj,
                                     float cursor_x, float cursor_y,
                                     HintIndexCache* index = nullptr,
+                                    float radius = kHintHitRadiusPx);
+std::optional<HintResult> find_hint(const RenderSnapshotPolar& snap,
+                                    const HintProjector& proj,
+                                    float cursor_x, float cursor_y,
                                     float radius = kHintHitRadiusPx);
 
 // 3D: casts the cursor ray against planes and bars, nearest first. A bar

@@ -892,11 +892,10 @@ struct StyleStamps {
     unsigned long long box = 0;     // 3D only
     unsigned long long aspect = 0;  // 3D set_box_aspect(), 2D set_aspect()
     unsigned long long axis = 0;    // 2D only: set_axis_visible()
-    unsigned long long polar = 0;   // PolarAxes only: its PolarState
 
     static constexpr StyleStamps any() {
         constexpr auto m = ~0ull;
-        return { m, m, m, m, m, m, m, m, m, m, m };
+        return { m, m, m, m, m, m, m, m, m, m };
     }
 };
 
@@ -920,20 +919,6 @@ struct AxesAspect {
     // Whether layout widens limits for it (Adjustable::Datalim with a ratio).
     bool datalim() const { return ratio > 0.0 && adjustable == Adjustable::Datalim; }
     bool operator==(const AxesAspect&) const = default;
-};
-
-// A polar axes' frame (PolarAxes): what turns its sheet's (θ, r) data into a
-// disc. The sheet's y limits are r's, its yticks the rings and its xticks the
-// spokes (in degrees); these are the rest. Angles in degrees.
-struct PolarState {
-    // The screen angle of θ = 0, counterclockwise from east.
-    double theta_offset = 0.0;
-    // +1 counterclockwise, -1 clockwise.
-    int    direction = 1;
-    double thetamin = 0.0, thetamax = 360.0;
-    // The θ the r labels sit along.
-    double rlabel_position = 22.5;
-    bool operator==(const PolarState&) const = default;
 };
 
 // Everything the render thread needs from Axes::Impl: decoration and limits
@@ -997,12 +982,55 @@ struct RenderSnapshot {
     // Explicit ticks; absent = generate_ticks().
     std::optional<std::vector<Tick>> xticks_override, yticks_override;
 
-    // A PolarAxes' sheet only; empty everywhere else.
-    std::optional<PolarState> polar;
-
     AllPlotData all() const {
         return { lines, scatters, bars, heatmaps, scatter_z, &axlines, &axspans, &fills, &quivers, &polys, &circles, &wedges, &heatmap_tris, &contours, &pies };
     }
+};
+
+// A polar axes' view (PolarAxes): what navigation changes. Angles in degrees.
+struct PolarView {
+    // The screen angle of θ = 0, counterclockwise from east.
+    double theta_offset = 0.0;
+    // +1 counterclockwise, -1 clockwise.
+    int    direction = 1;
+    double thetamin = 0.0, thetamax = 360.0;
+    // r's limits: automatic (polar_auto_rlim()), or [rmin, rmax].
+    bool   rauto = true;
+    double rmin = 0.0, rmax = 1.0;
+    bool operator==(const PolarView&) const = default;
+};
+
+// A polar axes' rings, spokes and their labels.
+struct PolarStyle {
+    // The θ (degrees) the r labels sit along.
+    double rlabel_position = 22.5;
+    // set_rticks(), set_rtick_format() ("" = %g), set_thetagrids() (degrees);
+    // absent = generated.
+    std::optional<std::vector<Tick>> rticks_override;
+    std::string rtick_format;
+    std::optional<std::vector<Tick>> thetagrids_override;
+};
+
+// Setter stamps, as StyleStamps: view = the θ and r setters, style = the
+// PolarStyle ones.
+struct PolarStamps {
+    unsigned long long view = 0, style = 0;
+
+    static constexpr PolarStamps any() {
+        constexpr auto m = ~0ull;
+        return { m, m };
+    }
+};
+
+// A polar axes for the render thread (PolarAxes::Impl::build_snapshot()):
+// its objects, title, legend and look on a 2D snapshot whose limits, ticks,
+// scales and aspect are unused, and its own view and style.
+struct RenderSnapshotPolar {
+    RenderSnapshot objects;
+    PolarView view;
+    PolarStyle style;
+    PolarStamps stamps;
+    ObjectId id = 0;
 };
 
 // What a share group holds in common, copied from one member to another;
@@ -1539,7 +1567,7 @@ struct TwinSnapshot {
 // already knows the kind; otherwise use std::visit.
 struct FigureAxesSnapshot {
     AxesSlot slot;
-    std::variant<RenderSnapshot, RenderSnapshot3D> snap;
+    std::variant<RenderSnapshot, RenderSnapshot3D, RenderSnapshotPolar> snap;
     // 2D only: the axes' twins, twinx before twiny. Their own title, legend
     // and colorbar options are unused (the cell's are the host's).
     std::vector<TwinSnapshot> twins;
@@ -1556,11 +1584,28 @@ struct FigureAxesSnapshot {
     }
 
     bool is_3d() const { return std::holds_alternative<RenderSnapshot3D>(snap); }
-    const RenderSnapshot*   snap2d() const { return std::get_if<RenderSnapshot>(&snap); }
-    const RenderSnapshot3D* snap3d() const { return std::get_if<RenderSnapshot3D>(&snap); }
-    RenderSnapshot*   snap2d() { return std::get_if<RenderSnapshot>(&snap); }
-    RenderSnapshot3D* snap3d() { return std::get_if<RenderSnapshot3D>(&snap); }
+    // The cell's 2D snapshot: a 2D axes', or a polar axes' objects (whose
+    // limits and ticks are unused: code drawing a cartesian frame checks
+    // snappolar() first).
+    const RenderSnapshot* snap2d() const {
+        if (const RenderSnapshotPolar* p = snappolar()) return &p->objects;
+        return std::get_if<RenderSnapshot>(&snap);
+    }
+    const RenderSnapshot3D*    snap3d() const { return std::get_if<RenderSnapshot3D>(&snap); }
+    const RenderSnapshotPolar* snappolar() const { return std::get_if<RenderSnapshotPolar>(&snap); }
+    RenderSnapshot* snap2d() { return const_cast<RenderSnapshot*>(std::as_const(*this).snap2d()); }
+    RenderSnapshot3D*    snap3d() { return std::get_if<RenderSnapshot3D>(&snap); }
+    RenderSnapshotPolar* snappolar() { return std::get_if<RenderSnapshotPolar>(&snap); }
 };
+
+// `f` on the cell's 2D or 3D snapshot, a polar axes' objects standing for it
+// (they hold its title, legend and look); for code that reads what both kinds
+// have.
+template <class F>
+decltype(auto) visit_cell(const FigureAxesSnapshot& fa, F&& f) {
+    if (const RenderSnapshot3D* s3 = fa.snap3d()) return f(*s3);
+    return f(*fa.snap2d());
+}
 
 // The cell's frame edges in its twinned axes' colors (AxesStyle::xaxis_color);
 // none for an untwinned or 3D cell.
@@ -1601,6 +1646,15 @@ struct FigureSnapshot {
     }
     RenderSnapshot3D* find3d(int key) {
         return const_cast<RenderSnapshot3D*>(std::as_const(*this).find3d(key));
+    }
+    // The polar axes at slot `key` (no layers either).
+    const RenderSnapshotPolar* findpolar(int key) const {
+        for (const FigureAxesSnapshot& fa : axes)
+            if (fa.slot.index == key) return fa.snappolar();
+        return nullptr;
+    }
+    RenderSnapshotPolar* findpolar(int key) {
+        return const_cast<RenderSnapshotPolar*>(std::as_const(*this).findpolar(key));
     }
     // `f(key, snapshot)` for every 2D axes, each cell's own before its twins.
     template <class F> void for_each2d(F&& f) const {

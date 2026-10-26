@@ -80,6 +80,8 @@ struct PlotDataTable {
 
 // Every plot object in `snap`, in RenderSnapshot member order.
 std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot& snap);
+// A polar axes' objects, as above, `polar` set (θ, r columns).
+std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshotPolar& snap);
 
 // 3D: the axes' own objects first (plane_index -1, texts last), then each plane's
 // sheet with `plane_index`/`group` set. Same lifetime rule.

@@ -9,6 +9,7 @@
 #include "../render_frame.h"
 #include "../figure_export.h"
 #include "../plot_data_view.h"
+#include "../polar_geometry.h"
 #include "../renderer/figure_layout.h"
 #include "../font_discovery.h"
 #include "../ticker.h"
@@ -260,6 +261,15 @@ void seed_cosmetic(CosmeticState& c, const RenderSnapshot& sn) {
     c.colorbar_local   = sn.colorbar_opts;
 }
 
+// A polar axes: its objects' look, then its θ grids, r ticks and r format in
+// the X and Y fields.
+void seed_cosmetic(CosmeticState& c, const RenderSnapshotPolar& sn) {
+    seed_cosmetic(c, sn.objects);
+    c.xticks_scratch = sn.style.thetagrids_override.value_or(std::vector<Tick>{});
+    c.yticks_scratch = sn.style.rticks_override.value_or(std::vector<Tick>{});
+    std::snprintf(c.yfmt_buf, sizeof(c.yfmt_buf), "%s", sn.style.rtick_format.c_str());
+}
+
 // The 3D counterpart: the shared fields and the 3D-only ones.
 void seed_cosmetic(CosmeticState& c, const RenderSnapshot3D& sn) {
     std::snprintf(c.title_buf,  sizeof(c.title_buf),  "%s", sn.title.c_str());
@@ -381,8 +391,9 @@ void sync_layout_from_snapshot(CosmeticState& c, const FigureSnapshot& fsnap) {
 // The Cosmetic inspector's own pull.
 void pull_cosmetic(CosmeticState& c, const Selection& sel, const FigureAxesSnapshot& fa) {
     if (c.synced_generation == sel.generation) return;
-    if (fa.snap2d()) seed_cosmetic(c, *selected_layer(sel, fa));
-    else std::visit([&](const auto& sn) { seed_cosmetic(c, sn); }, fa.snap);
+    if (const RenderSnapshotPolar* p = fa.snappolar()) seed_cosmetic(c, *p);
+    else if (fa.snap2d()) seed_cosmetic(c, *selected_layer(sel, fa));
+    else visit_cell(fa, [&](const auto& sn) { seed_cosmetic(c, sn); });
     c.synced_generation = sel.generation;
 }
 
@@ -1064,12 +1075,12 @@ SlotViewState& slot_view(FigureContext& ctx) {
     const RenderSnapshot* layer = fa->snap2d() ? selected_layer(ctx.selection, *fa) : nullptr;
     if (v.synced_generation != ctx.selection.generation) {
         if (layer) seed_slot_view(v, *layer);
-        else std::visit([&](const auto& sn) { seed_slot_view(v, sn); }, fa->snap);
+        else visit_cell(*fa, [&](const auto& sn) { seed_slot_view(v, sn); });
         v.synced_generation = ctx.selection.generation;
         return v;
     }
     if (layer) follow_program_limits(v, *layer);
-    else std::visit([&](const auto& sn) { follow_program_limits(v, sn); }, fa->snap);
+    else visit_cell(*fa, [&](const auto& sn) { follow_program_limits(v, sn); });
     if (const RenderSnapshot3D* sn = fa->snap3d()) {
         // The program set the camera since it was seeded: follow it, or the next
         // drag would start from a view no longer on screen.
@@ -1453,7 +1464,7 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
             }
         }
         // Frame edges, independent of ticks. A polar frame is one outline.
-        const bool polar = cur2d->polar.has_value();
+        const bool polar = cur->snappolar() != nullptr;
         if (host && !polar && begin_field_table("spines", 2)) {
             field_row("Bottom");
             if (ImGui::Checkbox("##spinebottom", &sty.spine_bottom)) push_style();
@@ -1550,9 +1561,25 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
 
     // ==== Ticks ===========================================================
     if (section("Ticks", true)) {
-        // A polar axes (PolarAxes): x is θ, y is r. θ's limits are the
-        // sector in degrees (PolarState), r's the sheet's y limits.
-        const bool polar = cur2d->polar.has_value();
+        // A polar axes (PolarAxes): θ's limits are the sector in degrees, r's
+        // its r limits (PolarView); its ticks and r format are PolarStyle.
+        const RenderSnapshotPolar* curp = cur->snappolar();
+        const bool polar = curp != nullptr;
+        // A view or style edit onto one already pushed this frame (each is whole).
+        const auto push_view = [&](auto&& fn) {
+            edit_box.update(idx, [&](AxesEdit& e) {
+                PolarView v = e.polar_view.value_or(curp->view);
+                fn(v);
+                e.polar_view = v;
+            });
+        };
+        const auto push_polar_style = [&](auto&& fn) {
+            edit_box.update(idx, [&](AxesEdit& e) {
+                PolarStyle s = e.polar_style.value_or(curp->style);
+                fn(s);
+                e.polar_style = s;
+            });
+        };
         ImGui::SeparatorText("Limits");
         struct AxisLim {
             const char* label;
@@ -1564,13 +1591,13 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
         const AxisLim axes[2] = {
             { "X", &st.slot_view.xauto_local, &st.slot_view.xmin_local, &st.slot_view.xmax_local,
               &AxesEdit::xmin, &AxesEdit::xmax, &AxesEdit::xlim_auto },
-            { polar ? "R" : "Y", &st.slot_view.yauto_local, &st.slot_view.ymin_local, &st.slot_view.ymax_local,
+            { "Y", &st.slot_view.yauto_local, &st.slot_view.ymin_local, &st.slot_view.ymax_local,
               &AxesEdit::ymin, &AxesEdit::ymax, &AxesEdit::ylim_auto },
         };
         if (begin_field_table("lim")) {
             if (polar) {
                 // As PolarAxes::set_thetalim() accepts it: lo < hi, span <= 360.
-                PolarState p = *cur2d->polar;
+                PolarView p = curp->view;
                 field_row("Theta");
                 split_begin(2);
                 bool changed = drag_double("##tmin", &p.thetamin, 1.0f, "%.0f\xC2\xB0");
@@ -1580,13 +1607,29 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
                 if (ImGui::IsItemHovered()) ImGui::SetTooltip("The sector drawn, degrees (at most 360 apart).");
                 if (changed && std::isfinite(p.thetamin) && std::isfinite(p.thetamax) && p.thetamin < p.thetamax
                     && p.thetamax - p.thetamin <= 360.0)
-                    edit_box.update(idx, [&](AxesEdit& e) {
-                        e.polar = p;
-                        e.style_seen.polar = cur2d->style_stamps.polar;
-                    });
+                    push_view([&](PolarView& v) { v.thetamin = p.thetamin; v.thetamax = p.thetamax; });
+                // r: Auto, then low and high, as drawn (polar_rlim()).
+                const Range rl = polar_rlim(*curp);
+                field_row("R");
+                bool rauto = p.rauto;
+                if (ImGui::Checkbox("Auto##r", &rauto))
+                    push_view([&](PolarView& v) { v.rauto = rauto; v.rmin = rl.lo; v.rmax = rl.hi; });
+                ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+                ImGui::BeginDisabled(rauto);
+                double lo = rl.lo, hi = rl.hi;
+                const float speed = limit_drag_speed(lo, hi);
+                ImGui::SetNextItemWidth(-FLT_MIN);
+                split_begin(2);
+                bool rchanged = drag_double("##rlo", &lo, speed);
+                split_next();
+                rchanged |= drag_double("##rhi", &hi, speed);
+                split_end();
+                ImGui::EndDisabled();
+                if (rchanged && std::isfinite(lo) && std::isfinite(hi) && lo != hi)
+                    push_view([&](PolarView& v) { v.rauto = false; v.rmin = lo; v.rmax = hi; });
             }
             for (const AxisLim& a : axes) {
-                if (polar && a.lo_field == &AxesEdit::xmin) continue;
+                if (polar) break;
                 ImGui::PushID(a.label);
                 // One row per axis: Auto, then low and high.
                 field_row(a.label);
@@ -1630,7 +1673,8 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
         // A polar axes' frame (PolarAxes): where θ = 0 sits and turns, and the
         // r labels' angle; the sector and r are the Limits above.
         if (polar && begin_field_table("polar", 2)) {
-            PolarState p = *cur2d->polar;
+            PolarView p = curp->view;
+            double rlabel = curp->style.rlabel_position;
             bool changed = false;
             field_row("Zero at");
             changed |= drag_double("##poloffset", &p.theta_offset, 0.5f, "%.1f\xC2\xB0");
@@ -1642,14 +1686,12 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
                 p.direction = cw ? -1 : 1;
                 changed = true;
             }
+            if (changed && std::isfinite(p.theta_offset))
+                push_view([&](PolarView& v) { v.theta_offset = p.theta_offset; v.direction = p.direction; });
             field_row("R labels");
-            changed |= drag_double("##polrlabel", &p.rlabel_position, 0.5f, "%.1f\xC2\xB0");
+            if (drag_double("##polrlabel", &rlabel, 0.5f, "%.1f\xC2\xB0") && std::isfinite(rlabel))
+                push_polar_style([&](PolarStyle& s) { s.rlabel_position = rlabel; });
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("The theta the r labels sit along.");
-            if (changed && std::isfinite(p.theta_offset) && std::isfinite(p.rlabel_position))
-                edit_box.update(idx, [&](AxesEdit& e) {
-                    e.polar = p;
-                    e.style_seen.polar = cur2d->style_stamps.polar;
-                });
             end_field_table();
         }
         // Axes::set_aspect(), the cell's own axes' only: a twin draws in its
@@ -1800,7 +1842,9 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
                     if (typed) {
                         const std::string f = a.fmt;
                         *a.bad = !f.empty() && !tick_format_ok(f);
-                        if (!*a.bad) edit_box.update(idx, [&](AxesEdit& e){ e.*a.fmt_field = f; });
+                        if (*a.bad) {}
+                        else if (polar) push_polar_style([&](PolarStyle& s) { s.rtick_format = f; });
+                        else edit_box.update(idx, [&](AxesEdit& e){ e.*a.fmt_field = f; });
                     }
                     end_field_table();
                 }
@@ -1811,13 +1855,25 @@ void draw_cosmetic_panel(FigureContext& ctx, CosmeticState& cosmetic) {
         // Tick positions; a twin's shared axis takes the host's.
         if (host_axis != 0) {
             ImGui::TextDisabled(polar ? "Theta grids (degrees)" : "X ticks");
-            if (draw_tick_table("xticks", st.cosmetic.xticks_scratch))
-                edit_box.update(idx, [&](AxesEdit& e){ e.xticks_override = st.cosmetic.xticks_scratch; });
+            if (draw_tick_table("xticks", st.cosmetic.xticks_scratch)) {
+                const std::vector<Tick>& t = st.cosmetic.xticks_scratch;
+                if (polar)
+                    push_polar_style([&](PolarStyle& s) {
+                        s.thetagrids_override = t.empty() ? std::nullopt : std::optional(t);
+                    });
+                else edit_box.update(idx, [&](AxesEdit& e){ e.xticks_override = t; });
+            }
         }
         if (host_axis != 1) {
             ImGui::TextDisabled(polar ? "R ticks" : "Y ticks");
-            if (draw_tick_table("yticks", st.cosmetic.yticks_scratch))
-                edit_box.update(idx, [&](AxesEdit& e){ e.yticks_override = st.cosmetic.yticks_scratch; });
+            if (draw_tick_table("yticks", st.cosmetic.yticks_scratch)) {
+                const std::vector<Tick>& t = st.cosmetic.yticks_scratch;
+                if (polar)
+                    push_polar_style([&](PolarStyle& s) {
+                        s.rticks_override = t.empty() ? std::nullopt : std::optional(t);
+                    });
+                else edit_box.update(idx, [&](AxesEdit& e){ e.yticks_override = t; });
+            }
         }
     }
 

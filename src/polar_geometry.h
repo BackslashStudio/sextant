@@ -123,14 +123,15 @@ namespace sextant {
         return {lo, hi};
     }
 
-    // r limits: rlim set (ylim_auto false) or automatic.
-    inline Range polar_rlim(const RenderSnapshot& s) {
-        if (!s.ylim_auto && std::isfinite(s.ymin) && std::isfinite(s.ymax) && s.ymin != s.ymax)
-            return {s.ymin, s.ymax};
-        return polar_auto_rlim(s);
+    // r limits: rlim set (rauto false) or automatic.
+    inline Range polar_rlim(const RenderSnapshotPolar& s) {
+        const PolarView& v = s.view;
+        if (!v.rauto && std::isfinite(v.rmin) && std::isfinite(v.rmax) && v.rmin != v.rmax)
+            return {v.rmin, v.rmax};
+        return polar_auto_rlim(s.objects);
     }
 
-    inline PolarMap polar_map(const PolarState& p, Range rlim) {
+    inline PolarMap polar_map(const PolarView& p, Range rlim) {
         PolarMap m;
         m.offset = p.theta_offset * kPolarDeg;
         m.dir = p.direction < 0 ? -1.0 : 1.0;
@@ -141,7 +142,7 @@ namespace sextant {
         return m;
     }
 
-    inline PolarMap polar_map(const RenderSnapshot& s) { return polar_map(*s.polar, polar_rlim(s)); }
+    inline PolarMap polar_map(const RenderSnapshotPolar& s) { return polar_map(s.view, polar_rlim(s)); }
 
     // The frame's box in unit space: the disc's, or the sector's (its arc's
     // ends, the compass points it passes and the centre).
@@ -571,7 +572,6 @@ namespace sextant {
         out.yscale = AxisScale{};
         out.xticks_override.reset();
         out.yticks_override.reset();
-        out.polar.reset();
         std::vector<double> ox, oy;
         for (LinePlot& l: out.lines) {
             polar_polyline(m, l.x.data(), l.y.data(), l.x.size(), l.opts.drawstyle, l.opts.loop, ox, oy);
@@ -651,15 +651,15 @@ namespace sextant {
 
     // The spokes' θ (degrees) and labels: set_thetagrids() ones, or every 45°
     // in the span (360 dropped on a full circle, where 0 is).
-    inline std::vector<Tick> polar_theta_ticks(const RenderSnapshot& s) {
-        const PolarState& p = *s.polar;
+    inline std::vector<Tick> polar_theta_ticks(const RenderSnapshotPolar& s) {
+        const PolarView& p = s.view;
         std::vector<Tick> out;
         const auto in_span = [&](double deg) {
             return deg >= p.thetamin - 1e-9 && deg <= p.thetamax + 1e-9;
         };
         const bool full = p.thetamax - p.thetamin >= 360.0 - 1e-9;
-        if (s.xticks_override) {
-            for (const Tick& t: *s.xticks_override)
+        if (s.style.thetagrids_override) {
+            for (const Tick& t: *s.style.thetagrids_override)
                 if (std::isfinite(t.value) && in_span(t.value)) out.push_back(t);
             return out;
         }
@@ -675,10 +675,11 @@ namespace sextant {
     // The rings' r and labels: set_rticks() ones or ~kPolarRTicks generated
     // (relabelled by the r tick format), only those past rmin and up to rmax
     // (the centre has none).
-    inline std::vector<Tick> polar_r_ticks(const RenderSnapshot& s, Range rlim) {
-        std::vector<Tick> all = s.yticks_override
-                                    ? relabel_ticks(*s.yticks_override, s.ytick_format)
-                                    : ticker_detail::linear_majors(rlim.lo, rlim.hi, kPolarRTicks, s.ytick_format);
+    inline std::vector<Tick> polar_r_ticks(const RenderSnapshotPolar& s, Range rlim) {
+        const PolarStyle& p = s.style;
+        std::vector<Tick> all = p.rticks_override
+                                    ? relabel_ticks(*p.rticks_override, p.rtick_format)
+                                    : ticker_detail::linear_majors(rlim.lo, rlim.hi, kPolarRTicks, p.rtick_format);
         std::vector<Tick> out;
         const double lo = std::min(rlim.lo, rlim.hi), hi = std::max(rlim.lo, rlim.hi);
         const double eps = (hi - lo) * 1e-9;

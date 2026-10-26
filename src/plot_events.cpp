@@ -36,9 +36,9 @@ PointLocation locate_point(const FigureSnapshot& fsnap,
     const FigureAxesSnapshot* fa = find_axes(fsnap, cell->slot.index);
     if (!fa) return loc;
 
-    if (const RenderSnapshot* s2 = fa->snap2d(); s2 && s2->polar) {
+    if (const RenderSnapshotPolar* sp = fa->snappolar()) {
         // A polar cell: θ (radians) and r, inside its frame only.
-        const PolarMap m = polar_map(*s2);
+        const PolarMap m = polar_map(*sp);
         const double ux = cell->tr.to_data_x(x), uy = cell->tr.to_data_y(y);
         if (!m.inside(ux, uy)) return loc;
         loc.has_data = true;
@@ -95,6 +95,9 @@ static bool fill_pick(Event& e, const FigureSnapshot& fsnap, const std::vector<A
             twin = l.layers[k];
             object = pick_object_id(*l.snaps[k], hit->kind, hit->object);
         }
+    } else if (const RenderSnapshotPolar* sp = fa->snappolar()) {
+        hit = find_pick(*sp, HintProjector(cell->tr), e.x, e.y, fsnap.pick_radius);
+        if (hit) object = pick_object_id(sp->objects, hit->kind, hit->object);
     } else if (fa->snap2d()) {
         if (index) index->set_frame_key(fsnap.data_generation, cell->slot.index);
         hit = find_pick(*fa->snap2d(), HintProjector(cell->tr), e.x, e.y, index, fsnap.pick_radius);

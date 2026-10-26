@@ -397,8 +397,8 @@ namespace sextant {
             std::string s = "Axis " + std::to_string(fa.slot.index);
             if (fa.is_3d()) s += " (3D)";
             // Lists 3D cells alongside 2D ones (both have titles).
-            const std::string& title = std::visit(
-                [](const auto& sn) -> const std::string& { return sn.title; }, fa.snap);
+            const std::string& title = visit_cell(
+                fa, [](const auto& sn) -> const std::string& { return sn.title; });
             if (!title.empty()) {
                 constexpr std::size_t kMaxTitle = 24;
                 s += " - " + (title.size() > kMaxTitle

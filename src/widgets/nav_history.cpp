@@ -33,18 +33,25 @@ NavLimits take_limits(int key, const RenderSnapshot& s) {
 
 bool in_cell(int key, int slot) { return slot < 0 || key_slot(key) == slot; }
 
+// The turn and r limits (auto r's are not compared).
+bool same_polar(const PolarView& a, const PolarView& b) {
+    if (a.theta_offset != b.theta_offset || a.rauto != b.rauto) return false;
+    return a.rauto || (a.rmin == b.rmin && a.rmax == b.rmax);
+}
+
 } // namespace
 
 NavView capture_view(const FigureSnapshot& fsnap) {
     NavView v;
     fsnap.for_each2d([&](int key, const RenderSnapshot& s) {
+        if (fsnap.findpolar(key)) return;   // its view is in `polars`
         v.limits.push_back(take_limits(key, s));
     });
     for (const FigureAxesSnapshot& fa : fsnap.axes) {
         if (const RenderSnapshot3D* s = fa.snap3d())
             v.cameras.push_back({fa.slot.index, s->camera, s->camera_stamp});
-        if (const RenderSnapshot* s = fa.snap2d(); s && s->polar)
-            v.polars.push_back({fa.slot.index, s->polar->theta_offset, s->style_stamps.polar});
+        if (const RenderSnapshotPolar* s = fa.snappolar())
+            v.polars.push_back({fa.slot.index, s->view, s->stamps.view});
     }
     return v;
 }
@@ -63,7 +70,7 @@ bool same_view(const NavView& a, const NavView& b, int slot) {
     for (const NavPolar& pa : a.polars) {
         if (slot >= 0 && pa.slot != slot) continue;
         for (const NavPolar& pb : b.polars)
-            if (pb.slot == pa.slot && pb.theta_offset != pa.theta_offset) return false;
+            if (pb.slot == pa.slot && !same_polar(pa.view, pb.view)) return false;
     }
     return true;
 }
@@ -193,14 +200,14 @@ bool nav_restore(const NavView& view, FigureContext& ctx, int slot) {
     }
     for (const NavPolar& p : view.polars) {
         if (slot >= 0 && p.slot != slot) continue;
-        const RenderSnapshot* s = ctx.snap.find2d(p.slot);
-        if (!s || !s->polar || s->style_stamps.polar != p.stamp) continue;
-        PolarState st = *s->polar;
-        st.theta_offset = p.theta_offset;
-        ctx.edits.update(p.slot, [&](AxesEdit& e) {
-            e.polar = st;
-            e.style_seen.polar = s->style_stamps.polar;
-        });
+        const RenderSnapshotPolar* s = ctx.snap.findpolar(p.slot);
+        if (!s || s->stamps.view != p.stamp) continue;
+        PolarView v = s->view;
+        v.theta_offset = p.view.theta_offset;
+        v.rauto = p.view.rauto;
+        v.rmin = p.view.rmin;
+        v.rmax = p.view.rmax;
+        ctx.edits.update(p.slot, [&](AxesEdit& e) { e.polar_view = v; });
         pushed = true;
     }
     return pushed;

@@ -32,7 +32,9 @@ void push_text_tables(std::vector<PlotDataTable>& out, const std::vector<TextPlo
 
 } // namespace
 
-std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot& snap) {
+namespace {
+// collect_plot_data_tables(); `polar`: a polar axes' objects, θ and r columns.
+std::vector<PlotDataTable> tables_of(const RenderSnapshot& snap, bool polar) {
     std::vector<PlotDataTable> out;
     out.reserve(snap.lines.size() + snap.scatters.size() + snap.bars.size()
                 + snap.heatmaps.size() + snap.scatter_z.size());
@@ -47,8 +49,8 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot& snap) 
         t.label = pick_label(lp.opts.name, "line", static_cast<int>(i));
         // A polar axes' objects: θ in radians, r (as their bars' centres and
         // heights).
-        t.columns.push_back({snap.polar ? "theta" : "x", lp.x.data(), lp.x.size()});
-        t.columns.push_back({snap.polar ? "r" : "y", lp.y.data(), lp.y.size()});
+        t.columns.push_back({polar ? "theta" : "x", lp.x.data(), lp.x.size()});
+        t.columns.push_back({polar ? "r" : "y", lp.y.data(), lp.y.size()});
         out.push_back(std::move(t));
     }
 
@@ -60,8 +62,8 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot& snap) 
         t.data_stamp = snap.scatters[i].data_stamp;
         t.id = snap.scatters[i].id;
         t.label = pick_label(sp.opts.name, "scatter", static_cast<int>(i));
-        t.columns.push_back({snap.polar ? "theta" : "x", sp.x.data(), sp.x.size()});
-        t.columns.push_back({snap.polar ? "r" : "y", sp.y.data(), sp.y.size()});
+        t.columns.push_back({polar ? "theta" : "x", sp.x.data(), sp.x.size()});
+        t.columns.push_back({polar ? "r" : "y", sp.y.data(), sp.y.size()});
         if (!sp.sizes.empty())
             t.columns.push_back({"size", sp.sizes.data(), sp.sizes.size()});
         out.push_back(std::move(t));
@@ -77,7 +79,7 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot& snap) 
         t.label = pick_label(bp.opts.name, "bar", static_cast<int>(i));
         // Named for the orientation, as barh(y, width, left) for a lying bar.
         const bool lying = bp.horizontal();
-        t.columns.push_back({snap.polar ? "theta" : "center", bp.centers.data(), bp.centers.size()});
+        t.columns.push_back({polar ? "theta" : "center", bp.centers.data(), bp.centers.size()});
         t.columns.push_back({lying ? "width" : "height", bp.heights.data(), bp.heights.size()});
         if (!bp.bottom.empty())
             t.columns.push_back({lying ? "left" : "bottom", bp.bottom.data(), bp.bottom.size()});
@@ -105,8 +107,8 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot& snap) 
         t.data_stamp = snap.scatter_z[i].data_stamp;
         t.id = snap.scatter_z[i].id;
         t.label = synth_label("scatter_z", static_cast<int>(i));
-        t.columns.push_back({snap.polar ? "theta" : "x", sp.x.data(), sp.x.size()});
-        t.columns.push_back({snap.polar ? "r" : "y", sp.y.data(), sp.y.size()});
+        t.columns.push_back({polar ? "theta" : "x", sp.x.data(), sp.x.size()});
+        t.columns.push_back({polar ? "r" : "y", sp.y.data(), sp.y.size()});
         t.columns.push_back({"z", sp.z.data(), sp.z.size()});
         if (!sp.sizes.empty())
             t.columns.push_back({"size", sp.sizes.data(), sp.sizes.size()});
@@ -125,7 +127,7 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot& snap) 
         t.label = pick_label(fp.opts.name, "fill", static_cast<int>(i));
         // On a polar axes θ runs along it and r across (swapped if Vertical).
         const bool v = fp.vertical();
-        const bool p = snap.polar.has_value();
+        const bool p = polar;
         t.columns.push_back({v ? (p ? "r" : "y") : (p ? "theta" : "x"), fp.x.data(), fp.x.size()});
         t.columns.push_back({v ? (p ? "theta1" : "x1") : (p ? "r1" : "y1"), fp.y1.data(), fp.y1.size()});
         t.columns.push_back({v ? (p ? "theta2" : "x2") : (p ? "r2" : "y2"), fp.y2.data(), fp.y2.size()});
@@ -195,8 +197,8 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot& snap) 
         t.data_stamp = pp.data_stamp;
         t.id = pp.id;
         t.label = pick_label(pp.opts.name, "poly", static_cast<int>(i));
-        t.columns.push_back({snap.polar ? "theta" : "x", pp.x.data(), pp.x.size()});
-        t.columns.push_back({snap.polar ? "r" : "y", pp.y.data(), pp.y.size()});
+        t.columns.push_back({polar ? "theta" : "x", pp.x.data(), pp.x.size()});
+        t.columns.push_back({polar ? "r" : "y", pp.y.data(), pp.y.size()});
         out.push_back(std::move(t));
     }
     for (std::size_t i = 0; i < snap.circles.size(); ++i) {
@@ -268,9 +270,17 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot& snap) 
     }
 
     push_text_tables(out, snap.texts);
-    if (snap.polar)
+    if (polar)
         for (PlotDataTable& t : out) t.polar = true;
     return out;
+}
+} // namespace
+
+std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot& snap) {
+    return tables_of(snap, false);
+}
+std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshotPolar& snap) {
+    return tables_of(snap.objects, true);
 }
 
 std::string plane_group_label(const PlaneSnapshot& p, int index) {

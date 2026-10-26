@@ -135,7 +135,7 @@ namespace lt {
             pa->set_rmin(1);
             check(near(pa->rlim().lo, 1) && near(pa->rlim().hi, 5), "rlim: set_rmin");
 
-            const RenderSnapshot s = *detail::FigureAccess::impl(*fig).build_figure_snapshot().axes[0].snap2d();
+            const RenderSnapshotPolar s = *detail::FigureAccess::impl(*fig).build_figure_snapshot().axes[0].snappolar();
             const auto tt = polar_theta_ticks(s);
             check(tt.size() == 8 && tt[0].label == "0\xC2\xB0" && tt[2].label == "90\xC2\xB0",
                   "θ labels: every 45°, 0 to 315");
@@ -222,7 +222,7 @@ namespace lt {
             const FigureSnapshot fs = snapshot(*fig);
             int polar = 0, flat = 0;
             for (const auto& a: fs.axes)
-                if (const RenderSnapshot* s = a.snap2d()) (s->polar ? polar : flat)++;
+                if (a.snap2d()) (a.snappolar() ? polar : flat)++;
             check(polar == 1 && flat == 1, "mixed: one polar and one 2D snapshot");
             const FigureLayout fl = compute_figure_layout(fs, 800, 400);
             int polar_cells = 0;
@@ -231,37 +231,147 @@ namespace lt {
             fig->savefig_png("polar_mixed.png");
         }
 
+        bool default_style(const PolarStyle& s) {
+            return s.rlabel_position == 22.5 && !s.rticks_override && s.rtick_format.empty()
+                   && !s.thetagrids_override;
+        }
+
         void edits_and_journal() {
             auto fig = Figure::create();
             auto pa = fig->add_subplot_polar(1, 1, 1);
             pa->plot(V{0, 1}, V{1, 2});
             pa->set_theta_offset(0);   // a setter's stamp, for one to be newer than
             FigureSnapshot fs = snapshot(*fig);
-            RenderSnapshot& s = *fs.axes[0].snap2d();
+            RenderSnapshotPolar& s = *fs.findpolar(fs.axes[0].slot.index);
+            check(fs.find2d(fs.axes[0].slot.index) == &s.objects, "snapshot: a polar cell's objects are its 2D layer");
             AxesEdit e;
-            PolarState p = *s.polar;
-            p.theta_offset = 45;
-            e.polar = p;
-            e.style_seen.polar = s.style_stamps.polar;
+            PolarView v = s.view;
+            v.theta_offset = 45;
+            e.polar_view = v;
+            e.polar_seen = s.stamps;
             AxesEdit inv;
-            apply_axes_edit(s, e, &inv);
-            check(near(s.polar->theta_offset, 45), "edit: a turn applies");
-            apply_axes_edit(s, inv);
-            check(near(s.polar->theta_offset, 0), "edit: its inverse turns back");
+            apply_polar_edit(s, e, &inv);
+            check(near(s.view.theta_offset, 45), "edit: a turn applies");
+            apply_polar_edit(s, inv);
+            check(near(s.view.theta_offset, 0), "edit: its inverse turns back");
 
-            e.style_seen.polar = s.style_stamps.polar - 1;
-            apply_axes_edit(s, e);
-            check(near(s.polar->theta_offset, 0), "edit: a turn over a newer setter is skipped");
+            e.polar_seen.view = s.stamps.view - 1;
+            apply_polar_edit(s, e);
+            check(near(s.view.theta_offset, 0), "edit: a turn over a newer setter is skipped");
+
+            check(polar_relayouts(e, s), "edit: a turn re-lays the figure (labels move)");
+            AxesEdit zoom;
+            PolarView z = s.view;
+            z.rauto = false;
+            z.rmin = 0.5;
+            z.rmax = 3.0;
+            zoom.polar_view = z;
+            check(!polar_relayouts(zoom, s), "edit: an r zoom is navigation");
+            AxesEdit rt;
+            PolarStyle ps = s.style;
+            ps.rticks_override = std::vector<Tick>{{1.0, "one"}};
+            rt.polar_style = ps;
+            check(!polar_relayouts(rt, s), "edit: an r tick override is navigation, as in 2D");
+            ps.rlabel_position = 60;
+            rt.polar_style = ps;
+            check(polar_relayouts(rt, s), "edit: moving the r labels re-lays the figure");
+
+            // A plain 2D axes ignores it: apply_axes_edit() has no polar fields.
+            RenderSnapshot flat;
+            const RenderSnapshot before = flat;
+            apply_axes_edit(flat, e);
+            check(flat.title == before.title && flat.ylim_auto == before.ylim_auto,
+                  "edit: a 2D axes ignores a polar edit");
+        }
+
+        // The panel's polar edits on the figure: patched into the snapshot,
+        // journaled, replayed onto the live PolarAxes, undone; a setter after
+        // the panel drew wins; cla() resets.
+        void figure_edits() {
+            auto fig = Figure::create();
+            auto pa = fig->add_subplot_polar(1, 1, 1);
+            pa->plot(V{0, 1, 2}, V{1, 2, 3});
+            auto& fi = detail::FigureAccess::impl(*fig);
+            fi.apply_edits_and_publish();
+            const auto drawn = [&] { return fi.snapshot_box.load()->axes[0].snappolar(); };
+            const int key = fi.snapshot_box.load()->axes[0].slot.index;
+            const unsigned long long gen0 = fi.snapshot_box.load()->layout_generation;
 
             FigureEdits f;
-            f.per_axes.push_back({0, e});
-            check(!is_navigation_only(f), "edit: a turn re-lays the figure (labels move)");
+            AxesEdit ae;
+            PolarView v = drawn()->view;
+            v.rauto = false;
+            v.rmin = 1;
+            v.rmax = 4;
+            ae.polar_view = v;
+            ae.polar_seen = drawn()->stamps;
+            f.per_axes.push_back({key, ae});
+            const FigureEdits undo_r = fi.apply_edits(f);
+            check(!drawn()->view.rauto && near(drawn()->view.rmax, 4), "figure: an r zoom reaches the snapshot");
+            check(fi.snapshot_box.load()->layout_generation == gen0, "figure: an r zoom keeps the measure");
+            fi.apply_edits_and_publish();
+            check(near(pa->rlim().lo, 1) && near(pa->rlim().hi, 4), "figure: the r zoom replays onto the axes");
+            fi.apply_edits(undo_r);
+            check(drawn()->view.rauto, "figure: its undo restores auto r");
+            fi.apply_edits_and_publish();
+            check(near(pa->rlim().lo, 0) && near(pa->rlim().hi, 3), "figure: and the undo replays too");
 
-            // A plain 2D axes ignores it.
-            RenderSnapshot flat;
-            e.style_seen = StyleStamps::any();
-            apply_axes_edit(flat, e);
-            check(!flat.polar, "edit: a 2D axes ignores a polar edit");
+            FigureEdits t;
+            AxesEdit te;
+            PolarView tv = drawn()->view;
+            tv.theta_offset = 90;
+            tv.direction = -1;
+            te.polar_view = tv;
+            te.polar_seen = drawn()->stamps;
+            PolarStyle st = drawn()->style;
+            st.rlabel_position = 45;
+            st.rtick_format = "%.1f";
+            st.thetagrids_override = std::vector<Tick>{{0.0, "N"}, {90.0, "E"}};
+            te.polar_style = st;
+            t.per_axes.push_back({key, te});
+            const unsigned long long gen1 = fi.snapshot_box.load()->layout_generation;
+            const FigureEdits undo_t = fi.apply_edits(t);
+            check(fi.snapshot_box.load()->layout_generation != gen1, "figure: a turn re-measures");
+            fi.apply_edits_and_publish();
+            check(near(pa->theta_offset(), 90) && pa->theta_direction() == -1 && near(pa->rlabel_position(), 45),
+                  "figure: view and style replay onto the axes");
+            check(drawn()->style.rtick_format == "%.1f" && drawn()->style.thetagrids_override
+                      && drawn()->style.thetagrids_override->size() == 2,
+                  "figure: the republished snapshot keeps the style");
+            fi.apply_edits(undo_t);
+            fi.apply_edits_and_publish();
+            check(near(pa->theta_offset(), 0) && pa->theta_direction() == 1 && near(pa->rlabel_position(), 22.5)
+                      && default_style(drawn()->style),
+                  "figure: undo restores view and style");
+
+            // A setter after the panel drew wins.
+            FigureEdits late;
+            AxesEdit le;
+            PolarView lv = drawn()->view;
+            lv.theta_offset = 30;
+            le.polar_view = lv;
+            le.polar_seen = drawn()->stamps;
+            pa->set_theta_offset(60);
+            late.per_axes.push_back({key, le});
+            fi.apply_edits(late);
+            fi.apply_edits_and_publish();
+            check(near(pa->theta_offset(), 60) && near(drawn()->view.theta_offset, 60),
+                  "figure: a newer set_theta_offset() wins over an older edit");
+
+            // cla(): defaults, and a panel edit drawn before it doesn't land.
+            FigureEdits stale;
+            AxesEdit se;
+            PolarStyle ss = drawn()->style;
+            ss.rlabel_position = 80;
+            se.polar_style = ss;
+            se.polar_seen = drawn()->stamps;
+            pa->set_rlim(2, 5).set_thetalim(0, 180).set_rtick_format("%.2f");
+            pa->cla();
+            stale.per_axes.push_back({key, se});
+            fi.apply_edits(stale);
+            fi.apply_edits_and_publish();
+            check(drawn()->view == PolarView{} && default_style(drawn()->style) && near(pa->rlabel_position(), 22.5),
+                  "figure: cla() resets view and style, and an older edit is skipped");
         }
 
         void hover_pick_events() {
@@ -272,7 +382,7 @@ namespace lt {
             const FigureSnapshot fs = snapshot(*fig);
             const FigureLayout fl = compute_figure_layout(fs, 500, 500);
             const std::vector<AxesLayout> layout = axes_layouts(fl);
-            const RenderSnapshot& s = *fs.axes[0].snap2d();
+            const RenderSnapshotPolar& s = *fs.axes[0].snappolar();
             const PolarMap m = polar_map(s);
             const CoordTransform& tr = layout[0].tr;
             const float x = tr.to_px(m.unit_x(pi / 2, 2.0)), y = tr.to_py(m.unit_y(pi / 2, 2.0));
@@ -303,20 +413,22 @@ namespace lt {
             NavHistory& h = st.plot.nav;
             const auto apply = [&] {
                 if (auto d = box.load_and_clear()) {
-                    for (const auto& [k, e]: d->per_axes)
+                    for (const auto& [k, e]: d->per_axes) {
                         if (RenderSnapshot* s = fs.find2d(k)) apply_axes_edit(*s, e);
+                        if (RenderSnapshotPolar* p = fs.findpolar(k)) apply_polar_edit(*p, e);
+                    }
                     ++fs.generation;
                 }
             };
-            const auto offset = [&] { return fs.find2d(fs.axes[0].slot.index)->polar->theta_offset; };
+            const auto view = [&]() -> const PolarView& { return fs.findpolar(fs.axes[0].slot.index)->view; };
+            const auto offset = [&] { return view().theta_offset; };
             const int key = fs.axes[0].slot.index;
             nav_track_home(h, fs);
             nav_begin_gesture(h, fs);
             box.update(key, [&](AxesEdit& e) {
-                PolarState p = *fs.find2d(key)->polar;
-                p.theta_offset = 30;
-                e.polar = p;
-                e.style_seen.polar = fs.find2d(key)->style_stamps.polar;
+                PolarView v = view();
+                v.theta_offset = 30;
+                e.polar_view = v;
             });
             apply();
             check(near(offset(), 30) && !at_home(h, fs), "history: a turn leaves Home");
@@ -329,6 +441,29 @@ namespace lt {
             check(nav_home(h, ctx), "history: Home pushes edits");
             apply();
             check(near(offset(), 0), "history: Home turns it home");
+
+            // r zoom: Back/Forward/Home over r, the sector kept.
+            nav_begin_gesture(h, fs);
+            box.update(key, [&](AxesEdit& e) {
+                PolarView v = view();
+                v.rauto = false;
+                v.rmin = 0.5;
+                v.rmax = 4.0;
+                v.thetamax = 180;
+                e.polar_view = v;
+            });
+            apply();
+            check(!view().rauto && near(view().rmax, 4.0) && !at_home(h, fs), "history: an r zoom leaves Home");
+            check(nav_back(h, ctx), "history: Back after an r zoom pushes edits");
+            apply();
+            check(view().rauto && near(view().thetamax, 180) && at_home(h, fs),
+                  "history: Back restores auto r, the sector kept");
+            check(nav_forward(h, ctx), "history: Forward pushes edits");
+            apply();
+            check(!view().rauto && near(view().rmin, 0.5) && near(view().rmax, 4.0), "history: Forward zooms r again");
+            check(nav_home(h, ctx), "history: Home pushes edits");
+            apply();
+            check(view().rauto, "history: Home restores auto r");
         }
     } // namespace
 
@@ -339,6 +474,7 @@ namespace lt {
         render_files();
         checks_and_read_back();
         edits_and_journal();
+        figure_edits();
         hover_pick_events();
         navigation_history();
     }

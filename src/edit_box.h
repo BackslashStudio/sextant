@@ -71,6 +71,9 @@ inline void stamp_edit(AxesEdit& e, const RenderSnapshot& s) {
     }
 }
 
+// A polar axes' view and style stamps; its objects take stamp_edit().
+inline void stamp_polar(AxesEdit& e, const RenderSnapshotPolar& s) { e.polar_seen = s.stamps; }
+
 inline void stamp_edit(AxesEdit3D& e, const RenderSnapshot3D& s) {
     using stamp_detail::fill_id;
     e.style_seen = s.style_stamps;
@@ -136,6 +139,7 @@ inline void stamp_figure_edits(FigureEdits& f, const FigureSnapshot& snap) {
         if (const RenderSnapshot* s = snap.find2d(idx)) {
             stamp_edit(e, *s);
             stamp_view(e, *s);
+            if (const RenderSnapshotPolar* p = snap.findpolar(idx)) stamp_polar(e, *p);
         }
     for (auto& [idx, e] : f.per_axes3d)
         if (const RenderSnapshot3D* s = snap.find3d(idx)) {
@@ -263,6 +267,8 @@ private:
         using Snap = std::conditional_t<std::is_same_v<E, AxesEdit3D>, RenderSnapshot3D,
                                         RenderSnapshot>;
         if (const Snap* s = drawn_axes<Snap>(idx)) stamp_edit(e, *s);
+        if constexpr (std::is_same_v<E, AxesEdit>)
+            if (const RenderSnapshotPolar* p = drawn_ ? drawn_->findpolar(idx) : nullptr) stamp_polar(e, *p);
     }
 
     // Both lanes into one journal keyed by slot (a slot is one kind only).

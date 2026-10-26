@@ -114,14 +114,6 @@ namespace sextant {
         CellPrep prepare(const RenderSnapshot& snap, const ResolvedLimits& limits) {
             CellPrep p;
             p.limits = limits;
-            if (snap.polar) {
-                const Range rl{limits.ymin, limits.ymax};
-                p.polar = true;
-                p.pmap = polar_map(*snap.polar, rl);
-                p.xticks = polar_theta_ticks(snap);
-                p.yticks = polar_r_ticks(snap, rl);
-                return p;
-            }
             p.xticks = ticks_for(snap.xticks_override, p.limits.xmin, p.limits.xmax, snap.xscale,
                                  snap.xtick_format);
             p.yticks = ticks_for(snap.yticks_override, p.limits.ymin, p.limits.ymax, snap.yscale,
@@ -169,6 +161,17 @@ namespace sextant {
             CellPrep p = fa.twins.empty() ? prepare(snap, limits) : prepare_layer(snap, limits, 0, tx, ty);
             p.xlabels = was.xlabels;
             p.ylabels = was.ylabels;
+            return p;
+        }
+
+        CellPrep prepare(const RenderSnapshotPolar& snap, const ResolvedLimits& limits) {
+            CellPrep p;
+            p.limits = limits;
+            const Range rl{limits.ymin, limits.ymax};
+            p.polar = true;
+            p.pmap = polar_map(snap.view, rl);
+            p.xticks = polar_theta_ticks(snap);
+            p.yticks = polar_r_ticks(snap, rl);
             return p;
         }
 
@@ -325,7 +328,7 @@ namespace sextant {
         // set on a twin).
         bool may_align(const FigureAxesSnapshot& fa) {
             const RenderSnapshot* s = fa.snap2d();
-            return s && !(s->aspect.ratio > 0.0) && !s->polar;
+            return s && !(s->aspect.ratio > 0.0) && !fa.snappolar();
         }
 
         // Frames that keep one edge together, as a group id per cell (a cell
@@ -512,7 +515,7 @@ namespace sextant {
             CellMeasure m;
             m.slot = fa.slot;
             m.is3d = fa.snap3d() != nullptr;
-            std::visit([&](const auto& s) {
+            visit_cell(fa, [&](const auto& s) {
                 m.title = title_band(s.title, s.axes_style);
                 m.frame_margin = std::max(0.0f, s.axes_style.frame_margin);
                 m.dec = compute_cell_decorations(fa);
@@ -520,7 +523,7 @@ namespace sextant {
                 m.legend_fontsize = s.legend_opts.fontsize;
                 if (!m.dec.legend_entries.empty()) m.legend = legend_side(s.legend_opts.anchor);
                 m.bars = colorbar_side(s.colorbar_opts.anchor);
-            }, fa.snap);
+            });
             if (const RenderSnapshot* s2 = fa.snap2d()) {
                 // A twinned cell: every layer's furniture, the largest per side.
                 add_furniture(*s2, prep, m);
@@ -1061,7 +1064,7 @@ namespace sextant {
 
     CellDecorations compute_cell_decorations(const FigureAxesSnapshot& fa) {
         if (fa.twins.empty())
-            return std::visit([](const auto& s) { return compute_cell_decorations(s); }, fa.snap);
+            return visit_cell(fa, [](const auto& s) { return compute_cell_decorations(s); });
         const RenderSnapshot& s = *fa.snap2d();
         CellDecorations d;
         fill_colorbars(d, cell_colorbar_requests(fa), s.colorbar_opts);
@@ -1487,7 +1490,8 @@ namespace sextant {
 
         // A polar cell's part, its frame already placed: the transform for its
         // unit-space lines and the plan both drawers draw the frame from.
-        void layout_polar(CellLayout& c, const RenderSnapshot& s2, const CellPrep& p, float fw, float fh) {
+        void layout_polar(CellLayout& c, const RenderSnapshotPolar& sp, const CellPrep& p, float fw, float fh) {
+            const RenderSnapshot& s2 = sp.objects;
             const AxesStyle& st = s2.axes_style;
             const PolarMap& m = p.pmap;
             c.tr = polar_transform(c.frame, m, fw, fh);
@@ -1510,8 +1514,8 @@ namespace sextant {
                                      pl.cy - d * static_cast<float>(std::sin(a))});
             }
             // Along rlabel_position, kept inside a sector's span.
-            double at = s2.polar->rlabel_position;
-            if (!m.full()) at = std::clamp(at, s2.polar->thetamin, s2.polar->thetamax);
+            double at = sp.style.rlabel_position;
+            if (!m.full()) at = std::clamp(at, sp.view.thetamin, sp.view.thetamax);
             const double ra = m.angle(at * kPolarDeg);
             for (const Tick& t: p.yticks) {
                 const float rr = pl.radius * static_cast<float>(m.rho(t.value));
@@ -1577,19 +1581,19 @@ namespace sextant {
                     c.frame.w + al.left + al.right + 2.0f * fm, c.frame.h + al.top + al.bottom + 2.0f * fm
                 };
 
-                const AxesStyle& st = std::visit(
-                    [](const auto& sn) -> const AxesStyle& { return sn.axes_style; }, fa.snap);
-                const LegendOptions& lo = std::visit(
-                    [](const auto& sn) -> const LegendOptions& { return sn.legend_opts; }, fa.snap);
-                const ColorbarOptions& cbo = std::visit(
-                    [](const auto& sn) -> const ColorbarOptions& { return sn.colorbar_opts; }, fa.snap);
+                const AxesStyle& st = visit_cell(
+                    fa, [](const auto& sn) -> const AxesStyle& { return sn.axes_style; });
+                const LegendOptions& lo = visit_cell(
+                    fa, [](const auto& sn) -> const LegendOptions& { return sn.legend_opts; });
+                const ColorbarOptions& cbo = visit_cell(
+                    fa, [](const auto& sn) -> const ColorbarOptions& { return sn.colorbar_opts; });
 
                 // The axes title: atop cell_d (beyond a top legend and colorbars),
                 // centred on the frame (as in 2D).
                 const float frame_cx = c.frame.x + c.frame.w * 0.5f;
                 c.title_x = frame_cx;
-                const std::string& title = std::visit(
-                    [](const auto& sn) -> const std::string& { return sn.title; }, fa.snap);
+                const std::string& title = visit_cell(
+                    fa, [](const auto& sn) -> const std::string& { return sn.title; });
                 c.title_y = c.extended.y - top_decor(me, rows) - me.title
                             + title_height(title, st.font_path, st.title_fontsize) * 0.5f;
 
@@ -1624,8 +1628,8 @@ namespace sextant {
                         Projector3D(prep[i].tf3, s3->camera, c.frame, s3->box_style.margin),
                         prep[i].xticks, prep[i].yticks, prep[i].zticks
                     };
-                } else if (prep[i].polar) {
-                    layout_polar(c, *own2d, prep[i], fw, fh);
+                } else if (const RenderSnapshotPolar* sp = fa.snappolar()) {
+                    layout_polar(c, *sp, prep[i], fw, fh);
                 } else {
                     // Empty for 3D: its ticks are in `box3d`. The transform
                     // carries Datalim's widened limits, so a pan keeps them.

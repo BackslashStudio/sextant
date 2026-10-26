@@ -5,6 +5,7 @@
 #include "sextant/figure.h"
 #include "axes_impl.h"
 #include "axes3d_impl.h"
+#include "polar_axes_impl.h"
 #include "window_thread.h"
 #include "event_channel.h"
 #include "snapshot_box.h"
@@ -27,14 +28,13 @@ struct Figure::Impl {
     // names a private member.
     using AxesImpl   = Axes::Impl;
     using Axes3DImpl = Axes3D::Impl;
+    using PolarImpl  = PolarAxes::Impl;
 
-    // A cell holds one kind or the other (mirrors FigureAxesSnapshot).
+    // A cell holds one kind (mirrors FigureAxesSnapshot).
     struct Slot {
         int rows, cols, index;
         int last;   // bottom-right cell; == index for a single cell
-        std::variant<std::shared_ptr<Axes>, std::shared_ptr<Axes3D>> axes;
-        // Set for a polar cell, whose `axes` is the PolarAxes' hidden sheet.
-        std::shared_ptr<PolarAxes> polar;
+        std::variant<std::shared_ptr<Axes>, std::shared_ptr<Axes3D>, std::shared_ptr<PolarAxes>> axes;
 
         Axes*   as2d() const {
             auto p = std::get_if<std::shared_ptr<Axes>>(&axes);
@@ -42,6 +42,10 @@ struct Figure::Impl {
         }
         Axes3D* as3d() const {
             auto p = std::get_if<std::shared_ptr<Axes3D>>(&axes);
+            return p ? p->get() : nullptr;
+        }
+        PolarAxes* aspolar() const {
+            auto p = std::get_if<std::shared_ptr<PolarAxes>>(&axes);
             return p ? p->get() : nullptr;
         }
     };
@@ -112,15 +116,15 @@ struct Figure::Impl {
     // The implicit single-axes case (slot 1,1,1).
     Axes& get_or_create_axes() {
         ensure_any_axes();
+        if (slots.front().aspolar())
+            throw std::invalid_argument(
+                "Figure::axes: this Figure's first cell holds a polar axes; "
+                "reach it through the add_subplot_polar() that created it");
         Axes* ax = slots.front().as2d();
         if (!ax)
             throw std::invalid_argument(
                 "Figure::axes: this Figure's first cell holds a 3D axes; "
                 "reach it through the add_subplot3d() that created it");
-        if (slots.front().polar)
-            throw std::invalid_argument(
-                "Figure::axes: this Figure's first cell holds a polar axes; "
-                "reach it through the add_subplot_polar() that created it");
         return *ax;
     }
 
@@ -163,10 +167,12 @@ struct Figure::Impl {
     FigureSnapshot build_figure_snapshot() const;
 
     // The 2D axes an edit key names (axes_key(): a slot, or a twin of the
-    // axes there); nullptr for a 3D slot (see find_slot_impl3d()).
+    // axes there), or a polar axes' objects; nullptr for a 3D slot (see
+    // find_slot_impl3d()).
     AxesImpl* find_slot_impl(int key) {
         for (auto& s : slots) {
             if (s.index != key_slot(key)) continue;
+            if (PolarImpl* p = polar_impl(s)) return key_layer(key) == 0 ? &p->sheet : nullptr;
             AxesImpl* d = s.as2d() ? s.as2d()->d.get() : nullptr;
             switch (key_layer(key)) {
                 case 0:           return d;
@@ -181,6 +187,13 @@ struct Figure::Impl {
     Axes3DImpl* find_slot_impl3d(int idx) {
         for (auto& s : slots)
             if (s.index == idx) return s.as3d() ? s.as3d()->d.get() : nullptr;
+        return nullptr;
+    }
+
+    static PolarImpl* polar_impl(const Slot& s) { return s.aspolar() ? s.aspolar()->d.get() : nullptr; }
+    PolarImpl* find_slot_polar(int idx) {
+        for (auto& s : slots)
+            if (s.index == idx) return polar_impl(s);
         return nullptr;
     }
 

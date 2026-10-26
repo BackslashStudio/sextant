@@ -230,6 +230,6 @@ namespace sextant {
         std::unique_ptr<Impl> d;
         friend class Figure;
 
-        explicit PolarAxes(std::shared_ptr<Axes> sheet);
+        PolarAxes();
     };
 } // namespace sextant

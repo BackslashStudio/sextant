@@ -129,7 +129,7 @@ namespace lt {
             pa->bar(V{0.5, 2.0}, V{1.0, 1.5}, {.zorder = -1});
             const FigureSnapshot fs = snapshot(*fig);
             const RenderSnapshot& s = *fs.axes[0].snap2d();
-            const PolarMap m = polar_map(s);
+            const PolarMap m = polar_map(*fs.axes[0].snappolar());
             const RenderSnapshot sh = polar_sheet(s, m);
             const ScatterPlot& sp = sh.scatters[0];
             check(sp.x.size() == 2 && sp.sizes.size() == 2 && near(sp.sizes[0], 5) && near(sp.sizes[1], 8),
@@ -221,7 +221,7 @@ namespace lt {
             const FigureSnapshot fs = snapshot(*fig);
             const FigureLayout fl = compute_figure_layout(fs, 500, 500);
             const std::vector<AxesLayout> layout = axes_layouts(fl);
-            const RenderSnapshot& s = *fs.axes[0].snap2d();
+            const RenderSnapshotPolar& s = *fs.axes[0].snappolar();
             const PolarMap m = polar_map(s);
             const CoordTransform& tr = layout[0].tr;
             const auto at = [&](double t, double r, float& x, float& y) {
@@ -286,7 +286,7 @@ namespace lt {
             pa->set_colorbar_style({.width = 20.0f});
             check(near(snapshot(*fig).axes[0].snap2d()->colorbar_opts.width, 20.0), "read-back: set_colorbar_style");
 
-            const std::vector<PlotDataTable> t = collect_plot_data_tables(*snapshot(*fig).axes[0].snap2d());
+            const std::vector<PlotDataTable> t = collect_plot_data_tables(*snapshot(*fig).axes[0].snappolar());
             bool named = false;
             for (const PlotDataTable& d: t)
                 if (d.kind == PlotKind::Bar) named = d.columns[0].name == std::string("theta");

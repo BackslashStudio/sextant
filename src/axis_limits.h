@@ -46,11 +46,6 @@ namespace sextant {
     // axis' own bounds and pin with its share group's.
     inline ResolvedLimits resolve_limits(const RenderSnapshot& snap, const AutoBounds* own,
                                          const SharedAuto* gx, const SharedAuto* gy) {
-        // A polar sheet: x is θ's span (radians), y is r's (polar_rlim()).
-        if (snap.polar) {
-            const Range rl = polar_rlim(snap);
-            return {snap.polar->thetamin * kPolarDeg, snap.polar->thetamax * kPolarDeg, rl.lo, rl.hi};
-        }
         ResolvedLimits r{snap.xmin, snap.xmax, snap.ymin, snap.ymax};
         const AxisScale& xs = snap.xscale;
         const AxisScale& ys = snap.yscale;
@@ -99,9 +94,15 @@ namespace sextant {
         return resolve_limits(snap, nullptr, nullptr, nullptr);
     }
 
+    // A polar axes: x is θ's span (radians), y is r's (polar_rlim()).
+    inline ResolvedLimits resolve_limits(const RenderSnapshotPolar& s) {
+        const Range rl = polar_rlim(s);
+        return {s.view.thetamin * kPolarDeg, s.view.thetamax * kPolarDeg, rl.lo, rl.hi};
+    }
+
     // Every 2D axes' limits in a figure, flat: each cell's own axes, then its
-    // twins (FigureAxesSnapshot::twins), cell after cell; a 3D cell has one
-    // default entry. One auto_bounds() per axes, and share groups resolved over
+    // twins (FigureAxesSnapshot::twins), cell after cell; a polar cell has its
+    // own (never shared) and a 3D cell one default entry. One auto_bounds() per axes, and share groups resolved over
     // all their members, twins included. Layout uses it.
     inline std::vector<ResolvedLimits> resolve_figure_limits(const FigureSnapshot& fs) {
         std::size_t n = 0;
@@ -117,7 +118,8 @@ namespace sextant {
         bool shared = false;
         std::size_t at = 0;
         for (const FigureAxesSnapshot& fa: fs.axes) {
-            if (const RenderSnapshot* s = fa.snap2d()) {
+            if (const RenderSnapshotPolar* p = fa.snappolar()) out[at] = resolve_limits(*p);
+            else if (const RenderSnapshot* s = fa.snap2d()) {
                 layers.push_back({s, at});
                 shared = shared || s->xshare || s->yshare;
                 for (std::size_t k = 0; k < fa.twins.size(); ++k) {

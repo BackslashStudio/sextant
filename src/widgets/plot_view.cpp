@@ -231,10 +231,11 @@ PlotViewInfo PlotView::draw(FigureContext& fig, RenderDevice& dev, PlotViewState
     if (gate.box) {
         for (const AxesLayout& al : layout) {
             if (al.slot.index != fig.selection.slot) continue;
-            const RenderSnapshot* s = nullptr;
+            const FigureAxesSnapshot* fa = nullptr;
             for (const auto& a : fsnap.axes)
-                if (a.slot.index == al.slot.index) { s = a.snap2d(); break; }
-            if (s && s->polar) break;
+                if (a.slot.index == al.slot.index) { fa = &a; break; }
+            if (fa && fa->snappolar()) break;
+            const RenderSnapshot* s = fa ? fa->snap2d() : nullptr;
             const CoordTransform& tr = al.tr;
             const auto b = box_pixels(tr, pv.box.x0, pv.box.y0, pv.box.x1, pv.box.y1,
                                       s && s->aspect.ratio > 0.0);
@@ -278,6 +279,8 @@ PlotViewInfo PlotView::draw(FigureContext& fig, RenderDevice& dev, PlotViewState
                 if (const auto hit = find_pick_layers(l, cursor_x, cursor_y, k, &pv.hint_index,
                                                       fsnap.data_generation, fsnap.pick_radius))
                     hint = HintResult{format_pick(*l.snaps[k], *hit), hit->anchor_x, hit->anchor_y};
+            } else if (const RenderSnapshotPolar* sp = fa ? fa->snappolar() : nullptr) {
+                hint = find_hint(*sp, cell->tr, cursor_x, cursor_y, fsnap.pick_radius);
             } else if (fa && fa->snap2d()) {
                 pv.hint_index.set_frame_key(fsnap.data_generation, cell->slot.index);
                 hint = find_hint(*fa->snap2d(), cell->tr, cursor_x, cursor_y,
@@ -376,25 +379,25 @@ PlotViewInfo PlotView::draw(FigureContext& fig, RenderDevice& dev, PlotViewState
                     e.camera_seen = sel3d->camera_stamp;
                 });
             }
-        } else if (cur && sel2d && sel2d->polar) {
+        } else if (const RenderSnapshotPolar* selp = cur ? fsnap.findpolar(cur->slot.index) : nullptr) {
             // A polar cell (PolarAxes): a drag turns the frame about its
             // centre (θ offset), Shift-drag moves r (rmin and rmax together),
             // the wheel scales rmax about rmin. Box zoom has no meaning here.
             const ImGuiIO& io = ImGui::GetIO();
-            const PolarMap m = polar_map(*sel2d);
+            const PolarMap m = polar_map(*selp);
             const CoordTransform& tr = cur->tr;
             const float cx = tr.to_px(0.0), cy = tr.to_py(0.0);
             const float radius = tr.to_px(1.0) - cx;
             const bool moved = io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f;
             const auto set_r = [&](double lo, double hi) {
                 if (!(hi - lo > 0.0) || !std::isfinite(lo) || !std::isfinite(hi)) return;
-                if (cur->slot.index == fig.selection.key()) {
-                    sv.ymin_local = lo; sv.ymax_local = hi;
-                    sv.yauto_local = false;
-                }
+                // Onto a turn pushed this frame, if any (one PolarView holds both).
                 edit_box.update(cur->slot.index, [&](AxesEdit& e) {
-                    e.ymin = lo; e.ymax = hi; e.ylim_auto = false;
-                    e.lim_seen = sel2d->limit_stamps;
+                    PolarView v = e.polar_view.value_or(selp->view);
+                    v.rauto = false;
+                    v.rmin = lo;
+                    v.rmax = hi;
+                    e.polar_view = v;
                 });
             };
             nav_in.drag = gate.drag || gate.box;
@@ -409,11 +412,10 @@ PlotViewInfo PlotView::draw(FigureContext& fig, RenderDevice& dev, PlotViewState
                 double da = (a1 - a0) / kPolarDeg;
                 if (da > 180.0) da -= 360.0;
                 if (da < -180.0) da += 360.0;
-                PolarState p = *sel2d->polar;
-                p.theta_offset = std::fmod(p.theta_offset + da, 360.0);
                 edit_box.update(cur->slot.index, [&](AxesEdit& e) {
-                    e.polar = p;
-                    e.style_seen.polar = sel2d->style_stamps.polar;
+                    PolarView v = e.polar_view.value_or(selp->view);
+                    v.theta_offset = std::fmod(selp->view.theta_offset + da, 360.0);
+                    e.polar_view = v;
                 });
             }
             if (gate.box && moved && radius > 0.0f) {

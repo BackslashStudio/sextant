@@ -27,11 +27,12 @@ namespace sextant {
         unsigned long long stamp = 0;
     };
 
-    // One polar axes' turn (PolarState::theta_offset, degrees) in a view; its
-    // r is in `limits`. The stamp is StyleStamps::polar.
+    // One polar axes' view in a view: its turn and r limits are what
+    // navigation moves and restores (the sector and direction stay as they
+    // are). The stamp is PolarStamps::view.
     struct NavPolar {
         int slot = 0;
-        double theta_offset = 0.0;
+        PolarView view;
         unsigned long long stamp = 0;
     };
 

@@ -144,7 +144,7 @@ namespace lt {
             pa->annotate(pi / 2, 1.0, "arrow", Pos::fraction(0.1), Pos::fraction(0.1));
             const FigureSnapshot fs = snapshot(*fig);
             const RenderSnapshot& s = *fs.axes[0].snap2d();
-            const PolarMap m = polar_map(s);
+            const PolarMap m = polar_map(*fs.axes[0].snappolar());
             const RenderSnapshot sheet = polar_sheet(s, m);
             check(sheet.polys.empty() && sheet.fills.size() == 2, "sheet: the polygon becomes a fill");
             check(sheet.fills.size() == 2 && sheet.fills[0].polar_area && sheet.fills[1].polar_area
@@ -169,14 +169,14 @@ namespace lt {
                   "texts: an arrow's point at its unit point");
 
             pa->set_thetalim(0, 90);
-            const RenderSnapshot s2 = *snapshot(*fig).axes[0].snap2d();
+            const RenderSnapshotPolar s2 = *snapshot(*fig).axes[0].snappolar();
             bool arrow = false;
-            for (const TextPlot& t: polar_texts(s2, polar_map(s2))) arrow |= t.content.text == "arrow";
+            for (const TextPlot& t: polar_texts(s2.objects, polar_map(s2))) arrow |= t.content.text == "arrow";
             check(arrow, "texts: an arrow to a point on the sector's edge kept");
             pa->set_thetalim(0, 45);
-            const RenderSnapshot s3 = *snapshot(*fig).axes[0].snap2d();
+            const RenderSnapshotPolar s3 = *snapshot(*fig).axes[0].snappolar();
             arrow = false;
-            for (const TextPlot& t: polar_texts(s3, polar_map(s3))) arrow |= t.content.text == "arrow";
+            for (const TextPlot& t: polar_texts(s3.objects, polar_map(s3))) arrow |= t.content.text == "arrow";
             check(!arrow, "texts: an arrow to a point off the sector dropped");
         }
 
@@ -241,7 +241,7 @@ namespace lt {
             const FigureSnapshot fs = snapshot(*fig);
             const FigureLayout fl = compute_figure_layout(fs, 500, 500);
             const std::vector<AxesLayout> layout = axes_layouts(fl);
-            const RenderSnapshot& s = *fs.axes[0].snap2d();
+            const RenderSnapshotPolar& s = *fs.axes[0].snappolar();
             const PolarMap m = polar_map(s);
             const CoordTransform& tr = layout[0].tr;
             const auto at = [&](double t, double r, float& x, float& y) {
@@ -299,7 +299,7 @@ namespace lt {
             pa->set_text_visible(0, false);
             check(!pa->fill_visible(0) && !pa->shape_poly_visible(0) && !pa->text_visible(0), "read-back: visible");
 
-            const std::vector<PlotDataTable> t = collect_plot_data_tables(*snapshot(*fig).axes[0].snap2d());
+            const std::vector<PlotDataTable> t = collect_plot_data_tables(*snapshot(*fig).axes[0].snappolar());
             bool fill_named = false, poly_named = false, flagged = !t.empty();
             for (const PlotDataTable& d: t) {
                 flagged &= d.polar;
