@@ -2251,6 +2251,83 @@ static void part_polar_kinds() {
     fig->show(true);
 }
 
+// Step 4d: PolarAxes::fill(), shape_poly(), text() and annotate(). A radar
+// chart of two series (translucent, edged, named spokes), a band under its
+// median line, a Vertical θ band with a polygon whose straight (θ, r) edges
+// curve, and a boxed text with an annotation from a frame-fraction text to a
+// point on a spiral. Hover an area for θ and r; the Data panel holds the
+// areas as θ/r tables and the text form reads Theta/R.
+static void part_polar_areas() {
+    auto fig = sextant::Figure::create({.width = 1400, .height = 900, .title = "Polar areas"});
+    fig->suptitle("PolarAxes: fill(), shape_poly(), text() and annotate()");
+    const double pi = 3.14159265358979323846;
+
+    auto a1 = fig->add_subplot_polar(2, 2, 1);
+    const std::vector<double> sa = {4.0, 3.0, 4.5, 2.0, 3.5}, sb = {2.5, 4.5, 3.0, 4.0, 2.0};
+    std::vector<double> rt, ra, rb;
+    for (int i = 0; i <= 5; ++i) {
+        rt.push_back(2.0 * pi * i / 5.0);
+        ra.push_back(sa[i % 5]);
+        rb.push_back(sb[i % 5]);
+    }
+    a1->fill(rt, ra, 0.0, {.color = sextant::Color{0.12f, 0.47f, 0.71f, 1.0f}, .alpha = 0.3f, .name = "model A"});
+    a1->plot(rt, ra, {.color = sextant::Color{0.12f, 0.47f, 0.71f, 1.0f}, .linewidth = 2.0f, .show_legend = false});
+    a1->fill(rt, rb, 0.0, {.color = sextant::Color{1.0f, 0.5f, 0.05f, 1.0f}, .alpha = 0.3f, .name = "model B"});
+    a1->plot(rt, rb, {.color = sextant::Color{1.0f, 0.5f, 0.05f, 1.0f}, .linewidth = 2.0f, .show_legend = false});
+    a1->set_thetagrids(std::vector<double>{0, 72, 144, 216, 288}, {"speed", "range", "cost", "comfort", "safety"});
+    a1->set_rlim(0, 5);
+    a1->legend();
+    a1->set_title("radar: fill(theta, r) translucent, looped line edges");
+
+    auto a2 = fig->add_subplot_polar(2, 2, 2);
+    std::vector<double> bt, lo, mid, hi;
+    for (int i = 0; i <= 120; ++i) {
+        const double t = 2.0 * pi * i / 120.0;
+        bt.push_back(t);
+        mid.push_back(2.0 + 0.6 * std::sin(3.0 * t));
+        lo.push_back(mid.back() - 0.4 - 0.2 * std::cos(t));
+        hi.push_back(mid.back() + 0.4 + 0.2 * std::cos(t));
+    }
+    a2->fill(bt, lo, hi, {.alpha = 0.35f, .linewidth = 1.0f, .name = "spread"});
+    a2->plot(bt, mid, {.color = sextant::Color::Black, .name = "median"});
+    a2->legend();
+    a2->set_title("band fill(theta, r1, r2) under its median");
+
+    auto a3 = fig->add_subplot_polar(2, 2, 3);
+    std::vector<double> vr, vt1, vt2;
+    for (int i = 0; i <= 40; ++i) {
+        const double rr = 0.5 + 2.5 * i / 40.0;
+        vr.push_back(rr);
+        vt1.push_back(0.2 + 0.25 * rr);
+        vt2.push_back(0.9 + 0.35 * rr);
+    }
+    a3->fill(vr, vt1, vt2, {.orientation = sextant::Orientation::Vertical, .alpha = 0.5f, .name = "theta band"});
+    a3->shape_poly(std::vector<double>{3.4, 4.6, 4.6, 3.4}, std::vector<double>{1.0, 1.0, 2.8, 2.8},
+                   {.color = sextant::Color{0.2f, 0.6f, 0.3f, 1.0f}, .alpha = 0.6f,
+                    .edgecolor = sextant::Color::Black, .linewidth = 1.5f, .name = "patch"});
+    a3->set_rlim(0, 3);
+    a3->set_title("Vertical theta band; a (theta, r) rectangle is an annulus sector");
+
+    auto a4 = fig->add_subplot_polar(2, 2, 4);
+    std::vector<double> spt, spr;
+    for (int i = 0; i <= 200; ++i) {
+        spt.push_back(4.0 * pi * i / 200.0);
+        spr.push_back(spt.back() / (4.0 * pi) * 3.0);
+    }
+    a4->plot(spt, spr, {.name = "spiral"});
+    const double pt = 2.6 * pi, pr = 2.6 * pi / (4.0 * pi) * 3.0;
+    a4->scatter(std::vector<double>{pt}, std::vector<double>{pr}, {.color = sextant::Color::Red, .size = 9.0f});
+    a4->annotate(pt, pr, "a polar annotation", sextant::Pos::fraction(0.7), sextant::Pos::fraction(0.0),
+                 {.fontsize = 13.0f}, {.arc = 0.3f});
+    a4->text("boxed at (45\xC2\xB0, 2.5)", 45.0 * pi / 180.0, 2.5,
+             {.background = {1.0f, 1.0f, 0.85f, 1.0f}, .edgecolor = sextant::Color::Black,
+              .edge_linewidth = 1.0f});
+    a4->set_title("text at (theta, r); annotate from a frame fraction");
+
+    savefig_and_check_memory(fig, "part_polar_areas");
+    fig->show(true);
+}
+
 // Step 36d-1: Axes::fill_between() and Plane2D::fill_between(): areas under a
 // curve and bands, exclude and interpolate, steps, the Vertical orientation
 // with an outline, log axes and NaN gaps, planes; the Data panel edits them.
@@ -3765,6 +3842,7 @@ static void test_decorations() { // text, annotate (2D and 3D), axline, axspan, 
 static void test_polar() {
     part_polar();
     part_polar_kinds();
+    part_polar_areas();
 }
 
 static void test_legend_colorbar() {

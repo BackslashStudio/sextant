@@ -151,6 +151,11 @@ void render_frame(RenderDevice& dev, DataRenderer& data,
         const RenderSnapshot& snap = *fsnap.axes[i].snap2d();
         if (c.polar) {
             if (snap.axis_on) nvg.draw_polar_frame(*c.polar, snap.axes_style, snap.grid_enabled, snap.grid_opts);
+            // Texts at their unit points (c.tr maps the unit box, as in pass 2).
+            if (!snap.texts.empty()) {
+                const std::vector<TextPlot> ts = polar_texts(snap, c.polar->map);
+                if (!ts.empty()) nvg.draw_texts(plan_texts(ts, c.tr, c.frame), c.frame);
+            }
             nvg.draw_titles(c, snap);
             if (c.has_legend()) nvg.draw_legend(c, snap.legend_opts);
             for (const auto& cb : c.colorbars) nvg.draw_colorbar(cb, snap.colorbar_opts);

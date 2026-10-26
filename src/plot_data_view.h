@@ -37,6 +37,8 @@ struct PlotDataTable {
     int         plane_index = -1;
     // Plane tab prefix, e.g. "plane 0 (XY @ 0.5)"; empty for non-plane objects.
     std::string group;
+    // On a polar axes (PolarAxes): x is θ, y is r.
+    bool        polar = false;
 
     std::vector<DataColumn> columns;          // vector mode; empty for Heatmap
     const HeatmapPlot*      heatmap = nullptr;// non-null => 2D grid mode

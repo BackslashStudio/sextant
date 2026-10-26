@@ -673,6 +673,21 @@ struct AxSpanPlot {
     unsigned long long zorder_stamp = 0;
 };
 
+// A polar fill or polygon as drawn (polar_geometry.h, set only by
+// polar_sheet()): in the frame's unit space, already clipped to the r limits
+// and the θ span and cut into chords. `tris` holds three (x, y) points per
+// triangle, which never overlap; `rings` the outline of each piece (nonzero
+// fill, SVG's polygons); `strokes` the edge as stroked, NaN between runs,
+// `closed` when it was never cut (so the seam joins).
+struct PolarArea {
+    struct Path {
+        std::vector<double> x, y;
+        bool closed = false;
+    };
+    std::vector<float> tris;
+    std::vector<Path> rings, strokes;
+};
+
 // Axes::fill(): the area between y1 and y2 along x, one value of each
 // per point. `x` is the run coordinate, on the y axis when the fill is
 // Vertical (and y1/y2 then on x). fill_geometry.h turns it into regions.
@@ -691,6 +706,8 @@ struct FillPlot {
 
     unsigned long long visible_stamp = 0;
     unsigned long long zorder_stamp = 0;
+    // Polar only: the area as drawn, which the drawers take instead of the points.
+    std::shared_ptr<const PolarArea> polar_area;
 };
 
 // Axes::quiver(): one arrow per point, from (x, y) along (u, v). `opts.amp`

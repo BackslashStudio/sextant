@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 
 namespace sextant {
 
@@ -453,8 +454,8 @@ std::optional<PickHit> find_pick(const RenderSnapshot& snap, const HintProjector
     // A polar sheet (PolarAxes): its lines' and markers' points through the
     // polar map, a linear scan (no index: the grid is over θ/r, not the
     // screen); points outside the frame aren't drawn (polar_point_shown()),
-    // so aren't found. Without one, the bars answer as areas: the cursor's
-    // (θ, r) inside one, the top one first.
+    // so aren't found. Without one, bars, fills and polygons answer as areas:
+    // the cursor's (θ, r) inside one, the top one first.
     if (snap.polar) {
         const PolarMap m = polar_map(snap);
         float best = radius * radius;
@@ -494,9 +495,80 @@ std::optional<PickHit> find_pick(const RenderSnapshot& snap, const HintProjector
         double ct = 0.0, cr = 0.0;
         m.from_unit(ux, uy, ct, cr);
         const double two_pi = 2.0 * std::numbers::pi;
+        // The turns of the cursor's θ a fill or polygon spanning [lo, hi] may
+        // hold: on a disc every ct + 2πk in it, on a sector ct alone (the
+        // frame clips raw θ there).
+        const auto turns = [&](double lo, double hi, auto&& at) {
+            if (!m.full()) return at(ct);
+            if (!(lo <= hi)) return false;
+            const long k0 = static_cast<long>(std::floor((lo - ct) / two_pi));
+            const long k1 = static_cast<long>(std::ceil((hi - ct) / two_pi));
+            for (long k = k0; k <= k1 && k - k0 < 64; ++k)
+                if (at(ct + two_pi * static_cast<double>(k))) return true;
+            return false;
+        };
+        const auto area = [&](PickKind kind, std::size_t o, std::size_t element, double t) {
+            PickHit h;
+            h.kind = kind;
+            h.object = o;
+            h.element = element;
+            h.anchor_x = cursor_x;
+            h.anchor_y = cursor_y;
+            h.data_x = t;
+            h.data_y = cr;
+            return h;
+        };
         for (std::size_t rank = order.size(); rank-- > 0;) {
+            const std::size_t o = order[rank].index;
+            if (order[rank].kind == PlotKind::Fill) {
+                // In (θ, r) with identity scales, θ along it (across a
+                // Vertical one), as polar_fill_area() draws it.
+                const FillPlot& fp = snap.fills[o];
+                if (!object_shown(fp)) continue;
+                const bool vert = fp.vertical();
+                double lo = std::numeric_limits<double>::infinity(), hi = -lo;
+                for (const FillRun& run : fill_runs(fp, AxisScale{}, AxisScale{}))
+                    for (std::size_t k = 0; k < run.size(); ++k) {
+                        lo = std::min({lo, vert ? std::min(run.a[k], run.b[k]) : run.r[k]});
+                        hi = std::max({hi, vert ? std::max(run.a[k], run.b[k]) : run.r[k]});
+                    }
+                long seg = -1;
+                double at_t = ct;
+                const bool in = turns(lo, hi, [&](double t) {
+                    seg = vert ? fill_segment_at(fp, AxisScale{}, AxisScale{}, cr, t)
+                               : fill_segment_at(fp, AxisScale{}, AxisScale{}, t, cr);
+                    at_t = t;
+                    return seg >= 0;
+                });
+                if (in) return area(PickKind::Fill, o, static_cast<std::size_t>(seg), at_t);
+                continue;
+            }
+            if (order[rank].kind == PlotKind::Poly) {
+                // Even-odd in (θ, r), where its edges are straight.
+                const PolyPlot& pp = snap.polys[o];
+                if (!object_shown(pp)) continue;
+                const std::size_t n = std::min(pp.x.size(), pp.y.size());
+                if (n < 3) continue;
+                double lo = std::numeric_limits<double>::infinity(), hi = -lo;
+                for (std::size_t k = 0; k < n; ++k) {
+                    lo = std::min(lo, pp.x[k]);
+                    hi = std::max(hi, pp.x[k]);
+                }
+                double at_t = ct;
+                const bool in = turns(lo, hi, [&](double t) {
+                    bool odd = false;
+                    for (std::size_t a = 0, b = n - 1; a < n; b = a++) {
+                        const double ta = pp.x[a], ra = pp.y[a], tb = pp.x[b], rb = pp.y[b];
+                        if ((ra > cr) != (rb > cr) && t < ta + (tb - ta) * (cr - ra) / (rb - ra)) odd = !odd;
+                    }
+                    at_t = t;
+                    return odd;
+                });
+                if (in) return area(PickKind::Poly, o, 0, at_t);
+                continue;
+            }
             if (order[rank].kind != PlotKind::Bar) continue;
-            const BarPlot& bp = snap.bars[order[rank].index];
+            const BarPlot& bp = snap.bars[o];
             const double half = std::abs(bp.bar_width) * 0.5;
             const std::size_t n = std::min(bp.centers.size(), bp.heights.size());
             for (std::size_t i = n; i-- > 0;) {
@@ -732,7 +804,7 @@ std::string format_pick(const RenderSnapshot& snap, const PickHit& hit) {
         }
         case PickKind::Fill: {
             // Where the cursor is, then the fill's name (a stack's layer).
-            std::string s = fmt_point(hit.data_x, hit.data_y);
+            std::string s = snap.polar ? fmt_polar(hit.data_x, hit.data_y) : fmt_point(hit.data_x, hit.data_y);
             const std::string& name = snap.fills[hit.object].opts.name;
             if (!name.empty()) s += '\n' + name;
             return s;
@@ -775,7 +847,7 @@ std::string format_pick(const RenderSnapshot& snap, const PickHit& hit) {
         }
         case PickKind::Poly: case PickKind::Circle: case PickKind::Wedge: {
             // Where the cursor is, then the shape's name.
-            std::string s = fmt_point(hit.data_x, hit.data_y);
+            std::string s = snap.polar ? fmt_polar(hit.data_x, hit.data_y) : fmt_point(hit.data_x, hit.data_y);
             const std::string& name = hit.kind == PickKind::Poly     ? snap.polys[hit.object].opts.name
                                       : hit.kind == PickKind::Circle ? snap.circles[hit.object].opts.name
                                                                      : snap.wedges[hit.object].opts.name;

@@ -123,10 +123,12 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot& snap) 
         t.data_stamp = fp.data_stamp;
         t.id = fp.id;
         t.label = pick_label(fp.opts.name, "fill", static_cast<int>(i));
+        // On a polar axes θ runs along it and r across (swapped if Vertical).
         const bool v = fp.vertical();
-        t.columns.push_back({v ? "y" : "x", fp.x.data(), fp.x.size()});
-        t.columns.push_back({v ? "x1" : "y1", fp.y1.data(), fp.y1.size()});
-        t.columns.push_back({v ? "x2" : "y2", fp.y2.data(), fp.y2.size()});
+        const bool p = snap.polar.has_value();
+        t.columns.push_back({v ? (p ? "r" : "y") : (p ? "theta" : "x"), fp.x.data(), fp.x.size()});
+        t.columns.push_back({v ? (p ? "theta1" : "x1") : (p ? "r1" : "y1"), fp.y1.data(), fp.y1.size()});
+        t.columns.push_back({v ? (p ? "theta2" : "x2") : (p ? "r2" : "y2"), fp.y2.data(), fp.y2.size()});
         if (!fp.exclude.empty())
             t.columns.push_back({"exclude", fp.exclude.data(), fp.exclude.size()});
         out.push_back(std::move(t));
@@ -193,8 +195,8 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot& snap) 
         t.data_stamp = pp.data_stamp;
         t.id = pp.id;
         t.label = pick_label(pp.opts.name, "poly", static_cast<int>(i));
-        t.columns.push_back({"x", pp.x.data(), pp.x.size()});
-        t.columns.push_back({"y", pp.y.data(), pp.y.size()});
+        t.columns.push_back({snap.polar ? "theta" : "x", pp.x.data(), pp.x.size()});
+        t.columns.push_back({snap.polar ? "r" : "y", pp.y.data(), pp.y.size()});
         out.push_back(std::move(t));
     }
     for (std::size_t i = 0; i < snap.circles.size(); ++i) {
@@ -266,6 +268,8 @@ std::vector<PlotDataTable> collect_plot_data_tables(const RenderSnapshot& snap) 
     }
 
     push_text_tables(out, snap.texts);
+    if (snap.polar)
+        for (PlotDataTable& t : out) t.polar = true;
     return out;
 }
 

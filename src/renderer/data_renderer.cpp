@@ -3034,6 +3034,10 @@ void main() {
     // -------------------------------------------------------------------------
     void DataRenderer::draw_fill(const FillPlot& p, int index, const CoordTransform& tr,
                                  const PlotRect& pr) {
+        if (p.polar_area) {
+            draw_polar_area(*p.polar_area, p, index, tr, pr);
+            return;
+        }
         const bool vert = p.vertical();
         // The regions in scale space (built at most once per draw).
         std::vector<FillRun> runs;
@@ -3155,6 +3159,72 @@ void main() {
             rings.push_back(std::move(ring));
         }
         stroke_rings(rings, tr, pr, p.opts.linewidth, p.opts.linestyle, fill_edge(p));
+    }
+
+    // A polar fill or polygon (polar_sheet()): its unit-space triangles in
+    // pixels, uploaded each draw (frame key 0, as polar lines), then its edge
+    // strokes, each run of a cut one open, an uncut one closed.
+    void DataRenderer::draw_polar_area(const PolarArea& a, const FillPlot& p, int index, const CoordTransform& tr,
+                                       const PlotRect& pr) {
+        const Color& c = *p.opts.color;
+        if (!a.tris.empty()) {
+            FillCache& e = fill_cache_[CacheKey{axes_index_, plane_index_, index}];
+            std::vector<float> verts(a.tris.size());
+            for (std::size_t i = 0; i + 1 < a.tris.size(); i += 2) {
+                verts[i] = tr.to_px(a.tris[i]);
+                verts[i + 1] = tr.to_py(a.tris[i + 1]);
+            }
+            if (e.vbo == 0) glGenBuffers(1, &e.vbo);
+            glBindBuffer(GL_ARRAY_BUFFER, e.vbo);
+            glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(verts.size() * sizeof(float)), verts.data(),
+                         GL_DYNAMIC_DRAW);
+            // Never a cache hit for a later 2D fill in this slot.
+            e.generation = 0;
+            begin_pass(pr, tr.win_h);
+            glUseProgram(line_program_);
+            const float res[2] = {tr.win_w, tr.win_h};
+            glUniform2fv(line_u_.resolution, 1, res);
+            glBindVertexArray(line_vao_);
+            glEnableVertexAttribArray(0);
+            glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), nullptr);
+            const float one[2] = {1.0f, 1.0f}, zero[2] = {0.0f, 0.0f};
+            glUniform2fv(line_u_.scale, 1, one);
+            glUniform2fv(line_u_.offset, 1, zero);
+            glUniform4f(line_u_.color, c.r, c.g, c.b, c.a * p.opts.alpha);
+            glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(verts.size() / 2));
+            glBindVertexArray(0);
+            glUseProgram(0);
+            end_pass();
+        }
+        if (!(p.opts.linewidth > 0.0f) || p.opts.linestyle == LineStyle::None || a.strokes.empty()) return;
+        // Pixel runs split at NaN, a point equal to the one before dropped.
+        std::vector<std::vector<float>> open, closed;
+        for (const PolarArea::Path& s : a.strokes) {
+            std::vector<float> run;
+            const auto flush = [&](bool whole) {
+                if (run.size() >= 4) (whole ? closed : open).push_back(std::move(run));
+                run.clear();
+            };
+            for (std::size_t i = 0; i < s.x.size(); ++i) {
+                if (std::isnan(s.x[i]) || std::isnan(s.y[i])) {
+                    flush(false);
+                    continue;
+                }
+                const float px = tr.to_px(s.x[i]), py = tr.to_py(s.y[i]);
+                if (run.size() >= 2 && run[run.size() - 2] == px && run.back() == py) continue;
+                run.push_back(px);
+                run.push_back(py);
+            }
+            if (s.closed)
+                while (run.size() >= 4 && run[0] == run[run.size() - 2] && run[1] == run.back()) {
+                    run.pop_back();
+                    run.pop_back();
+                }
+            flush(s.closed);
+        }
+        const Color ec = fill_edge(p);
+        if (!closed.empty()) stroke_rings(closed, tr, pr, p.opts.linewidth, p.opts.linestyle, ec, true);
+        if (!open.empty()) stroke_rings(open, tr, pr, p.opts.linewidth, p.opts.linestyle, ec, false);
     }
 
     // Rings of pixel points (x, y pairs) stroked through the segment program,

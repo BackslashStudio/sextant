@@ -54,6 +54,36 @@ namespace sextant {
         PolarAxes& bar(std::span<const double> theta, std::span<const double> height,
                        BarOptions opts = {});
 
+        // The area between r1(θ) and r2(θ), FillOptions as Axes::fill(): its
+        // curves straight in (θ, r), so arcs where θ changes; cut to the r
+        // limits and the θ span. With Orientation::Vertical, between θ1(r)
+        // and θ2(r): the spans then read as r, θ1, θ2.
+        PolarAxes& fill(std::span<const double> theta, std::span<const double> r1,
+                        std::span<const double> r2, FillOptions opts = {});
+
+        // The same down to one value: 0 by default, the area inside a curve
+        // (a radar chart's).
+        PolarAxes& fill(std::span<const double> theta, std::span<const double> r1,
+                        double r2 = 0.0, FillOptions opts = {});
+
+        // A filled polygon through (theta[i], r[i]), closed implicitly, its
+        // edges straight in (θ, r), PolyOptions as Axes::shape_poly(). Only
+        // Coords::Data: another space throws std::invalid_argument.
+        PolarAxes& shape_poly(std::span<const double> theta, std::span<const double> r,
+                              PolyOptions opts = {});
+
+        // `s` at (theta, r): both data values (radians, r), or both a
+        // fraction of the frame's box (Pos::fraction()) or pixels from its
+        // bottom left (Pos::pixels()); mixed spaces throw
+        // std::invalid_argument. Otherwise as Axes::text(): a text at a data
+        // point outside the r limits or the θ span is hidden.
+        PolarAxes& text(std::string_view s, Pos theta, Pos r, TextOptions opts = {});
+
+        // `s` at (ttheta, tr) as text() places it, with an arrow to the data
+        // point (theta, r). Hidden while the point is not shown.
+        PolarAxes& annotate(double theta, double r, std::string_view s, Pos ttheta, Pos tr,
+                            TextOptions opts = {}, ArrowOptions arrow = {});
+
         // ----------------------------------------------------------------
         // Objects, as Axes's
         // ----------------------------------------------------------------
@@ -93,6 +123,32 @@ namespace sextant {
                                 std::span<const double> height);
         PolarAxes& set_bar_visible(std::size_t i, bool visible);
         bool bar_visible(std::size_t i) const;
+
+        // x is θ (radians), y1/y2 are r; Vertical: x is r, y1/y2 θ.
+        std::size_t fill_count() const;
+        FillData fill_data(std::size_t i) const;
+        PolarAxes& set_fill_data(std::size_t i, const FillData& data);
+        PolarAxes& set_fill_data(std::size_t i, std::span<const double> theta, std::span<const double> r1,
+                                 std::span<const double> r2);
+        PolarAxes& set_fill_visible(std::size_t i, bool visible);
+        bool fill_visible(std::size_t i) const;
+
+        // x is θ (radians), y is r.
+        std::size_t shape_poly_count() const;
+        PolyData shape_poly_data(std::size_t i) const;
+        PolarAxes& set_shape_poly_data(std::size_t i, const PolyData& data);
+        PolarAxes& set_shape_poly_data(std::size_t i, std::span<const double> theta, std::span<const double> r);
+        PolarAxes& set_shape_poly_visible(std::size_t i, bool visible);
+        bool shape_poly_visible(std::size_t i) const;
+
+        // x is θ, y is r (or both frame fractions or pixels); px/py the
+        // arrow's point (θ, r). Mixed spaces throw, as text().
+        std::size_t text_count() const;
+        TextData text_data(std::size_t i) const;
+        PolarAxes& set_text_data(std::size_t i, const TextData& data);
+        PolarAxes& set_text_data(std::size_t i, std::string_view s, Pos theta, Pos r);
+        PolarAxes& set_text_visible(std::size_t i, bool visible);
+        bool text_visible(std::size_t i) const;
 
         ObjectId last_object() const;
         bool remove(ObjectId id);

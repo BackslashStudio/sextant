@@ -2309,7 +2309,18 @@ namespace sextant {
 
             const bool in_frame = is3d && c.x.space == Coords::Fraction;
             if (begin_field_table("textpos")) {
-                if (!is3d) {
+                if (!is3d && t.polar) {
+                    // Both in one space (a polar text never mixes them): a
+                    // space picked on one moves the other with it.
+                    field_row("Theta");
+                    const Coords sx = c.x.space, sy = c.y.space;
+                    const bool cx = pos_field("tx", c.x, true);
+                    if (c.x.space != sx) c.y.space = c.x.space;
+                    field_row("R");
+                    const bool cy = pos_field("ty", c.y, true);
+                    if (c.y.space != sy) c.x.space = c.y.space;
+                    if (cx || cy) push_content();
+                } else if (!is3d) {
                     field_row("X");
                     if (pos_field("tx", c.x, true)) push_content();
                     field_row("Y");
@@ -2340,10 +2351,10 @@ namespace sextant {
                     push_content();
                 }
                 if (c.arrow && begin_field_table("textpoint")) {
-                    field_row("Point X");
+                    field_row(t.polar ? "Point theta" : "Point X");
                     if (drag_double("##tpx", &c.px, static_cast<float>(std::max(std::abs(c.px), 1.0) * 0.005)))
                         push_content();
-                    field_row("Point Y");
+                    field_row(t.polar ? "Point r" : "Point Y");
                     if (drag_double("##tpy", &c.py, static_cast<float>(std::max(std::abs(c.py), 1.0) * 0.005)))
                         push_content();
                     end_field_table();

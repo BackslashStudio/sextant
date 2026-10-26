@@ -1,18 +1,23 @@
 #pragma once
 // A polar axes' geometry (PolarAxes), shared by layout, both drawers, hover
 // and navigation. Its objects are drawn by the 2D code: polar_sheet() turns
-// lines, markers and bars into "unit" space -- the disc of radius 1 about the
-// origin, x east and y north -- and the cell's CoordTransform maps the frame's
-// box in that space onto the frame, so the frame is round.
+// lines, markers, bars, areas and texts into "unit" space -- the disc of
+// radius 1 about the origin, x east and y north -- and the cell's
+// CoordTransform maps the frame's box in that space onto the frame, so the
+// frame is round.
 #include "coord_transform.h"
+#include "fill_geometry.h"
 #include "line_steps.h"
 #include "plot_objects.h"
+#include "shape_geometry.h"
 #include "tick.h"
 #include "ticker.h"
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <limits>
+#include <memory>
 #include <numbers>
 #include <string>
 #include <vector>
@@ -66,8 +71,8 @@ namespace sextant {
     };
 
     // r's limits as drawn: set ones, or automatic (see PolarAxes::rlim()).
-    // Shown lines' and markers' r count, and bars' bases and tips; non-finite
-    // points are skipped.
+    // Shown lines', markers', fills' and polygons' r count, and bars' bases
+    // and tips; non-finite points are skipped.
     inline Range polar_auto_rlim(const RenderSnapshot& s) {
         double lo = std::numeric_limits<double>::infinity(), hi = -lo;
         const auto add = [&](double t, double r) {
@@ -91,6 +96,22 @@ namespace sextant {
                 add(b.centers[i], b.tip_at(i));
             }
         }
+        // Every region point on both curves (r across them, or along them
+        // for a Vertical fill), and every polygon vertex.
+        for (const FillPlot& f: s.fills) {
+            if (!object_shown(f)) continue;
+            const bool vert = f.vertical();
+            for (const FillRun& run: fill_runs(f, AxisScale{}, AxisScale{}))
+                for (std::size_t k = 0; k < run.size(); ++k) {
+                    if (vert) {
+                        add(run.a[k], run.r[k]);
+                    } else {
+                        add(run.r[k], run.a[k]);
+                        add(run.r[k], run.b[k]);
+                    }
+                }
+        }
+        points(s.polys);
         if (!(lo <= hi)) return {0.0, 1.0};
         lo = std::min(lo, 0.0);
         if (hi <= lo) hi = lo + 1.0;
@@ -297,10 +318,250 @@ namespace sextant {
         }
     }
 
+    namespace polar_detail {
+        struct ThetaR {
+            double t, r;
+        };
+
+        // `poly` cut to where sign * (coordinate k - v) >= 0, k 0 for θ and 1
+        // for r (Sutherland-Hodgman: a concave ring keeps the winding number
+        // of every point inside, joined by zero-area bridges along the cut).
+        inline void clip_half(std::vector<ThetaR>& poly, int k, double v, double sign,
+                              std::vector<ThetaR>& tmp) {
+            tmp.clear();
+            const std::size_t n = poly.size();
+            const auto f = [&](const ThetaR& p) { return sign * ((k == 0 ? p.t : p.r) - v); };
+            for (std::size_t i = 0; i < n; ++i) {
+                const ThetaR& a = poly[i];
+                const ThetaR& b = poly[(i + 1) % n];
+                const double fa = f(a), fb = f(b);
+                if (fa >= 0.0) tmp.push_back(a);
+                if ((fa >= 0.0) != (fb >= 0.0)) {
+                    const double u = fa / (fa - fb);
+                    ThetaR q{a.t + (b.t - a.t) * u, a.r + (b.r - a.r) * u};
+                    (k == 0 ? q.t : q.r) = v;
+                    tmp.push_back(q);
+                }
+            }
+            poly.swap(tmp);
+        }
+
+        // To the r limits and, on a sector, raw θ in [tmin, tmax] (as lines
+        // clip); fewer than three points left is nothing.
+        inline void clip_frame(const PolarMap& m, std::vector<ThetaR>& poly, std::vector<ThetaR>& tmp) {
+            clip_half(poly, 1, std::min(m.rmin, m.rmax), 1.0, tmp);
+            clip_half(poly, 1, std::max(m.rmin, m.rmax), -1.0, tmp);
+            if (!m.full()) {
+                clip_half(poly, 0, m.tmin, 1.0, tmp);
+                clip_half(poly, 0, m.tmax, -1.0, tmp);
+            }
+            if (poly.size() < 3) poly.clear();
+        }
+
+        inline bool finite_all(const std::vector<ThetaR>& p) {
+            for (const ThetaR& q: p)
+                if (!std::isfinite(q.t) || !std::isfinite(q.r)) return false;
+            return true;
+        }
+    } // namespace polar_detail
+
+    // Triangles in (θ, r), six numbers each (θ, r per corner), as drawn: each
+    // clipped to the frame (polar_detail::clip_frame()), cut into strips at
+    // most kPolarChord wide in θ, each strip fanned, appended to `out` as
+    // three unit (x, y) points per triangle. Pieces never overlap, as the
+    // source triangles don't.
+    inline void polar_area_tris(const PolarMap& m, const std::vector<double>& tris, std::vector<float>& out) {
+        using namespace polar_detail;
+        std::vector<ThetaR> poly, strip, tmp;
+        const auto put = [&](const ThetaR& q) {
+            out.push_back(static_cast<float>(m.unit_x(q.t, q.r)));
+            out.push_back(static_cast<float>(m.unit_y(q.t, q.r)));
+        };
+        for (std::size_t i = 0; i + 6 <= tris.size(); i += 6) {
+            poly = {{tris[i], tris[i + 1]}, {tris[i + 2], tris[i + 3]}, {tris[i + 4], tris[i + 5]}};
+            if (!finite_all(poly)) continue;
+            clip_frame(m, poly, tmp);
+            if (poly.empty()) continue;
+            double tlo = poly[0].t, thi = tlo;
+            for (const ThetaR& q: poly) {
+                tlo = std::min(tlo, q.t);
+                thi = std::max(thi, q.t);
+            }
+            const int k = std::max(1, static_cast<int>(std::ceil((thi - tlo) / kPolarChord - 1e-9)));
+            for (int s = 0; s < k; ++s) {
+                strip = poly;
+                if (k > 1) {
+                    if (s > 0) clip_half(strip, 0, tlo + (thi - tlo) * s / k, 1.0, tmp);
+                    if (s + 1 < k) clip_half(strip, 0, tlo + (thi - tlo) * (s + 1) / k, -1.0, tmp);
+                }
+                for (std::size_t j = 1; j + 1 < strip.size(); ++j) {
+                    put(strip[0]);
+                    put(strip[j]);
+                    put(strip[j + 1]);
+                }
+            }
+        }
+    }
+
+    // A closed outline (θ[i], r[i]) as drawn, its fill the nonzero rule's:
+    // clipped as polar_area_tris() clips, each edge cut into chords at most
+    // kPolarChord apart, in unit space. Empty when nothing shows.
+    inline PolarArea::Path polar_area_ring(const PolarMap& m, const std::vector<double>& th,
+                                           const std::vector<double>& r) {
+        using namespace polar_detail;
+        PolarArea::Path out;
+        out.closed = true;
+        std::vector<ThetaR> poly, tmp;
+        for (std::size_t i = 0; i < th.size() && i < r.size(); ++i) poly.push_back({th[i], r[i]});
+        if (poly.size() < 3 || !finite_all(poly)) return out;
+        clip_frame(m, poly, tmp);
+        const std::size_t n = poly.size();
+        for (std::size_t i = 0; i < n; ++i) {
+            const ThetaR& a = poly[i];
+            const ThetaR& b = poly[(i + 1) % n];
+            const int k = std::max(1, static_cast<int>(std::ceil(std::fabs(b.t - a.t) / kPolarChord - 1e-9)));
+            for (int q = 0; q < k; ++q) {
+                const double u = static_cast<double>(q) / k;
+                const double t = a.t + (b.t - a.t) * u, rr = a.r + (b.r - a.r) * u;
+                out.x.push_back(m.unit_x(t, rr));
+                out.y.push_back(m.unit_y(t, rr));
+            }
+        }
+        return out;
+    }
+
+    // A closed outline's edge as stroked: polar_polyline() looped, so it
+    // breaks where the frame cuts the area (no stroke along the rim); never
+    // cut, it is closed (its repeated last point dropped).
+    inline PolarArea::Path polar_area_stroke(const PolarMap& m, const std::vector<double>& th,
+                                             const std::vector<double>& r) {
+        PolarArea::Path out;
+        polar_polyline(m, th.data(), r.data(), std::min(th.size(), r.size()), DrawStyle::Default, true,
+                       out.x, out.y);
+        const std::size_t n = out.x.size();
+        if (n < 3) return out;
+        for (std::size_t i = 0; i < n; ++i)
+            if (std::isnan(out.x[i])) return out;
+        if (std::fabs(out.x[0] - out.x[n - 1]) < 1e-12 && std::fabs(out.y[0] - out.y[n - 1]) < 1e-12) {
+            out.x.pop_back();
+            out.y.pop_back();
+            out.closed = true;
+        }
+        return out;
+    }
+
+    // A fill (identity scales: θ along it and r across, swapped for a
+    // Vertical one) as drawn: fill_triangles() and fill_outline() of each
+    // region through the functions above.
+    inline PolarArea polar_fill_area(const PolarMap& m, const FillPlot& f) {
+        PolarArea a;
+        const bool vert = f.vertical();
+        std::vector<double> tri, th, rr;
+        const bool edged = f.opts.linewidth > 0.0f && f.opts.linestyle != LineStyle::None;
+        for (const FillRun& run: fill_runs(f, AxisScale{}, AxisScale{})) {
+            tri.clear();
+            const auto corner = [&](double rc, double v) {
+                tri.push_back(vert ? v : rc);
+                tri.push_back(vert ? rc : v);
+            };
+            fill_triangles(run, [&](double r0, double v0, double r1, double v1, double r2, double v2) {
+                corner(r0, v0);
+                corner(r1, v1);
+                corner(r2, v2);
+            });
+            polar_area_tris(m, tri, a.tris);
+            th.clear();
+            rr.clear();
+            fill_outline(run, [&](double rc, double v) {
+                th.push_back(vert ? v : rc);
+                rr.push_back(vert ? rc : v);
+            });
+            PolarArea::Path ring = polar_area_ring(m, th, rr);
+            if (!ring.x.empty()) a.rings.push_back(std::move(ring));
+            if (edged) {
+                PolarArea::Path st = polar_area_stroke(m, th, rr);
+                if (!st.x.empty()) a.strokes.push_back(std::move(st));
+            }
+        }
+        return a;
+    }
+
+    // A polygon in (θ, r) as drawn: ear-clipped in (θ, r), where its edges
+    // are straight (consecutive repeats and a closing repeat dropped, as
+    // poly_geometry() drops them).
+    inline PolarArea polar_poly_area(const PolarMap& m, const PolyPlot& p) {
+        PolarArea a;
+        std::vector<double> th, rr;
+        const std::size_t n = std::min(p.x.size(), p.y.size());
+        for (std::size_t i = 0; i < n; ++i) {
+            if (!std::isfinite(p.x[i]) || !std::isfinite(p.y[i])) return a;
+            if (!th.empty() && th.back() == p.x[i] && rr.back() == p.y[i]) continue;
+            th.push_back(p.x[i]);
+            rr.push_back(p.y[i]);
+        }
+        while (th.size() > 1 && th.front() == th.back() && rr.front() == rr.back()) {
+            th.pop_back();
+            rr.pop_back();
+        }
+        if (th.size() < 3) return a;
+        std::vector<ShapePt> pts;
+        for (std::size_t i = 0; i < th.size(); ++i)
+            pts.push_back({static_cast<float>(th[i]), static_cast<float>(rr[i])});
+        std::vector<std::uint32_t> idx;
+        shape_detail::ear_clip(pts, idx);
+        std::vector<double> tri;
+        for (std::uint32_t k: idx) {
+            tri.push_back(th[k]);
+            tri.push_back(rr[k]);
+        }
+        polar_area_tris(m, tri, a.tris);
+        PolarArea::Path ring = polar_area_ring(m, th, rr);
+        if (!ring.x.empty()) a.rings.push_back(std::move(ring));
+        if (p.opts.linewidth > 0.0f && p.opts.linestyle != LineStyle::None) {
+            PolarArea::Path st = polar_area_stroke(m, th, rr);
+            if (!st.x.empty()) a.strokes.push_back(std::move(st));
+        }
+        return a;
+    }
+
+    // The texts as the 2D text pass places them: a Data text's (θ, r) and an
+    // arrow's point at their unit points. A Data text whose point doesn't
+    // show (polar_point_shown()) is dropped, unless clip_to_frame keeps one
+    // on the far side of the r limits or the θ span; an arrow whose point
+    // doesn't show is dropped. Frame-fraction and pixel texts pass as they
+    // are; a text with mixed spaces (only an edit makes one) is dropped.
+    inline std::vector<TextPlot> polar_texts(const RenderSnapshot& s, const PolarMap& m) {
+        std::vector<TextPlot> out;
+        for (const TextPlot& t: s.texts) {
+            TextPlot q = t;
+            TextContent& c = q.content;
+            if (c.x.space != c.y.space) continue;
+            if (c.x.space == Coords::Data) {
+                const bool kept = polar_point_shown(m, c.x.v, c.y.v)
+                                  || (t.opts.text.clip_to_frame && std::isfinite(c.x.v) && std::isfinite(c.y.v)
+                                      && m.rho(c.y.v) >= 0.0);
+                if (!kept) continue;
+                const double ux = m.unit_x(c.x.v, c.y.v), uy = m.unit_y(c.x.v, c.y.v);
+                c.x = Pos(ux);
+                c.y = Pos(uy);
+            }
+            if (c.arrow) {
+                if (!polar_point_shown(m, c.px, c.py)) continue;
+                const double ux = m.unit_x(c.px, c.py), uy = m.unit_y(c.px, c.py);
+                c.px = ux;
+                c.py = uy;
+            }
+            out.push_back(std::move(q));
+        }
+        return out;
+    }
+
     // The sheet as the 2D code draws it, the limits the frame's box: every
     // line in unit space (polar_polyline(), plain style, no loop), the
     // markers that show (polar_point_shown()) at their unit points, and each
-    // bar as wedges (polar_bar_sectors()) keeping its id, zorder and colours.
+    // bar as wedges (polar_bar_sectors()) keeping its id, zorder and colours,
+    // each fill and polygon as a fill carrying its PolarArea, and the texts
+    // placed (polar_texts()).
     inline RenderSnapshot polar_sheet(const RenderSnapshot& s, const PolarMap& m) {
         RenderSnapshot out = s;
         const PolarBox b = polar_box(m);
@@ -364,6 +625,27 @@ namespace sextant {
             }
         }
         out.bars.clear();
+        // Fills and polygons as areas; a polygon becomes a fill keeping its
+        // id, zorder and look, so one drawer takes both.
+        for (FillPlot& f: out.fills) f.polar_area = std::make_shared<const PolarArea>(polar_fill_area(m, f));
+        for (const PolyPlot& p: out.polys) {
+            FillPlot f;
+            f.opts.color = p.opts.color;
+            f.opts.alpha = p.opts.alpha;
+            f.opts.edgecolor = p.opts.edgecolor;
+            f.opts.linewidth = p.opts.linewidth;
+            f.opts.linestyle = p.opts.linestyle;
+            f.opts.name = p.opts.name;
+            f.opts.show_legend = false;
+            f.opts.visible = p.opts.visible;
+            f.opts.zorder = p.opts.zorder;
+            f.data_stamp = p.data_stamp;
+            f.id = p.id;
+            f.polar_area = std::make_shared<const PolarArea>(polar_poly_area(m, p));
+            out.fills.push_back(std::move(f));
+        }
+        out.polys.clear();
+        out.texts = polar_texts(s, m);
         return out;
     }
 

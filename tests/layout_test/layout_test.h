@@ -619,6 +619,8 @@ namespace lt {
     void test_polar();
     // polar_kinds.cpp
     void test_polar_kinds();
+    // polar_area.cpp
+    void test_polar_area();
 
     // edge_markers.cpp
     void test_edge_markers();

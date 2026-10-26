@@ -207,6 +207,9 @@ private:
     // A fill (fill_geometry.h): its triangles cached as bars' fills are, its
     // outline stroked per frame through the segment program.
     void draw_fill(const FillPlot& p, int index, const CoordTransform& tr, const PlotRect& pr);
+    // A polar fill's PolarArea (draw_fill() hands it over): uncached.
+    void draw_polar_area(const PolarArea& a, const FillPlot& p, int index, const CoordTransform& tr,
+                         const PlotRect& pr);
     // A shape (shape_geometry.h): its triangles streamed per frame through the
     // flat program, its outline stroked as a fill's; nothing cached.
     void draw_shape(const ShapeGeom& g, const Color& color, float alpha, float linewidth,

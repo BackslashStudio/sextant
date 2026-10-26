@@ -312,6 +312,8 @@ int main() {
     test_polar();
     // polar_kinds.cpp
     test_polar_kinds();
+    // polar_area.cpp
+    test_polar_area();
 
     // edge_markers.cpp
     test_edge_markers();

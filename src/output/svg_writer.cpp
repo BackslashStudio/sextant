@@ -849,7 +849,60 @@ static void emit_axspan(std::ostringstream& o, const SvgAxesData& d, const AxSpa
 // A fill as one <polygon> per region (fill_geometry.h, as the raster path),
 // its outline the polygon's stroke. A region whose curves cross pinches
 // there; the nonzero rule fills both lobes, as the raster's triangles do.
+// A polar fill or polygon (polar_sheet()), as draw_polar_area(): one <path> of
+// its clipped rings under the nonzero rule, then its edge strokes, each piece
+// cut at NaN, an uncut closed one a loop, cut at the joints the raster bevels.
+static void emit_polar_area(std::ostringstream& o, const SvgAxesData& d, const FillPlot& p) {
+    const CoordTransform& tr = d.layout.tr;
+    const PolarArea& ar = *p.polar_area;
+    const Color& c = *p.opts.color;
+    const float a = c.a * p.opts.alpha;
+    if (!ar.rings.empty() && a > 0.0f) {
+        o << "    <path fill=\"" << rgb(c) << "\"";
+        if (a < 1.0f) o << " fill-opacity=\"" << a << "\"";
+        o << " d=\"";
+        for (const PolarArea::Path& r : ar.rings) {
+            for (std::size_t i = 0; i < r.x.size(); ++i)
+                o << (i == 0 ? "M" : "L") << tr.to_px(r.x[i]) << "," << tr.to_py(r.y[i]) << " ";
+            o << "Z ";
+        }
+        o << "\"/>\n";
+    }
+    if (!(p.opts.linewidth > 0.0f) || p.opts.linestyle == LineStyle::None) return;
+    const Color ec = fill_edge(p);
+    for (const PolarArea::Path& s : ar.strokes) {
+        PixelPath run;
+        const auto flush = [&](bool whole) {
+            if (whole)
+                while (run.x.size() >= 2 && run.x.front() == run.x.back() && run.y.front() == run.y.back()) {
+                    run.x.pop_back();
+                    run.y.pop_back();
+                }
+            run.loop = whole;
+            if (run.x.size() >= 2)
+                emit_beveled_stroke(o, run, short_bevels(run, p.opts.linewidth), rgb(ec), ec.a,
+                                    p.opts.linewidth, p.opts.linestyle);
+            run = PixelPath{};
+        };
+        for (std::size_t i = 0; i < s.x.size(); ++i) {
+            if (std::isnan(s.x[i]) || std::isnan(s.y[i])) {
+                flush(false);
+                continue;
+            }
+            const float px = tr.to_px(s.x[i]), py = tr.to_py(s.y[i]);
+            if (!run.x.empty() && run.x.back() == px && run.y.back() == py) continue;
+            run.x.push_back(px);
+            run.y.push_back(py);
+        }
+        flush(s.closed);
+    }
+}
+
 static void emit_fill(std::ostringstream& o, const SvgAxesData& d, const FillPlot& p) {
+    if (p.polar_area) {
+        emit_polar_area(o, d, p);
+        return;
+    }
     const CoordTransform& tr = d.layout.tr;
     const bool vert = p.vertical();
     const std::vector<FillRun> runs = fill_runs(p, vert ? tr.ys : tr.xs, vert ? tr.xs : tr.ys);
@@ -2009,7 +2062,7 @@ static std::vector<const SvgAxesData*> layers_of(const SvgAxesData& d) {
 
 // A polar cell (PolarAxes), as NvgRenderer: its disc or sector filled, the
 // objects clipped to it, then rings, spokes, the outline, their labels, the
-// titles, legend and colorbars.
+// texts, titles, legend and colorbars.
 static void emit_polar(std::ostringstream& o, const SvgAxesData& d, std::size_t idx) {
     const PolarPlan& plan = *d.layout.polar;
     const AxesStyle& st = d.axes_style;
@@ -2069,6 +2122,7 @@ static void emit_polar(std::ostringstream& o, const SvgAxesData& d, std::size_t 
         if (plan.tlabels && !plan.spokes.empty()) labels(plan.spokes, tick_look(st, TickAxis::X));
         if (plan.rlabels && !plan.rings.empty()) labels(plan.rings, tick_look(st, TickAxis::Y));
     }
+    emit_texts(o, d, idx);
     emit_titles(o, d);
     emit_legend(o, d, idx);
     emit_colorbar(o, d, idx);

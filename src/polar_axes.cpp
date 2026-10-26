@@ -36,6 +36,13 @@ namespace {
                                         + std::to_string(lo) + ") must be below thetamax ("
                                         + std::to_string(hi) + ") and at most 360 degrees from it");
     }
+    // (θ, r) is a pair: a data point, or a place in the frame's box.
+    void check_text_spaces(const Pos& theta, const Pos& r, const char* who) {
+        if (theta.space != r.space)
+            throw std::invalid_argument(std::string("PolarAxes::") + who
+                                        + ": theta and r must be in the same space (both data, both "
+                                          "Pos::fraction() or both Pos::pixels())");
+    }
 }
 
 PolarAxes::PolarAxes(std::shared_ptr<Axes> sheet) : d(std::make_unique<Impl>()) {
@@ -71,6 +78,50 @@ PolarAxes& PolarAxes::bar(std::span<const double> theta, std::span<const double>
     if (opts.orientation != Orientation::Vertical)
         throw std::invalid_argument("PolarAxes::bar: a polar bar runs along r (Orientation::Vertical only)");
     d->ax().ingest_bar(theta, height, ErrorBar{}, std::move(opts), "bar");
+    return *this;
+}
+
+PolarAxes& PolarAxes::fill(std::span<const double> theta, std::span<const double> r1, std::span<const double> r2,
+                           FillOptions opts) {
+    d->ax().ingest_fill(theta, r1, r2, std::move(opts), "fill");
+    return *this;
+}
+
+PolarAxes& PolarAxes::fill(std::span<const double> theta, std::span<const double> r1, double r2, FillOptions opts) {
+    const std::vector<double> base(theta.size(), r2);
+    d->ax().ingest_fill(theta, r1, base, std::move(opts), "fill");
+    return *this;
+}
+
+PolarAxes& PolarAxes::shape_poly(std::span<const double> theta, std::span<const double> r, PolyOptions opts) {
+    if (opts.space != Coords::Data)
+        throw std::invalid_argument("PolarAxes::shape_poly: a polar polygon's vertices are (theta, r) data "
+                                    "(Coords::Data only)");
+    d->ax().ingest_poly(theta, r, std::move(opts), "shape_poly");
+    return *this;
+}
+
+PolarAxes& PolarAxes::text(std::string_view s, Pos theta, Pos r, TextOptions opts) {
+    check_text_spaces(theta, r, "text");
+    TextContent c;
+    c.text = s;
+    c.x = theta;
+    c.y = r;
+    d->ax().ingest_text(std::move(c), { std::move(opts), ArrowOptions{} }, "text");
+    return *this;
+}
+
+PolarAxes& PolarAxes::annotate(double theta, double r, std::string_view s, Pos ttheta, Pos tr,
+                               TextOptions opts, ArrowOptions arrow) {
+    check_text_spaces(ttheta, tr, "annotate");
+    TextContent c;
+    c.text = s;
+    c.x = ttheta;
+    c.y = tr;
+    c.arrow = true;
+    c.px = theta;
+    c.py = r;
+    d->ax().ingest_text(std::move(c), { std::move(opts), std::move(arrow) }, "annotate");
     return *this;
 }
 
@@ -138,6 +189,57 @@ PolarAxes& PolarAxes::set_bar_visible(std::size_t i, bool visible) {
     return *this;
 }
 bool PolarAxes::bar_visible(std::size_t i) const { return d->sheet->bar_visible(i); }
+
+std::size_t PolarAxes::fill_count() const { return d->sheet->fill_count(); }
+FillData PolarAxes::fill_data(std::size_t i) const { return d->sheet->fill_data(i); }
+PolarAxes& PolarAxes::set_fill_data(std::size_t i, const FillData& data) {
+    d->sheet->set_fill_data(i, data);
+    return *this;
+}
+PolarAxes& PolarAxes::set_fill_data(std::size_t i, std::span<const double> theta, std::span<const double> r1,
+                                    std::span<const double> r2) {
+    d->sheet->set_fill_data(i, theta, r1, r2);
+    return *this;
+}
+PolarAxes& PolarAxes::set_fill_visible(std::size_t i, bool visible) {
+    d->sheet->set_fill_visible(i, visible);
+    return *this;
+}
+bool PolarAxes::fill_visible(std::size_t i) const { return d->sheet->fill_visible(i); }
+
+std::size_t PolarAxes::shape_poly_count() const { return d->sheet->shape_poly_count(); }
+PolyData PolarAxes::shape_poly_data(std::size_t i) const { return d->sheet->shape_poly_data(i); }
+PolarAxes& PolarAxes::set_shape_poly_data(std::size_t i, const PolyData& data) {
+    d->sheet->set_shape_poly_data(i, data);
+    return *this;
+}
+PolarAxes& PolarAxes::set_shape_poly_data(std::size_t i, std::span<const double> theta, std::span<const double> r) {
+    d->sheet->set_shape_poly_data(i, theta, r);
+    return *this;
+}
+PolarAxes& PolarAxes::set_shape_poly_visible(std::size_t i, bool visible) {
+    d->sheet->set_shape_poly_visible(i, visible);
+    return *this;
+}
+bool PolarAxes::shape_poly_visible(std::size_t i) const { return d->sheet->shape_poly_visible(i); }
+
+std::size_t PolarAxes::text_count() const { return d->sheet->text_count(); }
+TextData PolarAxes::text_data(std::size_t i) const { return d->sheet->text_data(i); }
+PolarAxes& PolarAxes::set_text_data(std::size_t i, const TextData& data) {
+    check_text_spaces(data.x, data.y, "set_text_data");
+    d->sheet->set_text_data(i, data);
+    return *this;
+}
+PolarAxes& PolarAxes::set_text_data(std::size_t i, std::string_view s, Pos theta, Pos r) {
+    check_text_spaces(theta, r, "set_text_data");
+    d->sheet->set_text_data(i, s, theta, r);
+    return *this;
+}
+PolarAxes& PolarAxes::set_text_visible(std::size_t i, bool visible) {
+    d->sheet->set_text_visible(i, visible);
+    return *this;
+}
+bool PolarAxes::text_visible(std::size_t i) const { return d->sheet->text_visible(i); }
 
 ObjectId PolarAxes::last_object() const { return d->sheet->last_object(); }
 bool PolarAxes::remove(ObjectId id) { return d->sheet->remove(id); }
