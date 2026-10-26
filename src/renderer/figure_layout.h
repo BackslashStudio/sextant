@@ -307,7 +307,7 @@ namespace sextant {
         bool is_3d() const { return box3d.has_value(); }
 
         // Polar cells only (PolarAxes): the frame, its grid and labels. `tr`
-        // maps the frame's box in unit space (polar_sheet()); the tick lists
+        // maps the frame's box in unit space (polar_transform()); the tick lists
         // are empty.
         std::optional<PolarPlan> polar;
 

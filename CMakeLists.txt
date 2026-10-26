@@ -364,6 +364,7 @@ set(SEXTANT_SOURCES
     src/renderer/render_device.cpp
     src/renderer/nvg_renderer.cpp
     src/renderer/data_renderer.cpp
+    src/renderer/polar_renderer.cpp
     src/renderer/fbo_readback.cpp
     src/renderer/plot_fbo.cpp
     src/renderer/saved_target.cpp

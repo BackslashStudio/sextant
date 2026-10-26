@@ -1,5 +1,6 @@
 #pragma once
 #include "plot_rect.h"
+#include "polar_renderer.h"
 #include "../plot_objects.h"
 #include "../coord_transform.h"
 #include "../coord_transform3d.h"
@@ -8,6 +9,7 @@
 #include "../shape_geometry.h"
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <span>
 #include <unordered_map>
 #include <vector>
@@ -24,7 +26,10 @@ public:
 
     // Framebuffer pixels per logical pixel (the supersample factor), set per
     // frame. Only scissor rects and line widths need it.
-    void set_pixel_ratio(float ratio) { pixel_ratio_ = ratio > 0.0f ? ratio : 1.0f; }
+    void set_pixel_ratio(float ratio) {
+        pixel_ratio_ = ratio > 0.0f ? ratio : 1.0f;
+        polar_->set_pixel_ratio(pixel_ratio_);
+    }
 
     // The snapshot/axes the following draws belong to: the cache key. Set per
     // axes per frame; generation 0 disables caching.
@@ -33,16 +38,8 @@ public:
         axes_index_ = axes_index;
     }
 
-    // A polar cell's disc or sector the following markers are clipped to:
-    // centre and radius in logical pixels, the sector's start angle (radians
-    // counter-clockwise from +x on screen) and sweep (>= 2 pi: the disc).
-    // Lines and shapes arrive clipped on the CPU; markers have area. Cleared
-    // with clear_polar_clip() (a radius of 0 clips nothing).
-    void set_polar_clip(float cx, float cy, float radius, float start, float sweep) {
-        polar_clip_[0] = cx; polar_clip_[1] = cy; polar_clip_[2] = radius; polar_clip_[3] = start;
-        polar_sweep_ = sweep;
-    }
-    void clear_polar_clip() { polar_clip_[2] = 0.0f; }
+    // A polar cell's objects (polar_renderer.h), on the same GL context.
+    PolarRenderer& polar() { return *polar_; }
 
     // A 2D sheet's plot objects (an axes', or a plane's into its raster), each
     // with its error bars, in draw_order(): by zorder, a later call over an earlier
@@ -207,9 +204,6 @@ private:
     // A fill (fill_geometry.h): its triangles cached as bars' fills are, its
     // outline stroked per frame through the segment program.
     void draw_fill(const FillPlot& p, int index, const CoordTransform& tr, const PlotRect& pr);
-    // A polar fill's PolarArea (draw_fill() hands it over): uncached.
-    void draw_polar_area(const PolarArea& a, const FillPlot& p, int index, const CoordTransform& tr,
-                         const PlotRect& pr);
     // A shape (shape_geometry.h): its triangles streamed per frame through the
     // flat program, its outline stroked as a fill's; nothing cached.
     void draw_shape(const ShapeGeom& g, const Color& color, float alpha, float linewidth,
@@ -223,13 +217,12 @@ private:
     void draw_quiver(const QuiverPlot& p, int index, const CoordTransform& tr, const PlotRect& pr);
 
     float pixel_ratio_ = 1.0f;
+    std::unique_ptr<PolarRenderer> polar_;
 
     // ---- Per-frame caches (per window thread) ----------------------------
     // Keyed on (data generation, axes, plot index) plus whatever else is baked
     // into the result.
     unsigned long long data_generation_ = 0;
-    float polar_clip_[4] = {0.0f, 0.0f, 0.0f, 0.0f};   // set_polar_clip()
-    float polar_sweep_ = 0.0f;
     int                axes_index_ = -1;
     // The plane the 2D draws are currently targeting (-1 = the axes); part of
     // every 2D cache key.
@@ -555,8 +548,7 @@ private:
 
     struct Scatter3DUniforms { int clip = -1, box_scale = -1, box_offset = -1,
                                    resolution = -1, marker = -1, depth = -1, shade = -1,
-                                   edge = -1, edge_w = -1, edge_face = -1,
-                                polar_clip = -1, polar_sweep = -1; };
+                                   edge = -1, edge_w = -1, edge_face = -1; };
     Scatter3DUniforms scatter3d_u_{};
     Scatter3DUniforms peel_scatter3d_u_{};
     unsigned int scatter3d_program_ = 0;
@@ -683,8 +675,7 @@ private:
     QuiverUniforms quiver_u_{};
     struct MarkerUniforms { int resolution = -1, color = -1, marker = -1,
                                 scale = -1, offset = -1,
-                                edge = -1, edge_w = -1, edge_face = -1,
-                                polar_clip = -1, polar_sweep = -1; };
+                                edge = -1, edge_w = -1, edge_face = -1; };
     struct HeatUniforms   { int resolution = -1, tex = -1; };
     LineUniforms   line_u_{};       // shared by draw_lines and draw_bars
     MarkerUniforms scatter_u_{};

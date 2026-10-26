@@ -82,8 +82,8 @@ namespace sextant {
         return r;
     }
 
-    // The transform the 2D line code draws polar_sheet()'s lines with: the
-    // box onto the frame.
+    // The frame's box in unit space onto the frame: polar_sheet()'s objects
+    // (SVG) and PolarRenderer's view both read it.
     inline CoordTransform polar_transform(const PlotRect& frame, const PolarMap& m, float fw, float fh) {
         const PolarBox b = polar_box(m);
         return {b.xmin, b.xmax, b.ymin, b.ymax, frame.x, frame.y, frame.w, frame.h, fw, fh,

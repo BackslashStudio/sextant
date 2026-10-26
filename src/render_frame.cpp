@@ -95,18 +95,10 @@ void render_frame(RenderDevice& dev, DataRenderer& data,
         const RenderSnapshot* s2 = fsnap.axes[i].snap2d();
         if (!s2) continue;
         if (c.polar) {
-            // Objects in unit space through c.tr; the map changes with every
-            // rotate/zoom, so no cached buffers (key 0). Markers are clipped
-            // to the disc or sector in their shaders (lines and bars already
-            // are).
-            const PolarPlan& pp = *c.polar;
-            const PolarMap& m = pp.map;
-            data.set_frame_key(0, c.slot.index);
-            data.set_polar_clip(pp.cx, pp.cy, pp.radius,
-                                static_cast<float>(std::min(m.angle(m.tmin), m.angle(m.tmax))),
-                                static_cast<float>(m.full() ? 2.0 * std::numbers::pi : m.tmax - m.tmin));
-            data.draw_plots(polar_sheet(*s2, m), c.tr, c.frame);
-            data.clear_polar_clip();
+            // (θ, r) buffers kept across frames; the view is uniforms
+            // (polar_renderer.h). c.tr maps the unit disc.
+            if (const RenderSnapshotPolar* sp = fsnap.axes[i].snappolar())
+                data.polar().draw(*sp, c.polar->map, c.tr, c.frame);
             continue;
         }
         const auto& twins = fsnap.axes[i].twins;
@@ -128,6 +120,8 @@ void render_frame(RenderDevice& dev, DataRenderer& data,
         // In call order, as the SVG writer.
         data.draw_plots(*s2, c.tr, c.frame);
     }
+
+    data.polar().end_frame();
 
     // Pass 3 — NanoVG: borders, ticks, labels, texts, legend, colorbar, suptitle.
     dev.begin_nvg_frame(iw, ih, ratio);

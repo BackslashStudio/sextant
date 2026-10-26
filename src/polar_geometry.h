@@ -451,14 +451,13 @@ namespace sextant {
         return out;
     }
 
-    // A fill (identity scales: θ along it and r across, swapped for a
-    // Vertical one) as drawn: fill_triangles() and fill_outline() of each
-    // region through the functions above.
-    inline PolarArea polar_fill_area(const PolarMap& m, const FillPlot& f) {
-        PolarArea a;
+    // A fill's regions in (θ, r) (identity scales: θ along it and r across,
+    // swapped for a Vertical one): `part(tri, th, r)` per region, its
+    // fill_triangles() (six numbers each) and its fill_outline().
+    template <class F>
+    void polar_fill_parts(const FillPlot& f, F&& part) {
         const bool vert = f.vertical();
         std::vector<double> tri, th, rr;
-        const bool edged = f.opts.linewidth > 0.0f && f.opts.linestyle != LineStyle::None;
         for (const FillRun& run: fill_runs(f, AxisScale{}, AxisScale{})) {
             tri.clear();
             const auto corner = [&](double rc, double v) {
@@ -470,32 +469,46 @@ namespace sextant {
                 corner(r1, v1);
                 corner(r2, v2);
             });
-            polar_area_tris(m, tri, a.tris);
             th.clear();
             rr.clear();
             fill_outline(run, [&](double rc, double v) {
                 th.push_back(vert ? v : rc);
                 rr.push_back(vert ? rc : v);
             });
+            part(tri, th, rr);
+        }
+    }
+
+    // A fill as drawn: each region's polar_fill_parts() through the
+    // functions above.
+    inline PolarArea polar_fill_area(const PolarMap& m, const FillPlot& f) {
+        PolarArea a;
+        const bool edged = f.opts.linewidth > 0.0f && f.opts.linestyle != LineStyle::None;
+        polar_fill_parts(f, [&](const std::vector<double>& tri, const std::vector<double>& th,
+                                const std::vector<double>& rr) {
+            polar_area_tris(m, tri, a.tris);
             PolarArea::Path ring = polar_area_ring(m, th, rr);
             if (!ring.x.empty()) a.rings.push_back(std::move(ring));
             if (edged) {
                 PolarArea::Path st = polar_area_stroke(m, th, rr);
                 if (!st.x.empty()) a.strokes.push_back(std::move(st));
             }
-        }
+        });
         return a;
     }
 
-    // A polygon in (θ, r) as drawn: ear-clipped in (θ, r), where its edges
-    // are straight (consecutive repeats and a closing repeat dropped, as
-    // poly_geometry() drops them).
-    inline PolarArea polar_poly_area(const PolarMap& m, const PolyPlot& p) {
-        PolarArea a;
-        std::vector<double> th, rr;
+    // A polygon's outline (θ, r) and its triangles (six numbers each),
+    // ear-clipped in (θ, r): consecutive repeats and a closing repeat
+    // dropped, as poly_geometry() drops them. False (nothing) for a
+    // non-finite vertex or fewer than three left.
+    inline bool polar_poly_parts(const PolyPlot& p, std::vector<double>& th, std::vector<double>& rr,
+                                 std::vector<double>& tri) {
+        th.clear();
+        rr.clear();
+        tri.clear();
         const std::size_t n = std::min(p.x.size(), p.y.size());
         for (std::size_t i = 0; i < n; ++i) {
-            if (!std::isfinite(p.x[i]) || !std::isfinite(p.y[i])) return a;
+            if (!std::isfinite(p.x[i]) || !std::isfinite(p.y[i])) return false;
             if (!th.empty() && th.back() == p.x[i] && rr.back() == p.y[i]) continue;
             th.push_back(p.x[i]);
             rr.push_back(p.y[i]);
@@ -504,17 +517,25 @@ namespace sextant {
             th.pop_back();
             rr.pop_back();
         }
-        if (th.size() < 3) return a;
+        if (th.size() < 3) return false;
         std::vector<ShapePt> pts;
         for (std::size_t i = 0; i < th.size(); ++i)
             pts.push_back({static_cast<float>(th[i]), static_cast<float>(rr[i])});
         std::vector<std::uint32_t> idx;
         shape_detail::ear_clip(pts, idx);
-        std::vector<double> tri;
         for (std::uint32_t k: idx) {
             tri.push_back(th[k]);
             tri.push_back(rr[k]);
         }
+        return true;
+    }
+
+    // A polygon in (θ, r) as drawn: polar_poly_parts(), where its edges are
+    // straight, through the functions above.
+    inline PolarArea polar_poly_area(const PolarMap& m, const PolyPlot& p) {
+        PolarArea a;
+        std::vector<double> th, rr, tri;
+        if (!polar_poly_parts(p, th, rr, tri)) return a;
         polar_area_tris(m, tri, a.tris);
         PolarArea::Path ring = polar_area_ring(m, th, rr);
         if (!ring.x.empty()) a.rings.push_back(std::move(ring));
@@ -523,6 +544,162 @@ namespace sextant {
             if (!st.x.empty()) a.strokes.push_back(std::move(st));
         }
         return a;
+    }
+
+    // -------------------------------------------------------------------------
+    // Data-space geometry (PolarRenderer): no view in it, so it is built once
+    // per data change; the GPU maps (θ, r) to pixels and clips per pixel.
+    // -------------------------------------------------------------------------
+
+    // One unbroken stroke in (θ, r): `closed` joins its last point to its first.
+    struct PolarStroke {
+        std::vector<double> t, r;
+        bool closed = false;
+    };
+
+    // Most chords one segment or strip is cut into (a θ span of ~1000 turns).
+    inline constexpr int kPolarMaxChords = 1 << 18;
+
+    inline int polar_chords(double span) {
+        const double k = std::ceil(std::fabs(span) / kPolarChord - 1e-9);
+        return k < 1.0 ? 1 : k > kPolarMaxChords ? kPolarMaxChords : static_cast<int>(k);
+    }
+
+    // A line's points (θ, r) as strokes: steps applied in (θ, r), the closing
+    // segment added for `loop`, each segment cut into chords at most
+    // kPolarChord apart in θ, a non-finite point breaking it (as
+    // polar_polyline() without the frame). Exact repeats are dropped. A loop
+    // never broken is one closed stroke; a broken one's last stroke runs on
+    // into its first.
+    inline void polar_line_strokes(const double* th, const double* r, std::size_t n, DrawStyle ds, bool loop,
+                                   std::vector<PolarStroke>& out) {
+        out.clear();
+        StrokePath sp;
+        sp.build(th, r, n, ds, loop);
+        const std::size_t segs = sp.segment_count();
+        PolarStroke cur;
+        bool broken = false, first_ok = false, last_ok = false;
+        const auto put = [&](double t, double rr) {
+            if (!cur.t.empty() && cur.t.back() == t && cur.r.back() == rr) return;
+            cur.t.push_back(t);
+            cur.r.push_back(rr);
+        };
+        const auto flush = [&] {
+            if (cur.t.size() >= 2) out.push_back(std::move(cur));
+            cur = PolarStroke{};
+        };
+        for (std::size_t s = 0; s < segs; ++s) {
+            const std::size_t i = s, j = (s + 1 == sp.n) ? 0 : s + 1;
+            const double t0 = sp.x[i], r0 = sp.y[i], t1 = sp.x[j], r1 = sp.y[j];
+            const bool ok = std::isfinite(t0) && std::isfinite(r0) && std::isfinite(t1) && std::isfinite(r1);
+            if (s == 0) first_ok = ok;
+            if (s + 1 == segs) last_ok = ok;
+            if (!ok) {
+                broken = true;
+                flush();
+                continue;
+            }
+            const int k = polar_chords(t1 - t0);
+            for (int q = cur.t.empty() ? 0 : 1; q <= k; ++q)
+                put(t0 + (t1 - t0) * q / k, r0 + (r1 - r0) * q / k);
+            // A segment ending where it starts (k == 1, a repeat) adds nothing.
+        }
+        flush();
+        if (!loop || out.empty()) return;
+        if (!broken) {
+            PolarStroke& c = out.front();
+            if (c.t.size() >= 3 && c.t.back() == c.t.front() && c.r.back() == c.r.front()) {
+                c.t.pop_back();
+                c.r.pop_back();
+                c.closed = true;
+            }
+        } else if (first_ok && last_ok && out.size() >= 2) {
+            // The last stroke ends at point 0, where the first begins.
+            PolarStroke& a = out.back();
+            const PolarStroke& b = out.front();
+            for (std::size_t q = 1; q < b.t.size(); ++q) {
+                a.t.push_back(b.t[q]);
+                a.r.push_back(b.r[q]);
+            }
+            out.front() = std::move(out.back());
+            out.pop_back();
+        }
+    }
+
+    // Triangles in (θ, r), six numbers each, cut into strips at most
+    // kPolarChord wide in θ, each strip fanned, appended to `out` (θ, r per
+    // corner): polar_area_tris() without the frame.
+    inline void polar_area_strips(const std::vector<double>& tris, std::vector<double>& out) {
+        using namespace polar_detail;
+        std::vector<ThetaR> poly, strip, tmp;
+        const auto put = [&](const ThetaR& q) {
+            out.push_back(q.t);
+            out.push_back(q.r);
+        };
+        for (std::size_t i = 0; i + 6 <= tris.size(); i += 6) {
+            poly = {{tris[i], tris[i + 1]}, {tris[i + 2], tris[i + 3]}, {tris[i + 4], tris[i + 5]}};
+            if (!finite_all(poly)) continue;
+            double tlo = poly[0].t, thi = tlo;
+            for (const ThetaR& q: poly) {
+                tlo = std::min(tlo, q.t);
+                thi = std::max(thi, q.t);
+            }
+            const int k = polar_chords(thi - tlo);
+            for (int s = 0; s < k; ++s) {
+                strip = poly;
+                if (k > 1) {
+                    if (s > 0) clip_half(strip, 0, tlo + (thi - tlo) * s / k, 1.0, tmp);
+                    if (s + 1 < k) clip_half(strip, 0, tlo + (thi - tlo) * (s + 1) / k, -1.0, tmp);
+                }
+                for (std::size_t j = 1; j + 1 < strip.size(); ++j) {
+                    put(strip[0]);
+                    put(strip[j]);
+                    put(strip[j + 1]);
+                }
+            }
+        }
+    }
+
+    // One bar, unclipped: the ring sector from `base` to `tip` across
+    // min(width, 2π) about `centre`, as strips at most kPolarChord wide
+    // appended to `tris` ((θ, r) per corner), and its outline appended to
+    // `edges` (two circles for a full turn).
+    inline void polar_bar_parts(double centre, double width, double base, double tip, std::vector<double>& tris,
+                                std::vector<PolarStroke>& edges) {
+        if (!std::isfinite(centre) || !std::isfinite(width) || !std::isfinite(base) || !std::isfinite(tip)) return;
+        const double w = std::min(std::fabs(width), 2.0 * std::numbers::pi);
+        if (!(w > 0.0) || base == tip) return;
+        const double t0 = centre - w / 2;
+        const int k = polar_chords(w);
+        const auto at = [&](int q) { return t0 + w * q / k; };
+        for (int q = 0; q < k; ++q) {
+            const double a = at(q), b = at(q + 1);
+            for (const double v: {a, base, b, base, b, tip, a, base, b, tip, a, tip}) tris.push_back(v);
+        }
+        const bool full = w >= 2.0 * std::numbers::pi * (1.0 - 1e-12);
+        if (full) {
+            for (const double rr: {base, tip}) {
+                PolarStroke c;
+                c.closed = true;
+                for (int q = 0; q < k; ++q) {
+                    c.t.push_back(at(q));
+                    c.r.push_back(rr);
+                }
+                edges.push_back(std::move(c));
+            }
+            return;
+        }
+        PolarStroke c;
+        c.closed = true;
+        for (int q = 0; q <= k; ++q) {
+            c.t.push_back(at(q));
+            c.r.push_back(base);
+        }
+        for (int q = k; q >= 0; --q) {
+            c.t.push_back(at(q));
+            c.r.push_back(tip);
+        }
+        edges.push_back(std::move(c));
     }
 
     // The texts as the 2D text pass places them: a Data text's (θ, r) and an

@@ -52,5 +52,8 @@ namespace sextant {
     private:
         DataRenderer data_;
         PlotFbo      fbo_; // sized on the first draw()
+        // A polar drag held last frame: its edit draws this frame, so the
+        // polar dashes keep their lengths until the release (PolarRenderer).
+        bool polar_drag_ = false;
     };
 } // namespace sextant

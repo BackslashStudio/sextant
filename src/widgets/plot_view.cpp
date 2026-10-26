@@ -119,7 +119,9 @@ PlotViewInfo PlotView::draw(FigureContext& fig, RenderDevice& dev, PlotViewState
     // What is drawn, for hit-testing: the cells render_frame() lays out.
     const std::vector<AxesLayout> layout = axes_layouts(fl);
     plot_fbo.bind();
+    data.polar().set_nav_active(polar_drag_);
     render_frame(dev, data, fsnap, render_w, render_h, pixel_ratio, nullptr, &fl);
+    data.polar().set_nav_active(false);
     plot_fbo.unbind();
 
     // What only a drawn frame knows, for the other components: the live size,
@@ -308,6 +310,7 @@ PlotViewInfo PlotView::draw(FigureContext& fig, RenderDevice& dev, PlotViewState
     NavInput nav_in;
     nav_in.slot = fig.selection.slot;
     nav_in.time = ImGui::GetTime();
+    polar_drag_ = false;
 
     if (pv.navigate_enabled) {
         // Pulled here, after any selection change above: a drag starts from the
@@ -403,6 +406,7 @@ PlotViewInfo PlotView::draw(FigureContext& fig, RenderDevice& dev, PlotViewState
             nav_in.drag = gate.drag || gate.box;
             nav_in.moved = nav_in.drag && moved;
             nav_in.wheel = gate.wheel && io.MouseWheel != 0.0f;
+            polar_drag_ = nav_in.drag;
             if (gate.drag && moved && radius > 0.0f) {
                 const float x1 = (io.MousePos.x - image_pos.x) * to_plot;
                 const float y1 = (io.MousePos.y - image_pos.y) * to_plot;

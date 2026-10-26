@@ -849,7 +849,7 @@ static void emit_axspan(std::ostringstream& o, const SvgAxesData& d, const AxSpa
 // A fill as one <polygon> per region (fill_geometry.h, as the raster path),
 // its outline the polygon's stroke. A region whose curves cross pinches
 // there; the nonzero rule fills both lobes, as the raster's triangles do.
-// A polar fill or polygon (polar_sheet()), as draw_polar_area(): one <path> of
+// A polar fill or polygon (polar_sheet(), SVG only): one <path> of
 // its clipped rings under the nonzero rule, then its edge strokes, each piece
 // cut at NaN, an uncut closed one a loop, cut at the joints the raster bevels.
 static void emit_polar_area(std::ostringstream& o, const SvgAxesData& d, const FillPlot& p) {
