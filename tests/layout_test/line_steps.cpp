@@ -274,6 +274,25 @@ namespace lt {
             check(on > 0 && off > 0, "steps rendered: a dashed step line is dashed along its runs");
         }
 
+        // NaN: SVG has no break in a polyline, so a line is cut into one
+        // element per finite run, and no `nan` reaches the file.
+        for (DrawStyle ds: modes) {
+            const double nan = std::numeric_limits<double>::quiet_NaN();
+            LinePlot lp = stairs(ds);
+            lp.x = std::vector<double>{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0};
+            lp.y = std::vector<double>{1.0, 3.0, nan, 4.0, 6.0, 5.0, 2.0};
+            const std::string base = "line_steps_nan_" + std::string(enum_name(ds));
+            export_figure_svg(one_axes(lp), base + ".svg", W, H);
+            const std::string svg = read_file(base + ".svg");
+            std::size_t runs = 0;
+            for (std::size_t p = svg.find("<polyline "); p != std::string::npos;
+                 p = svg.find("<polyline ", p + 1))
+                ++runs;
+            check(svg.find("nan") == std::string::npos && runs == 2,
+                  "steps rendered: a NaN cuts the SVG line into two polylines, none with nan (" +
+                  base + ", " + std::to_string(runs) + " polylines)");
+        }
+
         // A plane strokes the same expansion.
         {
             auto plane_segs = [](DrawStyle ds, bool loop) {

@@ -348,16 +348,14 @@ static void emit_beveled_stroke(std::ostringstream& o, const PixelPath& p,
     if (opacity < 1.0f) o << "  </g>\n";
 }
 
-static void emit_lines(std::ostringstream& o, const SvgAxesData& d,
-                       std::span<const std::size_t> which) {
-    for (const std::size_t k : which) {
-        const auto& lp = d.lines[k];
-        if (lp.x.empty() || lp.opts.linestyle == LineStyle::None) continue;
-
+// One run of points (finite ones only) of `lp` as a stroke.
+static void emit_line_run(std::ostringstream& o, const SvgAxesData& d, const LinePlot& lp,
+                          const double* xs, const double* ys, std::size_t count, bool loop) {
+    {
         PixelPath path;
-        path.loop = lp.opts.loop && lp.x.size() >= 2;
+        path.loop = loop && count >= 2;
         StrokePath sp;
-        sp.build(lp.x.data(), lp.y.data(), lp.x.size(), lp.opts.drawstyle, lp.opts.loop);
+        sp.build(xs, ys, count, lp.opts.drawstyle, loop);
         for (std::size_t i = 0; i < sp.n; ++i) {
             path.x.push_back(d.layout.tr.to_px(sp.x[i]));
             path.y.push_back(d.layout.tr.to_py(sp.y[i]));
@@ -372,7 +370,7 @@ static void emit_lines(std::ostringstream& o, const SvgAxesData& d,
         if (!bevels.empty()) {
             emit_beveled_stroke(o, path, bevels, rgb(*lp.opts.color), a, lp.opts.linewidth,
                                 lp.opts.linestyle);
-            continue;
+            return;
         }
         // A closed path is a <polygon> (fill="none") so the seam gets a join;
         // SVG's default miterlimit 4 matches the stroke shader.
@@ -380,6 +378,34 @@ static void emit_lines(std::ostringstream& o, const SvgAxesData& d,
           << dash_attr(lp.opts.linestyle) << " points=\"";
         for (std::size_t i = 0; i < path.x.size(); ++i) o << path.x[i] << "," << path.y[i] << " ";
         o << "\"/>\n";
+    }
+}
+
+// SVG has no break in a polyline: a line is cut at each non-finite point into
+// runs, one stroke each (as the raster breaks it). A cut line is no longer
+// closed.
+static void emit_lines(std::ostringstream& o, const SvgAxesData& d,
+                       std::span<const std::size_t> which) {
+    for (const std::size_t k : which) {
+        const auto& lp = d.lines[k];
+        if (lp.x.empty() || lp.opts.linestyle == LineStyle::None) continue;
+        const double* x = lp.x.data();
+        const double* y = lp.y.data();
+        const std::size_t n = lp.x.size();
+        const auto good = [&](std::size_t i) { return std::isfinite(x[i]) && std::isfinite(y[i]); };
+        std::size_t a = 0;
+        while (a < n && good(a)) ++a;
+        if (a == n) {  // no gap: the whole line
+            emit_line_run(o, d, lp, x, y, n, lp.opts.loop);
+            continue;
+        }
+        for (a = 0; a < n;) {
+            while (a < n && !good(a)) ++a;
+            std::size_t b = a;
+            while (b < n && good(b)) ++b;
+            if (b - a >= 2) emit_line_run(o, d, lp, x + a, y + a, b - a, false);
+            a = b;
+        }
     }
 }
 
