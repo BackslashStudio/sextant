@@ -8,6 +8,7 @@
 #include "../shape_geometry.h"
 #include <glad/glad.h>
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -172,7 +173,10 @@ void place() {
             return lo <= hi ? 0.5 * (lo + hi) : 0.0;
         }
 
+        std::atomic<unsigned long long> g_uploads{0};
+
         void upload(unsigned int& vbo, const void* data, std::size_t bytes) {
+            ++g_uploads;
             if (vbo == 0) glGenBuffers(1, &vbo);
             glBindBuffer(GL_ARRAY_BUFFER, vbo);
             glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(bytes), data, GL_STATIC_DRAW);
@@ -217,6 +221,8 @@ void place() {
         u.marker = loc("uMarker");
         return u;
     }
+
+    unsigned long long PolarRenderer::uploads() { return g_uploads.load(); }
 
     PolarRenderer::PolarRenderer() {
         const std::string lv = expand_shader(k_lineseg_vert, "TO_PX", line_px().c_str());

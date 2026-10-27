@@ -318,9 +318,8 @@ PolarAxes& PolarAxes::cla() {
     *cycle = ColorCycle{};
     d->sheet.cycle = std::move(cycle);
     d->id = id;
-    // Fresh stamps, so a panel edit made before it doesn't land.
-    const auto g = next_snapshot_generation();
-    d->stamps = {g, g};
+    // Stamps back to 0 (Impl{}), as Axes::cla(): a panel edit of the view or
+    // style made before it still lands; a setter called after it is newer.
     return *this;
 }
 

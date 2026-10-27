@@ -622,6 +622,9 @@ namespace lt {
     // polar_area.cpp
     void test_polar_area();
 
+    // polar_gpu.cpp
+    void test_polar_gpu();
+
     // edge_markers.cpp
     void test_edge_markers();
     void test_marker_shapes();

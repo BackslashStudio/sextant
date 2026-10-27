@@ -31,6 +31,10 @@ public:
     // (exports and headless draws are always exact).
     void set_nav_active(bool active) { nav_active_ = active; }
 
+    // Buffer uploads made so far by every PolarRenderer (a diagnostic: tests
+    // check that a turn, zoom or resize uploads nothing).
+    static unsigned long long uploads();
+
     // A polar cell's objects in draw_order(), mapped by `m` into the frame
     // whose unit disc `tr` maps (PolarPlan's), scissored to `pr`.
     void draw(const RenderSnapshotPolar& snap, const PolarMap& m, const CoordTransform& tr, const PlotRect& pr);

@@ -1181,6 +1181,71 @@ namespace {
         }
         std::printf("  resident memory   : %.1f MB\n", resident_mb());
     }
+    // ---------------------------------------------------------------------------
+    // Polar axes: live frames, still and while the axes turn
+    // ---------------------------------------------------------------------------
+    void bench_polar() {
+        std::printf("\n=== Polar: live render, still and turning ===\n");
+        std::printf("Each frame of 'turning' follows a set_theta_offset() from another thread;\n");
+        std::printf("the buffers stay on the GPU, so it should cost what 'still' costs.\n");
+        std::printf("Compare builds (e.g. P1's CPU tessellation vs the shaders) on this table.\n\n");
+        std::printf("%-26s %10s %10s %10s\n", "scene", "frame ms", "cpu ms", "FPS");
+        std::printf("%-26s %10s %10s %10s\n", "--------------------------", "----------", "----------",
+                    "----------");
+
+        struct Scene {
+            const char* name;
+            std::size_t lines, markers;
+            bool dashed, turning;
+        };
+        const Scene scenes[] = {
+            {"line 1e5", 100000, 0, false, false},
+            {"line 1e5, turning", 100000, 0, false, true},
+            {"dashed line 1e5, turning", 100000, 0, true, true},
+            {"markers 1e4", 0, 10000, false, false},
+            {"markers 1e4, turning", 0, 10000, false, true},
+            {"both, turning", 100000, 10000, false, true},
+        };
+        for (const Scene& sc: scenes) {
+            auto fig = sextant::Figure::create(perf_opts("perf polar", 1));
+            auto pa = fig->add_subplot_polar(1, 1, 1);
+            const auto make = [](std::size_t n) {
+                std::vector<double> th(n), r(n);
+                for (std::size_t i = 0; i < n; ++i) {
+                    th[i] = static_cast<double>(i) * 0.002;
+                    r[i] = 1.0 + 0.4 * std::sin(th[i] * 0.31) + 0.0001 * static_cast<double>(i % 97);
+                }
+                return std::pair{th, r};
+            };
+            if (sc.lines) {
+                const auto [th, r] = make(sc.lines);
+                sextant::LineOptions lo;
+                if (sc.dashed) lo.linestyle = sextant::LineStyle::Dashed;
+                pa->plot(th, r, lo);
+            }
+            if (sc.markers) {
+                const auto [th, r] = make(sc.markers);
+                sextant::ScatterOptions so;
+                so.size = 6.0f;
+                pa->scatter(th, r, so);
+            }
+            std::atomic<bool> stop{false};
+            std::thread turner;
+            if (sc.turning) {
+                turner = std::thread([&] {
+                    double a = 0.0;
+                    while (!stop.load()) {
+                        pa->set_theta_offset(a += 1.5);
+                        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+                    }
+                });
+            }
+            const RenderSample r = sample_render(fig);
+            stop = true;
+            if (turner.joinable()) turner.join();
+            std::printf("%-26s %10.2f %10.2f %10.1f\n", sc.name, r.frame_ms, r.cpu_ms, r.fps);
+        }
+    }
 } // namespace
 
 int main(int argc, char** argv) {
@@ -1196,7 +1261,7 @@ int main(int argc, char** argv) {
     } else {
         which = prompt_choice(
             "Which test?",
-            {"all", "ingest", "snapshot", "render", "export", "peel", "svg3d", "edit", "interactive"},
+            {"all", "ingest", "snapshot", "render", "export", "peel", "svg3d", "polar", "edit", "interactive"},
             "all");
         std::printf("\n");
     }
@@ -1211,14 +1276,15 @@ int main(int argc, char** argv) {
     if (all || which == "export") bench_export_live();
     if (all || which == "peel") bench_peel();
     if (all || which == "svg3d") bench_newell();
+    if (all || which == "polar") bench_polar();
     if (which == "edit") bench_edit();
     if (which == "interactive") bench_interactive();
 
     if (!all && which != "ingest" && which != "snapshot" && which != "render"
-        && which != "export" && which != "peel" && which != "svg3d"
+        && which != "export" && which != "peel" && which != "svg3d" && which != "polar"
         && which != "edit" && which != "interactive") {
         std::printf("unknown test '%s'\n", which.c_str());
-        std::printf("usage: sextant_perf_test [all|ingest|snapshot|render|export|peel|svg3d|edit|interactive]\n");
+        std::printf("usage: sextant_perf_test [all|ingest|snapshot|render|export|peel|svg3d|polar|edit|interactive]\n");
         return 1;
     }
 

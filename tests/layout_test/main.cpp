@@ -315,6 +315,9 @@ int main() {
     // polar_area.cpp
     test_polar_area();
 
+    // polar_gpu.cpp
+    test_polar_gpu();
+
     // edge_markers.cpp
     test_edge_markers();
     test_marker_shapes();

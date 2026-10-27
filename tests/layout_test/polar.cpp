@@ -358,20 +358,34 @@ namespace lt {
             check(near(pa->theta_offset(), 60) && near(drawn()->view.theta_offset, 60),
                   "figure: a newer set_theta_offset() wins over an older edit");
 
-            // cla(): defaults, and a panel edit drawn before it doesn't land.
+            // cla(): defaults, and, as on a 2D Axes, a panel edit drawn before it lands.
             FigureEdits stale;
             AxesEdit se;
             PolarStyle ss = drawn()->style;
             ss.rlabel_position = 80;
             se.polar_style = ss;
+            PolarView sv = drawn()->view;
+            sv.theta_offset = 45;
+            se.polar_view = sv;
             se.polar_seen = drawn()->stamps;
             pa->set_rlim(2, 5).set_thetalim(0, 180).set_rtick_format("%.2f");
             pa->cla();
+            check(near(pa->theta_offset(), 0) && near(pa->rlabel_position(), 22.5),
+                  "figure: cla() resets the view");
             stale.per_axes.push_back({key, se});
             fi.apply_edits(stale);
             fi.apply_edits_and_publish();
-            check(drawn()->view == PolarView{} && default_style(drawn()->style) && near(pa->rlabel_position(), 22.5),
-                  "figure: cla() resets view and style, and an older edit is skipped");
+            check(near(pa->theta_offset(), 45) && near(pa->rlabel_position(), 80)
+                      && near(drawn()->view.theta_offset, 45) && near(drawn()->style.rlabel_position, 80),
+                  "figure: an edit drawn before cla() lands, as on a 2D Axes");
+
+            // ... and a setter called after cla() wins over one.
+            pa->cla();
+            pa->set_theta_offset(10);
+            fi.apply_edits(stale);
+            fi.apply_edits_and_publish();
+            check(near(pa->theta_offset(), 10) && near(pa->rlabel_position(), 80),
+                  "figure: a setter after cla() wins over an older view edit (the style edit still lands)");
         }
 
         void hover_pick_events() {
