@@ -417,9 +417,7 @@ PlotViewInfo PlotView::draw(FigureContext& fig, RenderDevice& dev, PlotViewState
                 if (da > 180.0) da -= 360.0;
                 if (da < -180.0) da += 360.0;
                 edit_box.update(cur->slot.index, [&](AxesEdit& e) {
-                    PolarView v = e.polar_view.value_or(selp->view);
-                    v.theta_offset = std::fmod(selp->view.theta_offset + da, 360.0);
-                    e.polar_view = v;
+                    e.polar_view = polar_pan(e.polar_view.value_or(selp->view), da);
                 });
             }
             if (gate.box && moved && radius > 0.0f) {

@@ -144,6 +144,22 @@ namespace sextant {
 
     inline PolarMap polar_map(const RenderSnapshotPolar& s) { return polar_map(s.view, polar_rlim(s)); }
 
+    // A drag by `delta` degrees: the data turns by it. On a sector the frame
+    // stays put, so the limits slide the other way (the screen angles of both
+    // ends are unchanged); thetamin is kept in [-180, 180) by whole turns,
+    // thetamax = thetamin + the width. A full circle only turns.
+    inline PolarView polar_pan(PolarView v, double delta) {
+        v.theta_offset = std::fmod(v.theta_offset + delta, 360.0);
+        if (v.thetamax - v.thetamin < 360.0 * (1.0 - 1e-12)) {
+            const double width = v.thetamax - v.thetamin;
+            double lo = v.thetamin - (v.direction < 0 ? -1.0 : 1.0) * delta;
+            lo = std::fmod(std::fmod(lo + 180.0, 360.0) + 360.0, 360.0) - 180.0;
+            v.thetamin = lo;
+            v.thetamax = lo + width;
+        }
+        return v;
+    }
+
     // The frame's box in unit space: the disc's, or the sector's (its arc's
     // ends, the compass points it passes and the centre).
     inline PolarBox polar_box(const PolarMap& m) {

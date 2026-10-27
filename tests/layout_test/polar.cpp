@@ -479,6 +479,47 @@ namespace lt {
             apply();
             check(view().rauto, "history: Home restores auto r");
         }
+        // The screen angle (degrees, mod 360) of θ = `t` under a view.
+        double screen_deg(const PolarView& v, double t) {
+            return std::fmod(std::fmod(v.theta_offset + (v.direction < 0 ? -1.0 : 1.0) * t, 360.0) + 360.0, 360.0);
+        }
+        bool same_angle(double a, double b) {
+            const double d = std::fmod(std::fmod(a - b, 360.0) + 360.0, 360.0);
+            return d < 1e-9 || 360.0 - d < 1e-9;
+        }
+
+        void pan_rule() {
+            PolarView full;
+            const PolarView f2 = polar_pan(full, 30);
+            check(near(f2.theta_offset, 30) && near(f2.thetamin, 0) && near(f2.thetamax, 360),
+                  "pan: a full circle only turns");
+            for (const int dir: {1, -1}) {
+                PolarView v;
+                v.direction = dir;
+                v.thetamin = -90;
+                v.thetamax = 90;
+                v.theta_offset = 90;
+                bool ok = true, data = true;
+                PolarView w = v;
+                for (const double d: {20.0, -35.0, 170.0, 170.0, 170.0, -100.0}) {
+                    const PolarView n = polar_pan(w, d);
+                    ok &= same_angle(screen_deg(n, n.thetamin), screen_deg(v, v.thetamin))
+                          && same_angle(screen_deg(n, n.thetamax), screen_deg(v, v.thetamax))
+                          && near(n.thetamax - n.thetamin, 180.0) && n.thetamin >= -180.0 && n.thetamin < 180.0;
+                    // A data point moves by the drag.
+                    data &= same_angle(screen_deg(n, 40) - screen_deg(w, 40), d);
+                    w = n;
+                }
+                check(ok, dir > 0 ? "pan: a sector's frame stays put (counterclockwise)"
+                                  : "pan: a sector's frame stays put (clockwise)");
+                check(data, "pan: the data turns by the drag");
+                const PolarView once = polar_pan(v, 25);
+                const PolarView twice = polar_pan(polar_pan(v, 10), 15);
+                check(same_angle(once.theta_offset, twice.theta_offset) && same_angle(once.thetamin, twice.thetamin),
+                      "pan: small drags add up to a big one");
+            }
+        }
+
     } // namespace
 
     void test_polar() {
@@ -491,5 +532,6 @@ namespace lt {
         figure_edits();
         hover_pick_events();
         navigation_history();
+        pan_rule();
     }
 } // namespace lt
