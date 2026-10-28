@@ -16,10 +16,12 @@ own page, **[3d.md](3d.md)**; every option struct and enum is tabulated in
 - [The model](#the-model)
 - [2D plot types](#2d-plot-types): [line](#line) · [scatter](#scatter) ·
   [scatter_z](#scatter_z) · [bar](#bar) · [hist](#hist) · [heatmap and imshow](#heatmap-and-imshow) ·
-  [fill](#fill) · [stack](#stack) · [quiver](#quiver) · [axline and axspan](#axline-and-axspan)
+  [imshow_rgb](#imshow_rgb) · [heatmap_rec](#heatmap_rec) · [heatmap_tri](#heatmap_tri) · [hist2d](#hist2d) ·
+  [fill](#fill) · [stack](#stack) · [quiver](#quiver) · [axline and axspan](#axline-and-axspan) ·
+  [shapes](#shapes) · [pie](#pie)
 - [Error bars](#error-bars)
-- [Contours](#contours)
-- [Colormaps](#colormaps)
+- [Contours](#contours): [on a heatmap](#contour-lines-on-a-heatmap) · [contour and contourf](#contour-and-contourf)
+- [Colormaps](#colormaps): [colour norms](#colour-norms)
 - [Titles, legends, colorbars and ticks](#titles-legends-colorbars-and-ticks)
 - [Scales, shared and twin axes](#scales-shared-and-twin-axes): [log and symlog](#log-and-symlog-axes) ·
   [tick formats and minor ticks](#tick-formats-and-minor-ticks) · [shared axes](#shared-axes) ·
@@ -27,12 +29,14 @@ own page, **[3d.md](3d.md)**; every option struct and enum is tabulated in
 - [Styling](#styling)
 - [Layout](#layout): [subplots and spans](#subplots-and-spans) · [a 3D cell](#a-3d-cell-in-the-same-grid) ·
   [sizing a figure](#sizing-a-figure)
+- [Polar axes](#polar-axes)
 - [Saving and exporting](#saving-and-exporting)
 - [The interactive window](#the-interactive-window)
 - [Text and annotations](#text-and-annotations)
 - [Math in text](#math-in-text)
 - [Events and picking](#events-and-picking)
 - [Live updates and threads](#live-updates-and-threads)
+- [Objects and ids](#objects-and-ids)
 - [Reading back](#reading-back)
 - [Errors](#errors)
 - [Linking](#linking)
@@ -95,8 +99,16 @@ ax->set_color_cycle({sextant::Color::from_hex(0x264653), sextant::Color::from_he
 
 **Objects draw in the order you plotted them**, whatever their kinds: a heatmap
 plotted after a line covers it, and a `scatter_z` plotted before a `scatter` is
-under it. The legend and the colorbars list series in the same order, and hover
-answers for whichever is on top.
+under it. Every 2D kind's options take a **`zorder`** (default 0) to change that:
+objects draw in ascending `zorder`, equal ones in call order. The window, PNG, SVG,
+planes, twinned axes and the hover hint all follow it; the legend and the colorbars
+list series in call order. `set_zorder(id, z)` and `zorder(id)` change and read it
+later (see [objects and ids](#objects-and-ids)).
+
+```cpp
+ax->heatmap(field, rows, cols, {0.0, 1.0}, {0.0, 1.0});
+ax->line(x, y, {.zorder = -1.0});   // under the heatmap, though plotted after it
+```
 
 **Any object can be hidden** without removing it: `visible = false` in its options,
 or later `set_<kind>_visible(i, bool)` / `<kind>_visible(i)` on `Axes`, `Plane2D` and
@@ -169,14 +181,19 @@ and `scatter3d` take it too, and `ScatterData::sizes` reads and sets it.
 
 **Outlines and hollow markers.** `edge_linewidth` (pixels, 0 by default) draws an
 outline inside the marker, so `size` stays its full diameter. `edgecolor` sets its
-colour (unset: the marker's own) and `edge_alpha` its opacity, independent of
-`alpha`. With `alpha = 0` only the outline is drawn: a hollow marker. Every shape
-takes one, `Cross` and `Plus` included. `scatter_z` and `scatter3d` have the same
-fields.
+colour (unset: the marker's own). `filled = false` leaves the fill out: a hollow
+marker. Every shape takes an outline, `Cross` and `Plus` included. `scatter_z` and
+`scatter3d` have the same fields.
+
+**One alpha rule.** Every part of an object (fill, outline, error bars) is drawn at
+its own colour's alpha times the object's `alpha`, in the window, PNG and SVG. So
+`alpha` fades an outline along with its fill; for a faint fill with a solid outline,
+put the alpha in `color` and leave `alpha` at 1. Bars, fills, spans, shapes,
+`bar3d` and surface wireframes follow the same rule.
 
 ```cpp
 ax->scatter(px, py, {.color = sextant::Color::Orange, .size = 16.0f,
-                     .alpha = 0.0f, .edge_linewidth = 2.0f});        // hollow
+                     .filled = false, .edge_linewidth = 2.0f});      // hollow
 ```
 
 ![filled, outlined, hollow and translucent markers](images/docs/markers.png)
@@ -313,8 +330,124 @@ change either way.
 Hovering a cell reports its **row and column** and value, which under a real
 extent are deliberately not the numbers on the axes.
 
-A heatmap keeps linear axes: plotting one on a log or symlog axis, or switching an
-axes that holds one to such a scale, throws.
+On a **log or symlog axis** each cell is placed through the scale, so cells that
+are even in data are uneven on screen ([`heatmap_rec`](#heatmap_rec) with log-spaced
+edges gives even ones). On a log axis the part of a cell at or below 0 is not drawn,
+and the automatic limits cover the cells that can be drawn.
+
+A **NaN** cell is empty (transparent) in the window, PNG, SVG and on planes;
+contours leave out the squares that touch it, and hover says "no value".
+
+### imshow_rgb
+
+```cpp
+Axes& imshow_rgb(std::span<const double> data, int rows, int cols, int channels,
+                 ImageOptions opts = {});
+Axes& imshow_rgb(std::span<const std::uint8_t> data, int rows, int cols, int channels,
+                 ImageOptions opts = {});
+```
+
+```cpp
+std::vector<std::uint8_t> rgba = load_png_somehow();   // rows * cols * 4 bytes
+ax->imshow_rgb(rgba, rows, cols, 4);                     // row 0 at the top, as a photo
+```
+
+An image whose pixels carry their own colour: row-major, `channels` (3 or 4) values
+per pixel, doubles in [0, 1] (clamped when drawn) or bytes 0..255. A NaN channel
+leaves its pixel empty. `ImageOptions` sets `xrange` / `yrange` (the pixel index by
+default), `origin` (`"upper"` by default, as matplotlib's `imshow`), `visible`,
+`zorder` and `hint_labels`.
+
+An image counts as a heatmap: `heatmap_count()`, `heatmap_data(i)` (with
+`HeatmapData::channels` 3 or 4), `set_heatmap_data(i, …)` (the channel count cannot
+change), visibility, `remove()` and picks work as for heatmaps. It has no colorbar
+and no contours; hover shows the pixel's colour. `Plane2D` has it too.
+
+### heatmap_rec
+
+Cells of any size, as matplotlib's `pcolormesh`:
+
+```cpp
+Axes& heatmap_rec(std::span<const double> data, int rows, int cols,
+                  std::span<const double> x_edges, std::span<const double> y_edges,
+                  HeatmapRecOptions opts = {});
+```
+
+```cpp
+std::vector<double> xe = {1, 10, 100, 1000}, ye = {0, 1, 3, 6};   // 3 x 3 cells
+ax->heatmap_rec(values, 3, 3, xe, ye, {.colorbar = true})
+   .set_xscale(sextant::Scale::Log);                                // even cells on screen
+```
+
+Column *j* spans `x_edges[j]..x_edges[j+1]` and row *i* `y_edges[i]..y_edges[i+1]`,
+so there are `cols + 1` and `rows + 1` edges, and row 0 is at the first y edge.
+Edges are finite and strictly increasing or decreasing; log-spaced edges give even
+cells on a log axis. `HeatmapRecOptions` is `HeatmapOptions` without `origin`:
+colormap, `vmin` / `vmax`, `norm`, colorbar, name, `visible`, `zorder`,
+`hint_labels` and the [contour fields](#contour-lines-on-a-heatmap), traced between
+cell centres.
+
+It counts as a heatmap: `heatmap_data(i)` returns its edges in
+`HeatmapData::x_edges` / `y_edges` (empty for the other kinds), and
+`set_heatmap_data(i, HeatmapData)` takes new ones; the span form of
+`set_heatmap_data()` throws for it. A wrong edge count, unordered or non-finite
+edges, or too little data throw `std::invalid_argument`. `Plane2D` has it too.
+
+### heatmap_tri
+
+Values on the vertices of a triangle mesh, as matplotlib's
+`tripcolor(shading="gouraud")`:
+
+```cpp
+Axes& heatmap_tri(std::span<const double> x, std::span<const double> y,
+                  std::span<const double> values, std::span<const std::uint32_t> tri,
+                  HeatmapTriOptions opts = {});
+Axes& heatmap_tri(std::span<const double> x, std::span<const double> y,
+                  std::span<const double> values, HeatmapTriOptions opts = {});   // Delaunay
+```
+
+```cpp
+ax->heatmap_tri(px, py, temperature, {.cmap = sextant::Colormap::Inferno,
+                                      .colorbar = true, .name = "°C"});
+```
+
+One value per vertex, interpolated across each triangle and coloured per pixel.
+`tri` holds three vertex indices per triangle; without it the points are
+triangulated once, at the call (Delaunay: a concave domain fills to its convex
+hull, so pass `tri` for one). Edges are straight on screen on any scale. A NaN value,
+or a vertex at or below 0 on a log axis, leaves out its triangles. Automatic limits
+are the vertices' extent, unpadded. `HeatmapTriOptions` has the colormap,
+`vmin` / `vmax`, `norm`, colorbar, name, `visible`, `zorder` and `hint_labels` (one
+per vertex: hover shows the interpolated value and the nearest vertex's label).
+
+It is a kind of its own: `heatmap_tri_count()`, `heatmap_tri_data(i)`
+(`HeatmapTriData`), `set_heatmap_tri_data(i, …)` with or without new triangles,
+`set_heatmap_tri_visible()` and `PickKind::HeatmapTri`. `heatmap_tri(x, y, values,
+{})` is ambiguous between the two forms: leave the options out or name a field.
+Mismatched lengths, fewer than 3 vertices, non-finite x or y, an index past the last
+vertex or an index count that is not a multiple of 3 throw `std::invalid_argument`.
+`Plane2D` has it too.
+
+### hist2d
+
+```cpp
+Axes& hist2d(std::span<const double> x, std::span<const double> y, Hist2dOptions opts = {});
+```
+
+```cpp
+ax->hist2d(px, py, {.xbins = 40, .ybins = 30, .cmin = 1.0,      // empty bins left blank
+                    .norm = sextant::ColorNorm::log(), .colorbar = true});
+```
+
+As matplotlib's `hist2d`: counts the points in each bin and adds a heatmap, or a
+`heatmap_rec` when `x_edges` / `y_edges` are given, so it reads back, picks and
+removes as one (row 0 is the lowest y bin). `Hist2dOptions` sets the bin counts and
+ranges (unset: the points' extent), `density`, `cmin` / `cmax` (bins below / above
+are empty), the colormap, norm, `vmin` / `vmax` (unset: the bins' extent; under log,
+the smallest count above 0) and colorbar. Bins are numpy's: half-open, the last one
+including its upper edge; points outside or with a NaN are not counted. Unequal
+lengths, a bin count below 1, an empty range or unordered edges throw
+`std::invalid_argument`. Not on `Plane2D`.
 
 ### fill
 
@@ -400,12 +533,23 @@ vector or an end at or below 0 on a log axis is not drawn. Automatic limits cove
 whole arrows. Hover shows the vector (`PickKind::Quiver`), and `quiver_data(i)` /
 `set_quiver_data(i, …)` read and replace it. `Plane2D` has `quiver()` too.
 
+**On a grid**, as matplotlib's `quiver(X, Y, U, V)` with 1D X and Y: `x` holds one
+value per column, `y` one per row, and `u`, `v` (and `c`) one per grid point,
+row-major, `u[i * x.size() + j]` at `(x[j], y[i])`. That form is used when `u` has
+`x.size() * y.size()` values; `quiver_data()` reads back one point per arrow.
+
+```cpp
+ax->quiver(xs, ys, u, v);   // xs: 20 columns, ys: 15 rows, u and v: 300 values each
+```
+
 ### axline and axspan
 
 Reference lines and bands across the frame:
 
 ```cpp
 Axes& axline(double value, AxLineOptions opts = {});
+Axes& axline(Pos x, Pos y, double slope, AxLineOptions opts = {});
+Axes& axline(Pos x1, Pos y1, Pos x2, Pos y2, AxLineOptions opts = {});
 Axes& axspan(double lo, double hi, AxSpanOptions opts = {});
 ```
 
@@ -424,6 +568,72 @@ zoom along their length, draw in call order, have legend keys, and are edited in
 Data panel. Automatic limits include their values (on a log axis only those > 0);
 a non-finite value throws. Read back and moved with `axline_data(i)` /
 `set_axline_data(i, …)` and the `axspan_` equivalents.
+
+The **sloped** forms draw the infinite line through a point with a slope, or
+through two points (matplotlib's `axline`). In data units it is the line of the
+data: straight on linear axes, a curve on log and symlog axes. If any point is a
+`Pos::fraction()` or `Pos::pixels()` position it is a straight line on screen, its
+slope the screen's. `AxLineData` reads back the form (`mode`) and its `x`, `y`,
+`x2`, `y2` and `slope`.
+
+```cpp
+ax->axline(0.0, 0.0, 1.0, {.linestyle = LineStyle::Dashed, .name = "y = x"})
+   .axline(Pos::fraction(0), Pos::fraction(0), Pos::fraction(1), Pos::fraction(1));  // the diagonal
+```
+
+### shapes
+
+```cpp
+Axes& shape_poly(std::span<const double> x, std::span<const double> y, PolyOptions opts = {});
+Axes& shape_circle(Pos cx, Pos cy, Pos r, CircleOptions opts = {});
+Axes& shape_wedge(Pos cx, Pos cy, Pos r, double theta1, double theta2, WedgeOptions opts = {});
+```
+
+```cpp
+std::vector<double> tx = {1, 3, 2}, ty = {1, 1, 2.5};
+ax->shape_poly(tx, ty, {.color = Color::Orange, .alpha = 0.6f, .name = "region"})
+   .shape_circle(4.0, 2.0, 0.5, {.edgecolor = Color::Black, .linewidth = 1.5f})
+   .shape_wedge(Pos::fraction(0.9), Pos::fraction(0.85), Pos::pixels(24), 0, 270,
+                {.inner = 12});   // a ring segment, 24 px across, in the corner
+```
+
+A filled polygon, circle, and wedge or ring. Centre and radius are each a `Pos`. A
+radius in data units follows the axes: an ellipse where the two scales differ, bent
+on a log axis. A radius in pixels, or as a fraction of the frame's shorter side,
+stays round. A wedge's `inner` (in the space of `r`) makes it a ring; its angles are
+in degrees, counter-clockwise from +x. A polygon's vertices are all in its options'
+`space`, and it must not cross itself.
+
+The options have `color` (from the cycle when unset), `alpha`, an outline
+(`edgecolor`, `linewidth`, `linestyle`), `name`, `show_legend`, `visible` and
+`zorder`. Each shape kind has its count, `shape_poly_data(i)` (`PolyData`, and
+`CircleData`, `WedgeData`), `set_*_data(i, …)` and visible calls, a legend key, a
+hover hint and a Data panel form. Automatic limits include only shapes in data
+units. A radius <= 0, fewer than 3 vertices, or a data radius on a non-data centre
+throw `std::invalid_argument`. `Plane2D` has the shapes too.
+
+### pie
+
+```cpp
+Axes& pie(std::span<const double> values, PieOptions opts = {});
+```
+
+```cpp
+std::vector<double> share = {45, 30, 15, 10};
+ax->pie(share, {.labels = {"A", "B", "C", "D"}, .explode = {0.08, 0, 0, 0},
+                .autopct = "%1.1f%%", .startangle = 90});
+```
+
+As matplotlib's `pie`: `labels`, `explode` (a fraction of the radius), `colors`,
+`autopct` (matplotlib's format strings), `pctdistance` and `labeldistance`,
+`startangle`, `counterclock`, `radius`, centre `cx` / `cy`, `normalize` (false:
+values are fractions of the circle, leaving a gap), a ring through `inner`, and
+edge, alpha and text style. Each labelled slice has a legend entry; hover shows
+`label: value (pct%)` and a pick gives the slice in `pick_index`. `pie()` turns the
+[axis off](#styling) and sets aspect 1. `pie_count()`, `pie_data(i)` (`PieData`),
+`set_pie_data()` and `set_pie_visible()`; the Data panel has a tab for it. A
+negative or non-finite value, labels or explode of another length, or an `autopct`
+it cannot format throw `std::invalid_argument`.
 
 ---
 
@@ -478,6 +688,8 @@ is the series' own (a bar's edge colour); for `scatter_z` it is black.
 
 ## Contours
 
+### Contour lines on a heatmap
+
 A heatmap can trace iso-lines through itself.
 
 ```cpp
@@ -502,6 +714,39 @@ the label.
 Lines pass through **cell centres**, so a contour stops half a cell inside the
 image, and a heatmap smaller than 2×2 traces nothing. The traced geometry is in
 data space, so it follows the extent you gave the heatmap. `origin` is honoured.
+
+### contour and contourf
+
+```cpp
+Axes& contour(std::span<const double> x, std::span<const double> y, std::span<const double> z,
+              ContourOptions opts = {});
+Axes& contourf(std::span<const double> x, std::span<const double> y, std::span<const double> z,
+               ContourOptions opts = {});
+```
+
+```cpp
+ax->contourf(xs, ys, z, {.nlevels = 10, .cmap = sextant::Colormap::RdBu, .colorbar = true})
+   .contour(xs, ys, z, {.nlevels = 10, .line_color = Color::Black, .linewidth = 0.8f,
+                        .labels = true});
+```
+
+As matplotlib's `contour` / `contourf` with 1D x and y: `z` is row-major, one value
+per grid point (`z[i * x.size() + j]` at `(x[j], y[i])`), NaN allowed (its squares
+are left out). x and y are finite and strictly monotone. `ContourOptions` sets
+`levels` (or `nlevels` nice values over z's range, 7 by default), the colormap,
+`norm`, `vmin` / `vmax`, `line_color` (one colour for every line), `linewidth`,
+`labels` and `fontsize`, colorbar, name, `visible` and `zorder`.
+
+A line is coloured at its level, a band at its midpoint. A `contourf` leaves values
+outside the first..last level unfilled and has a stepped colorbar, and a `contour`
+over a `contourf` of the same data follows the band edges. Labels break each line at
+its level. On a plane the lines are drawn without labels.
+
+It is a kind of its own: `contour_count()`, `contour_data(i)` (`ContourData`),
+`set_contour_data(i, …)` with or without new levels, `set_contour_visible()` and
+`PickKind::Contour`. Hover shows a band's value and levels, or a line's level. Wrong
+lengths, unordered or non-finite x or y, a non-finite level, `nlevels` out of range
+or a norm that doesn't fit throw `std::invalid_argument`. `Plane2D` has both.
 
 ---
 
@@ -543,6 +788,34 @@ for (const auto& name : sextant::Colormap::names()) { /* every map, registered o
 rest of the process; `name()` and `is_cyclic()` read a map back. The panel's
 colormap list shows registered maps, grouped as sequential, diverging and cyclic,
 with a "Reversed" toggle.
+
+### Colour norms
+
+A `ColorNorm norm` on `HeatmapOptions`, `HeatmapRecOptions`, `HeatmapTriOptions`,
+`ContourOptions`, `Hist2dOptions`, `ScatterZOptions`, `QuiverOptions` and
+`Quiver3DOptions` sets how values land on the colormap, as matplotlib's norms:
+
+| | matplotlib | |
+|---|---|---|
+| `ColorNorm::linear()` | `Normalize` | The default: vmin..vmax evenly over the map |
+| `ColorNorm::log()` | `LogNorm` | vmin and vmax above 0; a value at or below 0 has no colour |
+| `ColorNorm::two_slope(c)` | `TwoSlopeNorm` | vmin..c on the map's lower half, c..vmax on its upper; c strictly between them |
+| `ColorNorm::boundaries(b)` | `BoundaryNorm` | One colour per band `[b[i], b[i+1])` (the last closed), spread over the whole map; vmin / vmax unused |
+
+```cpp
+ax->heatmap(anomaly, rows, cols, {0, 360}, {-90, 90},
+            {.cmap = sextant::Colormap::RdBu, .vmin = -2.0f, .vmax = 6.0f,
+             .norm = sextant::ColorNorm::two_slope(0.0f), .colorbar = true});
+```
+
+A value with no colour is drawn as NaN is: the cell is empty, a triangle heatmap
+leaves out its triangles, a point or arrow is not drawn. A triangle heatmap applies
+the norm per pixel. `boundaries()` takes 2 to 16384 finite, strictly increasing
+values, and a value outside them has no colour; its colorbar is stepped, equal
+blocks labelled at each boundary. A norm that doesn't fit its vmin / vmax throws
+`std::invalid_argument` at the call; one that stops fitting after a panel edit draws
+as linear until it fits again. The Data panel has a Norm choice with Centre and
+Bounds fields.
 
 ---
 
@@ -663,7 +936,7 @@ automatic limits cover all their data. Tick positions, formats and titles stay p
 axes. Inner subplots hide their tick labels by themselves, as
 `plt.subplots(sharex=True)`, and give the room back; frames along a shared axis stay
 aligned, even with a legend or colorbar beside one. There is no unsharing. Sharing
-an axes of another figure throws, as does putting a heatmap on a log-scaled group.
+an axes of another figure throws.
 
 ### Twin axes
 
@@ -785,6 +1058,12 @@ fig->axes()->set_axes_style({.background = sextant::Color::from_hex(0x1e1f29),
 
 ![figure and plot-area backgrounds; hidden x ticks with the grid kept](images/docs/backgrounds.png)
 
+**Axis off.** `set_axis_visible(false)`, as matplotlib's `axis('off')`, hides the
+spines, ticks, tick labels, axis titles, grid and background, and the frame grows
+into the freed room. Data, title, legend, colorbars and texts stay;
+`set_axis_visible(true)` brings back exactly what was set, and `axis_visible()`
+reads it. The window has an "Axis" checkbox for it, and `pie()` turns it off.
+
 ---
 
 ## Layout
@@ -884,6 +1163,68 @@ fig->resize_to_frame(400, 300, /*slot_index=*/2);        // of subplot 2
 `slot_index` matters because a legend or colorbar is carved out of the cell that
 owns it, so two subplots of one grid can have different frame sizes. The result
 is exact apart from rounding to whole pixels.
+
+---
+
+## Polar axes
+
+```cpp
+std::shared_ptr<PolarAxes> add_subplot_polar(int rows, int cols, int index);
+std::shared_ptr<PolarAxes> add_subplot_polar(int rows, int cols, SubplotSpan span);
+std::shared_ptr<PolarAxes> add_subplot_polar(int index);           // in the figure's grid
+std::shared_ptr<PolarAxes> add_subplot_polar(SubplotSpan span);
+```
+
+```cpp
+auto pax = fig->add_subplot_polar(1, 2, 2);
+std::vector<double> th(400), r(400);
+for (int i = 0; i < 400; ++i) { th[i] = i * 0.05; r[i] = 0.2 * th[i]; }
+pax->plot(th, r, {.name = "spiral"})
+    .set_theta_zero_location(sextant::ThetaZero::N)
+    .set_theta_direction(-1)
+    .legend();
+```
+
+A polar subplot, as matplotlib's `projection="polar"`. θ is in **radians** in data
+(plotting calls, read-back, events) and in **degrees** in every setter that places
+the frame or its grid, as matplotlib's. r runs outward from rmin at the centre to
+rmax at the frame.
+
+The plot kinds take the options of their `Axes` counterparts:
+
+| | |
+|---|---|
+| `plot(theta, r)`, `plot(r)` | Lines, curved along θ: steps, `loop`, dashes, legend and colour cycle as on `Axes` |
+| `scatter(theta, r)`, `scatter_z(theta, r, z)` | Markers; `scatter_z` with a colorbar beside the frame (`set_colorbar_style()`) |
+| `bar(theta, height)` | Ring sectors, `width` and `bottom` as in 2D; horizontal bars throw |
+| `fill(theta, r1, r2)`, `fill(theta, r)` | The area between two curves, or inside one (a radar chart's); `Orientation::Vertical` fills between two θ curves |
+| `shape_poly(theta, r)` | A filled polygon in data coordinates |
+| `text(s, theta, r)`, `annotate(theta, r, s, ttheta, tr)` | Texts at (θ, r), or with both coordinates as frame fractions or pixels; mixed spaces throw |
+
+Edges are straight in (θ, r), so they are arcs where θ changes; everything is cut to
+the r limits and the sector, markers at the rim.
+
+**The frame.** `set_rlim()`, `set_rmin()`, `set_rmax()` (r = 0 and the largest r by
+default; a negative r lowers rmin), `set_rticks()`, `set_rtick_format()`,
+`set_rlabel_position()`; `set_thetagrids()` (every 45° by default),
+`set_theta_zero_location()` / `set_theta_offset()`, `set_theta_direction()` (1
+counter-clockwise, -1 clockwise), and a sector with `set_thetamin()` /
+`set_thetamax()` / `set_thetalim()` (at most 360° apart). `rlim()`,
+`rlabel_position()`, `theta_offset()`, `theta_direction()` and `thetalim()` read
+them back; `grid()` turns the rings and spokes on and off; `set_title()`,
+`legend()`, `set_color_cycle()`, `set_axes_style()` and `cla()` work as on `Axes`.
+
+Objects read back, change, hide, remove and order as on `Axes`: `line_data(i)` gives
+θ in `x` and r in `y`, and so on for each kind. Picks use the 2D kinds
+(`PickKind::Line`, `Scatter`, `Bar`, `Fill`, …), hover shows θ and r, and an event's
+`xdata` / `ydata` are θ and r. In the window, drag turns the frame, Shift-drag moves
+r and the wheel zooms r; Back, Forward and Home follow. The Cosmetic panel edits
+θ = 0, the direction, the sector, the r limits and the labels, and the Data panel the
+θ and r columns. PNG and SVG output match the window.
+
+Invalid values (a non-finite or empty r range, a direction other than ±1, a bad
+sector) throw `std::invalid_argument`, as do `add_subplot()` on a polar cell and
+`add_subplot_polar()` on a cell of another kind.
 
 ---
 
@@ -1024,7 +1365,8 @@ Axes& annotate(double px, double py, std::string_view s, Pos tx, Pos ty,
 `text()` writes a string over the plot; `annotate()` writes one with an arrow to
 the data point `(px, py)`. Each coordinate of the text's position is a **`Pos`**:
 a plain number is a data value, `Pos::fraction(f)` a fraction of the plot frame
-from its left (x) or bottom (y) edge. The two are independent, so a label can
+from its left (x) or bottom (y) edge, and `Pos::pixels(p)` pixels from that same
+edge (y up). The two are independent, so a label can
 follow the data on one axis and stay put on the other:
 
 ```cpp
@@ -1134,7 +1476,8 @@ int id = fig->connect(sextant::EventKind::MouseDown, [](const sextant::Event& e)
 });
 fig->connect(sextant::EventKind::Pick, [&](const sextant::Event& e) {
     if (e.pick_kind == sextant::PickKind::Line)
-        std::printf("line %d, point %d\n", e.pick_object, e.pick_index);
+        if (auto at = ax->find_object(e.pick_object))     // where that line is now
+            std::printf("line %zu, point %d\n", at->index, e.pick_index);
 });
 fig->connect(sextant::EventKind::KeyDown, [&](const sextant::Event& e) {
     if (e.key == "escape") fig->close();
@@ -1168,16 +1511,27 @@ either way, and a callback cannot suppress sextant's own handling.
 **Picking.** A press on a plot object also sends one `Pick` event. A point, marker,
 arrow or path vertex within the **pick radius** answers first, the nearest
 (`FigureOptions::pick_radius`, 12 pixels by default, or `Figure::set_pick_radius()`);
-otherwise the topmost bar, fill or heatmap cell the press is *inside*, whose
-position is the event's `xdata` / `ydata`. `pick_kind` is `Line`, `Scatter`,
-`ScatterZ`, `Bar`, `Heatmap`, `Quiver`, `Fill`; `Bar3D`, `Surface`, `SurfaceTri`,
-`Scatter3D`, `Line3D`,
-`pick_object` (the object's index in its kind, the `i` of `line_data(i)` and
-friends), `pick_index` (the point, bar or vertex; the flat cell index of a heatmap
-or `bar3d`; a fill's segment *i*, between its points *i* and *i* + 1), `pick_row`/`pick_col` for those grids, and `pick_plane`, the
-`Plane2D`'s index in `Axes3D::plane_at()` for an object on a plane (-1 otherwise),
-and `pick_twin` (0 the axes' own, 1 its `twinx()`, 2 its `twiny()`). Reference
-lines, spans and texts are decorations and are never picked. It finds what the hover
+otherwise the topmost bar, fill, heatmap cell, triangle, contour band, shape or pie
+slice the press is *inside*, whose position is the event's `xdata` / `ydata`. The
+event carries:
+
+- `pick_kind`: `Line`, `Scatter`, `ScatterZ`, `Bar`, `Heatmap`, `HeatmapTri`,
+  `Contour`, `Quiver`, `Fill`, `Poly`, `Circle`, `Wedge`, `Pie`; `Bar3D`, `Surface`,
+  `SurfaceTri`, `Scatter3D`, `Line3D`, `Quiver3D`.
+- `pick_object`: the object's [`ObjectId`](#objects-and-ids) (0 = none).
+  `find_object(id)` on the axes, or on the `Plane2D`, gives its kind and its index
+  within the kind (the `i` of `line_data(i)` and friends), or nothing if it has been
+  removed since. An id stays valid when other objects are removed.
+- `pick_index`: the point, bar, marker or vertex; the flat cell index of a heatmap
+  or `bar3d`; a fill's segment *i*, between its points *i* and *i* + 1; a triangle
+  heatmap's triangle; a contour's level, or a filled contour's band; a pie's slice.
+  `pick_row` / `pick_col` for the grids.
+- `pick_plane`: the plane's `ObjectId` for an object on a `Plane2D` (0 otherwise);
+  `Axes3D::plane_index(id)` gives its index in `plane_at()`.
+- `pick_twin`: in a cell with twins, the axes to ask `find_object()`: 0 the axes'
+  own, 1 its `twinx()`, 2 its `twiny()`.
+
+Reference lines, spans and texts are decorations and are never picked. It finds what the hover
 hints find. The indices refer to the data the window drew.
 
 **Where callbacks run.** The window never calls them. It queues events, and they
@@ -1287,6 +1641,40 @@ end-to-end cost.
 
 ---
 
+## Objects and ids
+
+Every object a plotting call makes has an **`ObjectId`** (an integer, never reused;
+0 means none). `last_object()` is the id of the object the latest call made (the last
+layer for `stack()`); keep it to change or remove the object later:
+
+```cpp
+ax->line(x, y, {.name = "fit"});
+sextant::ObjectId fit = ax->last_object();
+// ...
+ax->set_zorder(fit, 5.0);                       // draw it above the rest
+if (auto at = ax->find_object(fit))             // its kind and index now
+    auto d = ax->line_data(at->index);
+ax->remove(fit);                                 // gone for good
+```
+
+`remove(id)` takes the object out; the indices of later objects of its kind shift
+down, so `*_data(i)` and `set_*_data(i)` follow the new order, while ids stay.
+`find_object(id)` gives the object's `ObjectLocation` (its `PickKind` and index), or
+nothing for an id that is gone. `set_zorder(id, z)` and `zorder(id)` change and read
+its [draw order](#the-model). An id that is not there (removed already, unknown,
+another axes') changes nothing, returns `false` and sends a message through the
+message handler; it never throws. A non-finite zorder throws
+`std::invalid_argument`.
+
+The same calls are on `Plane2D` (over the plane's objects; `id()` is the plane's own
+id) and `PolarAxes`. `Axes3D` has `last_object()`, `remove()` and `find_object()` over
+its own objects; a scene draws by depth, so it has no zorder. `Axes3D::last_plane()` is the
+latest `plane()`'s id, `remove_plane(id)` takes a plane out (a `Plane2D` you still
+hold stays usable but is not drawn), and `plane_index(id)` is its index in
+`plane_at()`.
+
+---
+
 ## Reading back
 
 `Axes`, `Plane2D` and `Axes3D` report what they hold now, including edits made in
@@ -1302,11 +1690,13 @@ sextant::LineData d = ax->line_data(0);   // a copy: d.x, d.y
 
 Every kind has a `<kind>_count()` and a `<kind>_data(i)` returning a copy in a
 struct named after the kind (`LineData`, `ScatterData`, `ScatterZData`,
-`BarData`, `HeatmapData`, `FillData`, `QuiverData`, `AxLineData`, `AxSpanData`; in
-3D `Bar3DData`, `SurfaceData`, `SurfaceTriData`, `Scatter3DData`, `Line3DData`), with
-fields named after the plotting call's arguments. A `stack()` reads back as its
-layers, each a fill. `bar_data` covers `hist()` too (bin centres and heights), and
-`heatmap_data` covers `imshow()`. Texts and annotations read back the same way:
+`BarData`, `HeatmapData`, `HeatmapTriData`, `ContourData`, `FillData`, `QuiverData`,
+`AxLineData`, `AxSpanData`, `PolyData`, `CircleData`, `WedgeData`, `PieData`; in 3D
+`Bar3DData`, `SurfaceData`, `SurfaceTriData`, `Scatter3DData`, `Line3DData`,
+`Quiver3DData`), with fields named after the plotting call's arguments. A `stack()`
+reads back as its layers, each a fill. `bar_data` covers `hist()` too (bin centres
+and heights), and `heatmap_data` covers `imshow()`, `imshow_rgb()`, `heatmap_rec()`
+and `hist2d()`. Texts and annotations read back the same way:
 `text_count()`, `text_data(i)` (`TextData`; in 3D `Text3DData`) and
 `set_text_data(i, …)`. An index past the count throws `std::out_of_range`.
 Styles, error bars and `hint_labels` are not read back.

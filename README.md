@@ -8,7 +8,7 @@
 <p align="center"><b>Plotting for C++ that never gets in the way.</b></p>
 
 <p align="center">
-  <a href="https://github.com/BackslashStudio/sextant/actions/workflows/ci.yml?query=branch%3Amain"><img src="https://github.com/BackslashStudio/sextant/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <a href="https://github.com/BackslashStudio/sextant/actions/runs/40545100656"><img src="https://img.shields.io/badge/CI-passing%20(v1.3.0)-brightgreen" alt="CI"></a>
   <a href="https://github.com/BackslashStudio/sextant/releases/latest"><img src="https://img.shields.io/github/v/release/BackslashStudio/sextant" alt="Latest release"></a>
   <img src="https://img.shields.io/badge/C%2B%2B-20-blue" alt="C++20">
   <img src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey" alt="Windows | Linux | macOS">
@@ -102,11 +102,19 @@ int main() {
 | `scatter_z`         | Scatter whose colour comes from a third value, with a colorbar.                                                           |
 | `bar`               | Bar charts, vertical or horizontal, positive or diverging, stacked with `bottom`.                                         |
 | `hist`              | Histograms: binning on top of the same bar plot, with `density` and `cumulative`.                                         |
-| `heatmap`, `imshow` | Colour-mapped matrices over real coordinates or indices, with traced and labelled **contour lines**.                      |
+| `heatmap`, `imshow` | Colour-mapped matrices over real coordinates or indices, with traced and labelled **contour lines**, on linear, log or symlog axes. |
+| `imshow_rgb`        | RGB and RGBA images, drawn as given.                                                                                      |
+| `heatmap_rec`       | Cells of any size, between given edges (matplotlib's `pcolormesh`).                                                       |
+| `heatmap_tri`       | Values on a triangle mesh, smoothly shaded (`tripcolor`).                                                                 |
+| `hist2d`            | Points binned into a heatmap, evenly or by edges.                                                                         |
+| `contour`, `contourf` | Contour lines or filled bands of a gridded z, with labels and a stepped colorbar.                                       |
 | `fill`              | The area between two curves, or down to a value; `Orientation::Vertical` fills across. Gaps, steps and crossings handled. |
 | `stack`             | Stacked areas with a zero, symmetric or streamgraph baseline.                                                             |
-| `quiver`            | An arrow per point, optionally coloured through a colormap with a colorbar.                                               |
-| `axline`, `axspan`  | Reference lines and bands across the frame, horizontal or vertical.                                                       |
+| `quiver`            | An arrow per point or per grid cell, optionally coloured through a colormap with a colorbar.                              |
+| `axline`, `axspan`  | Reference lines and bands across the frame, horizontal, vertical or (lines) at any slope.                                 |
+| shapes              | Polygons, circles, wedges and rings, in data, frame-fraction or pixel coordinates.                                        |
+| `pie`               | Pie and donut charts with labels, percentages and exploded slices.                                                        |
+| polar axes          | `add_subplot_polar()`: lines, markers, bars, fills and text over θ and r, with a full or partial circle.                 |
 | error bars          | A capped whisker for an observed range plus a box for a spread, one- or two-sided, on lines, bars and both scatter kinds. |
 
 Drawn in one figure: a confidence band with a reference line and span, a
@@ -117,8 +125,10 @@ stacked horizontal bars.
 
 Series without a colour take the next one from a ten-colour cycle, so several
 lines in one axes come out distinct with no styling at all. Objects draw in the
-order you plot them, whatever their kind, and any of them can be hidden with
-`visible = false` (a hidden object also leaves the automatic limits).
+order you plot them, whatever their kind, unless a `zorder` says otherwise. Any of
+them can be hidden with `visible = false` (a hidden object also leaves the
+automatic limits), or removed by the `ObjectId` its call returned. Colour-mapped
+kinds take a log, two-slope or boundary norm.
 
 ## 3D plots
 
@@ -139,6 +149,7 @@ ax3->plane(sextant::PlaneOrientation::XY, -10.0) // a 2D plane inside the scene
 | `surface_tri` | A sheet on a triangle mesh: give the triangles, or let sextant triangulate scattered points. |
 | `scatter3d`   | Markers in space, flat or colour-mapped, with depth shading.                                 |
 | `line3d`      | A path through space, flat or colour-mapped along its length, open or closed.                |
+| `quiver3d`    | An arrow per point in space, flat or colour-mapped.                                          |
 | `Plane2D`     | A plane in the scene carrying any 2D plot: heatmaps, lines, scatter, bars, fills, arrows.    |
 | error bars    | Whiskers and boxes on `scatter3d` and `line3d`, along any axis.                              |
 | camera        | Orthographic or perspective, orbit, pan and zoom, a box of any aspect.                       |
@@ -167,7 +178,8 @@ correctly per pixel in the PNG and per polygon in the SVG.
   Inferno, Magma, Cividis, Turbo), sequential, diverging and cyclic ones that wrap.
   `.reversed()` flips any, and `register_colormap()` adds your own.
 - **Styling.** Figure and plot-area backgrounds (transparent if you like),
-  hidden ticks per axis, marker outlines and hollow markers.
+  hidden ticks per axis, an axis switched off entirely, marker outlines and hollow
+  markers.
 - **Read-back.** Every plot's data, the titles and the limits as drawn can be read
   back, including what the user edited in the window.
 - **Diagnostics.** `Figure::set_message_handler()` routes sextant's warnings to
@@ -210,18 +222,22 @@ thread, inside `run()`, `wait_closed()`, `poll_events()` or `dispatch_events()`,
 so they can change the figure freely.
 
 ```cpp
+ax->line(x, y, {.name = "fit"});
+const sextant::ObjectId fit = ax->last_object();   // the id a pick reports
+
 fig->connect(sextant::EventKind::MouseDown, [](const sextant::Event& e) {
     if (e.has_data) std::printf("clicked at (%g, %g)\n", e.xdata, e.ydata);
 });
 fig->connect(sextant::EventKind::Pick, [&](const sextant::Event& e) {
-    std::printf("picked line %d, point %d\n", e.pick_object, e.pick_index);
+    if (e.pick_object == fit) std::printf("picked the fit, point %d\n", e.pick_index);
 });
 fig->show(false);
 sextant::Figure::run();   // deliver events until every window is closed
 ```
 
 A pick finds a point, marker or arrow within `pick_radius` pixels, or the bar,
-fill or heatmap cell the cursor is inside.
+fill, heatmap cell, shape or pie slice the cursor is inside, and names it by its
+`ObjectId`.
 
 ## Watch it run
 

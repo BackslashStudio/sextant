@@ -123,7 +123,7 @@ Four groups, each opened with its header. Groups share their names between 2D an
 |---|---|
 | **Figure** (closed by default) | **Suptitle**: text, font, colour, size, alignment, offset. **Layout**: background colour, margins, the gaps between subplots, and a readout of the plot frame and measured insets these settings give |
 | **Axis** | **Titles**: title, x title, y title, with colour and size under each, and the axes font. **Axis frame**: plot-area colour, frame colour and width, margin, and which of the four spines to draw. **Axis position**: where each axis sits (low, mid, high, or pinned at a value) |
-| **Ticks** | **Limits** (with *Auto*, aspect and adjust), **Ticks & labels**, **Scale & format**, and the x and y tick tables |
+| **Ticks** | **Limits** (with *Auto*, aspect and adjust, and an **Axis** checkbox that turns the axis off as `set_axis_visible()`), **Ticks & labels**, **Scale & format**, and the x and y tick tables |
 | **Legend & colorbar** (closed by default) | Legend: show, text, size, font, the twelve anchors, margin, offset, frame fill and border. Colorbar: text, size, font, border, anchor, bar width and margin |
 
 ![The four Cosmetic groups, open](images/panels/cosmetic_groups.gif)
@@ -145,14 +145,19 @@ or off (*Auto* is on for log and symlog axes), and set the look in one table:
 
 **Scale and format.** Per axis: *Linear*, *Log* or *Symlog*, with the base or the
 linear threshold they need, and a **Format** such as `%.2f`. An empty format
-restores the default. The scale of an axes holding a heatmap cannot be changed,
-and a tooltip says why.
+restores the default. Every scale is open to every axes, heatmaps included.
 
 **Shared axes.** When axes share an axis (`sharex`), a line under Limits names the
 other members. Limits and scale edit the whole group.
 
 **Tick tables.** Under each axis, the ticks can be automatic or set by hand,
 position by position, with their labels.
+
+**Polar cells.** A polar subplot's Cosmetic panel has the same groups, with θ and r
+in place of x and y: where θ = 0 sits and its offset, the direction, the sector
+(θ min and max), the r limits, r ticks and their format, where the r labels sit,
+and the θ grid. The frame is one outline, so there are no spine boxes or axis
+positions.
 
 **Grid weights.** Drag the boundary between two subplots on the plot to resize
 the columns or rows beside it; a double-click evens the two out. Nothing else in
@@ -164,18 +169,22 @@ the grid moves.
 
 ## Data panel
 
-Each plot object in the selected subplot has a tab. A line, scatter, bar, histogram,
-heatmap, `scatter_z`, text or annotation each gets one; in 3D, so does every
-object and plane.
+Each plot object in the selected subplot has a tab: every plotting call's object
+(lines, markers, bars, heatmaps and images, contours, fills, arrows, reference lines
+and bands, shapes, pies), and every text or annotation. In 3D, so does every object
+and plane; in a polar cell, the θ and r columns stand in for x and y.
 
 A tab has two parts:
 
 **Appearance** (a collapsible header, open by default) carries every option the
 plotting call takes, except per-point data: colour and alpha, width and line
 style, marker and size and outline, bar width and edges, colormap with *Reversed*,
-`vmin`/`vmax`, a heatmap's origin and contour levels, error-bar styling, the
-legend key and its name, and the colorbar. A *Legend key* box with no name says so,
-since a key needs a name to be drawn.
+`vmin`/`vmax` and the **Norm** (with its *Centre* or bounds), a heatmap's origin and
+contour levels, error-bar styling, the legend key and its name, and the colorbar.
+A *Legend key* box with no name says so, since a key needs a name to be drawn.
+Beside *Visible*, a **Z-order** field moves the object up or down the draw order.
+A norm that stops fitting after an edit (a log norm whose range reaches 0) draws as
+linear until it fits again.
 
 **The table** holds the object's data.
 
@@ -225,6 +234,14 @@ pages the visible window; the buttons keep acting on the true column index shown
 the header.
 
 ![Editing a heatmap: cells, a column insert, a row delete](images/panels/matrix.gif)
+
+### Forms
+
+Shapes, pies, sloped reference lines and contours carry their geometry as fields
+under Appearance: a circle's centre and radius (each in data, frame fraction or
+pixels), a wedge's angles and hole, a pie's start angle, direction, distances,
+explode and labels, a sloped line's mode (point and slope, or two points), a
+contour's levels or their count.
 
 ### Text and annotations
 

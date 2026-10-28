@@ -327,7 +327,7 @@ namespace lt {
             check(ax->remove(id) && ax->heatmap_count() == 2, "heatmap_rec: removed by its id");
         }
 
-        // ---- Contours on a mesh (v1.3 stage 3e-1): crossings between cell centres.
+        // ---- Contours on a mesh: crossings between cell centres.
         {
             auto ramp_x = [](std::vector<double> xe, double level) {
                 HeatmapOptions o;

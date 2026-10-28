@@ -1963,7 +1963,7 @@ static void part_reference_lines() {
     fig->show(true);
 }
 
-// v1.3 stage 2: shape_poly(), shape_circle(), shape_wedge() with Pos spaces
+// shape_poly(), shape_circle(), shape_wedge() with Pos spaces
 // (Coords::Pixels is new), the sloped axline() and Plane2D::axspan(). Hover the
 // shapes (data position and name), edit them in the Data panel (a polygon's
 // vertices, a circle's and wedge's numbers with their spaces, a sloped line's
@@ -2080,7 +2080,7 @@ static void part_shapes() {
     fig->show(true);
 }
 
-// v1.3 stage 4a: Axes::pie() and set_axis_visible(). Hover a slice (label,
+// Axes::pie() and set_axis_visible(). Hover a slice (label,
 // value, percent), edit the slices in the Data panel's pie tab (value, label,
 // explode; add and remove rows) and its appearance, toggle "Axis" in the axes'
 // style block; a pie turns the axis off and the aspect to 1.
@@ -2115,7 +2115,7 @@ static void part_pie() {
     fig->show(true);
 }
 
-// Step 4b: PolarAxes. A spiral, a rose with a legend, a clockwise half
+// PolarAxes. A spiral, a rose with a legend, a clockwise half
 // sector from north, and dashed steps with set r limits and labelled rings.
 // Drag turns a frame, Shift-drag moves r, the wheel zooms r; the panel's Axis
 // group holds the polar fields, the Data panel the θ/r table.
@@ -2175,7 +2175,7 @@ static void part_polar() {
     fig->show(true);
 }
 
-// Step 4c: PolarAxes::scatter(), scatter_z() and bar(). A wind rose stacked
+// PolarAxes::scatter(), scatter_z() and bar(). A wind rose stacked
 // through `bottom`, markers coloured by z with a colorbar and sized per point,
 // markers on a half sector (the rim clips them), and bars on a ring with
 // a marker over them. Hover a bar or a marker for θ and r; the Data panel
@@ -2251,7 +2251,7 @@ static void part_polar_kinds() {
     fig->show(true);
 }
 
-// Step 4d: PolarAxes::fill(), shape_poly(), text() and annotate(). A radar
+// PolarAxes::fill(), shape_poly(), text() and annotate(). A radar
 // chart of two series (translucent, edged, named spokes), a band under its
 // median line, a Vertical θ band with a polygon whose straight (θ, r) edges
 // curve, and a boxed text with an annotation from a frame-fraction text to a
@@ -2633,7 +2633,7 @@ static void part_quiver2d() {
     fig->show(true);
 }
 
-// v1.3 stage 3f: quiver()'s grid form (1D x and y against u and v per grid
+// quiver()'s grid form (1D x and y against u and v per grid
 // point, row-major) and Axes3D::quiver3d(): flat arrows turned to face the eye,
 // sized in pixels at the box centre (a far arrow is thinner under
 // perspective). Hover shows x, y, z, u, v, w (and c); the Data panel edits the
