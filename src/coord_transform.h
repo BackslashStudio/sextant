@@ -327,6 +327,15 @@ namespace sextant {
                     grow_err(a.x, a.y, bp.err);
                 }
             }
+            // A bar stack's layers as bars.
+            if (all.bar_stacks)
+                for (const auto& sp: *all.bar_stacks) {
+                    if (!object_shown(sp)) continue;
+                    for (const BarPlot& bp : bar_stack_layers(sp)) {
+                        if (bp.horizontal()) add_bars(bp, fy, ylo, yhi, fx, xlo, xhi);
+                        else add_bars(bp, fx, xlo, xhi, fy, ylo, yhi);
+                    }
+                }
             // A reference line or span counts on its own axis only.
             if (all.axlines)
                 for (const auto& lp: *all.axlines) {
@@ -473,6 +482,26 @@ namespace sextant {
             }
             grow_err(sp.x, sp.y, sp.err);
         }
+        // Thickness along the category axis, base to tip along the value axis.
+        const auto add_bar_extent = [&](const BarPlot& bp) {
+            const bool lying = bp.horizontal();
+            double& clo = lying ? ylo : xlo;
+            double& chi = lying ? yhi : xhi;
+            double& vlo = lying ? xlo : ylo;
+            double& vhi = lying ? xhi : yhi;
+            for (std::size_t i = 0; i < bp.centers.size(); ++i) {
+                const double half = bp.bar_width * 0.5;
+                clo = std::min(clo, bp.centers[i] - half);
+                chi = std::max(chi, bp.centers[i] + half);
+                const double base = bp.base_at(i), tip = base + bp.heights[i];
+                vlo = std::min(vlo, std::min(base, tip));
+                vhi = std::max(vhi, std::max(base, tip));
+            }
+        };
+        if (all.bar_stacks)
+            for (const auto& sp: *all.bar_stacks)
+                if (object_shown(sp))
+                    for (const BarPlot& bp : bar_stack_layers(sp)) add_bar_extent(bp);
         for (const auto& bp: all.bars) {
             if (!object_shown(bp)) continue;
             // Thickness along the category axis, base to tip along the value axis.

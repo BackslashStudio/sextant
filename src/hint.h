@@ -103,7 +103,8 @@ private:
 // the snapshot vector of its kind (creation order, the read-back index);
 // `element` is the point, bar, cell, sample, marker or vertex; `plane` is -1 for
 // an object of the axes itself, else the index into RenderSnapshot3D::planes
-// (a 2D kind on that plane's sheet). `row`/`col`: heatmap cells, else -1.
+// (a 2D kind on that plane's sheet). `row`/`col`: heatmap cells, a bar
+// stack's layer and bar, else -1.
 // An area hit (pick_is_area()) also has the cursor's data position, `data_x`/
 // `data_y` (on a plane, in the plane's own coordinates).
 // A heatmap_tri hit: `element` the triangle, `value` the value interpolated at
@@ -124,7 +125,8 @@ struct PickHit {
 inline bool pick_is_area(PickKind k) {
     return k == PickKind::Bar || k == PickKind::Fill || k == PickKind::Heatmap
            || k == PickKind::Poly || k == PickKind::Circle || k == PickKind::Wedge
-           || k == PickKind::HeatmapTri || k == PickKind::Pie || k == PickKind::Stack;
+           || k == PickKind::HeatmapTri || k == PickKind::Pie || k == PickKind::Stack
+           || k == PickKind::BarStack;
 }
 
 // The same for a hit: a contour is an area when filled.

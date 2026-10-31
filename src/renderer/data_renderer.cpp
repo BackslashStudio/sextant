@@ -2241,10 +2241,11 @@ void main() {
     // -------------------------------------------------------------------------
     // draw_bars
     // -------------------------------------------------------------------------
-    void DataRenderer::draw_bars(const std::vector<BarPlot>& bars,
+    void DataRenderer::draw_bars(std::span<const BarPlot> bars,
                                  std::span<const std::size_t> which,
                                  const CoordTransform& tr,
-                                 const PlotRect& pr) {
+                                 const PlotRect& pr,
+                                 std::size_t stack) {
         if (which.empty()) return;
 
         begin_pass(pr, tr.win_h);
@@ -2282,7 +2283,8 @@ void main() {
                 return lying ? Rect{v0, v1, c0, c1} : Rect{c0, c1, v0, v1};
             };
 
-            const CacheKey key{axes_index_, plane_index_, static_cast<int>(bi)};
+            const int index = stack == kNoStack ? static_cast<int>(bi) : stack_fill_key(stack, bi);
+            const CacheKey key{axes_index_, plane_index_, index};
             BarCache& e = bar_cache_[key];
 
             // Read before the fill branch overwrites e.bar_width, so a width edit
@@ -2478,6 +2480,14 @@ void main() {
                 const std::span<const FillPlot> layers = stack_layers(snap.stacks[r.index]);
                 for (std::size_t k = 0; k < layers.size(); ++k)
                     draw_fill(layers[k], stack_fill_key(r.index, k), tr, pr);
+                break;
+            }
+            case PlotKind::BarStack: {
+                const std::span<const BarPlot> layers = bar_stack_layers(snap.bar_stacks[r.index]);
+                for (std::size_t k = 0; k < layers.size(); ++k) {
+                    const std::size_t at[1] = {k};
+                    draw_bars(layers, at, tr, pr, r.index);
+                }
                 break;
             }
             case PlotKind::Quiver:

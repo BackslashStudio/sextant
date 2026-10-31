@@ -168,6 +168,28 @@ std::vector<PlotDataTable> tables_of(const RenderSnapshot& snap, bool polar) {
         out.push_back(std::move(t));
     }
 
+    // Bar stacks: the centers, one column per layer (its heights) headed as a
+    // stack's, then the bottom (left, lying) when there is one. The width is a
+    // style option here, not a table's bar_width.
+    for (std::size_t i = 0; i < snap.bar_stacks.size(); ++i) {
+        const auto& sp = snap.bar_stacks[i];
+        PlotDataTable t;
+        t.kind = PlotKind::BarStack;
+        t.plot_index = static_cast<int>(i);
+        t.data_stamp = sp.data_stamp;
+        t.id = sp.id;
+        t.label = pick_label(sp.opts.name, "bar_stack", static_cast<int>(i));
+        t.columns.push_back({"center", sp.x.data(), sp.x.size()});
+        for (std::size_t k = 0; k < sp.heights.size(); ++k) {
+            const bool named = k < sp.opts.names.size() && !sp.opts.names[k].empty();
+            t.columns.push_back({named ? sp.opts.names[k].c_str() : layer_column_name(k),
+                                 sp.heights[k].data(), sp.heights[k].size()});
+        }
+        if (!sp.bottom.empty())
+            t.columns.push_back({sp.horizontal() ? "left" : "bottom", sp.bottom.data(), sp.bottom.size()});
+        out.push_back(std::move(t));
+    }
+
     // Quivers: each arrow's position and vector, then its color value when
     // colormapped.
     for (std::size_t i = 0; i < snap.quivers.size(); ++i) {

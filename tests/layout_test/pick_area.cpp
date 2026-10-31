@@ -173,6 +173,33 @@ namespace lt {
             check(format_pick(sk, *s2).ends_with("\ntop\nall"), "pick stack: then the stack's own name");
             check(pick_object_id(sk, PickKind::Stack, 0) == 7, "pick stack: the stack's id, whichever layer");
 
+            // A bar stack: PickKind::BarStack, row the layer and col the bar
+            // (pick_index k * bars + i); on a shared edge the upper bar.
+            RenderSnapshot bs = snap_0_10();
+            BarStackPlot bp;
+            bp.x = V{2.0, 8.0};
+            bp.heights = {CowVec<double>(V{1.0, 1.0}), CowVec<double>(V{2.0, 2.0}), CowVec<double>(V{1.0, 1.0})};
+            bp.opts.colors = {Color::Red, Color::Green, Color::Blue};
+            bp.opts.names = {"low", "", "top"};
+            bp.id = 9;
+            bar_stack_rebuild(bp);
+            bs.bar_stacks.push_back(bp);
+            const auto b0 = at(bs, 2.0, 0.5), b1 = at(bs, 8.0, 2.0), b2 = at(bs, 2.0, 3.5);
+            check(is(b0, PickKind::BarStack, 0, 0) && b0->row == 0 && b0->col == 0 &&
+                      is(b1, PickKind::BarStack, 0, 3) && b1->row == 1 && b1->col == 1 &&
+                      is(b2, PickKind::BarStack, 0, 4) && b2->row == 2 && b2->col == 0,
+                  "pick bar stack: one object, row the layer, col the bar");
+            check(is(at(bs, 2.0, 1.0), PickKind::BarStack, 0, 2) && !at(bs, 5.0, 1.0) && !at(bs, 2.0, 4.5),
+                  "pick bar stack: the upper bar on a shared edge; nothing between bars or above");
+            check(format_pick(bs, *b0).ends_with("\nlow") && format_pick(bs, *b1).ends_with("\nlayer 1") &&
+                      format_pick(bs, *b2).ends_with("\ntop"),
+                  "pick bar stack: the hint names the layer (its name, else layer k)");
+            bs.bar_stacks[0].opts.hint_labels = {"A", "B"};
+            bs.bar_stacks[0].opts.name = "all";
+            check(format_pick(bs, *b2).ends_with("\ntop\nA\nall") && format_pick(bs, *b1).ends_with("\nlayer 1\nB\nall"),
+                  "pick bar stack: then the bar's label and the stack's own name");
+            check(pick_object_id(bs, PickKind::BarStack, 0) == 9, "pick bar stack: the stack's id, whichever bar");
+
             check(fill_segment_at(s.fills[0], AxisScale{}, AxisScale{}, std::numeric_limits<double>::quiet_NaN(),
                                   2.0) == -1,
                   "pick fill: a NaN position is in no segment");

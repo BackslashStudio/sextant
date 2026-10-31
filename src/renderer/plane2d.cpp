@@ -321,6 +321,35 @@ namespace sextant {
             b.close();
         };
 
+        // A bar object's rectangles, then their outlines; no error bars.
+        const auto bar_geom = [&](const BarPlot& bp) {
+            const double half = bp.bar_width * 0.5;
+            const std::size_t n = std::min(bp.centers.size(), bp.heights.size());
+            const Color c = with_alpha(*bp.opts.color, bp.opts.alpha);
+            // Bar i's corners (u0, v0, u1, v1): category edges by base and
+            // tip, swapped when it lies along u.
+            auto corners = [&](std::size_t i) {
+                const double c0 = bp.centers[i] - half, c1 = bp.centers[i] + half;
+                const double v0 = bp.base_at(i), v1 = bp.tip_at(i);
+                return bp.horizontal() ? std::array{v0, c0, v1, c1}
+                                       : std::array{c0, v0, c1, v1};
+            };
+            b.open(Kind::Tri);
+            for (std::size_t i = 0; i < n; ++i) {
+                const auto [u0, v0, u1, v1] = corners(i);
+                b.rect(u0, v0, u1, v1, c);
+            }
+            b.close();
+            if (bp.opts.linewidth > 0.0f) {
+                b.open(Kind::Seg);
+                for (std::size_t i = 0; i < n; ++i) {
+                    const auto [u0, v0, u1, v1] = corners(i);
+                    b.rect_outline(u0, v0, u1, v1, bar_edge(bp), bp.opts.linewidth);
+                }
+                b.close();
+            }
+        };
+
         // A fill's regions' triangles, then their outlines (solid, as a
         // plane's lines), in plane coordinates (no scales on a plane).
         const auto fill_geom = [&](const FillPlot& fp) {
@@ -392,31 +421,7 @@ namespace sextant {
 
                 case PlotKind::Bar: {
                     const auto& bp = s.bars[r.index];
-                    const double half = bp.bar_width * 0.5;
-                    const std::size_t n = std::min(bp.centers.size(), bp.heights.size());
-                    const Color c = with_alpha(*bp.opts.color, bp.opts.alpha);
-                    // Bar i's corners (u0, v0, u1, v1): category edges by base and
-                    // tip, swapped when it lies along u.
-                    auto corners = [&](std::size_t i) {
-                        const double c0 = bp.centers[i] - half, c1 = bp.centers[i] + half;
-                        const double v0 = bp.base_at(i), v1 = bp.tip_at(i);
-                        return bp.horizontal() ? std::array{v0, c0, v1, c1}
-                                               : std::array{c0, v0, c1, v1};
-                    };
-                    b.open(Kind::Tri);
-                    for (std::size_t i = 0; i < n; ++i) {
-                        const auto [u0, v0, u1, v1] = corners(i);
-                        b.rect(u0, v0, u1, v1, c);
-                    }
-                    b.close();
-                    if (bp.opts.linewidth > 0.0f) {
-                        b.open(Kind::Seg);
-                        for (std::size_t i = 0; i < n; ++i) {
-                            const auto [u0, v0, u1, v1] = corners(i);
-                            b.rect_outline(u0, v0, u1, v1, bar_edge(bp), bp.opts.linewidth);
-                        }
-                        b.close();
-                    }
+                    bar_geom(bp);
                     // Error bars hang off the tip, not the base.
                     if (!bp.err.empty()) {
                         const XYColumns a = bar_anchors(bp);
@@ -453,6 +458,10 @@ namespace sextant {
 
                 case PlotKind::Stack:
                     for (const FillPlot& fp : stack_layers(s.stacks[r.index])) fill_geom(fp);
+                    break;
+
+                case PlotKind::BarStack:
+                    for (const BarPlot& bp : bar_stack_layers(s.bar_stacks[r.index])) bar_geom(bp);
                     break;
 
                 case PlotKind::Poly:

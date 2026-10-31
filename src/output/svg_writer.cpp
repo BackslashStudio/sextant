@@ -796,11 +796,11 @@ static void emit_heatmap(std::ostringstream& o, const SvgAxesData& d,
     }
 }
 
-static void emit_bars(std::ostringstream& o, const SvgAxesData& d,
+static void emit_bars(std::ostringstream& o, const SvgAxesData& d, std::span<const BarPlot> bars,
                       std::span<const std::size_t> which) {
     const auto& tr = d.layout.tr;
     for (const std::size_t k : which) {
-        const auto& bp = d.bars[k];
+        const auto& bp = bars[k];
         const float half = static_cast<float>(bp.bar_width * 0.5);
         const std::string fill  = rgb(*bp.opts.color);
         const Color ec = bar_edge(bp);
@@ -1083,7 +1083,7 @@ static void emit_object(std::ostringstream& o, const SvgAxesData& d, const Objec
             emit_heatmap(o, d, one);
             break;
         case PlotKind::Bar:
-            emit_bars(o, d, one);
+            emit_bars(o, d, d.bars, one);
             emit_error_bars(o, d, r);
             break;
         case PlotKind::Line:
@@ -1107,6 +1107,14 @@ static void emit_object(std::ostringstream& o, const SvgAxesData& d, const Objec
         case PlotKind::Fill:
             emit_fill(o, d, d.fills[r.index]);
             break;
+        case PlotKind::BarStack: {
+            const std::span<const BarPlot> layers = bar_stack_layers(d.bar_stacks[r.index]);
+            for (std::size_t k = 0; k < layers.size(); ++k) {
+                const std::size_t at[1] = {k};
+                emit_bars(o, d, layers, at);
+            }
+            break;
+        }
         case PlotKind::Stack:
             for (const FillPlot& layer : stack_layers(d.stacks[r.index])) emit_fill(o, d, layer);
             break;

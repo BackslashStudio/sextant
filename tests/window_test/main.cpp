@@ -2523,6 +2523,52 @@ static void part_stack() {
     fig->show(true);
 }
 
+// v1.4.0 part 4: Axes::bar_stack() and Plane2D::bar_stack(): positive and negative
+// heights stacked apart, names and hint labels (hover names the layer), a
+// lying stack on a bottom, a NaN gap, a plane. The Data panel edits the layers,
+// the bottom and the style (per-layer colors, the width fraction).
+static void part_bar_stack() {
+    using V = std::vector<double>;
+    auto fig = sextant::Figure::create({.width = 1400, .height = 900, .title = "Stacked bars"});
+    fig->suptitle("Stacked bars (Axes::bar_stack, Plane2D::bar_stack)");
+
+    const V q{1, 2, 3, 4, 5, 6};
+    auto a1 = fig->add_subplot(2, 2, 1);
+    a1->bar_stack(q, std::vector<V>{{3, 4, 2, 5, 3, 4}, {-2, -1, -3, -1, -2, -1}, {2, 1, 3, 2, -2, 1}},
+                  {.names = {"revenue", "cost", "other"},
+                   .hint_labels = {"Jan", "Feb", "Mar", "Apr", "May", "Jun"}});
+    a1->axline(0.0, {.color = sextant::Color::Black, .linewidth = 1.0f});
+    a1->legend();
+    a1->set_title("negatives stack down from 0; hover names layer and month");
+
+    auto a2 = fig->add_subplot(2, 2, 2);
+    a2->bar_stack(V{0, 1, 2, 3}, std::vector<V>{{2, 3, 1, 2}, {1, 1, 2, 3}, {2, 1, 1, 1}},
+                  {.orientation = sextant::Orientation::Horizontal, .bottom = {1.0, 0.5, 2.0, 0.0},
+                   .names = {"a", "b", "c"}, .width = 0.6f, .alpha = 0.8f, .linewidth = 1.0f, .name = "lying"});
+    a2->legend();
+    a2->set_title("Horizontal on a bottom (left), width 0.6, outlined");
+
+    auto a3 = fig->add_subplot(2, 2, 3);
+    std::vector<V> g{{1, 2, 3, 2, 1, 2}, {2, 2, 2, 2, 2, 2}, {1, 1, 1, 1, 1, 1}};
+    g[1][2] = std::nan("");
+    a3->bar_stack(q, g, {.colors = {sextant::Color{0.85f, 0.35f, 0.2f, 1.0f}, sextant::Color{0.95f, 0.75f, 0.2f, 1.0f},
+                                    sextant::Color{0.3f, 0.6f, 0.8f, 1.0f}},
+                         .names = {"low", "mid (NaN at 3)", "top"}});
+    a3->legend();
+    a3->set_title("own colors; a NaN draws no bar, the one above sits lower");
+
+    auto a4 = fig->add_subplot3d(2, 2, 4);
+    {
+        auto floor = a4->plane(sextant::PlaneOrientation::XY, 0.0);
+        floor->bar_stack(q, std::vector<V>{{1, 2, 1, 2, 1, 2}, {2, 1, 2, 1, 2, 1}}, {.names = {"a", "b"}});
+        a4->legend();
+        a4->set_title("a bar stack on an XY plane");
+    }
+
+    savefig_and_check_memory(fig, "part_bar_stack");
+    fig->show(true);
+}
+
 // Steps 36e-1/36e-2: Axes::quiver() and Plane2D::quiver(): the automatic amp,
 // equal aspect against free aspect colored by speed (with a colorbar), the
 // three pivots, explicit amp and shape over a heatmap, a log axis, a plane
@@ -3853,8 +3899,9 @@ static void test_scatter() { // scatter, scatter_z
     part_marker_sizes();
 }
 
-static void test_bar() { // bar, hist
+static void test_bar() { // bar, hist, bar_stack
     part_bar_orientation();
+    part_bar_stack();
 }
 
 static void test_fill() { // fill, stack
@@ -3884,9 +3931,9 @@ int main() {
     // test_legend_colorbar();
     // test_line();
     // test_scatter();
-    // test_bar();
+    test_bar();
     // test_heatmap();
-    test_fill();
+    // test_fill();
     // test_quiver();
     // test_bar3d();
     // test_surface();

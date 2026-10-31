@@ -511,6 +511,38 @@ namespace sextant {
         double zorder = 0.0;     // see LineOptions::zorder
     };
 
+    // Stacked bars (Axes::bar_stack()).
+    struct BarStackOptions {
+        // As BarOptions: Vertical bars stand on x and stack up y; Horizontal
+        // ones lie on y and stack along x (heights are then widths).
+        Orientation orientation = Orientation::Vertical;
+
+        // Where each bar's stack starts, as BarOptions::bottom (empty = 0, one
+        // value = every bar, else one per bar). Kept as the object's data:
+        // read back and replaced through BarStackData::bottom.
+        std::vector<double> bottom;
+
+        // As StackOptions: empty = one cycle color per layer, else one per
+        // layer; empty = no names, else one legend name per layer.
+        std::vector<Color> colors;
+        std::vector<std::string> names;
+
+        // As BarOptions, for every layer. `name` names the stack itself (the
+        // Data panel's tab, the hover's last line); the legend lists `names`.
+        float width = 0.8f;
+        float alpha = 1.0f;
+        Color edgecolor = Color::Black;
+        float linewidth = 0.5f;
+        std::string name;
+        bool show_legend = true;
+        bool visible = true;     // see LineOptions::visible
+        double zorder = 0.0;     // see LineOptions::zorder
+
+        // See LineOptions::hint_labels: one per bar position (index-aligned
+        // with x), shown for every layer's bar there.
+        std::vector<std::string> hint_labels;
+    };
+
     // Which part of a quiver arrow sits on its (x, y): the tail, the middle or
     // the tip.
     enum class QuiverPivot { Tail, Middle, Tip };
@@ -1250,6 +1282,17 @@ namespace sextant {
     struct StackData {
         std::vector<double> x;
         std::vector<std::vector<double>> ys;
+    };
+
+    // Axes::bar_stack(): the bar positions, each layer's heights (one per
+    // position, bottom layer first, as given, not stacked) and `bottom` as
+    // BarData::bottom. set_bar_stack_data(i, BarStackData) takes `bottom` as
+    // given (empty clears it, one value is every bar); the span overload keeps
+    // it while the bar count is unchanged.
+    struct BarStackData {
+        std::vector<double> x;
+        std::vector<std::vector<double>> heights;
+        std::vector<double> bottom;
     };
 
     // Axes::quiver(): each arrow's position and vector, one value each per

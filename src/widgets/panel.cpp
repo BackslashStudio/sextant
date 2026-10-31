@@ -108,6 +108,7 @@ void sync_sheet(DataPanelState::SheetStyles& dst, const RenderSnapshot& sn) {
     copy(dst.contours, sn.contours);
     copy(dst.pies, sn.pies);
     copy(dst.stacks, sn.stacks);
+    copy(dst.bar_stacks, sn.bar_stacks);
     dst.ids = object_ids(sn, kPlotKinds2D);
 }
 

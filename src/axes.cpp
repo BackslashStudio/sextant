@@ -925,6 +925,66 @@ Axes& Axes::stack(std::span<const double> x, std::span<const std::vector<double>
     return *this;
 }
 
+namespace {
+// A bar stack's colors follow a new layer count as a stack's: trimmed, or
+// extended from the cycle; names trimmed or extended empty.
+template <class Opts>
+void fit_layer_styles(Opts& o, std::size_t m, ColorCycle& cycle) {
+    while (o.colors.size() < m) {
+        std::optional<Color> c;
+        cycle.resolve(c);
+        o.colors.push_back(*c);
+    }
+    o.colors.resize(m);
+    if (!o.names.empty()) o.names.resize(m);
+}
+} // namespace
+
+void Axes::Impl::ingest_bar_stack(std::span<const double> x, std::span<const std::vector<double>> heights,
+                                  BarStackOptions opts, const char* who) {
+    read_back::check_zorder(opts.zorder, who);
+    check_stack_layers(x.size(), heights, who);
+    if (!opts.colors.empty() && opts.colors.size() != heights.size())
+        throw std::invalid_argument(std::string(who) + ": colors needs one per layer");
+    if (!opts.names.empty() && opts.names.size() != heights.size())
+        throw std::invalid_argument(std::string(who) + ": names needs one per layer");
+    std::vector<double> bottom = read_back::take_bottom(std::move(opts.bottom), x.size(), who);
+    opts.bottom.clear();
+    warn_math(mathtext, who, opts.name);
+    for (const std::string& n : opts.names) warn_math(mathtext, who, n);
+    if (opts.colors.empty()) fit_layer_styles(opts, heights.size(), *cycle);
+    BarStackPlot p;
+    p.x = read_back::own(x);
+    p.heights = own_layers(heights);
+    p.bottom = std::move(bottom);
+    p.opts = std::move(opts);
+    p.data_stamp = next_snapshot_generation();
+    p.id = new_id();
+    bar_stack_rebuild(p);
+    bar_stacks.push_back(std::move(p));
+}
+
+void Axes::Impl::set_bar_stack_data(std::size_t i, std::span<const double> x,
+                                    std::span<const std::vector<double>> heights,
+                                    const std::vector<double>* bottom, const char* who) {
+    BarStackPlot& p = read_back::at(bar_stacks, i, who);
+    check_stack_layers(x.size(), heights, who);
+    std::vector<double> bases;
+    if (bottom) bases = read_back::take_bottom(*bottom, x.size(), who);
+    fit_layer_styles(p.opts, heights.size(), *cycle);
+    read_back::keep_aligned(p, x.size() == p.x.size());
+    p.x = read_back::own(x);
+    p.heights = own_layers(heights);
+    if (bottom) p.bottom = std::move(bases);
+    bar_stack_rebuild(p);
+}
+
+Axes& Axes::bar_stack(std::span<const double> x, std::span<const std::vector<double>> heights,
+                      BarStackOptions opts) {
+    d->ingest_bar_stack(x, heights, std::move(opts), "bar_stack");
+    return *this;
+}
+
 // An unset amp is chosen from the data here and kept, as matplotlib's.
 // A colormapped quiver keeps a cycle color without using one up, as the 3D
 // kinds' colormapped objects do.
@@ -1270,6 +1330,23 @@ Axes& Axes::set_stack_data(std::size_t i, std::span<const double> x,
     return *this;
 }
 
+std::size_t Axes::bar_stack_count() const { return d->bar_stacks.size(); }
+
+BarStackData Axes::bar_stack_data(std::size_t i) const {
+    return read_back::to_data(read_back::at(d->bar_stacks, i, "bar_stack_data"));
+}
+
+Axes& Axes::set_bar_stack_data(std::size_t i, const BarStackData& data) {
+    d->set_bar_stack_data(i, data.x, data.heights, &data.bottom, "set_bar_stack_data");
+    return *this;
+}
+
+Axes& Axes::set_bar_stack_data(std::size_t i, std::span<const double> x,
+                               std::span<const std::vector<double>> heights) {
+    d->set_bar_stack_data(i, x, heights, nullptr, "set_bar_stack_data");
+    return *this;
+}
+
 
 std::size_t Axes::shape_poly_count() const   { return d->polys.size(); }
 std::size_t Axes::shape_circle_count() const { return d->circles.size(); }
@@ -1438,6 +1515,10 @@ Axes& Axes::set_stack_visible(std::size_t i, bool visible) {
     read_back::set_visible(d->stacks, i, visible, "set_stack_visible");
     return *this;
 }
+Axes& Axes::set_bar_stack_visible(std::size_t i, bool visible) {
+    read_back::set_visible(d->bar_stacks, i, visible, "set_bar_stack_visible");
+    return *this;
+}
 Axes& Axes::set_shape_poly_visible(std::size_t i, bool visible) {
     read_back::set_visible(d->polys, i, visible, "set_shape_poly_visible");
     return *this;
@@ -1488,6 +1569,7 @@ bool Axes::bar_visible(std::size_t i) const       { return read_back::visible(d-
 bool Axes::heatmap_visible(std::size_t i) const   { return read_back::visible(d->heatmaps, i, "heatmap_visible"); }
 bool Axes::fill_visible(std::size_t i) const      { return read_back::visible(d->fills, i, "fill_visible"); }
 bool Axes::stack_visible(std::size_t i) const     { return read_back::visible(d->stacks, i, "stack_visible"); }
+bool Axes::bar_stack_visible(std::size_t i) const { return read_back::visible(d->bar_stacks, i, "bar_stack_visible"); }
 bool Axes::shape_poly_visible(std::size_t i) const   { return read_back::visible(d->polys, i, "shape_poly_visible"); }
 bool Axes::shape_circle_visible(std::size_t i) const { return read_back::visible(d->circles, i, "shape_circle_visible"); }
 bool Axes::shape_wedge_visible(std::size_t i) const  { return read_back::visible(d->wedges, i, "shape_wedge_visible"); }

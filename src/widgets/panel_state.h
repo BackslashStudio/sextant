@@ -340,6 +340,7 @@ namespace sextant {
             std::vector<ContourOptions> contours;
             std::vector<PieOptions> pies;
             std::vector<StackOptions> stacks;
+            std::vector<BarStackOptions> bar_stacks;
             std::vector<ObjectId> ids;   // seeded from, kind by kind
         };
 

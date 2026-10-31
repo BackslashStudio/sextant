@@ -161,6 +161,12 @@ namespace sextant {
         return *this;
     }
 
+    Plane2D& Plane2D::bar_stack(std::span<const double> x, std::span<const std::vector<double>> heights,
+                                BarStackOptions opts) {
+        d->sheet.ingest_bar_stack(x, heights, std::move(opts), "Plane2D::bar_stack");
+        return *this;
+    }
+
     Plane2D& Plane2D::quiver(std::span<const double> x, std::span<const double> y,
                              std::span<const double> u, std::span<const double> v, QuiverOptions opts) {
         d->sheet.ingest_quiver(x, y, u, v, nullptr, std::move(opts), "Plane2D::quiver");
@@ -222,6 +228,7 @@ namespace sextant {
     std::size_t Plane2D::heatmap_count() const   { return d->sheet.heatmaps.size(); }
     std::size_t Plane2D::fill_count() const      { return d->sheet.fills.size(); }
     std::size_t Plane2D::stack_count() const     { return d->sheet.stacks.size(); }
+    std::size_t Plane2D::bar_stack_count() const { return d->sheet.bar_stacks.size(); }
     std::size_t Plane2D::axspan_count() const    { return d->sheet.axspans.size(); }
 
     AxSpanData Plane2D::axspan_data(std::size_t i) const {
@@ -369,6 +376,9 @@ namespace sextant {
     StackData Plane2D::stack_data(std::size_t i) const {
         return read_back::to_data(read_back::at(d->sheet.stacks, i, "Plane2D::stack_data"));
     }
+    BarStackData Plane2D::bar_stack_data(std::size_t i) const {
+        return read_back::to_data(read_back::at(d->sheet.bar_stacks, i, "Plane2D::bar_stack_data"));
+    }
     QuiverData Plane2D::quiver_data(std::size_t i) const {
         return read_back::to_data(read_back::at(d->sheet.quivers, i, "Plane2D::quiver_data"));
     }
@@ -416,6 +426,15 @@ namespace sextant {
     Plane2D& Plane2D::set_stack_data(std::size_t i, std::span<const double> x,
                                      std::span<const std::vector<double>> ys) {
         d->sheet.set_stack_data(i, x, ys, "Plane2D::set_stack_data");
+        return *this;
+    }
+    Plane2D& Plane2D::set_bar_stack_data(std::size_t i, const BarStackData& data) {
+        d->sheet.set_bar_stack_data(i, data.x, data.heights, &data.bottom, "Plane2D::set_bar_stack_data");
+        return *this;
+    }
+    Plane2D& Plane2D::set_bar_stack_data(std::size_t i, std::span<const double> x,
+                                         std::span<const std::vector<double>> heights) {
+        d->sheet.set_bar_stack_data(i, x, heights, nullptr, "Plane2D::set_bar_stack_data");
         return *this;
     }
     Plane2D& Plane2D::set_fill_data(std::size_t i, const FillData& data) {
@@ -477,6 +496,10 @@ namespace sextant {
         read_back::set_visible(d->sheet.stacks, i, visible, "Plane2D::set_stack_visible");
         return *this;
     }
+    Plane2D& Plane2D::set_bar_stack_visible(std::size_t i, bool visible) {
+        read_back::set_visible(d->sheet.bar_stacks, i, visible, "Plane2D::set_bar_stack_visible");
+        return *this;
+    }
     Plane2D& Plane2D::set_quiver_visible(std::size_t i, bool visible) {
         read_back::set_visible(d->sheet.quivers, i, visible, "Plane2D::set_quiver_visible");
         return *this;
@@ -502,6 +525,9 @@ namespace sextant {
     }
     bool Plane2D::stack_visible(std::size_t i) const {
         return read_back::visible(d->sheet.stacks, i, "Plane2D::stack_visible");
+    }
+    bool Plane2D::bar_stack_visible(std::size_t i) const {
+        return read_back::visible(d->sheet.bar_stacks, i, "Plane2D::bar_stack_visible");
     }
     bool Plane2D::quiver_visible(std::size_t i) const {
         return read_back::visible(d->sheet.quivers, i, "Plane2D::quiver_visible");

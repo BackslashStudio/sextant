@@ -92,7 +92,8 @@ namespace sextant {
                || (all.wedges && any_shown(*all.wedges))
                || (all.heatmap_tris && any_shown(*all.heatmap_tris))
                || (all.contours && any_shown(*all.contours))
-               || (all.stacks && any_shown(*all.stacks));
+               || (all.stacks && any_shown(*all.stacks))
+               || (all.bar_stacks && any_shown(*all.bar_stacks));
     }
 
     // True when a plane is drawn this frame. Drawing paths check this; layout does

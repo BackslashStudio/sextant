@@ -310,7 +310,7 @@ bool shape_covers(const RenderSnapshot& snap, const HintProjector& proj, PlotKin
     return shape_contains(shape_geom_of(snap, kind, o, st), st.to_px(cx), st.to_py(cy));
 }
 
-// The topmost bar, fill, stack layer or heatmap cell under the cursor (draw order, last
+// The topmost bar, fill, stack layer, stacked bar or heatmap cell under the cursor (draw order, last
 // first), at the cursor; nullopt if none, or the cursor misses the surface.
 std::optional<PickHit> find_area(const RenderSnapshot& snap, const HintProjector& tr,
                                  const std::vector<ObjectRef>& order,
@@ -326,6 +326,25 @@ std::optional<PickHit> find_area(const RenderSnapshot& snap, const HintProjector
     }
     const AxisScale xs = tr.x_scale(), ys = tr.y_scale();
 
+    // The last bar of `bp` the cursor (with its margin) is on, if any. In data
+    // space: a scale keeps the rectangle's corners in order, and a base at 0
+    // on a log axis reaches below any view, as drawn.
+    const auto bar_at = [&](const BarPlot& bp) -> std::optional<std::size_t> {
+        const bool lying = bp.horizontal();
+        const double a_lo = lying ? by_lo : bx_lo, a_hi = lying ? by_hi : bx_hi;
+        const double v_lo = lying ? bx_lo : by_lo, v_hi = lying ? bx_hi : by_hi;
+        const double half = std::abs(bp.bar_width) * 0.5;
+        const std::size_t n = std::min(bp.centers.size(), bp.heights.size());
+        for (std::size_t i = n; i-- > 0;) {
+            const double c = bp.centers[i], b = bp.base_at(i), t = bp.tip_at(i);
+            if (!std::isfinite(c) || !std::isfinite(b) || !std::isfinite(t)) continue;
+            if (c + half < a_lo || c - half > a_hi) continue;
+            if (std::max(b, t) < v_lo || std::min(b, t) > v_hi) continue;
+            return i;
+        }
+        return std::nullopt;
+    };
+
     PickHit hit;
     hit.anchor_x = cursor_x;
     hit.anchor_y = cursor_y;
@@ -335,22 +354,24 @@ std::optional<PickHit> find_area(const RenderSnapshot& snap, const HintProjector
         const std::size_t o = order[rank].index;
         switch (order[rank].kind) {
             case PlotKind::Bar: {
-                // In data space: a scale keeps the rectangle's corners in order,
-                // and a base at 0 on a log axis reaches below any view, as drawn.
-                const BarPlot& bp = snap.bars[o];
-                const bool lying = bp.horizontal();
-                const double a_lo = lying ? by_lo : bx_lo, a_hi = lying ? by_hi : bx_hi;
-                const double v_lo = lying ? bx_lo : by_lo, v_hi = lying ? bx_hi : by_hi;
-                const double half = std::abs(bp.bar_width) * 0.5;
-                const std::size_t n = std::min(bp.centers.size(), bp.heights.size());
-                for (std::size_t i = n; i-- > 0;) {
-                    const double c = bp.centers[i], b = bp.base_at(i), t = bp.tip_at(i);
-                    if (!std::isfinite(c) || !std::isfinite(b) || !std::isfinite(t)) continue;
-                    if (c + half < a_lo || c - half > a_hi) continue;
-                    if (std::max(b, t) < v_lo || std::min(b, t) > v_hi) continue;
-                    hit.kind = PickKind::Bar;
+                const std::optional<std::size_t> i = bar_at(snap.bars[o]);
+                if (!i) break;
+                hit.kind = PickKind::Bar;
+                hit.object = o;
+                hit.element = *i;
+                return hit;
+            }
+            case PlotKind::BarStack: {
+                // The top layer first: at a shared edge the upper bar wins.
+                const std::span<const BarPlot> layers = bar_stack_layers(snap.bar_stacks[o]);
+                for (std::size_t k = layers.size(); k-- > 0;) {
+                    const std::optional<std::size_t> i = bar_at(layers[k]);
+                    if (!i) continue;
+                    hit.kind = PickKind::BarStack;
                     hit.object = o;
-                    hit.element = i;
+                    hit.row = static_cast<int>(k);
+                    hit.col = static_cast<int>(*i);
+                    hit.element = k * layers[k].centers.size() + *i;
                     return hit;
                 }
                 break;
@@ -722,6 +743,7 @@ ObjectId pick_object_id(const RenderSnapshot& s, PickKind kind, std::size_t i) {
         case PickKind::Quiver:   return s.quivers[i].id;
         case PickKind::Fill:     return s.fills[i].id;
         case PickKind::Stack:    return s.stacks[i].id;
+        case PickKind::BarStack: return s.bar_stacks[i].id;
         case PickKind::Poly:     return s.polys[i].id;
         case PickKind::Circle:   return s.circles[i].id;
         case PickKind::Wedge:    return s.wedges[i].id;
@@ -840,6 +862,22 @@ std::string format_hit(const RenderSnapshot& snap, const PickHit& hit, bool pola
                 s += sp.opts.names[hit.element];
             else
                 s += "layer " + std::to_string(hit.element);
+            if (!sp.opts.name.empty()) s += '\n' + sp.opts.name;
+            return s;
+        }
+        case PickKind::BarStack: {
+            // The bar (position, height, base), its layer (name, else "layer
+            // k"), the position's hint label, then the stack's name.
+            const BarStackPlot& sp = snap.bar_stacks[hit.object];
+            const std::span<const BarPlot> layers = bar_stack_layers(sp);
+            const std::size_t k = static_cast<std::size_t>(hit.row), b = static_cast<std::size_t>(hit.col);
+            if (k >= layers.size() || b >= layers[k].centers.size()) return {};
+            std::string s = fmt_bar(layers[k], b) + '\n';
+            if (k < sp.opts.names.size() && !sp.opts.names[k].empty())
+                s += sp.opts.names[k];
+            else
+                s += "layer " + std::to_string(k);
+            s = append_label(std::move(s), sp.opts.hint_labels, b);
             if (!sp.opts.name.empty()) s += '\n' + sp.opts.name;
             return s;
         }

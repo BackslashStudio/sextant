@@ -72,7 +72,7 @@ struct PlotStyleEdit {
                  HeatmapOptions, ScatterZOptions, TextStyle,
                  AxLineOptions, AxSpanOptions, FillOptions, QuiverOptions,
                  PolyOptions, CircleOptions, WedgeOptions, HeatmapTriOptions, ContourOptions,
-                 PieOptions, StackOptions> opts;
+                 PieOptions, StackOptions, BarStackOptions> opts;
     ObjectId id = 0, plane_id = 0;   // see PlotCellEdit
     // The object's visible_stamp when the panel drew; filled in by
     // FigureEditBox. A set_<kind>_visible() since keeps its `visible`.
@@ -743,6 +743,20 @@ std::optional<PlotDataOp> apply_plot_data_op(T& t, const PlotCellEdit& e) {
                 return undo;
             }
             return std::nullopt;
+        case PlotKind::BarStack:
+            // x, one column per layer, then the bottom when there is one; the
+            // stacked bars follow.
+            if (auto* sp = op_target(t.bar_stacks, e)) {
+                const std::size_t m = sp->heights.size();
+                const std::size_t last = m + (sp->bottom.empty() ? 0 : 1);
+                if (e.column < 0 || static_cast<std::size_t>(e.column) > last) return std::nullopt;
+                const std::size_t c = static_cast<std::size_t>(e.column);
+                CowVec<double>& col = c == 0 ? sp->x : c <= m ? sp->heights[c - 1] : sp->bottom;
+                auto undo = cell_undo(e, t.bar_stacks, *sp, put_cell(col, e.element, e.value));
+                bar_stack_rebuild(*sp);
+                return undo;
+            }
+            return std::nullopt;
         case PlotKind::Circle:
         case PlotKind::Wedge:
             // One row; see ShapeDataEdit.
@@ -1024,6 +1038,49 @@ std::optional<PlotDataOp> stack_row_op(const PlotRowEdit& e, const Vec& v, Stack
     return inv;
 }
 
+// stack_row_op() for a bar stack, whose bottom and hint labels move with the
+// row where they reach it, as a bar's do (see row_op()).
+template <class Vec>
+std::optional<PlotDataOp> bar_stack_row_op(const PlotRowEdit& e, const Vec& v, BarStackPlot& p) {
+    const std::size_t n = p.x.size();
+    const bool insert = (e.op == PlotRowEdit::Op::Insert);
+    if (insert ? e.row > n : e.row >= n) return std::nullopt;
+    PlotRowEdit inv = retarget(e, v, p);
+    inv.restore.reset();
+    std::vector<std::string>& labels = p.opts.hint_labels;
+    const auto each = [&](auto&& f) {
+        f(p.x, 0);
+        for (std::size_t k = 0; k < p.heights.size(); ++k) f(p.heights[k], k + 1);
+    };
+    if (insert && e.restore) {
+        const PlotRowEdit::Restore& r = *e.restore;
+        each([&](CowVec<double>& c, std::size_t i) {
+            row_insert_value(c, e.row, i < r.cols.size() ? r.cols[i] : 0.0);
+        });
+        if (r.label) row_insert_value(labels, e.row, *r.label);
+        if (r.size) row_insert_value(p.bottom, e.row, *r.size);
+    } else if (insert) {
+        each([&](CowVec<double>& c, std::size_t) { row_insert(c, e.row, true); });
+        if (!labels.empty()) row_insert(labels, e.row, false);
+        if (!p.bottom.empty() && e.row <= p.bottom.size())
+            row_insert_value(p.bottom, e.row, p.bottom[e.row > 0 ? e.row - 1 : 0]);
+    } else {
+        PlotRowEdit::Restore r;
+        each([&](CowVec<double>& c, std::size_t) {
+            r.cols.push_back(c[e.row]);
+            row_remove(c, e.row);
+        });
+        r.label = value_at(labels, e.row);
+        r.size = value_at(p.bottom, e.row);
+        row_remove(labels, e.row);
+        row_remove(p.bottom, e.row);
+        inv.restore = std::move(r);
+    }
+    bar_stack_rebuild(p);
+    inv.op = insert ? PlotRowEdit::Op::Remove : PlotRowEdit::Op::Insert;
+    return inv;
+}
+
 } // namespace edits_detail
 
 // Adds or removes one data point.
@@ -1075,6 +1132,10 @@ std::optional<PlotDataOp> apply_plot_data_op(T& t, const PlotRowEdit& e) {
         case PlotKind::Stack:
             if (auto* sp = op_target(t.stacks, e))
                 return edits_detail::stack_row_op(e, t.stacks, *sp);
+            return std::nullopt;
+        case PlotKind::BarStack:
+            if (auto* sp = op_target(t.bar_stacks, e))
+                return edits_detail::bar_stack_row_op(e, t.bar_stacks, *sp);
             return std::nullopt;
         case PlotKind::Heatmap:
         case PlotKind::Bar3D:
@@ -1501,6 +1562,15 @@ std::optional<ReplacedOpts<Opts>> assign_plot_opts(Vec& v, int idx, ObjectId id,
         if (kept) visible_flag(p->opts) = *kept;
         if constexpr (requires { p->opts.zorder; })
             if (kept_z) p->opts.zorder = *kept_z;
+        // A bar stack's bars follow its options, as a stack's (its bottom is
+        // data, moved out at the call).
+        if constexpr (std::is_same_v<std::decay_t<decltype(*p)>, BarStackPlot>) {
+            p->opts.bottom.clear();
+            if (p->opts.colors.size() != p->heights.size()) p->opts.colors = r.old.colors;
+            if (!p->opts.names.empty() && p->opts.names.size() != p->heights.size())
+                p->opts.names = r.old.names;
+            bar_stack_rebuild(*p);
+        }
         return r;
     }
 }
@@ -1526,6 +1596,7 @@ auto& styled_vector(T& t) {
     else if constexpr (std::is_same_v<O, ContourOptions>) return t.contours;
     else if constexpr (std::is_same_v<O, PieOptions>)     return t.pies;
     else if constexpr (std::is_same_v<O, StackOptions>)   return t.stacks;
+    else if constexpr (std::is_same_v<O, BarStackOptions>) return t.bar_stacks;
     else                                                  return t.scatter_z;
 }
 

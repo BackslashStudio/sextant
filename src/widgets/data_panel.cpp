@@ -1206,6 +1206,34 @@ namespace sextant {
             }
         }
 
+        // A bar stack's width stays a fraction of the spacing (a style edit,
+        // re-resolved at every restack), unlike a bar's resolved width.
+        template<class Push>
+        void bar_stack_style(DataPanelState& st, BarStackOptions& o, Push&& push) {
+            name_and_key(st, o, push);
+            if (begin_field_table("barstack")) {
+                field_row("Orientation");
+                if (orientation_combo("##bsorient", o.orientation)) push();
+                for (std::size_t k = 0; k < o.colors.size(); ++k) {
+                    const std::string label = k < o.names.size() && !o.names[k].empty()
+                                                  ? o.names[k] : "y" + std::to_string(k);
+                    field_row(label.c_str());
+                    ImGui::PushID(static_cast<int>(k));
+                    if (color_swatch("##bscol", o.colors[k])) push();
+                    ImGui::PopID();
+                }
+                field_row("Alpha");
+                if (drag_float("##bsalpha", &o.alpha, 0.0f, 1.0f, 0.005f, "%.2f")) push();
+                field_row("Bar width");
+                if (drag_float("##bswidth", &o.width, 0.0f, 1.0f, 0.005f, "%.2f")) push();
+                field_row("Edge");
+                if (color_swatch("##bsecol", o.edgecolor)) push();
+                field_row("Edge width");
+                if (drag_float("##bsew", &o.linewidth, 0.0f, 10.0f, 0.05f, "%.2f px")) push();
+                end_field_table();
+            }
+        }
+
         template<class Push>
         void fill_style(DataPanelState& st, FillOptions& o, Push&& push) {
             name_and_key(st, o, push);
@@ -1632,6 +1660,7 @@ namespace sextant {
                 case PlotKind::Contour:  if (!both(ss->contours, sheet.contours)) return; break;
                 case PlotKind::Pie:      if (!both(ss->pies, sheet.pies)) return; break;
                 case PlotKind::Stack:    if (!both(ss->stacks, sheet.stacks)) return; break;
+                case PlotKind::BarStack: if (!both(ss->bar_stacks, sheet.bar_stacks)) return; break;
                 default: return; // the 3D kinds have blocks of their own
             }
             if (!section("Appearance", true)) return;
@@ -1692,6 +1721,9 @@ namespace sextant {
                     break;
                 case PlotKind::Stack:
                     stack_style(st, ss->stacks[i], push_of(ss->stacks[i]));
+                    break;
+                case PlotKind::BarStack:
+                    bar_stack_style(st, ss->bar_stacks[i], push_of(ss->bar_stacks[i]));
                     break;
                 default: break;
             }

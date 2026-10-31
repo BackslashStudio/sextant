@@ -77,6 +77,9 @@ namespace sextant {
     SEXTANT_DESCRIBE(StackOptions,
                      F(orientation) F(baseline) F(colors) F(names) F(alpha) F(edgecolor) F(linewidth)
                      F(linestyle) F(drawstyle) F(name) F(show_legend) F(visible) F(zorder))
+    SEXTANT_DESCRIBE(BarStackOptions,
+                     F(orientation) F(bottom) F(colors) F(names) F(width) F(alpha) F(edgecolor)
+                     F(linewidth) F(name) F(show_legend) F(visible) F(zorder) F(hint_labels))
     SEXTANT_DESCRIBE(PolyOptions,
                      F(color) F(alpha) F(edgecolor) F(linewidth) F(linestyle) F(space) F(name)
                      F(show_legend) F(visible) F(zorder))

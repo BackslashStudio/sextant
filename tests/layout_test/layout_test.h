@@ -671,6 +671,7 @@ namespace lt {
 
     // fill_between.cpp
     void test_fill_between();
+    void test_bar_stack();
     void test_fill_between_rendered();
 
     // shapes.cpp

@@ -40,6 +40,7 @@ namespace sextant {
         std::vector<HeatmapTriPlot> heatmap_tris;
         std::vector<ContourPlot> contours;
         std::vector<StackPlot> stacks;
+        std::vector<BarStackPlot> bar_stacks;
         // Font sizes come from axes_style.
         std::string title, xtitle, ytitle;
         bool grid_enabled = false;

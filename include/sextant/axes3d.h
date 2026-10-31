@@ -586,6 +586,10 @@ namespace sextant {
         Plane2D& stack(std::span<const double> x, std::span<const std::vector<double>> ys,
                        StackOptions opts = {});
 
+        // Stacked bars, as Axes::bar_stack().
+        Plane2D& bar_stack(std::span<const double> x, std::span<const std::vector<double>> heights,
+                           BarStackOptions opts = {});
+
         // An arrow field, as Axes::quiver().
         Plane2D& quiver(std::span<const double> x, std::span<const double> y,
                         std::span<const double> u, std::span<const double> v,
@@ -647,6 +651,9 @@ namespace sextant {
         std::size_t stack_count() const;
         StackData stack_data(std::size_t i) const;
 
+        std::size_t bar_stack_count() const;
+        BarStackData bar_stack_data(std::size_t i) const;
+
         std::size_t axspan_count() const;
         AxSpanData axspan_data(std::size_t i) const;
 
@@ -702,6 +709,12 @@ namespace sextant {
 
         Plane2D& set_stack_data(std::size_t i, std::span<const double> x,
                                 std::span<const std::vector<double>> ys);
+
+        // As Axes::set_bar_stack_data().
+        Plane2D& set_bar_stack_data(std::size_t i, const BarStackData& data);
+
+        Plane2D& set_bar_stack_data(std::size_t i, std::span<const double> x,
+                                    std::span<const std::vector<double>> heights);
 
         Plane2D& set_axspan_data(std::size_t i, const AxSpanData& data);
 
@@ -759,6 +772,9 @@ namespace sextant {
 
         Plane2D& set_stack_visible(std::size_t i, bool visible);
         bool stack_visible(std::size_t i) const;
+
+        Plane2D& set_bar_stack_visible(std::size_t i, bool visible);
+        bool bar_stack_visible(std::size_t i) const;
 
         Plane2D& set_axspan_visible(std::size_t i, bool visible);
         bool axspan_visible(std::size_t i) const;

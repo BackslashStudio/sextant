@@ -878,6 +878,16 @@ namespace sextant {
                     }
                     break;
                 }
+                case PlotKind::BarStack: {
+                    // One patch per named layer, bottom first, as a bar's.
+                    const BarStackPlot& sp = snap.bar_stacks[r.index];
+                    if (!sp.opts.show_legend || !sp.opts.visible) break;
+                    for (const BarPlot& bp : bar_stack_layers(sp))
+                        if (!bp.opts.name.empty())
+                            entries.push_back({*bp.opts.color, bp.opts.name, LegendKind::Bar,
+                                               LineStyle::Solid});
+                    break;
+                }
                 case PlotKind::Poly: case PlotKind::Circle: case PlotKind::Wedge: {
                     // A patch at the shape's opacity, as a fill's; outlined when
                     // the shape is.

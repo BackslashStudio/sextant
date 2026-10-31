@@ -201,6 +201,19 @@ namespace sextant {
         Axes& stack(std::span<const double> x, std::span<const std::vector<double>> ys,
                     StackOptions opts = {});
 
+        // Stacked bars: layer k's bar i sits on the layers below it, heights[k]
+        // giving one value per position of `x` (any other length throws
+        // std::invalid_argument, before anything is added). Positive heights
+        // stack up from the bar's bottom (BarStackOptions::bottom) and
+        // negative ones down from it, each on its own side, as Plotly's
+        // relative mode; a NaN height draws no bar and moves neither side. Bar
+        // widths as bar(). Its own kind: one object (bar_stack_count(),
+        // bar_stack_data(), PickKind::BarStack with the layer and the bar),
+        // restacked from the heights when drawn, so editing a layer moves the
+        // ones above it. No error bars.
+        Axes& bar_stack(std::span<const double> x, std::span<const std::vector<double>> heights,
+                        BarStackOptions opts = {});
+
         // ----------------------------------------------------------------
         // Arrow fields
         // ----------------------------------------------------------------
@@ -480,6 +493,9 @@ namespace sextant {
         std::size_t stack_count() const;
         StackData stack_data(std::size_t i) const;
 
+        std::size_t bar_stack_count() const;
+        BarStackData bar_stack_data(std::size_t i) const;
+
         std::size_t shape_poly_count() const;
         PolyData shape_poly_data(std::size_t i) const;
 
@@ -569,6 +585,14 @@ namespace sextant {
         Axes& set_stack_data(std::size_t i, std::span<const double> x,
                              std::span<const std::vector<double>> ys);
 
+        // A bar stack's numbers, checked as bar_stack() checks them; colors and
+        // names follow a new layer count as set_stack_data()'s, and hint_labels
+        // are dropped when the bar count changes.
+        Axes& set_bar_stack_data(std::size_t i, const BarStackData& data);
+
+        Axes& set_bar_stack_data(std::size_t i, std::span<const double> x,
+                                 std::span<const std::vector<double>> heights);
+
         // A shape's numbers, validated as its plotting call.
         Axes& set_shape_poly_data(std::size_t i, const PolyData& data);
 
@@ -650,6 +674,9 @@ namespace sextant {
 
         Axes& set_stack_visible(std::size_t i, bool visible);
         bool stack_visible(std::size_t i) const;
+
+        Axes& set_bar_stack_visible(std::size_t i, bool visible);
+        bool bar_stack_visible(std::size_t i) const;
 
         Axes& set_shape_poly_visible(std::size_t i, bool visible);
         bool shape_poly_visible(std::size_t i) const;

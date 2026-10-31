@@ -351,6 +351,7 @@ int main() {
     test_plane_axspan();
     // fill_between.cpp
     test_fill_between();
+    test_bar_stack();
     test_fill_between_rendered();
     // shapes.cpp
     test_shape_geometry();

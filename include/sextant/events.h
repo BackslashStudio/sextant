@@ -43,7 +43,8 @@ namespace sextant {
         Contour,                                              // 2D (contour(), lines or filled), appended
         Quiver3D,                                             // 3D (Axes3D::quiver3d()), appended
         Pie,                                                  // 2D (Axes::pie()), appended; pick_index = the slice
-        Stack                                                 // 2D (stack()), appended; pick_index = the layer
+        Stack,                                                // 2D (stack()), appended; pick_index = the layer
+        BarStack                                              // 2D (bar_stack()), appended; pick_row = the layer, pick_col = the bar
     };
 
     // Where an object is now: its kind and its index within the kind, the `i` of
@@ -126,7 +127,8 @@ namespace sextant {
         // fill's segment i, between its points i and i + 1; a heatmap_tri's triangle t
         // (tri[3t] .. tri[3t + 2]); a contour's level index (the line near the press)
         // or a contourf's band index (level i to i + 1); a pie's slice; a stack's layer;
-        // `pick_row`/`pick_col` for those grids, else -1. `pick_plane` is the
+        // a bar_stack's flat index (layer * bars + bar);
+        // `pick_row`/`pick_col` for those grids (a bar_stack's layer and bar), else -1. `pick_plane` is the
         // plane's ObjectId (Axes3D::plane_index() maps it to the index in
         // plane_at()), or 0 for an object of the axes itself. `pick_index`,
         // `pick_row` and `pick_col` refer to the data the window drew: a program

@@ -187,6 +187,13 @@ namespace sextant::read_back {
         return out;
     }
 
+    inline BarStackData to_data(const BarStackPlot& p) {
+        BarStackData d{ p.x.get(), {}, p.bottom.get() };
+        d.heights.reserve(p.heights.size());
+        for (const CowVec<double>& h : p.heights) d.heights.push_back(h.get());
+        return d;
+    }
+
     inline StackData to_data(const StackPlot& p) {
         StackData d{ p.x.get(), {} };
         d.ys.reserve(p.ys.size());

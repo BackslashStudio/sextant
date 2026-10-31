@@ -35,6 +35,7 @@ struct Axes::Impl {
     std::vector<HeatmapTriPlot> heatmap_tris;
     std::vector<ContourPlot>    contours;
     std::vector<StackPlot>      stacks;
+    std::vector<BarStackPlot>   bar_stacks;
 
     // The figure's FigureOptions::mathtext, set when the figure makes this
     // axes; only warn_math() reads it (drawing reads the snapshot's).
@@ -168,6 +169,7 @@ struct Axes::Impl {
         s.heatmap_tris = heatmap_tris;
         s.contours = contours;
         s.stacks = stacks;
+        s.bar_stacks = bar_stacks;
         s.title = title; s.xtitle = xtitle; s.ytitle = ytitle;
         s.title_stamps = title_stamps;
         s.grid_enabled   = grid_enabled;   s.grid_opts   = grid_opts;
@@ -261,6 +263,14 @@ struct Axes::Impl {
                       StackOptions opts, const char* who);
     void set_stack_data(std::size_t i, std::span<const double> x,
                         std::span<const std::vector<double>> ys, const char* who);
+    // bar_stack() for Axes and Plane2D, as ingest_stack(); the bottom moves
+    // out of the options into the object's data.
+    void ingest_bar_stack(std::span<const double> x, std::span<const std::vector<double>> heights,
+                          BarStackOptions opts, const char* who);
+    // `bottom` null: kept while the bar count is unchanged (a span overload).
+    void set_bar_stack_data(std::size_t i, std::span<const double> x,
+                            std::span<const std::vector<double>> heights,
+                            const std::vector<double>* bottom, const char* who);
     void set_fill_data(std::size_t i, std::span<const double> x, std::span<const double> y1,
                        std::span<const double> y2, const std::vector<bool>* exclude,
                        const char* who);

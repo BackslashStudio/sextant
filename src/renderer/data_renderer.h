@@ -190,8 +190,11 @@ private:
     // the CPU and uploaded per instance (separate shader from draw_scatter).
     void draw_scatter_z(const std::vector<ScatterZPlot>& points, std::span<const std::size_t> which,
                         const CoordTransform& tr, const PlotRect& pr);
-    void draw_bars(const std::vector<BarPlot>& bars, std::span<const std::size_t> which,
-                   const CoordTransform& tr, const PlotRect& pr);
+    // `stack`: the bar stack `bars` are the layers of (cached by
+    // stack_fill_key()), else kNoStack (plain bars, cached by index).
+    static constexpr std::size_t kNoStack = static_cast<std::size_t>(-1);
+    void draw_bars(std::span<const BarPlot> bars, std::span<const std::size_t> which,
+                   const CoordTransform& tr, const PlotRect& pr, std::size_t stack = kNoStack);
     void draw_heatmap(const std::vector<HeatmapPlot>& heatmaps, std::span<const std::size_t> which,
                       const CoordTransform& tr, const PlotRect& pr);
     // One object's error bars, any of the four kinds that have them.
@@ -204,8 +207,8 @@ private:
     // A fill (fill_geometry.h): its triangles cached as bars' fills are, its
     // outline stroked per frame through the segment program.
     void draw_fill(const FillPlot& p, int index, const CoordTransform& tr, const PlotRect& pr);
-    // The fill cache's index for layer `layer` of stack `stack`: below zero, so
-    // apart from the fills'.
+    // The fill (or bar) cache's index for layer `layer` of stack (bar stack)
+    // `stack`: below zero, so apart from the fills' (bars').
     static int stack_fill_key(std::size_t stack, std::size_t layer) {
         return -1 - static_cast<int>((stack << 16) + layer);
     }
