@@ -345,6 +345,7 @@ set(SEXTANT_SOURCES
     src/text_metrics.cpp
     src/rich_text.cpp
     src/axes.cpp
+    src/derived.cpp
     src/axes3d.cpp
     src/plane2d.cpp
     src/polar_axes.cpp

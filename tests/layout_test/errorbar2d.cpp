@@ -12,7 +12,7 @@ namespace lt {
         template<class T>
         concept HistTakesErrorBar = requires(T& a, std::span<const double> d)
         {
-            a.hist(d, 10, ErrorBar{});
+            hist(a, d, 10, ErrorBar{});
         };
 
         // One 2D axes over fixed 0..10 limits holding `lp`.

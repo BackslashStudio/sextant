@@ -52,7 +52,7 @@ namespace lt {
         ax->scatter_z(x, y, z);
         ax->bar(x, y);
         const std::vector<double> samples{0.0, 0.1, 0.9, 1.0, 1.0};
-        ax->hist(samples, 2);
+        hist(*ax, samples, 2);
         const std::vector<double> cells{0.1, 0.2, 0.3, 0.4, 0.5, 0.6};
         ax->heatmap(cells, 2, 3, {10.0, 40.0}, {0.0, 2.0});
 
@@ -355,7 +355,7 @@ namespace lt {
               "2d: the span overloads validate their lengths and change nothing");
 
         const std::vector<double> cells{1.0, 2.0, 3.0, 4.0};
-        ax->imshow(cells, 2, 2);
+        imshow(*ax, cells, 2, 2);
         HeatmapData h = ax->heatmap_data(0);
         h.data = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0};
         h.cols = 3;
@@ -390,7 +390,8 @@ namespace lt {
               "plane: set_line_data from spans");
         check(throws_out_of_range([&] { plane->set_bar_data(0, {}); }),
               "plane: an index past the count throws out_of_range");
-        plane->scatter(x, y).scatter_z(x, y, y).bar(x, y).imshow(cells, 2, 2);
+        plane->scatter(x, y).scatter_z(x, y, y).bar(x, y);
+        imshow(*plane, cells, 2, 2);
         plane->set_scatter_data(0, all.first(3), all.last(3))
                 .set_scatter_z_data(0, all.first(3), all.first(3), all.last(3))
                 .set_bar_data(0, all.first(3), all.last(3))

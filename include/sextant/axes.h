@@ -53,14 +53,6 @@ namespace sextant {
         Axes& bar(std::span<const double> x, std::span<const double> height,
                   const ErrorBar& err, BarOptions opts = {});
 
-        // BarOptions::width is a fraction of the bin width; the default argument
-        // sets it to 1.0 (bins touch). Passing your own BarOptions restores 0.8.
-        // BarOptions::orientation Horizontal lays the bins along y, and
-        // BarOptions::bottom takes one value or one per bin.
-        Axes& hist(std::span<const double> data, int bins = 10,
-                   BarOptions bar_opts = {.width = 1.0f},
-                   HistOptions hist_opts = {});
-
         // `data` is row-major rows x cols, drawn as a uniform mesh over
         // xrange x yrange (cell edges, see Range): even in data units, so on a Log
         // or Symlog axis the cells follow the scale. Throws if either range is
@@ -68,11 +60,6 @@ namespace sextant {
         // is not drawn.
         Axes& heatmap(std::span<const double> data, int rows, int cols,
                       Range xrange, Range yrange, HeatmapOptions opts = {});
-
-        // heatmap() over x in [0, cols], y in [0, rows]: unit cells, so tick 3 is
-        // the boundary between columns 2 and 3.
-        Axes& imshow(std::span<const double> data, int rows, int cols,
-                     HeatmapOptions opts = {});
 
         // An RGB (channels 3) or RGBA (4) image, row-major rows x cols x channels:
         // each pixel is its own colour, no colormap. Doubles are clamped to [0, 1]
@@ -141,18 +128,6 @@ namespace sextant {
         // same data follows the band edges.
         Axes& contourf(std::span<const double> x, std::span<const double> y, std::span<const double> z,
                        ContourOptions opts = {});
-
-        // A 2D histogram of the points (x[i], y[i]), as matplotlib's hist2d: the
-        // count (or density) of each bin, drawn as a heatmap() over even bins, or
-        // as a heatmap_rec() when Hist2dOptions gives edges for either axis. Not a
-        // kind of its own: the result counts in heatmap_count(), and its values
-        // read back through heatmap_data() (row 0 the lowest y bin). A point
-        // outside the bins or with a NaN coordinate is not counted. Throws
-        // std::invalid_argument if x and y differ in length, a bin count is < 1, a
-        // range is non-finite or empty, edges are too few, non-finite or not
-        // increasing, or the norm doesn't fit vmin/vmax; nothing is added then.
-        // Axes only, not Plane2D.
-        Axes& hist2d(std::span<const double> x, std::span<const double> y, Hist2dOptions opts = {});
 
         // ----------------------------------------------------------------
         // Filled areas

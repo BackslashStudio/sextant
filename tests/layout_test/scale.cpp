@@ -308,10 +308,10 @@ namespace lt {
             const std::vector<double> cells{1, 2, 3, 4};
             auto h = Figure::create()->add_subplot(1, 1, 1);
             h->set_xscale(Scale::Log);
-            h->imshow(cells, 2, 2);
+            imshow(*h, cells, 2, 2);
             check(h->heatmap_count() == 1, "api: heatmap() on a log axes is added");
             auto h2 = Figure::create()->add_subplot(1, 1, 1);
-            h2->imshow(cells, 2, 2);
+            imshow(*h2, cells, 2, 2);
             h2->set_yscale(Scale::Symlog);
             check(h2->yscale() == Scale::Symlog, "api: an axes holding a heatmap takes a scale");
 

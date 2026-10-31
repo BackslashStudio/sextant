@@ -537,10 +537,6 @@ namespace sextant {
         Plane2D& heatmap(std::span<const double> data, int rows, int cols,
                          Range xrange, Range yrange, HeatmapOptions opts = {});
 
-        // heatmap() over the index extent, as Axes::imshow().
-        Plane2D& imshow(std::span<const double> data, int rows, int cols,
-                        HeatmapOptions opts = {});
-
         // An RGB or RGBA image, as Axes::imshow_rgb().
         Plane2D& imshow_rgb(std::span<const double> data, int rows, int cols, int channels,
                             ImageOptions opts = {});

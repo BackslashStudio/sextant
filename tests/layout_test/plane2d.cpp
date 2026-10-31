@@ -67,7 +67,7 @@ namespace lt {
 
         // imshow is heatmap() at the index extent: two planes, one of each, must be
         // placed identically in the file.
-        ax->plane(PlaneOrientation::YZ, 0.0)->imshow(d, 3, 4);
+        imshow(*ax->plane(PlaneOrientation::YZ, 0.0), d, 3, 4);
         ax->plane(PlaneOrientation::YZ, 0.0)
                 ->heatmap(d, 3, 4, {0.0, 4.0}, {0.0, 3.0});
 

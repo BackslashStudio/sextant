@@ -144,7 +144,7 @@ namespace lt {
                   "raster: and alpha 0 leaves the plot area showing");
 
             const RgbaImage nan = render_of([](Axes& ax) {
-                ax.imshow(std::vector<double>{std::nan(""), 1.0}, 1, 2);
+                imshow(ax, std::vector<double>{std::nan(""), 1.0}, 1, 2);
             });
             const std::uint8_t* lut = colormaps::get(Colormap::Viridis);
             const Blob top = blob(nan, lut[1020], lut[1021], lut[1022]);
@@ -230,7 +230,7 @@ namespace lt {
             auto ax = fig->add_subplot(1, 1, 1);
             ax->imshow_rgb(kRgb, 2, 2, 3);
             ax->imshow_rgb(kBytes, 2, 2, 3, {.xrange = Range{10.0, 20.0}});
-            ax->imshow(std::vector<double>{0, 1, 2, 3}, 2, 2);
+            imshow(*ax, std::vector<double>{0, 1, 2, 3}, 2, 2);
             check(ax->heatmap_count() == 3, "read-back: an image counts as a heatmap");
             const HeatmapData d = ax->heatmap_data(0);
             check(d.channels == 3 && d.rows == 2 && d.cols == 2 && d.data == kRgb &&

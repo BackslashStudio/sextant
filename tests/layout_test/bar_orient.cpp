@@ -6,6 +6,7 @@
 // Part of sextant_layout_test; see layout_test.h.
 #include "layout_test.h"
 #include "describe.h"
+#include "figure_impl.h"
 #include "hint.h"
 #include "hint_index.h"
 #include "plot_data_view.h"
@@ -225,12 +226,28 @@ namespace lt {
         {
             auto ax = Figure::create()->add_subplot(1, 1, 1);
             const std::vector<double> data{0.0, 1.0, 1.0, 2.0, 2.0, 2.0, 3.0, 3.0, 4.0, 5.0};
-            ax->hist(data, 5, {.orientation = Orientation::Horizontal, .bottom = {1.0}, .width = 1.0f});
+            hist(*ax, data, 5, {.orientation = Orientation::Horizontal, .bottom = {1.0}, .width = 1.0f});
             const BarData d = ax->bar_data(0);
             const double yspan = ax->ylim().hi - ax->ylim().lo;
             check(d.bottom == std::vector<double>(5, 1.0) && ax->xlim().lo < 1.0 && ax->xlim().lo > 0.5 &&
                       ax->ylim().lo < 0.0 && ax->ylim().hi > 5.0 && yspan < 6.0,
                   "hist: horizontal bins lie along y, counted from a base of 1 along x");
+        }
+
+        // --- hist (derived.h, through bar()): bars span the bin width ---------
+        {
+            auto fig = Figure::create();
+            auto ax = fig->add_subplot(1, 1, 1);
+            const std::vector<double> data{0.0, 1.0, 1.0, 2.0, 2.0, 2.0, 3.0, 3.0, 4.0, 5.0};
+            const std::vector<double> two{2.0, 4.0};
+            hist(*ax, data, 5);
+            hist(*ax, two, 1);
+            hist(*ax, data, 5, {.width = 0.5f});
+            const auto* a = detail::FigureAccess::impl(*fig).find_slot_impl(1);
+            check(a->bars.size() == 3 && std::abs(a->bars[0].bar_width - 1.0) < 1e-12
+                      && std::abs(a->bars[1].bar_width - 2.0) < 1e-12
+                      && std::abs(a->bars[2].bar_width - 0.5) < 1e-6,
+                  "hist: a bar spans width x the bin width, one bin included");
         }
 
         // --- Hover: the tip, worded by orientation ----------------------------

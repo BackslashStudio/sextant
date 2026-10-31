@@ -36,8 +36,8 @@ namespace lt {
         auto ax  = fig->add_subplot(1, 2, 1);
         auto ax3 = fig->add_subplot3d(1, 2, 2);
         const std::vector<double> grid{ 1.0, 2.0, 3.0, 4.0 };
-        ax->line(kX, kY).line(kY).scatter(kX, kY).scatter_z(kX, kY, kY).bar(kX, kY)
-          .hist(kY).heatmap(grid, 2, 2, {0.0, 1.0}, {0.0, 1.0});
+        ax->line(kX, kY).line(kY).scatter(kX, kY).scatter_z(kX, kY, kY).bar(kX, kY);
+        hist(*ax, kY).heatmap(grid, 2, 2, {0.0, 1.0}, {0.0, 1.0});
         const std::vector<double> u{ 0.0, 1.0 };
         const std::vector<std::uint32_t> tri{ 0, 1, 2 };
         ax3->bar3d(PlaneOrientation::XY, u, u, grid).surface(PlaneOrientation::XY, u, u, grid)

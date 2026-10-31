@@ -400,12 +400,6 @@ namespace sextant {
         std::vector<std::string> hint_labels;
     };
 
-    // Binning options for hist(); bar drawing is BarOptions.
-    struct HistOptions {
-        bool density = false;
-        bool cumulative = false;
-    };
-
     // A reference line across the frame (Axes::axline()).
     struct AxLineOptions {
         // Horizontal: a line at y = value, running along x (matplotlib's
@@ -692,36 +686,6 @@ namespace sextant {
         std::string name;      // see HeatmapOptions::name
         bool visible = true;   // see LineOptions::visible
         double zorder = 0.0;   // see LineOptions::zorder
-    };
-
-    // A 2D histogram (Axes::hist2d()), as matplotlib's hist2d.
-    struct Hist2dOptions {
-        // Even bins: `xbins` x `ybins` over `xrange` x `yrange` (unset = the
-        // extent of the points, widened by 0.5 each way when it is one value).
-        int xbins = 10, ybins = 10;
-        std::optional<Range> xrange, yrange;
-
-        // Bin edges for an axis (at least two, finite, strictly increasing):
-        // they replace its bins and range, e.g. log-spaced edges for a log axis.
-        // With either set the histogram is a heatmap_rec(), else a heatmap().
-        std::vector<double> x_edges, y_edges;
-
-        // Each bin's count / (points inside the edges * bin area) rather than its count.
-        bool density = false;
-
-        // A bin whose value (count, or density) is below cmin or above cmax is
-        // empty (NaN): cmin = 1 hides the empty bins.
-        std::optional<double> cmin, cmax;
-
-        Colormap cmap = Colormap::Viridis;
-        ColorNorm norm;            // see ColorNorm
-        // Unset = the bins' smallest and largest value (under log(), the smallest
-        // above 0; under two_slope(), widened to keep the centre between them).
-        std::optional<float> vmin, vmax;
-        bool colorbar = false;
-        std::string name;    // see HeatmapOptions::name
-        bool visible = true; // see LineOptions::visible
-        double zorder = 0.0; // see LineOptions::zorder
     };
 
     struct GridOptions {

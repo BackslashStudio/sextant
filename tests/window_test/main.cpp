@@ -1,5 +1,6 @@
 #define _USE_MATH_DEFINES
 #include <sextant/figure.h>
+#include <sextant/derived.h>
 #include <vector>
 #include <string>
 #include <algorithm>
@@ -383,18 +384,15 @@ static void test_axes_gallery() {
                  })
             .set_title("Error bars").legend().grid();
 
-    fig->add_subplot(3, 4, 5)
-            ->hist(hist_data, 30, {.color = sextant::Color::Purple, .width = 1.0f}, {.density = true})
+    hist(*fig->add_subplot(3, 4, 5), hist_data, 30, {.color = sextant::Color::Purple, .width = 1.0f}, {.density = true})
             .set_title("Histogram").grid();
 
-    fig->add_subplot(3, 4, 6)
-            ->hist(cum_data, 25, {.color = sextant::Color::Green, .width = 1.0f}, {.density = true, .cumulative = true})
+    hist(*fig->add_subplot(3, 4, 6), cum_data, 25, {.color = sextant::Color::Green, .width = 1.0f}, {.density = true, .cumulative = true})
             .set_title("Histogram (cumulative)").grid();
 
     // Labelled contours on the gaussian (white 1.5px; black vanishes into
     // viridis). Pan/zoom: they must stay glued to the colors. Named colorbar.
-    fig->add_subplot(3, 4, 7)
-            ->imshow(gauss, R, C, {
+    imshow(*fig->add_subplot(3, 4, 7), gauss, R, C, {
                          .cmap = sextant::Colormap::Viridis, .vmin = 0.0f, .vmax = 1.0f,
                          .colorbar = true, .name = "density",
                          .contours = {0.2, 0.4, 0.6, 0.8},
@@ -404,8 +402,7 @@ static void test_axes_gallery() {
                      })
             .set_title("Heatmap + contours");
 
-    fig->add_subplot(3, 4, 8)
-            ->imshow(checker, R, C, {.vmin = 0.0f, .vmax = 1.0f, .origin = "upper"})
+    imshow(*fig->add_subplot(3, 4, 8), checker, R, C, {.vmin = 0.0f, .vmax = 1.0f, .origin = "upper"})
             .set_title("Heatmap (origin=upper)");
 
     fig->add_subplot(3, 4, 9)
@@ -443,8 +440,7 @@ static void test_axes_gallery() {
 
     // Two colour scales on one axes: each gets its own bar, sized for its own
     // numbers, in two different colormaps (Gray field, Plasma markers).
-    fig->add_subplot(3, 4, 12)
-            ->imshow(gauss, R, C, {
+    imshow(*fig->add_subplot(3, 4, 12), gauss, R, C, {
                          .cmap = sextant::Colormap::Gray, .vmin = 0.0f, .vmax = 1.0f,
                          .colorbar = true, .name = "field"
                      })
@@ -1349,8 +1345,7 @@ static void part_scales() {
             .set_xtick_format("#%.0f")
             .set_title("bars on log2 y (stand on the frame)").set_xtitle("bin").set_ytitle("count");
 
-    fig->add_subplot(2, 3, 6)
-            ->imshow(cells, 2, 3, {.vmin = 1.0f, .vmax = 6.0f})
+    imshow(*fig->add_subplot(2, 3, 6), cells, 2, 3, {.vmin = 1.0f, .vmax = 6.0f})
             .set_title("heatmap: linear only (scale combo disabled)");
 
     savefig_and_check_memory(fig, "part_scales");
@@ -1402,7 +1397,7 @@ static void part_shared() {
     s2->sharey(*s1);
 
     auto s4 = fig->add_subplot(3, 2, 4);
-    s4->imshow(cells, 4, 10).set_title("heatmap: its x group stays linear");
+    imshow(*s4, cells, 4, 10).set_title("heatmap: its x group stays linear");
     auto s6 = fig->add_subplot(3, 2, 6);
     s6->line(tx, ty).set_title("shares x with the heatmap").set_xtitle("column");
     s6->sharex(*s4);
@@ -1838,7 +1833,7 @@ static void part_bar_orientation() {
             for (int k = 0; k < 6; ++k) s += static_cast<double>((i * 7919 + k * 104729) % 1000) / 1000.0;
             data.push_back(s - 3.0);
         }
-        a4->hist(data, 24, {.orientation = Orientation::Horizontal, .width = 0.9f, .name = "counts"});
+        hist(*a4, data, 24, {.orientation = Orientation::Horizontal, .width = 0.9f, .name = "counts"});
         a4->set_title("hist(orientation = Horizontal)");
     }
 
@@ -2981,8 +2976,7 @@ static void part_heatmaps() {
                        .name = "angle"})
             .set_title("a cyclic map: no seam at +-pi");
 
-    fig->add_subplot(4)
-            ->imshow(field, R, C, {.cmap = sextant::Colormap::Gray, .origin = "upper"})
+    imshow(*fig->add_subplot(4), field, R, C, {.cmap = sextant::Colormap::Gray, .origin = "upper"})
             .set_title("origin = upper (an image)");
 
     fig->add_subplot(5)
@@ -3290,14 +3284,13 @@ static void part_color_norms() {
             ->scatter_z(zx, zy, zz, {.size = 10.0f, .vmin = 0.1f, .vmax = 1000.0f,
                                      .norm = sextant::ColorNorm::log(), .colorbar = true, .name = "z (log)"})
             .set_title("scatter_z, log norm");
-    fig->add_subplot(2, 3, 5)
-            ->hist2d(hx, hy, {.xbins = 40, .ybins = 40, .norm = sextant::ColorNorm::log(), .colorbar = true,
+    hist2d(*fig->add_subplot(2, 3, 5), hx, hy, {.xbins = 40, .ybins = 40, .norm = sextant::ColorNorm::log(), .colorbar = true,
                               .name = "count"})
             .set_title("hist2d, 20000 points, log norm (empty bins empty)");
     {
         auto a = fig->add_subplot(2, 3, 6);
         a->set_xscale(sextant::Scale::Log);
-        a->hist2d(lx, ly, {.ybins = 20, .x_edges = edges, .cmin = 1.0, .cmap = sextant::Colormap::Magma,
+        hist2d(*a, lx, ly, {.ybins = 20, .x_edges = edges, .cmin = 1.0, .cmap = sextant::Colormap::Magma,
                            .colorbar = true, .name = "count"});
         a->set_title("hist2d, log-spaced x edges on a log axis, cmin = 1");
     }
@@ -3516,7 +3509,7 @@ static void part_colorbar() {
         {ColorbarAnchor::Top, "Top"}, {ColorbarAnchor::Bottom, "Bottom"}};
     for (int k = 0; k < 4; ++k) {
         auto ax = fig->add_subplot(2, 3, k + 1);
-        ax->imshow(f, R, C, {.vmin = -1.0f, .vmax = 1.0f, .colorbar = true, .name = "value"});
+        imshow(*ax, f, R, C, {.vmin = -1.0f, .vmax = 1.0f, .colorbar = true, .name = "value"});
         sextant::ColorbarOptions co{.anchor = anchors[k].first};
         if (k == 1) co.width = 30.0f, co.margin = 25.0f;
         if (k == 3) co.offset_y = 12.0f;
@@ -3532,7 +3525,7 @@ static void part_colorbar() {
             y[i] = 10.0 * (i / 20) + std::sin(x[i]);
             z[i] = i;
         }
-        a5->imshow(f, R, C, {.cmap = sextant::Colormap::Gray, .vmin = -1.0f, .vmax = 1.0f, .colorbar = true,
+        imshow(*a5, f, R, C, {.cmap = sextant::Colormap::Gray, .vmin = -1.0f, .vmax = 1.0f, .colorbar = true,
                              .name = "field"})
                 .scatter_z(x, y, z, {.cmap = sextant::Colormap::Plasma, .size = 14.0f, .colorbar = true,
                                      .name = "index"})
@@ -3777,7 +3770,7 @@ static void test_animation() {
     a2->scatter_z(px, py, pz, {.colorbar = true, .name = "t"}).set_xlim(-2, 2).set_ylim(-2, 2)
             .set_aspect(1.0).set_title("scatter_z: orbiting");
     auto a3 = fig->add_subplot(2, 3, 3);
-    a3->imshow(hm, R, C, {.vmin = -1.0f, .vmax = 1.0f, .colorbar = true}).set_title("heatmap");
+    imshow(*a3, hm, R, C, {.vmin = -1.0f, .vmax = 1.0f, .colorbar = true}).set_title("heatmap");
     auto a4 = fig->add_subplot(2, 3, 4);
     a4->bar(bx, bh).set_ylim(0, 6).set_title("bar");
     auto a5 = fig->add_subplot3d(2, 3, 5);

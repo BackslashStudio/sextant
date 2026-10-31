@@ -143,7 +143,7 @@ namespace lt {
                 fig->axes()->heatmap(data, 5, 5, {0.0, 5.0},
                                      {0.0, std::numeric_limits<double>::quiet_NaN()});
             } catch (const std::invalid_argument&) { threw_nonfinite = true; }
-            try { fig->axes()->imshow(data, 5, 5); } catch (const std::exception&) { imshow_ok = false; }
+            try { imshow(*fig->axes(), data, 5, 5); } catch (const std::exception&) { imshow_ok = false; }
             check(threw_degenerate, "a zero-width range throws");
             check(threw_nonfinite, "a non-finite range throws");
             check(imshow_ok, "imshow needs no range of its own");
@@ -325,7 +325,7 @@ namespace lt {
             auto ax = fig->axes();
             auto throws = [&](std::string origin) {
                 try {
-                    ax->imshow(cells, 4, 6, {.origin = std::move(origin)});
+                    imshow(*ax, cells, 4, 6, {.origin = std::move(origin)});
                 } catch (const std::invalid_argument&) { return true; }
                 return false;
             };
@@ -339,7 +339,7 @@ namespace lt {
             auto f3 = sextant::Figure::create();
             auto plane = f3->add_subplot3d(1, 1, 1)->plane(sextant::PlaneOrientation::XY, 0.0);
             bool plane_threw = false;
-            try { plane->imshow(cells, 4, 6, {.origin = "top"}); }
+            try { imshow(*plane, cells, 4, 6, {.origin = "top"}); }
             catch (const std::invalid_argument&) { plane_threw = true; }
             check(plane_threw, "heatmap origin: on a plane too");
         }
@@ -354,7 +354,7 @@ namespace lt {
         {
             auto fig = sextant::Figure::create();
             auto ax = fig->axes();
-            ax->imshow(cells, 4, 6);
+            imshow(*ax, cells, 4, 6);
             check(near(ax->xlim(), 0.0, 6.0) && near(ax->ylim(), 0.0, 4.0),
                   "imshow: the limits are the index extent");
         }

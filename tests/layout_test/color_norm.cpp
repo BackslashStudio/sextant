@@ -380,12 +380,12 @@ namespace lt {
             auto fig = Figure::create();
             auto ax = fig->add_subplot(1, 1, 1);
             const std::vector<double> x{0.1, 0.2, 0.9, 0.95}, y{0.1, 0.1, 0.9, 0.9};
-            ax->hist2d(x, y, {.xbins = 2, .ybins = 2, .colorbar = true});
+            hist2d(*ax, x, y, {.xbins = 2, .ybins = 2, .colorbar = true});
             const HeatmapData h = ax->heatmap_data(0);
             check(ax->heatmap_count() == 1 && h.rows == 2 && h.cols == 2 && h.x_edges.empty()
                       && h.data == std::vector<double>{2, 0, 0, 2} && h.xrange.lo == 0.1 && h.xrange.hi == 0.95,
                   "hist2d: even bins give a heatmap, row 0 the lowest y");
-            ax->hist2d(x, y, {.ybins = 1, .x_edges = {0, 0.5, 1}});
+            hist2d(*ax, x, y, {.ybins = 1, .x_edges = {0, 0.5, 1}});
             check(ax->heatmap_count() == 2 && ax->heatmap_data(1).x_edges.size() == 3
                       && ax->heatmap_data(1).data == std::vector<double>{2, 2},
                   "hist2d: edges give a heatmap_rec");
@@ -393,11 +393,11 @@ namespace lt {
             check(found && found->kind == PickKind::Heatmap, "hist2d: the result is an ordinary heatmap object");
 
             const std::vector<double> x3{1, 2, 3};
-            check(throws([&] { ax->hist2d(x3, y); }), "hist2d: x and y of different lengths throw");
-            check(throws([&] { ax->hist2d(x, y, {.xbins = 0}); }), "hist2d: bins < 1 throws");
-            check(throws([&] { ax->hist2d(x, y, {.xrange = Range{1, 1}}); }), "hist2d: an empty range throws");
-            check(throws([&] { ax->hist2d(x, y, {.y_edges = {0, 2, 1}}); }), "hist2d: unordered edges throw");
-            check(throws([&] { ax->hist2d(x, y, {.norm = ColorNorm::log(), .vmin = 0.0f}); }),
+            check(throws([&] { hist2d(*ax, x3, y); }), "hist2d: x and y of different lengths throw");
+            check(throws([&] { hist2d(*ax, x, y, {.xbins = 0}); }), "hist2d: bins < 1 throws");
+            check(throws([&] { hist2d(*ax, x, y, {.xrange = Range{1, 1}}); }), "hist2d: an empty range throws");
+            check(throws([&] { hist2d(*ax, x, y, {.y_edges = {0, 2, 1}}); }), "hist2d: unordered edges throw");
+            check(throws([&] { hist2d(*ax, x, y, {.norm = ColorNorm::log(), .vmin = 0.0f}); }),
                   "hist2d: a log norm with vmin 0 throws");
             check(ax->heatmap_count() == 2, "hist2d: and a refused call adds nothing");
         }

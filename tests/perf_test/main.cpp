@@ -386,7 +386,7 @@ namespace {
             const std::vector<double> m = make_matrix(d[0], d[1]);
             for (int ss: {1, 2}) {
                 auto fig = sextant::Figure::create(perf_opts("perf heatmap", ss));
-                fig->axes()->imshow(m, d[0], d[1]);
+                imshow(*fig->axes(), m, d[0], d[1]);
                 const RenderSample r = sample_render(fig);
                 char label[32];
                 std::snprintf(label, sizeof(label), "%dx%d", d[0], d[1]);
@@ -1082,7 +1082,7 @@ namespace {
         char title[128];
         if (kind == "heatmap") {
             const std::vector<double> m = make_matrix(static_cast<int>(rows), static_cast<int>(cols));
-            ax->imshow(m, static_cast<int>(rows), static_cast<int>(cols));
+            imshow(*ax, m, static_cast<int>(rows), static_cast<int>(cols));
             std::snprintf(title, sizeof(title), "heatmap %zux%zu, supersample %zu", rows, cols, ss);
         } else {
             const Series s = make_series(n);

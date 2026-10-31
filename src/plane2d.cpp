@@ -80,13 +80,6 @@ namespace sextant {
         return *this;
     }
 
-    Plane2D& Plane2D::imshow(std::span<const double> data, int rows, int cols,
-                             HeatmapOptions opts) {
-        const Range xr{0.0, static_cast<double>(std::max(cols, 1))};
-        const Range yr{0.0, static_cast<double>(std::max(rows, 1))};
-        return heatmap(data, rows, cols, xr, yr, std::move(opts));
-    }
-
     Plane2D& Plane2D::imshow_rgb(std::span<const double> data, int rows, int cols, int channels,
                                  ImageOptions opts) {
         d->sheet.ingest_image(data, rows, cols, channels, std::move(opts), "Plane2D::imshow_rgb");

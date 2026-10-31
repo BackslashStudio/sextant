@@ -94,8 +94,7 @@ namespace {
         std::vector<double> h(u.size() * v.size());
         for (std::size_t i = 0; i < h.size(); ++i) h[i] = 1.0 + static_cast<double>(i % 5);
         a->bar3d(PlaneOrientation::XY, u, v, h, {.color = Color::Green, .edges = true, .name = "bars"});
-        a->plane(PlaneOrientation::ZX, 1.0)
-            ->imshow(std::vector<double>{0.1, 0.4, 0.7, 0.9, 0.3, 0.6}, 2, 3);
+        imshow(*a->plane(PlaneOrientation::ZX, 1.0), std::vector<double>{0.1, 0.4, 0.7, 0.9, 0.3, 0.6}, 2, 3);
         a->set_title("bar3d + plane").legend();
 
         auto b = fig->add_subplot3d(1, 2, 2);

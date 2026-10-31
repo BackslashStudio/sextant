@@ -87,7 +87,8 @@ namespace lt {
 
         // 2D: every flat-colored kind takes one; colormapped kinds take none.
         ax->line(x, y).scatter(x, y).scatter_z(x, y, y).heatmap(grid, 2, 3, {0, 3}, {0, 2})
-           .bar(x, y).hist(y);
+           .bar(x, y);
+        hist(*ax, y);
         check(same(a->lines[0].opts.color, tab10[0]) && same(a->scatters[0].opts.color, tab10[1])
               && same(a->bars[0].opts.color, tab10[2]) && same(a->bars[1].opts.color, tab10[3]),
               "2D: line, scatter, bar, hist take colors in call order; scatter_z and heatmap none");
@@ -233,7 +234,7 @@ namespace lt {
             auto fig = Figure::create();
             auto ax = fig->add_subplot(1, 1, 1);
             const std::vector<double> grid{ 0.0, 0.25, 0.5, 0.75, 1.0, 0.5 };
-            ax->imshow(grid, 2, 3, { .cmap = m, .colorbar = true });
+            imshow(*ax, grid, 2, 3, { .cmap = m, .colorbar = true });
             return render_figure_svg(*detail::FigureAccess::impl(*fig).host_frame(), 400, 300);
         };
         const std::string fwd = svg_of(Colormap::Viridis);

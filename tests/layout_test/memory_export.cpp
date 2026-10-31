@@ -95,8 +95,7 @@ namespace lt {
             for (std::size_t i = 0; i < hgt.size(); ++i) hgt[i] = 1.0 + static_cast<double>(i % 5);
             ax->bar3d(PlaneOrientation::XY, u, v, hgt, {.color = Color::Green, .edges = true,
                                                          .name = "bars"});
-            ax->plane(PlaneOrientation::ZX, 1.0)
-               ->imshow(std::vector<double>{0.1, 0.4, 0.7, 0.9, 0.3, 0.6}, 2, 3);
+            imshow(*ax->plane(PlaneOrientation::ZX, 1.0), std::vector<double>{0.1, 0.4, 0.7, 0.9, 0.3, 0.6}, 2, 3);
             ax->set_title("bar3d + plane").legend();
 
             auto sx = fig->add_subplot3d(1, 2, 2);

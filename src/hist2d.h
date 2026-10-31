@@ -3,7 +3,7 @@
 // calls): bins are half-open [lo, hi) but the last also takes its upper edge,
 // and a point outside the edges, or with a NaN coordinate, is not counted.
 #include "color_norm.h"
-#include "sextant/style.h"
+#include "sextant/derived.h"
 
 #include <algorithm>
 #include <cmath>

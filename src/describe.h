@@ -24,6 +24,7 @@
 // which catches a missing field unless it fits in existing padding (a bool
 // beside a bool).
 #include "sextant/axes3d.h"
+#include "sextant/derived.h"
 #include "sextant/figure.h"
 #include "sextant/style.h"
 
