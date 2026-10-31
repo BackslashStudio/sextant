@@ -3338,8 +3338,8 @@ static void part_contours() {
     fig->suptitle("contour / contourf, contours on heatmap_rec, ColorNorm::boundaries");
     {
         auto a = fig->add_subplot(2, 3, 1);
-        a->contourf(gx, gy, field, {.nlevels = 10, .cmap = sextant::Colormap::RdBu.reversed(), .colorbar = true,
-                                    .name = "contourf"});
+        a->contour(gx, gy, field, {.nlevels = 10, .filled = true, .cmap = sextant::Colormap::RdBu.reversed(),
+                                   .colorbar = true, .name = "contourf"});
         a->contour(gx, gy, field, {.nlevels = 10, .line_color = sextant::Color::Black, .linewidth = 0.8f,
                                    .labels = true});
         a->set_title("contourf + contour (black, labelled) of the same data");
@@ -3367,7 +3367,7 @@ static void part_contours() {
     {
         auto a = fig->add_subplot3d(2, 3, 6);
         auto pl = a->plane(sextant::PlaneOrientation::XY, 0.0);
-        pl->contourf(gx, gy, field, {.nlevels = 8, .colorbar = true, .name = "plane"});
+        pl->contour(gx, gy, field, {.nlevels = 8, .filled = true, .colorbar = true, .name = "plane"});
         pl->contour(gx, gy, field, {.nlevels = 8, .line_color = sextant::Color::Black, .linewidth = 1.0f});
         a->set_title("contourf + contour on a plane");
     }

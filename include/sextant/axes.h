@@ -114,20 +114,14 @@ namespace sextant {
         // Each square is split into four triangles around its centre (the corner
         // mean), and the lines are the levels' crossings of that surface, straight
         // on screen between grid edges. ContourOptions picks the levels (or their
-        // number), colours, width and labels. Throws std::invalid_argument for wrong
+        // number), colours, width and labels; ContourOptions::filled draws the bands
+        // between levels instead (matplotlib's contourf). Throws std::invalid_argument for wrong
         // lengths, fewer than 2 x or y, unordered or non-finite x or y, a
         // non-finite level, more than 16384 levels, nlevels < 1, or a norm that
         // doesn't fit; nothing is added then. Its own kind: contour_count(),
         // contour_data(), PickKind::Contour.
         Axes& contour(std::span<const double> x, std::span<const double> y, std::span<const double> z,
                       ContourOptions opts = {});
-
-        // Filled contours, as matplotlib's contourf: contour() with
-        // `opts.filled` set. Each band between neighbouring levels takes one
-        // colour, decided per pixel on the same triangles, so contour() over the
-        // same data follows the band edges.
-        Axes& contourf(std::span<const double> x, std::span<const double> y, std::span<const double> z,
-                       ContourOptions opts = {});
 
         // ----------------------------------------------------------------
         // Filled areas

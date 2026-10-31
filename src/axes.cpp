@@ -647,8 +647,7 @@ Axes& Axes::heatmap_tri(std::span<const double> x, std::span<const double> y, st
 }
 
 void Axes::Impl::ingest_contour(std::span<const double> x, std::span<const double> y, std::span<const double> z,
-                                ContourOptions opts, bool filled, const char* who) {
-    if (filled) opts.filled = true;
+                                ContourOptions opts, const char* who) {
     read_back::check_zorder(opts.zorder, who);
     check_contour(x, y, z, opts, who);
     warn_math(mathtext, who, opts.name);
@@ -665,15 +664,10 @@ void Axes::Impl::ingest_contour(std::span<const double> x, std::span<const doubl
 
 Axes& Axes::contour(std::span<const double> x, std::span<const double> y, std::span<const double> z,
                     ContourOptions opts) {
-    d->ingest_contour(x, y, z, std::move(opts), false, "contour");
+    d->ingest_contour(x, y, z, std::move(opts), "contour");
     return *this;
 }
 
-Axes& Axes::contourf(std::span<const double> x, std::span<const double> y, std::span<const double> z,
-                     ContourOptions opts) {
-    d->ingest_contour(x, y, z, std::move(opts), true, "contourf");
-    return *this;
-}
 
 void Axes::Impl::ingest_axline(double value, AxLineOptions opts, const char* who) {
     read_back::check_zorder(opts.zorder, who);

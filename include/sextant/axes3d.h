@@ -557,11 +557,10 @@ namespace sextant {
         Plane2D& heatmap_tri(std::span<const double> x, std::span<const double> y,
                              std::span<const double> values, HeatmapTriOptions opts = {});
 
-        // Contour lines and filled contours, as Axes::contour() / contourf().
+        // Contour lines, or filled contours with ContourOptions::filled, as
+        // Axes::contour().
         Plane2D& contour(std::span<const double> x, std::span<const double> y, std::span<const double> z,
                          ContourOptions opts = {});
-        Plane2D& contourf(std::span<const double> x, std::span<const double> y, std::span<const double> z,
-                          ContourOptions opts = {});
 
         // The area between two curves, as Axes::fill().
         Plane2D& fill(std::span<const double> x, std::span<const double> y1,

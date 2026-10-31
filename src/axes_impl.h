@@ -215,9 +215,9 @@ struct Axes::Impl {
     void ingest_heatmap_tri(std::span<const double> x, std::span<const double> y,
                             std::span<const double> values, std::span<const std::uint32_t> tri,
                             bool derive, HeatmapTriOptions opts, const char* who);
-    // contour() / contourf() (`filled` sets opts.filled).
+    // contour(), lines or (opts.filled) bands.
     void ingest_contour(std::span<const double> x, std::span<const double> y, std::span<const double> z,
-                        ContourOptions opts, bool filled, const char* who);
+                        ContourOptions opts, const char* who);
     // Null `levels` / `filled` keep the options'.
     void set_contour_data(std::size_t i, std::span<const double> x, std::span<const double> y,
                           std::span<const double> z, const std::vector<double>* levels, const bool* filled,

@@ -1,4 +1,4 @@
-// contour() / contourf(): the levels, the four-triangle split, the traced
+// contour(), lines and filled: the levels, the four-triangle split, the traced
 // lines (whole through grid points, closed around an island, on the fill's
 // surface), colours, GL fills and lines (in zorder), SVG, the colorbar, hover
 // and picks, the calls and read-back, edits that rebuild, a plane, and the
@@ -298,12 +298,12 @@ namespace lt {
                       && throws([&] { ax->contour(std::vector<double>{0, kNaN, 2}, y, z); })
                       && throws([&] { ax->contour(x, y, z, {.levels = {1, kNaN}}); })
                       && throws([&] { ax->contour(x, y, z, {.nlevels = 0}); })
-                      && throws([&] { ax->contourf(x, y, z, {.levels = {0, 1}, .norm = ColorNorm::log()}); })
+                      && throws([&] { ax->contour(x, y, z, {.levels = {0, 1}, .filled = true, .norm = ColorNorm::log()}); })
                       && ax->contour_count() == 0,
                   "api: bad grids, levels, nlevels and norms throw and add nothing");
             ax->contour(x, std::vector<double>{1, 0}, z, {.levels = {3, 1}});
             const ObjectId id = ax->last_object();
-            ax->contourf(x, y, z);
+            ax->contour(x, y, z, {.filled = true});
             check(ax->contour_count() == 2 && ax->find_object(id)->kind == PickKind::Contour,
                   "api: contour and contourf are one kind; descending y is taken");
             const ContourData d0 = ax->contour_data(0), d1 = ax->contour_data(1);
@@ -324,7 +324,7 @@ namespace lt {
 
             auto fig3 = Figure::create();
             auto pl = fig3->add_subplot3d(1, 1, 1)->plane(PlaneOrientation::XY, 0.5);
-            pl->contourf(x, y, z, {.colorbar = true});
+            pl->contour(x, y, z, {.filled = true, .colorbar = true});
             pl->contour(x, y, z, {.labels = true});
             check(pl->contour_count() == 2 && throws([&] { pl->contour(x, y, std::vector<double>{1}); }),
                   "api: Plane2D takes both and checks the same");

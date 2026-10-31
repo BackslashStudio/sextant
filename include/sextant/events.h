@@ -40,7 +40,7 @@ namespace sextant {
         Fill,                                                 // 2D (fill(), stack()), appended
         Poly, Circle, Wedge,                                  // 2D (shape_poly(), shape_circle(), shape_wedge()), appended
         HeatmapTri,                                           // 2D (heatmap_tri()), appended
-        Contour,                                              // 2D (contour(), contourf()), appended
+        Contour,                                              // 2D (contour(), lines or filled), appended
         Quiver3D,                                             // 3D (Axes3D::quiver3d()), appended
         Pie                                                   // 2D (Axes::pie()), appended; pick_index = the slice
     };

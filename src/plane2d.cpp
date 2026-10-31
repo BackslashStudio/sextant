@@ -110,15 +110,10 @@ namespace sextant {
 
     Plane2D& Plane2D::contour(std::span<const double> x, std::span<const double> y, std::span<const double> z,
                               ContourOptions opts) {
-        d->sheet.ingest_contour(x, y, z, std::move(opts), false, "Plane2D::contour");
+        d->sheet.ingest_contour(x, y, z, std::move(opts), "Plane2D::contour");
         return *this;
     }
 
-    Plane2D& Plane2D::contourf(std::span<const double> x, std::span<const double> y, std::span<const double> z,
-                               ContourOptions opts) {
-        d->sheet.ingest_contour(x, y, z, std::move(opts), true, "Plane2D::contourf");
-        return *this;
-    }
 
     Plane2D& Plane2D::heatmap_tri(std::span<const double> x, std::span<const double> y,
                                   std::span<const double> values, HeatmapTriOptions opts) {

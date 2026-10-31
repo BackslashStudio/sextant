@@ -653,8 +653,8 @@ namespace sextant {
         std::vector<std::string> hint_labels;
     };
 
-    // Contour lines or filled contours (Axes::contour(), Axes::contourf()), as
-    // matplotlib's contour / contourf over a grid of points.
+    // Contour lines or filled contours (Axes::contour()), as matplotlib's
+    // contour / contourf over a grid of points.
     struct ContourOptions {
         // The levels, in z's units (sorted and de-duplicated at the call; at most
         // 16384, finite). Empty: `nlevels` nice values over z's finite range, the
@@ -663,8 +663,10 @@ namespace sextant {
         std::vector<double> levels;
         int nlevels = 7;
 
-        // Filled bands between neighbouring levels (contourf()) instead of lines.
-        // A value outside the first..last level is not filled.
+        // Filled bands between neighbouring levels (matplotlib's contourf)
+        // instead of lines. Each band takes one colour, decided per pixel on the
+        // same triangles, so a contour() of lines over the same data follows the
+        // band edges. A value outside the first..last level is not filled.
         bool filled = false;
 
         // Colours: a line takes its level's place on the colormap, a band its
@@ -1198,7 +1200,7 @@ namespace sextant {
         std::vector<std::uint32_t> tri;
     };
 
-    // A contour() or contourf(): x (one per column), y (one per row), z row-major
+    // A contour(), lines or filled: x (one per column), y (one per row), z row-major
     // (y.size() rows of x.size()), the levels drawn (contour_data(): resolved;
     // set_contour_data(): empty re-resolves from the options) and whether it
     // is filled.
