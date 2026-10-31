@@ -33,7 +33,7 @@ namespace sextant {
 // holds none). Append new kinds to keep values stable.
 enum class PlotKind { Line, Scatter, Bar, Heatmap, ScatterZ, Bar3D, Surface, Scatter3D, Line3D,
                       SurfaceTri, Text, AxLine, AxSpan, Fill, Quiver, Poly, Circle, Wedge, HeatmapTri,
-                      Contour, Quiver3D, Pie };
+                      Contour, Quiver3D, Pie, Stack };
 
 // A plot object's (or a plane's) identity, the public ObjectId
 // (sextant/object_id.h): kept by set_*_data(), unchanged by
@@ -710,6 +710,37 @@ struct FillPlot {
     std::shared_ptr<const PolarArea> polar_area;
 };
 
+// Axes::stack(): the layers as given (`ys`, bottom first, one value per point
+// of `x` each) and, derived from them by stack_rebuild() whenever the data or
+// the options change, `layers`: one fill per layer between the stacked curves
+// (stack_curves.h), carrying the stack's id and data_stamp. Drawing, hover,
+// limits and the legend read the layers as fills; the visible and zorder that
+// count are the stack's own (opts), not the layers'. opts.colors holds one
+// color per layer (the cycle's, resolved at the call).
+struct StackPlot {
+    CowVec<double> x;
+    std::vector<CowVec<double>> ys;
+    StackOptions opts;
+    unsigned long long data_stamp = 0;
+    ObjectId id = 0;
+    std::shared_ptr<const std::vector<FillPlot>> layers;
+
+    bool vertical() const { return opts.orientation == Orientation::Vertical; }
+    std::size_t layer_count() const { return ys.size(); }
+
+    unsigned long long visible_stamp = 0;
+    unsigned long long zorder_stamp = 0;
+};
+
+// Derives `p.layers` from its data and options (stack_plot.cpp).
+void stack_rebuild(StackPlot& p);
+
+// The fills of a stack, empty before stack_rebuild().
+inline std::span<const FillPlot> stack_layers(const StackPlot& p) {
+    if (!p.layers) return {};
+    return *p.layers;
+}
+
 // Axes::quiver(): one arrow per point, from (x, y) along (u, v). `opts.amp`
 // is always set (resolved at the call). quiver_geometry.h places the arrows.
 struct QuiverPlot {
@@ -852,6 +883,7 @@ struct AllPlotData {
     const std::vector<HeatmapTriPlot>* heatmap_tris = nullptr;
     const std::vector<ContourPlot>*    contours = nullptr;
     const std::vector<PiePlot>*        pies = nullptr;
+    const std::vector<StackPlot>*      stacks = nullptr;
 };
 
 // Caller-side stamps of an axes' titles: each set_*title() takes a fresh
@@ -944,10 +976,12 @@ struct RenderSnapshot {
     std::vector<WedgePlot>    wedges;
     // Axes::heatmap_tri(), likewise.
     std::vector<HeatmapTriPlot> heatmap_tris;
-    // Axes::contour() / contourf(), likewise.
+    // Axes::contour(), likewise.
     std::vector<ContourPlot> contours;
     // Axes::pie(), likewise; always empty on a plane's sheet.
     std::vector<PiePlot> pies;
+    // Axes::stack(), on axes and planes alike.
+    std::vector<StackPlot> stacks;
 
     // Font sizes live in axes_style.
     std::string title, xtitle, ytitle;
@@ -983,7 +1017,7 @@ struct RenderSnapshot {
     std::optional<std::vector<Tick>> xticks_override, yticks_override;
 
     AllPlotData all() const {
-        return { lines, scatters, bars, heatmaps, scatter_z, &axlines, &axspans, &fills, &quivers, &polys, &circles, &wedges, &heatmap_tris, &contours, &pies };
+        return { lines, scatters, bars, heatmaps, scatter_z, &axlines, &axspans, &fills, &quivers, &polys, &circles, &wedges, &heatmap_tris, &contours, &pies, &stacks };
     }
 };
 
@@ -1152,6 +1186,7 @@ inline std::optional<ObjectLocation> to_location(const std::optional<ObjectRef>&
         case PlotKind::Contour:   k = PickKind::Contour;   break;
         case PlotKind::Quiver3D:  k = PickKind::Quiver3D;  break;
         case PlotKind::Pie:       k = PickKind::Pie;       break;
+        case PlotKind::Stack:     k = PickKind::Stack;     break;
         case PlotKind::Text: case PlotKind::AxLine: case PlotKind::AxSpan: return std::nullopt;
     }
     return ObjectLocation{ k, r->index };
@@ -1162,7 +1197,7 @@ inline constexpr PlotKind kPlotKinds2D[] = { PlotKind::Line, PlotKind::Scatter, 
                                              PlotKind::AxLine, PlotKind::AxSpan, PlotKind::Fill,
                                              PlotKind::Quiver, PlotKind::Poly, PlotKind::Circle,
                                              PlotKind::Wedge, PlotKind::HeatmapTri, PlotKind::Contour,
-                                             PlotKind::Pie };
+                                             PlotKind::Pie, PlotKind::Stack };
 inline constexpr PlotKind kPlotKinds3D[] = { PlotKind::Bar3D, PlotKind::Surface,
                                              PlotKind::Scatter3D, PlotKind::Line3D,
                                              PlotKind::SurfaceTri, PlotKind::Text,
@@ -1191,6 +1226,7 @@ R with_kind(S& s, PlotKind kind, F&& f, R none) {
         case PlotKind::HeatmapTri: return f(s.heatmap_tris);
         case PlotKind::Contour:  return f(s.contours);
         case PlotKind::Pie:      return f(s.pies);
+        case PlotKind::Stack:    return f(s.stacks);
         default:                 return none;
     }
 }
@@ -1288,7 +1324,8 @@ std::optional<ObjectRef> find_object_in(const S& s, const PlotKind (&kinds)[N], 
 // where it was among its kind, and the whole object, its id included.
 using PlotObject2D = std::variant<LinePlot, ScatterPlot, BarPlot, HeatmapPlot, ScatterZPlot,
                                   TextPlot, AxLinePlot, AxSpanPlot, FillPlot, QuiverPlot,
-                                  PolyPlot, CirclePlot, WedgePlot, HeatmapTriPlot, ContourPlot, PiePlot>;
+                                  PolyPlot, CirclePlot, WedgePlot, HeatmapTriPlot, ContourPlot, PiePlot,
+                                  StackPlot>;
 using PlotObject3D = std::variant<Bar3DPlot, SurfacePlot, Scatter3DPlot, Line3DPlot,
                                   SurfaceTriPlot, TextPlot, Quiver3DPlot>;
 template <class Object>
@@ -1433,6 +1470,7 @@ std::vector<ObjectRef> ordered_2d(const S& s, bool by_z) {
     if constexpr (requires { s.heatmap_tris; }) add_order_keys(keys, PlotKind::HeatmapTri, s.heatmap_tris);
     if constexpr (requires { s.contours; }) add_order_keys(keys, PlotKind::Contour, s.contours);
     if constexpr (requires { s.pies; }) add_order_keys(keys, PlotKind::Pie, s.pies);
+    if constexpr (requires { s.stacks; }) add_order_keys(keys, PlotKind::Stack, s.stacks);
     return sorted_refs(keys, by_z);
 }
 } // namespace objects_detail
@@ -1489,6 +1527,7 @@ std::vector<LayerRef> ordered_layers(std::span<const S* const> layers, bool by_z
         if constexpr (requires { s.heatmap_tris; }) add(PlotKind::HeatmapTri, s.heatmap_tris);
         if constexpr (requires { s.contours; }) add(PlotKind::Contour, s.contours);
         if constexpr (requires { s.pies; }) add(PlotKind::Pie, s.pies);
+        if constexpr (requires { s.stacks; }) add(PlotKind::Stack, s.stacks);
     }
     std::stable_sort(keys.begin(), keys.end(), [by_z](const Key& a, const Key& b) {
         if (by_z && a.z != b.z) return a.z < b.z;

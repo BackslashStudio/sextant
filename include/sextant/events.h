@@ -37,12 +37,13 @@ namespace sextant {
         Line, Scatter, ScatterZ, Bar, Heatmap,                // 2D kinds, on an Axes or a Plane2D
         Bar3D, Surface, SurfaceTri, Scatter3D, Line3D,         // 3D kinds
         Quiver,                                               // 2D, appended
-        Fill,                                                 // 2D (fill(), stack()), appended
+        Fill,                                                 // 2D (fill()), appended
         Poly, Circle, Wedge,                                  // 2D (shape_poly(), shape_circle(), shape_wedge()), appended
         HeatmapTri,                                           // 2D (heatmap_tri()), appended
         Contour,                                              // 2D (contour(), lines or filled), appended
         Quiver3D,                                             // 3D (Axes3D::quiver3d()), appended
-        Pie                                                   // 2D (Axes::pie()), appended; pick_index = the slice
+        Pie,                                                  // 2D (Axes::pie()), appended; pick_index = the slice
+        Stack                                                 // 2D (stack()), appended; pick_index = the layer
     };
 
     // Where an object is now: its kind and its index within the kind, the `i` of
@@ -116,7 +117,7 @@ namespace sextant {
         // Pick (the position fields above describe the press): what was under it.
         // A point, marker, arrow or path vertex within the pick radius
         // (Figure::set_pick_radius(), 12 by default) answers first, the nearest;
-        // else the topmost bar, fill, heatmap or heatmap_tri the press is inside, whose
+        // else the topmost bar, fill, stack layer, heatmap or heatmap_tri the press is inside, whose
         // position is the event's xdata/ydata. `pick_object`: the object's ObjectId
         // (0 = none; Axes::find_object() or Plane2D::find_object() maps it to the
         // index within its kind, nothing if the object was removed since);
@@ -124,7 +125,7 @@ namespace sextant {
         // the flat cell index (row * columns + column) of a heatmap or bar3d; a
         // fill's segment i, between its points i and i + 1; a heatmap_tri's triangle t
         // (tri[3t] .. tri[3t + 2]); a contour's level index (the line near the press)
-        // or a contourf's band index (level i to i + 1); a pie's slice;
+        // or a contourf's band index (level i to i + 1); a pie's slice; a stack's layer;
         // `pick_row`/`pick_col` for those grids, else -1. `pick_plane` is the
         // plane's ObjectId (Axes3D::plane_index() maps it to the index in
         // plane_at()), or 0 for an object of the axes itself. `pick_index`,

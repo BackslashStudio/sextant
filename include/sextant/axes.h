@@ -190,10 +190,11 @@ namespace sextant {
         // Stacked areas (matplotlib's stackplot): layer k fills from the top of
         // the layers below it (the baseline, StackOptions::baseline, for the
         // first) up by ys[k], one value per point of `x` (any other length
-        // throws std::invalid_argument, before anything is added). The curves
-        // are computed here, once, and each layer is added as an ordinary fill,
-        // in order: read back and edited as any other, and editing one does not
-        // restack the rest. A NaN carries up the stack: with Zero it leaves that
+        // throws std::invalid_argument, before anything is added). Its own kind:
+        // one object (stack_count(), stack_data(), PickKind::Stack with the layer
+        // as pick_index), whose curves are worked out from the layers when drawn,
+        // so editing a layer restacks the ones above it. A NaN carries up the
+        // stack: with Zero it leaves that
         // point out of its layer and every layer above; the other baselines take
         // every layer's value, so the point leaves every layer (WeightedWiggle,
         // as matplotlib's, every later point as well).
@@ -433,8 +434,7 @@ namespace sextant {
         Adjustable adjustable() const;
 
         // Identity. Every plot object has an ObjectId (object_id.h), handed out by the
-        // plotting call that makes it: last_object() is the latest call's (the last
-        // one when a call makes several, as stack()), 0 before any. remove() takes the
+        // plotting call that makes it: last_object() is the latest call's, 0 before any. remove() takes the
         // object out for good and returns true; an id that is not this axes's
         // (unknown, removed already, another axes') changes nothing, returns false and
         // sends a message (Figure::set_message_handler()). Removing shifts the indices
@@ -476,6 +476,9 @@ namespace sextant {
 
         std::size_t fill_count() const;
         FillData fill_data(std::size_t i) const;
+
+        std::size_t stack_count() const;
+        StackData stack_data(std::size_t i) const;
 
         std::size_t shape_poly_count() const;
         PolyData shape_poly_data(std::size_t i) const;
@@ -558,6 +561,14 @@ namespace sextant {
         Axes& set_fill_data(std::size_t i, std::span<const double> x, std::span<const double> y1,
                             std::span<const double> y2);
 
+        // A stack's layers, checked as stack() checks them; the stack is drawn
+        // from the new values. A new layer count trims the stack's colors and
+        // names, or extends them: colors from the color cycle, names empty.
+        Axes& set_stack_data(std::size_t i, const StackData& data);
+
+        Axes& set_stack_data(std::size_t i, std::span<const double> x,
+                             std::span<const std::vector<double>> ys);
+
         // A shape's numbers, validated as its plotting call.
         Axes& set_shape_poly_data(std::size_t i, const PolyData& data);
 
@@ -634,9 +645,11 @@ namespace sextant {
         Axes& set_heatmap_visible(std::size_t i, bool visible);
         bool heatmap_visible(std::size_t i) const;
 
-        // A stack()'s layers are fills of their own.
         Axes& set_fill_visible(std::size_t i, bool visible);
         bool fill_visible(std::size_t i) const;
+
+        Axes& set_stack_visible(std::size_t i, bool visible);
+        bool stack_visible(std::size_t i) const;
 
         Axes& set_shape_poly_visible(std::size_t i, bool visible);
         bool shape_poly_visible(std::size_t i) const;

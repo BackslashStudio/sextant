@@ -339,6 +339,7 @@ namespace sextant {
             std::vector<HeatmapTriOptions> heatmap_tris;
             std::vector<ContourOptions> contours;
             std::vector<PieOptions> pies;
+            std::vector<StackOptions> stacks;
             std::vector<ObjectId> ids;   // seeded from, kind by kind
         };
 

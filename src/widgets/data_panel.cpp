@@ -1161,6 +1161,51 @@ namespace sextant {
             }
         }
 
+        // A stack's style: its layers' colors (named as their columns), then
+        // the opacity and outline they share.
+        template<class Push>
+        void stack_style(DataPanelState& st, StackOptions& o, Push&& push) {
+            name_and_key(st, o, push);
+            if (begin_field_table("stack")) {
+                field_row("Orientation");
+                if (orientation_combo("##sorient", o.orientation)) push();
+                for (std::size_t k = 0; k < o.colors.size(); ++k) {
+                    const std::string label = k < o.names.size() && !o.names[k].empty()
+                                                  ? o.names[k] : "y" + std::to_string(k);
+                    field_row(label.c_str());
+                    ImGui::PushID(static_cast<int>(k));
+                    if (color_swatch("##scol", o.colors[k])) push();
+                    ImGui::PopID();
+                }
+                field_row("Alpha");
+                if (drag_float("##salpha", &o.alpha, 0.0f, 1.0f, 0.005f, "%.2f")) push();
+                field_row("Draw style");
+                if (drawstyle_combo("##sdraw", o.drawstyle)) push();
+                end_field_table();
+            }
+            ImGui::SeparatorText("Outline");
+            if (begin_field_table("stackedge")) {
+                field_row("Width");
+                if (drag_float("##sew", &o.linewidth, 0.0f, 10.0f, 0.05f, "%.2f px")) push();
+                end_field_table();
+            }
+            if (o.linewidth <= 0.0f) return;
+            bool own = o.edgecolor.has_value();
+            if (ImGui::Checkbox("Own colour##seown", &own)) {
+                o.edgecolor = own ? std::optional<Color>(o.colors.empty() ? Color::Black : o.colors[0]) : std::nullopt;
+                push();
+            }
+            if (begin_field_table("stackedge2")) {
+                if (o.edgecolor) {
+                    field_row("Color");
+                    if (color_swatch("##secol", *o.edgecolor)) push();
+                }
+                field_row("Style");
+                if (linestyle_combo("##sestyle", o.linestyle)) push();
+                end_field_table();
+            }
+        }
+
         template<class Push>
         void fill_style(DataPanelState& st, FillOptions& o, Push&& push) {
             name_and_key(st, o, push);
@@ -1586,6 +1631,7 @@ namespace sextant {
                 case PlotKind::HeatmapTri: if (!both(ss->heatmap_tris, sheet.heatmap_tris)) return; break;
                 case PlotKind::Contour:  if (!both(ss->contours, sheet.contours)) return; break;
                 case PlotKind::Pie:      if (!both(ss->pies, sheet.pies)) return; break;
+                case PlotKind::Stack:    if (!both(ss->stacks, sheet.stacks)) return; break;
                 default: return; // the 3D kinds have blocks of their own
             }
             if (!section("Appearance", true)) return;
@@ -1643,6 +1689,9 @@ namespace sextant {
                     break;
                 case PlotKind::Pie:
                     pie_style(st, ss->pies[i], push_of(ss->pies[i]));
+                    break;
+                case PlotKind::Stack:
+                    stack_style(st, ss->stacks[i], push_of(ss->stacks[i]));
                     break;
                 default: break;
             }

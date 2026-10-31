@@ -187,6 +187,13 @@ namespace sextant::read_back {
         return out;
     }
 
+    inline StackData to_data(const StackPlot& p) {
+        StackData d{ p.x.get(), {} };
+        d.ys.reserve(p.ys.size());
+        for (const CowVec<double>& y : p.ys) d.ys.push_back(y.get());
+        return d;
+    }
+
     inline FillData to_data(const FillPlot& p) {
         std::vector<bool> exclude(p.exclude.size());
         for (std::size_t i = 0; i < exclude.size(); ++i) exclude[i] = p.excluded(i);

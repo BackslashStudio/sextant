@@ -348,6 +348,7 @@ set(SEXTANT_SOURCES
     src/derived.cpp
     src/axes3d.cpp
     src/plane2d.cpp
+    src/stack_plot.cpp
     src/polar_axes.cpp
     src/style.cpp
     src/colormaps.cpp

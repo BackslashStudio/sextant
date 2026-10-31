@@ -310,7 +310,7 @@ bool shape_covers(const RenderSnapshot& snap, const HintProjector& proj, PlotKin
     return shape_contains(shape_geom_of(snap, kind, o, st), st.to_px(cx), st.to_py(cy));
 }
 
-// The topmost bar, fill or heatmap cell under the cursor (draw order, last
+// The topmost bar, fill, stack layer or heatmap cell under the cursor (draw order, last
 // first), at the cursor; nullopt if none, or the cursor misses the surface.
 std::optional<PickHit> find_area(const RenderSnapshot& snap, const HintProjector& tr,
                                  const std::vector<ObjectRef>& order,
@@ -368,6 +368,22 @@ std::optional<PickHit> find_area(const RenderSnapshot& snap, const HintProjector
                 hit.object = o;
                 hit.element = static_cast<std::size_t>(seg);
                 return hit;
+            }
+            case PlotKind::Stack: {
+                // The layer under the cursor, top first, each as a fill.
+                const std::span<const FillPlot> layers = stack_layers(snap.stacks[o]);
+                const bool vert = snap.stacks[o].vertical();
+                const AxisScale& rs = vert ? ys : xs;
+                const AxisScale& vs = vert ? xs : ys;
+                for (std::size_t k = layers.size(); k-- > 0;) {
+                    if (fill_segment_at(layers[k], rs, vs, rs.fwd(vert ? cy : cx), vs.fwd(vert ? cx : cy)) < 0)
+                        continue;
+                    hit.kind = PickKind::Stack;
+                    hit.object = o;
+                    hit.element = k;
+                    return hit;
+                }
+                break;
             }
             case PlotKind::Poly: case PlotKind::Circle: case PlotKind::Wedge: {
                 if (!shape_covers(snap, tr, order[rank].kind, o, cursor_x, cursor_y, cx, cy)) break;
@@ -705,6 +721,7 @@ ObjectId pick_object_id(const RenderSnapshot& s, PickKind kind, std::size_t i) {
         case PickKind::Heatmap:  return s.heatmaps[i].id;
         case PickKind::Quiver:   return s.quivers[i].id;
         case PickKind::Fill:     return s.fills[i].id;
+        case PickKind::Stack:    return s.stacks[i].id;
         case PickKind::Poly:     return s.polys[i].id;
         case PickKind::Circle:   return s.circles[i].id;
         case PickKind::Wedge:    return s.wedges[i].id;
@@ -808,10 +825,22 @@ std::string format_hit(const RenderSnapshot& snap, const PickHit& hit, bool pola
             return append_label(buf, qp.opts.hint_labels, i);
         }
         case PickKind::Fill: {
-            // Where the cursor is, then the fill's name (a stack's layer).
+            // Where the cursor is, then the fill's name.
             std::string s = polar ? fmt_polar(hit.data_x, hit.data_y) : fmt_point(hit.data_x, hit.data_y);
             const std::string& name = snap.fills[hit.object].opts.name;
             if (!name.empty()) s += '\n' + name;
+            return s;
+        }
+        case PickKind::Stack: {
+            // Where the cursor is, the layer under it (its name, else "layer k"),
+            // then the stack's name.
+            const StackPlot& sp = snap.stacks[hit.object];
+            std::string s = fmt_point(hit.data_x, hit.data_y) + '\n';
+            if (hit.element < sp.opts.names.size() && !sp.opts.names[hit.element].empty())
+                s += sp.opts.names[hit.element];
+            else
+                s += "layer " + std::to_string(hit.element);
+            if (!sp.opts.name.empty()) s += '\n' + sp.opts.name;
             return s;
         }
         case PickKind::HeatmapTri: {

@@ -863,6 +863,21 @@ namespace sextant {
                     }
                     break;
                 }
+                case PlotKind::Stack: {
+                    // One patch per named layer, bottom first, as a fill's.
+                    const StackPlot& sp = snap.stacks[r.index];
+                    if (!sp.opts.show_legend || !sp.opts.visible) break;
+                    for (const FillPlot& fp : stack_layers(sp)) {
+                        if (fp.opts.name.empty()) continue;
+                        Color c = *fp.opts.color;
+                        c.a *= fp.opts.alpha;
+                        LegendEntry e{c, fp.opts.name, LegendKind::Bar, LineStyle::Solid};
+                        if (fp.opts.linewidth > 0.0f && fp.opts.linestyle != LineStyle::None)
+                            e.edge = fill_edge(fp);
+                        entries.push_back(std::move(e));
+                    }
+                    break;
+                }
                 case PlotKind::Poly: case PlotKind::Circle: case PlotKind::Wedge: {
                     // A patch at the shape's opacity, as a fill's; outlined when
                     // the shape is.

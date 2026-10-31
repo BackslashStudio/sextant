@@ -1107,6 +1107,9 @@ static void emit_object(std::ostringstream& o, const SvgAxesData& d, const Objec
         case PlotKind::Fill:
             emit_fill(o, d, d.fills[r.index]);
             break;
+        case PlotKind::Stack:
+            for (const FillPlot& layer : stack_layers(d.stacks[r.index])) emit_fill(o, d, layer);
+            break;
         case PlotKind::Quiver:
             emit_quiver(o, d, d.quivers[r.index]);
             break;

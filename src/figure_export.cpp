@@ -216,6 +216,7 @@ std::string render_figure_svg(const FigureSnapshot& fsnap,
             sd.pies      = snap.pies;
             sd.heatmap_tris = snap.heatmap_tris;
             sd.contours     = snap.contours;
+            sd.stacks       = snap.stacks;
 
             sd.title           = snap.title;
             // Axes::set_axis_visible(false) drops the x/y titles with the axis.

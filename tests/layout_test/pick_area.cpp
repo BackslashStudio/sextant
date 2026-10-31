@@ -151,12 +151,27 @@ namespace lt {
                       !at(ls, 5.0, 500.0, kHintHitRadiusPx, lg),
                   "pick fill: on a log axis, up to its curve");
 
-            // A stack: the layer under the cursor; on a shared edge, the later one.
+            // A stack: PickKind::Stack, pick_index the layer under the cursor
+            // (on a shared edge, the upper one); the hint names that layer.
             RenderSnapshot sk = snap_0_10();
-            sk.fills.push_back(fill_of(V{0.0, 10.0}, V{0.0, 0.0}, V{1.0, 1.0}, 1));
-            sk.fills.push_back(fill_of(V{0.0, 10.0}, V{1.0, 1.0}, V{3.0, 3.0}, 2));
-            check(is(at(sk, 5.0, 0.5), PickKind::Fill, 0, 0) && is(at(sk, 5.0, 2.0), PickKind::Fill, 1, 0),
-                  "pick fill: a stack's layers, each its own band");
+            StackPlot sp;
+            sp.x = V{0.0, 10.0};
+            sp.ys = {CowVec<double>(V{1.0, 1.0}), CowVec<double>(V{2.0, 2.0}), CowVec<double>(V{1.0, 1.0})};
+            sp.opts.colors = {Color::Red, Color::Green, Color::Blue};
+            sp.opts.names = {"low", "", "top"};
+            sp.id = 7;
+            stack_rebuild(sp);
+            sk.stacks.push_back(sp);
+            const auto s0 = at(sk, 5.0, 0.5), s1 = at(sk, 5.0, 2.0), s2 = at(sk, 5.0, 3.5);
+            check(is(s0, PickKind::Stack, 0, 0) && is(s1, PickKind::Stack, 0, 1) && is(s2, PickKind::Stack, 0, 2) &&
+                      is(at(sk, 5.0, 1.0), PickKind::Stack, 0, 1) && !at(sk, 5.0, 4.5),
+                  "pick stack: one object, pick_index the layer under the cursor");
+            check(format_pick(sk, *s0).ends_with("\nlow") && format_pick(sk, *s1).ends_with("\nlayer 1") &&
+                      format_pick(sk, *s2).ends_with("\ntop"),
+                  "pick stack: the hint names the layer (its name, else layer k)");
+            sk.stacks[0].opts.name = "all";
+            check(format_pick(sk, *s2).ends_with("\ntop\nall"), "pick stack: then the stack's own name");
+            check(pick_object_id(sk, PickKind::Stack, 0) == 7, "pick stack: the stack's id, whichever layer");
 
             check(fill_segment_at(s.fills[0], AxisScale{}, AxisScale{}, std::numeric_limits<double>::quiet_NaN(),
                                   2.0) == -1,

@@ -72,7 +72,7 @@ struct PlotStyleEdit {
                  HeatmapOptions, ScatterZOptions, TextStyle,
                  AxLineOptions, AxSpanOptions, FillOptions, QuiverOptions,
                  PolyOptions, CircleOptions, WedgeOptions, HeatmapTriOptions, ContourOptions,
-                 PieOptions> opts;
+                 PieOptions, StackOptions> opts;
     ObjectId id = 0, plane_id = 0;   // see PlotCellEdit
     // The object's visible_stamp when the panel drew; filled in by
     // FigureEditBox. A set_<kind>_visible() since keeps its `visible`.
@@ -733,6 +733,16 @@ std::optional<PlotDataOp> apply_plot_data_op(T& t, const PlotCellEdit& e) {
                 return undo;
             }
             return std::nullopt;
+        case PlotKind::Stack:
+            // x, then one column per layer; the stacked curves follow.
+            if (auto* sp = op_target(t.stacks, e)) {
+                if (e.column < 0 || static_cast<std::size_t>(e.column) > sp->ys.size()) return std::nullopt;
+                CowVec<double>& col = e.column == 0 ? sp->x : sp->ys[static_cast<std::size_t>(e.column) - 1];
+                auto undo = cell_undo(e, t.stacks, *sp, put_cell(col, e.element, e.value));
+                stack_rebuild(*sp);
+                return undo;
+            }
+            return std::nullopt;
         case PlotKind::Circle:
         case PlotKind::Wedge:
             // One row; see ShapeDataEdit.
@@ -981,6 +991,39 @@ std::optional<PlotDataOp> row_op(const PlotRowEdit& e, const Vec& v, P& p, Cols&
     return inv;
 }
 
+// row_op() for a stack, whose layer count is its own: x and every layer move
+// together, a new point copying its predecessor; the curves follow.
+template <class Vec>
+std::optional<PlotDataOp> stack_row_op(const PlotRowEdit& e, const Vec& v, StackPlot& p) {
+    const std::size_t n = p.x.size();
+    const bool insert = (e.op == PlotRowEdit::Op::Insert);
+    if (insert ? e.row > n : e.row >= n) return std::nullopt;
+    PlotRowEdit inv = retarget(e, v, p);
+    inv.restore.reset();
+    const auto each = [&](auto&& f) {
+        f(p.x, 0);
+        for (std::size_t k = 0; k < p.ys.size(); ++k) f(p.ys[k], k + 1);
+    };
+    if (insert && e.restore) {
+        const auto& cols = e.restore->cols;
+        each([&](CowVec<double>& c, std::size_t i) {
+            row_insert_value(c, e.row, i < cols.size() ? cols[i] : 0.0);
+        });
+    } else if (insert) {
+        each([&](CowVec<double>& c, std::size_t) { row_insert(c, e.row, true); });
+    } else {
+        PlotRowEdit::Restore r;
+        each([&](CowVec<double>& c, std::size_t) {
+            r.cols.push_back(c[e.row]);
+            row_remove(c, e.row);
+        });
+        inv.restore = std::move(r);
+    }
+    stack_rebuild(p);
+    inv.op = insert ? PlotRowEdit::Op::Remove : PlotRowEdit::Op::Insert;
+    return inv;
+}
+
 } // namespace edits_detail
 
 // Adds or removes one data point.
@@ -1028,6 +1071,10 @@ std::optional<PlotDataOp> apply_plot_data_op(T& t, const PlotRowEdit& e) {
             return std::nullopt;
         case PlotKind::Pie:
             // Replaced whole; see PieDataEdit.
+            return std::nullopt;
+        case PlotKind::Stack:
+            if (auto* sp = op_target(t.stacks, e))
+                return edits_detail::stack_row_op(e, t.stacks, *sp);
             return std::nullopt;
         case PlotKind::Heatmap:
         case PlotKind::Bar3D:
@@ -1429,8 +1476,14 @@ std::optional<ReplacedOpts<Opts>> assign_plot_opts(Vec& v, int idx, ObjectId id,
         if (kept) visible_flag(p->opts) = *kept;
         if constexpr (requires { p->opts.zorder; })
             if (kept_z) p->opts.zorder = *kept_z;
-        // A contour's drawing data follows its options (levels, norm, filled).
+        // A contour's drawing data follows its options (levels, norm, filled);
+        // a stack's too, its colors kept unless one per layer comes.
         if constexpr (std::is_same_v<std::decay_t<decltype(*p)>, ContourPlot>) contour_rebuild(*p);
+        if constexpr (std::is_same_v<std::decay_t<decltype(*p)>, StackPlot>) {
+            if (p->opts.colors.size() != p->ys.size()) p->opts.colors = r.old.colors;
+            if (!p->opts.names.empty() && p->opts.names.size() != p->ys.size()) p->opts.names = r.old.names;
+            stack_rebuild(*p);
+        }
         return r;
     } else {
         auto labels = std::move(p->opts.hint_labels);
@@ -1472,6 +1525,7 @@ auto& styled_vector(T& t) {
     else if constexpr (std::is_same_v<O, HeatmapTriOptions>) return t.heatmap_tris;
     else if constexpr (std::is_same_v<O, ContourOptions>) return t.contours;
     else if constexpr (std::is_same_v<O, PieOptions>)     return t.pies;
+    else if constexpr (std::is_same_v<O, StackOptions>)   return t.stacks;
     else                                                  return t.scatter_z;
 }
 

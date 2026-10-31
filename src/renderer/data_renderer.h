@@ -204,6 +204,11 @@ private:
     // A fill (fill_geometry.h): its triangles cached as bars' fills are, its
     // outline stroked per frame through the segment program.
     void draw_fill(const FillPlot& p, int index, const CoordTransform& tr, const PlotRect& pr);
+    // The fill cache's index for layer `layer` of stack `stack`: below zero, so
+    // apart from the fills'.
+    static int stack_fill_key(std::size_t stack, std::size_t layer) {
+        return -1 - static_cast<int>((stack << 16) + layer);
+    }
     // A shape (shape_geometry.h): its triangles streamed per frame through the
     // flat program, its outline stroked as a fill's; nothing cached.
     void draw_shape(const ShapeGeom& g, const Color& color, float alpha, float linewidth,

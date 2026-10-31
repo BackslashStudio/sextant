@@ -858,31 +858,65 @@ Axes& Axes::pie(std::span<const double> values, PieOptions opts) {
     return *this;
 }
 
-void Axes::Impl::ingest_stack(std::span<const double> x, std::span<const std::vector<double>> ys,
-                              const StackOptions& opts, const char* who) {
+namespace {
+void check_stack_layers(std::size_t n, std::span<const std::vector<double>> ys, const char* who) {
     for (const std::vector<double>& y : ys)
-        if (y.size() != x.size())
+        if (y.size() != n)
             throw std::invalid_argument(std::string(who) + ": every layer needs one value per x");
+}
+
+std::vector<CowVec<double>> own_layers(std::span<const std::vector<double>> ys) {
+    std::vector<CowVec<double>> out;
+    out.reserve(ys.size());
+    for (const std::vector<double>& y : ys) out.emplace_back(y);
+    return out;
+}
+} // namespace
+
+void Axes::Impl::ingest_stack(std::span<const double> x, std::span<const std::vector<double>> ys,
+                              StackOptions opts, const char* who) {
+    read_back::check_zorder(opts.zorder, who);
+    check_stack_layers(x.size(), ys, who);
     if (!opts.colors.empty() && opts.colors.size() != ys.size())
         throw std::invalid_argument(std::string(who) + ": colors needs one per layer");
     if (!opts.names.empty() && opts.names.size() != ys.size())
         throw std::invalid_argument(std::string(who) + ": names needs one per layer");
-    const std::vector<std::vector<double>> curves = stack_curves(ys, x.size(), opts.baseline);
-    for (std::size_t k = 0; k < ys.size(); ++k) {
-        FillOptions f;
-        f.orientation = opts.orientation;
-        if (!opts.colors.empty()) f.color = opts.colors[k];
-        f.alpha = opts.alpha;
-        f.edgecolor = opts.edgecolor;
-        f.linewidth = opts.linewidth;
-        f.linestyle = opts.linestyle;
-        f.drawstyle = opts.drawstyle;
-        if (!opts.names.empty()) f.name = opts.names[k];
-        f.show_legend = opts.show_legend;
-        f.visible = opts.visible;
-        f.zorder = opts.zorder;
-        ingest_fill(x, curves[k], curves[k + 1], std::move(f), who);
+    warn_math(mathtext, who, opts.name);
+    for (const std::string& n : opts.names) warn_math(mathtext, who, n);
+    if (opts.colors.empty())
+        for (std::size_t k = 0; k < ys.size(); ++k) {
+            std::optional<Color> c;
+            cycle->resolve(c);
+            opts.colors.push_back(*c);
+        }
+    StackPlot p;
+    p.x = read_back::own(x);
+    p.ys = own_layers(ys);
+    p.opts = std::move(opts);
+    p.data_stamp = next_snapshot_generation();
+    p.id = new_id();
+    stack_rebuild(p);
+    stacks.push_back(std::move(p));
+}
+
+// A new layer count trims the colors and names or extends them (colors from
+// the cycle, names empty, so a named stack keeps one name per layer).
+void Axes::Impl::set_stack_data(std::size_t i, std::span<const double> x,
+                                std::span<const std::vector<double>> ys, const char* who) {
+    StackPlot& p = read_back::at(stacks, i, who);
+    check_stack_layers(x.size(), ys, who);
+    const std::size_t m = ys.size();
+    while (p.opts.colors.size() < m) {
+        std::optional<Color> c;
+        cycle->resolve(c);
+        p.opts.colors.push_back(*c);
     }
+    p.opts.colors.resize(m);
+    if (!p.opts.names.empty()) p.opts.names.resize(m);
+    p.x = read_back::own(x);
+    p.ys = own_layers(ys);
+    p.data_stamp = next_snapshot_generation();
+    stack_rebuild(p);
 }
 
 Axes& Axes::stack(std::span<const double> x, std::span<const std::vector<double>> ys,
@@ -1219,6 +1253,23 @@ FillData Axes::fill_data(std::size_t i) const {
     return read_back::to_data(read_back::at(d->fills, i, "fill_data"));
 }
 
+std::size_t Axes::stack_count() const     { return d->stacks.size(); }
+
+StackData Axes::stack_data(std::size_t i) const {
+    return read_back::to_data(read_back::at(d->stacks, i, "stack_data"));
+}
+
+Axes& Axes::set_stack_data(std::size_t i, const StackData& data) {
+    d->set_stack_data(i, data.x, data.ys, "set_stack_data");
+    return *this;
+}
+
+Axes& Axes::set_stack_data(std::size_t i, std::span<const double> x,
+                           std::span<const std::vector<double>> ys) {
+    d->set_stack_data(i, x, ys, "set_stack_data");
+    return *this;
+}
+
 
 std::size_t Axes::shape_poly_count() const   { return d->polys.size(); }
 std::size_t Axes::shape_circle_count() const { return d->circles.size(); }
@@ -1383,6 +1434,10 @@ Axes& Axes::set_fill_visible(std::size_t i, bool visible) {
     read_back::set_visible(d->fills, i, visible, "set_fill_visible");
     return *this;
 }
+Axes& Axes::set_stack_visible(std::size_t i, bool visible) {
+    read_back::set_visible(d->stacks, i, visible, "set_stack_visible");
+    return *this;
+}
 Axes& Axes::set_shape_poly_visible(std::size_t i, bool visible) {
     read_back::set_visible(d->polys, i, visible, "set_shape_poly_visible");
     return *this;
@@ -1432,6 +1487,7 @@ bool Axes::scatter_z_visible(std::size_t i) const { return read_back::visible(d-
 bool Axes::bar_visible(std::size_t i) const       { return read_back::visible(d->bars, i, "bar_visible"); }
 bool Axes::heatmap_visible(std::size_t i) const   { return read_back::visible(d->heatmaps, i, "heatmap_visible"); }
 bool Axes::fill_visible(std::size_t i) const      { return read_back::visible(d->fills, i, "fill_visible"); }
+bool Axes::stack_visible(std::size_t i) const     { return read_back::visible(d->stacks, i, "stack_visible"); }
 bool Axes::shape_poly_visible(std::size_t i) const   { return read_back::visible(d->polys, i, "shape_poly_visible"); }
 bool Axes::shape_circle_visible(std::size_t i) const { return read_back::visible(d->circles, i, "shape_circle_visible"); }
 bool Axes::shape_wedge_visible(std::size_t i) const  { return read_back::visible(d->wedges, i, "shape_wedge_visible"); }

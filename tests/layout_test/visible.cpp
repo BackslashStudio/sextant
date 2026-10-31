@@ -144,16 +144,16 @@ namespace lt {
                   "setters: every 2D kind's flag reads back");
         }
 
-        // ---- stack(): every layer takes StackOptions::visible.
+        // ---- stack(): one flag for the whole stack.
         {
             auto fig = Figure::create();
             auto ax = fig->add_subplot(1, 1, 1);
-            const std::vector<std::vector<double>> ys{{1.0, 2.0}, {2.0, 1.0}};
+            const std::vector<std::vector<double>> ys{{1.0, 2.0}, {2.0, 100.0}};
             ax->stack(V{0.0, 1.0}, ys, {.visible = false});
-            check(ax->fill_count() == 2 && !ax->fill_visible(0) && !ax->fill_visible(1),
-                  "stack: a hidden stack's layers are hidden fills");
-            ax->set_fill_visible(1, true);
-            check(ax->fill_visible(1) && !ax->fill_visible(0), "stack: and each shows on its own");
+            check(ax->stack_count() == 1 && !ax->stack_visible(0) && ax->ylim().hi < 50.0,
+                  "stack: hidden, it widens no limits");
+            ax->set_stack_visible(0, true);
+            check(ax->stack_visible(0) && ax->ylim().hi > 100.0, "stack: shown, all its layers count");
         }
 
         // ---- A share group counts its visible members' data only.

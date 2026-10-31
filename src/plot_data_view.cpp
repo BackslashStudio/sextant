@@ -1,6 +1,9 @@
 #include "plot_data_view.h"
 #include <algorithm>
 #include <cstdio>
+#include <deque>
+#include <mutex>
+#include <string>
 
 namespace sextant {
 
@@ -14,6 +17,16 @@ std::string synth_label(const char* kind_name, int index) {
 // Heatmap, scatter_z, bar3d and surface tabs always use the synthesized name.
 std::string pick_label(const std::string& user_label, const char* kind_name, int index) {
     return user_label.empty() ? synth_label(kind_name, index) : user_label;
+}
+
+// "y0", "y1", ...: an unnamed stack layer's column. The strings live for the
+// program, as a DataColumn's name must outlive the frame.
+const char* layer_column_name(std::size_t k) {
+    static std::mutex m;
+    static std::deque<std::string> names;
+    std::lock_guard lock(m);
+    while (names.size() <= k) names.push_back("y" + std::to_string(names.size()));
+    return names[k].c_str();
 }
 
 // A text's tab: no columns, the form reads `text`.
@@ -133,6 +146,25 @@ std::vector<PlotDataTable> tables_of(const RenderSnapshot& snap, bool polar) {
         t.columns.push_back({v ? (p ? "theta2" : "x2") : (p ? "r2" : "y2"), fp.y2.data(), fp.y2.size()});
         if (!fp.exclude.empty())
             t.columns.push_back({"exclude", fp.exclude.data(), fp.exclude.size()});
+        out.push_back(std::move(t));
+    }
+
+    // Stacks: the run coordinate, then one column per layer (its own values,
+    // not the stacked curves), headed by the layer's name or y0, y1, ...
+    for (std::size_t i = 0; i < snap.stacks.size(); ++i) {
+        const auto& sp = snap.stacks[i];
+        PlotDataTable t;
+        t.kind = PlotKind::Stack;
+        t.plot_index = static_cast<int>(i);
+        t.data_stamp = sp.data_stamp;
+        t.id = sp.id;
+        t.label = pick_label(sp.opts.name, "stack", static_cast<int>(i));
+        t.columns.push_back({sp.vertical() ? "y" : "x", sp.x.data(), sp.x.size()});
+        for (std::size_t k = 0; k < sp.ys.size(); ++k) {
+            const bool named = k < sp.opts.names.size() && !sp.opts.names[k].empty();
+            t.columns.push_back({named ? sp.opts.names[k].c_str() : layer_column_name(k),
+                                 sp.ys[k].data(), sp.ys[k].size()});
+        }
         out.push_back(std::move(t));
     }
 

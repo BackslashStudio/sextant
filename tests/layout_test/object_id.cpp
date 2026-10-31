@@ -326,8 +326,8 @@ namespace lt {
               "last_object: axline and text count too");
         const std::vector<std::vector<double>> layers{ kY, kY };
         ax->stack(kX, layers);
-        check(ax->last_object() == a2->fills.back().id && a2->fills.size() == 2,
-              "last_object: a call that makes several objects gives the last");
+        check(ax->last_object() == a2->stacks.back().id && a2->stacks.size() == 1 && a2->fills.empty(),
+              "last_object: a stack is one object, whatever its layers");
 
         ax3->scatter3d(kX, kY, kY);
         const ObjectId s0 = ax3->last_object();

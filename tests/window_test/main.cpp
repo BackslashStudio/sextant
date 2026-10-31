@@ -3880,13 +3880,13 @@ int main() {
     // test_aspect_scales();
     // test_mathtext_gallery();
     // test_decorations();
-    test_polar();
+    // test_polar();
     // test_legend_colorbar();
     // test_line();
     // test_scatter();
     // test_bar();
     // test_heatmap();
-    // test_fill();
+    test_fill();
     // test_quiver();
     // test_bar3d();
     // test_surface();

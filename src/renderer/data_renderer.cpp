@@ -2474,6 +2474,12 @@ void main() {
             case PlotKind::Fill:
                 draw_fill(snap.fills[r.index], static_cast<int>(r.index), tr, pr);
                 break;
+            case PlotKind::Stack: {
+                const std::span<const FillPlot> layers = stack_layers(snap.stacks[r.index]);
+                for (std::size_t k = 0; k < layers.size(); ++k)
+                    draw_fill(layers[k], stack_fill_key(r.index, k), tr, pr);
+                break;
+            }
             case PlotKind::Quiver:
                 draw_quiver(snap.quivers[r.index], static_cast<int>(r.index), tr, pr);
                 break;

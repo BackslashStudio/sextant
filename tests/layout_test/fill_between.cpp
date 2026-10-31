@@ -509,20 +509,34 @@ namespace lt {
             return true;
         };
         const char* names[] = {"Zero", "Sym", "Wiggle", "WeightedWiggle"};
+        // The stack's drawn layers, from a snapshot.
+        auto layers_of = [](Figure& f, std::size_t i = 0) {
+            const FigureSnapshot fs = detail::FigureAccess::impl(f).build_figure_snapshot();
+            const std::span<const FillPlot> l = stack_layers(fs.axes[0].snap2d()->stacks[i]);
+            return std::vector<FillPlot>(l.begin(), l.end());
+        };
         for (std::size_t b = 0; b < want.size(); ++b) {
             auto fig = Figure::create();
             auto ax = fig->add_subplot(1, 1, 1);
             ax->stack(x, ys, {.baseline = want[b].first});
-            bool ok = ax->fill_count() == 3;
-            for (std::size_t k = 0; ok && k < 3; ++k) {
-                const FillData d = ax->fill_data(k);
-                ok = d.x == x && same(d.y1, want[b].second[k]) && same(d.y2, want[b].second[k + 1]) &&
-                     d.exclude.empty();
-            }
+            const std::vector<FillPlot> l = layers_of(*fig);
+            bool ok = ax->stack_count() == 1 && ax->fill_count() == 0 && l.size() == 3;
+            for (std::size_t k = 0; ok && k < 3; ++k)
+                ok = l[k].x.get() == x && same(l[k].y1.get(), want[b].second[k]) &&
+                     same(l[k].y2.get(), want[b].second[k + 1]);
             check(ok, std::string("stack: ") + names[b] + " baseline, layer k between curves k and k+1 as matplotlib's");
         }
 
-        // Options: each layer a fill with the shared options, its own color and
+        // Read back as given (the layers, not the curves).
+        {
+            auto fig = Figure::create();
+            auto ax = fig->add_subplot(1, 1, 1);
+            ax->stack(x, ys, {.baseline = StackBaseline::Sym});
+            const StackData d = ax->stack_data(0);
+            check(d.x == x && d.ys == ys, "stack_data: x and the layers as given");
+        }
+
+        // Options: each layer drawn with the shared options, its own color and
         // name; the cycle when no colors are given, as three fill_between() calls.
         {
             auto fig = Figure::create();
@@ -533,22 +547,22 @@ namespace lt {
             auto ref = Figure::create();
             auto rx = ref->add_subplot(1, 1, 1);
             for (int k = 0; k < 3; ++k) rx->fill(x, ys[0]);
-            const FigureSnapshot fs = detail::FigureAccess::impl(*fig).build_figure_snapshot();
             const FigureSnapshot rs = detail::FigureAccess::impl(*ref).build_figure_snapshot();
-            const RenderSnapshot& s = *fs.axes[0].snap2d();
             const RenderSnapshot& r = *rs.axes[0].snap2d();
+            const std::vector<FillPlot> l = layers_of(*fig), l2 = layers_of(*fig, 1);
             bool cyc = true, opts = true;
             for (std::size_t k = 0; k < 3; ++k) {
-                const Color& a = *s.fills[k].opts.color;
+                const Color& a = *l[k].opts.color;
                 const Color& c = *r.fills[k].opts.color;
                 cyc = cyc && a.r == c.r && a.g == c.g && a.b == c.b && a.a == c.a;
-                const FillOptions& o = s.fills[k].opts;
+                const FillOptions& o = l[k].opts;
                 opts = opts && o.orientation == Orientation::Vertical && o.alpha == 0.5f && o.linewidth == 1.5f &&
                        o.drawstyle == DrawStyle::StepsMid && !o.show_legend && o.name == std::string(1, static_cast<char>('a' + k));
             }
-            check(s.fills.size() == 5 && cyc, "stack: no colors, one cycle color per layer");
+            check(ax->stack_count() == 2 && l.size() == 3 && cyc, "stack: no colors, one cycle color per layer");
             check(opts, "stack: every layer takes the shared options and its own name");
-            check(s.fills[3].opts.color->r == kRed.r && s.fills[4].opts.color->g == kGreen.g && s.fills[3].opts.name.empty(),
+            check(l2.size() == 2 && l2[0].opts.color->r == kRed.r && l2[1].opts.color->g == kGreen.g &&
+                      l2[0].opts.name.empty(),
                   "stack: colors, one per layer; no names, none");
             auto vf = Figure::create();
             auto vx = vf->add_subplot(1, 1, 1);
@@ -563,10 +577,10 @@ namespace lt {
             const std::vector<V> bad{{1, 2, 3, 2, 1}, {1, 2}};
             check(throws_invalid([&] { ax->stack(x, bad); }) &&
                       throws_invalid([&] { ax->stack(x, ys, {.colors = {kRed}}); }) &&
-                      throws_invalid([&] { ax->stack(x, ys, {.names = {"a", "b"}}); }) && ax->fill_count() == 0,
+                      throws_invalid([&] { ax->stack(x, ys, {.names = {"a", "b"}}); }) && ax->stack_count() == 0,
                   "stack: a layer of another length, or colors/names not one per layer, throw and add nothing");
             ax->stack(x, std::span<const V>{});
-            check(ax->fill_count() == 0, "stack: no layers, no fills");
+            check(ax->stack_count() == 1 && layers_of(*fig).empty(), "stack: no layers, an empty stack");
         }
 
         // NaN carries up the stack; with a centred baseline it reaches every layer.
@@ -577,17 +591,36 @@ namespace lt {
             auto ax = fig->add_subplot(1, 1, 1);
             ax->stack(x, n);
             ax->stack(x, n, {.baseline = StackBaseline::Sym});
-            check(!std::isnan(ax->fill_data(0).y2[2]) && std::isnan(ax->fill_data(1).y2[2]) &&
-                      std::isnan(ax->fill_data(2).y1[2]) && std::isnan(ax->fill_data(2).y2[2]) &&
-                      !std::isnan(ax->fill_data(1).y2[3]),
+            const std::vector<FillPlot> z = layers_of(*fig), m = layers_of(*fig, 1);
+            check(!std::isnan(z[0].y2[2]) && std::isnan(z[1].y2[2]) && std::isnan(z[2].y1[2]) &&
+                      std::isnan(z[2].y2[2]) && !std::isnan(z[1].y2[3]),
                   "stack: Zero, a NaN leaves its point out of its layer and those above");
-            check(std::isnan(ax->fill_data(3).y1[2]) && std::isnan(ax->fill_data(3).y2[2]) &&
-                      !std::isnan(ax->fill_data(3).y1[3]),
+            check(std::isnan(m[0].y1[2]) && std::isnan(m[0].y2[2]) && !std::isnan(m[0].y1[3]),
                   "stack: Sym, out of every layer");
+        }
 
-            // Afterwards the layers are ordinary fills: an edit does not restack.
-            ax->set_fill_data(0, x, V(5, 0.0), V(5, 9.0));
-            check(ax->fill_data(1).y1 == V({1.0, 2.0, 3.0, 2.0, 1.0}), "stack: editing a layer leaves the others as they were");
+        // An edit restacks; a new layer count trims or extends colors and names.
+        {
+            auto fig = Figure::create();
+            auto ax = fig->add_subplot(1, 1, 1);
+            ax->stack(x, ys, {.colors = {kRed, kGreen, kBlue}, .names = {"a", "b", "c"}});
+            std::vector<V> e = ys;
+            e[0] = V(5, 10.0);
+            ax->set_stack_data(0, x, e);
+            std::vector<FillPlot> l = layers_of(*fig);
+            check(l[1].y1.get() == V(5, 10.0) && l[2].y2[0] == 12.5,
+                  "set_stack_data: the layers above follow an edit below");
+            ax->set_stack_data(0, StackData{x, {ys[0], ys[1]}});
+            l = layers_of(*fig);
+            check(l.size() == 2 && l[1].opts.color->g == kGreen.g && l[1].opts.name == "b",
+                  "set_stack_data: fewer layers trim colors and names");
+            ax->set_stack_data(0, x, std::vector<V>{ys[0], ys[1], ys[2], ys[0]});
+            l = layers_of(*fig);
+            check(l.size() == 4 && l[2].opts.name.empty() && l[3].opts.name.empty(),
+                  "set_stack_data: more, colors from the cycle and names empty");
+            check(throws_invalid([&] { ax->set_stack_data(0, x, std::vector<V>{V{1.0}}); }) &&
+                      throws_range([&] { ax->set_stack_data(1, x, ys); }),
+                  "set_stack_data: a layer of another length, or no such stack, throws");
         }
 
         // Planes, and a legend entry per named layer.
@@ -596,15 +629,91 @@ namespace lt {
             auto a3 = f3->add_subplot3d(1, 1, 1);
             auto pl = a3->plane(PlaneOrientation::XY, 0.0);
             pl->stack(x, ys, {.baseline = StackBaseline::Sym});
-            check(pl->fill_count() == 3 && same(pl->fill_data(2).y2, want[1].second[3]), "plane: stack()");
+            check(pl->stack_count() == 1 && pl->fill_count() == 0 && pl->stack_data(0).ys == ys, "plane: stack()");
 
             auto fig = Figure::create();
             auto ax = fig->add_subplot(1, 1, 1);
-            ax->stack(x, ys, {.names = {"a", "b", "c"}});
+            ax->stack(x, ys, {.names = {"a", "", "c"}});
             const FigureSnapshot fs = detail::FigureAccess::impl(*fig).build_figure_snapshot();
             const auto e = collect_legend_entries(*fs.axes[0].snap2d());
-            check(e.size() == 3 && e[0].name == "a" && e[2].name == "c" && e[1].kind == LegendKind::Bar,
-                  "legend: a patch per layer, in order");
+            check(e.size() == 2 && e[0].name == "a" && e[1].name == "c" && e[1].kind == LegendKind::Bar,
+                  "legend: a patch per named layer, in order");
+        }
+
+        // The journal: a cell, a row and the style from the Data panel restack,
+        // replay onto the live axes, and undo.
+        {
+            auto fig = Figure::create();
+            auto ax = fig->add_subplot(1, 1, 1);
+            ax->stack(x, ys, {.colors = {kRed, kGreen, kBlue}});
+            auto& fi = detail::FigureAccess::impl(*fig);
+            AxesEdit ae;
+            ae.plot_ops.push_back(PlotCellEdit{PlotKind::Stack, 0, 1, 0, 10.0});
+            PlotRowEdit row;
+            row.kind = PlotKind::Stack;
+            row.row = 5;
+            ae.plot_ops.push_back(row);
+            ae.plot_styles.push_back(PlotStyleEdit{0, -1, StackOptions{.colors = {kBlue, kGreen, kRed}, .alpha = 0.5f}});
+            FigureEdits e;
+            e.per_axes.push_back({1, ae});
+            const FigureEdits undo = fi.apply_edits(e);
+            const auto snap = fi.snapshot_box.load();
+            const StackPlot& sp = snap->axes[0].snap2d()->stacks[0];
+            const std::span<const FillPlot> l = stack_layers(sp);
+            check(sp.x.size() == 6 && sp.ys[2].size() == 6 && l[1].y1[0] == 10.0 && l[2].y2[0] == 12.5 &&
+                      l[0].opts.color->b == kBlue.b && l[0].opts.alpha == 0.5f,
+                  "journal: a stack's cell, row and style reach the snapshot, restacked");
+            fi.apply_edits_and_publish();
+            check(ax->stack_data(0).ys[0][0] == 10.0 && ax->stack_data(0).x.size() == 6,
+                  "journal: and replay onto the live axes");
+            fi.apply_edits(undo);
+            const auto u = fi.snapshot_box.load();
+            const StackPlot& up = u->axes[0].snap2d()->stacks[0];
+            check(up.x.size() == 5 && stack_layers(up)[1].y1[0] == 1.0 && stack_layers(up)[0].opts.color->r == kRed.r,
+                  "journal: undo restores the stack");
+
+            AxesEdit bad;
+            bad.plot_styles.push_back(PlotStyleEdit{0, -1, StackOptions{.colors = {kBlue}}});
+            FigureEdits be;
+            be.per_axes.push_back({1, bad});
+            fi.apply_edits(be);
+            check(stack_layers(fi.snapshot_box.load()->axes[0].snap2d()->stacks[0])[2].opts.color->b == kBlue.b,
+                  "journal: a style without one color per layer keeps the colors");
+        }
+
+        // SVG: a stack is written as its layers, as the same fill_between() calls.
+        {
+            auto sf = Figure::create();
+            sf->add_subplot(1, 1, 1)->stack(x, ys, {.colors = {kRed, kGreen, kBlue}, .names = {"a", "b", "c"},
+                                                    .linewidth = 1.0f});
+            auto ff = Figure::create();
+            auto fx = ff->add_subplot(1, 1, 1);
+            const std::vector<V>& c = want[0].second;
+            const Color cs[] = {kRed, kGreen, kBlue};
+            const char* ns[] = {"a", "b", "c"};
+            for (int k = 0; k < 3; ++k)
+                fx->fill(x, c[k], c[k + 1], {.color = cs[k], .linewidth = 1.0f, .name = ns[k]});
+            const std::string a = sf->render_svg({}, 400, 300).svg, b = ff->render_svg({}, 400, 300).svg;
+            check(!a.empty() && a == b, "svg: a stack is its layers' fills");
+        }
+
+        // The Data panel draws a stack's tab with no duplicate widget ids.
+        {
+            FigureSnapshot fs;
+            RenderSnapshot r;
+            StackPlot sp;
+            sp.x = x;
+            for (const V& y : ys) sp.ys.emplace_back(y);
+            sp.opts.colors = {kRed, kGreen, kBlue};
+            sp.opts.names = {"a", "", "c"};
+            sp.opts.linewidth = 1.0f;
+            sp.id = 5;
+            stack_rebuild(sp);
+            r.stacks.push_back(sp);
+            fs.axes.push_back({{1, 1, 1}, std::move(r)});
+            fs.generation = fs.data_generation = 1;
+            const IdConflictScan sc = scan_panel_for_id_conflicts(fs, &draw_data_window, "Data", {});
+            check(sc.conflicts == 0 && sc.probes > 0, "panel: a stack's tab draws without id conflicts");
         }
     }
 

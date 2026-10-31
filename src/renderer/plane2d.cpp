@@ -321,6 +321,41 @@ namespace sextant {
             b.close();
         };
 
+        // A fill's regions' triangles, then their outlines (solid, as a
+        // plane's lines), in plane coordinates (no scales on a plane).
+        const auto fill_geom = [&](const FillPlot& fp) {
+            const std::vector<FillRun> runs = fill_runs(fp, AxisScale{}, AxisScale{});
+            const bool vert = fp.vertical();
+            auto uv = [vert](double run, double v) {
+                return vert ? std::array{v, run} : std::array{run, v};
+            };
+            const Color c = with_alpha(*fp.opts.color, fp.opts.alpha);
+            b.open(Kind::Tri);
+            for (const FillRun& run : runs)
+                fill_triangles(run, [&](double r0, double v0, double r1, double v1,
+                                        double r2, double v2) {
+                    const auto [u0, w0] = uv(r0, v0);
+                    const auto [u1, w1] = uv(r1, v1);
+                    const auto [u2, w2] = uv(r2, v2);
+                    b.g.tris.push_back({{b.at(u0, w0), b.at(u1, w1), b.at(u2, w2)}, c});
+                });
+            b.close();
+            if (fp.opts.linewidth > 0.0f && fp.opts.linestyle != LineStyle::None) {
+                const Color ec = fill_edge(fp);
+                b.open(Kind::Seg);
+                for (const FillRun& run : runs) {
+                    std::vector<std::array<double, 2>> ring;
+                    fill_outline(run, [&](double rr, double v) { ring.push_back(uv(rr, v)); });
+                    for (std::size_t k = 0; k < ring.size(); ++k) {
+                        const auto& p0 = ring[k];
+                        const auto& p1 = ring[(k + 1) % ring.size()];
+                        b.seg_uv(p0[0], p0[1], p1[0], p1[1], ec, fp.opts.linewidth);
+                    }
+                }
+                b.close();
+            }
+        };
+
         // In draw order (draw_order()), as the raster (DataRenderer::draw_plots()): a bar or line
         // object's error bars over it, a scatter's under its markers.
         for (const ObjectRef& r: draw_order(s)) {
@@ -412,42 +447,13 @@ namespace sextant {
                     break;
                 }
 
-                case PlotKind::Fill: {
-                    // The regions' triangles, then their outlines (solid, as a
-                    // plane's lines), in plane coordinates (no scales on a plane).
-                    const auto& fp = s.fills[r.index];
-                    const std::vector<FillRun> runs = fill_runs(fp, AxisScale{}, AxisScale{});
-                    const bool vert = fp.vertical();
-                    auto uv = [vert](double run, double v) {
-                        return vert ? std::array{v, run} : std::array{run, v};
-                    };
-                    const Color c = with_alpha(*fp.opts.color, fp.opts.alpha);
-                    b.open(Kind::Tri);
-                    for (const FillRun& run : runs)
-                        fill_triangles(run, [&](double r0, double v0, double r1, double v1,
-                                                double r2, double v2) {
-                            const auto [u0, w0] = uv(r0, v0);
-                            const auto [u1, w1] = uv(r1, v1);
-                            const auto [u2, w2] = uv(r2, v2);
-                            b.g.tris.push_back({{b.at(u0, w0), b.at(u1, w1), b.at(u2, w2)}, c});
-                        });
-                    b.close();
-                    if (fp.opts.linewidth > 0.0f && fp.opts.linestyle != LineStyle::None) {
-                        const Color ec = fill_edge(fp);
-                        b.open(Kind::Seg);
-                        for (const FillRun& run : runs) {
-                            std::vector<std::array<double, 2>> ring;
-                            fill_outline(run, [&](double rr, double v) { ring.push_back(uv(rr, v)); });
-                            for (std::size_t k = 0; k < ring.size(); ++k) {
-                                const auto& p0 = ring[k];
-                                const auto& p1 = ring[(k + 1) % ring.size()];
-                                b.seg_uv(p0[0], p0[1], p1[0], p1[1], ec, fp.opts.linewidth);
-                            }
-                        }
-                        b.close();
-                    }
+                case PlotKind::Fill:
+                    fill_geom(s.fills[r.index]);
                     break;
-                }
+
+                case PlotKind::Stack:
+                    for (const FillPlot& fp : stack_layers(s.stacks[r.index])) fill_geom(fp);
+                    break;
 
                 case PlotKind::Poly:
                 case PlotKind::Circle:

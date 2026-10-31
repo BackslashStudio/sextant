@@ -644,6 +644,9 @@ namespace sextant {
         std::size_t fill_count() const;
         FillData fill_data(std::size_t i) const;
 
+        std::size_t stack_count() const;
+        StackData stack_data(std::size_t i) const;
+
         std::size_t axspan_count() const;
         AxSpanData axspan_data(std::size_t i) const;
 
@@ -693,6 +696,12 @@ namespace sextant {
 
         Plane2D& set_fill_data(std::size_t i, std::span<const double> x, std::span<const double> y1,
                                std::span<const double> y2);
+
+        // As Axes::set_stack_data().
+        Plane2D& set_stack_data(std::size_t i, const StackData& data);
+
+        Plane2D& set_stack_data(std::size_t i, std::span<const double> x,
+                                std::span<const std::vector<double>> ys);
 
         Plane2D& set_axspan_data(std::size_t i, const AxSpanData& data);
 
@@ -747,6 +756,9 @@ namespace sextant {
 
         Plane2D& set_fill_visible(std::size_t i, bool visible);
         bool fill_visible(std::size_t i) const;
+
+        Plane2D& set_stack_visible(std::size_t i, bool visible);
+        bool stack_visible(std::size_t i) const;
 
         Plane2D& set_axspan_visible(std::size_t i, bool visible);
         bool axspan_visible(std::size_t i) const;

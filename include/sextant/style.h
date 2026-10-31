@@ -498,15 +498,17 @@ namespace sextant {
         // Empty = none, else one legend name per layer (likewise).
         std::vector<std::string> names;
 
-        // As FillOptions, for every layer.
+        // As FillOptions, for every layer. `name` names the stack itself (the
+        // Data panel's tab, the hover's last line); the legend lists `names`.
         float alpha = 1.0f;
         std::optional<Color> edgecolor;
         float linewidth = 0.0f;
         LineStyle linestyle = LineStyle::Solid;
         DrawStyle drawstyle = DrawStyle::Default;
+        std::string name;
         bool show_legend = true;
-        bool visible = true;     // every layer's FillOptions::visible
-        double zorder = 0.0;       // every layer's FillOptions::zorder
+        bool visible = true;     // see LineOptions::visible
+        double zorder = 0.0;     // see LineOptions::zorder
     };
 
     // Which part of a quiver arrow sits on its (x, y): the tail, the middle or
@@ -1240,6 +1242,14 @@ namespace sextant {
     struct FillData {
         std::vector<double> x, y1, y2;
         std::vector<bool> exclude;
+    };
+
+    // Axes::stack(): the run coordinate (y when the stack is Vertical) and the
+    // layers, each one value per point of `x`, bottom first, as given (not
+    // stacked: the curves are worked out from these when drawing).
+    struct StackData {
+        std::vector<double> x;
+        std::vector<std::vector<double>> ys;
     };
 
     // Axes::quiver(): each arrow's position and vector, one value each per

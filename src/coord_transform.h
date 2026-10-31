@@ -347,16 +347,22 @@ namespace sextant {
                     if (sp.on_x()) { add(fx(sp.lo), xlo, xhi); add(fx(sp.hi), xlo, xhi); }
                     else { add(fy(sp.lo), ylo, yhi); add(fy(sp.hi), ylo, yhi); }
                 }
-            // A fill: its runs' points on both curves (fill_limit_points()).
+            // A fill: its runs' points on both curves (fill_limit_points()); a
+            // stack's layers likewise.
+            const auto add_fill = [&](const FillPlot& fp) {
+                const bool v = fp.vertical();
+                fill_limit_points(fp, v ? ys : xs, v ? xs : ys, [&](double r, double c) {
+                    add(r, v ? ylo : xlo, v ? yhi : xhi);
+                    add(c, v ? xlo : ylo, v ? xhi : yhi);
+                });
+            };
             if (all.fills)
-                for (const auto& fp: *all.fills) {
-                    if (!object_shown(fp)) continue;
-                    const bool v = fp.vertical();
-                    fill_limit_points(fp, v ? ys : xs, v ? xs : ys, [&](double r, double c) {
-                        add(r, v ? ylo : xlo, v ? yhi : xhi);
-                        add(c, v ? xlo : ylo, v ? xhi : yhi);
-                    });
-                }
+                for (const auto& fp: *all.fills)
+                    if (object_shown(fp)) add_fill(fp);
+            if (all.stacks)
+                for (const auto& sp: *all.stacks)
+                    if (object_shown(sp))
+                        for (const FillPlot& fp : stack_layers(sp)) add_fill(fp);
             // A shape in data units: its vertices, or a circle's box.
             auto add_shape_point = [&](double x, double y) {
                 add(fx(x), xlo, xhi);
@@ -516,20 +522,25 @@ namespace sextant {
                 lo = std::min(lo, std::min(sp.lo, sp.hi));
                 hi = std::max(hi, std::max(sp.lo, sp.hi));
             }
+        const auto add_fill = [&](const FillPlot& fp) {
+            double& rlo = fp.vertical() ? ylo : xlo;
+            double& rhi = fp.vertical() ? yhi : xhi;
+            double& vlo = fp.vertical() ? xlo : ylo;
+            double& vhi = fp.vertical() ? xhi : yhi;
+            fill_limit_points(fp, AxisScale{}, AxisScale{}, [&](double r, double c) {
+                rlo = std::min(rlo, r);
+                rhi = std::max(rhi, r);
+                vlo = std::min(vlo, c);
+                vhi = std::max(vhi, c);
+            });
+        };
         if (all.fills)
-            for (const auto& fp: *all.fills) {
-                if (!object_shown(fp)) continue;
-                double& rlo = fp.vertical() ? ylo : xlo;
-                double& rhi = fp.vertical() ? yhi : xhi;
-                double& vlo = fp.vertical() ? xlo : ylo;
-                double& vhi = fp.vertical() ? xhi : yhi;
-                fill_limit_points(fp, AxisScale{}, AxisScale{}, [&](double r, double c) {
-                    rlo = std::min(rlo, r);
-                    rhi = std::max(rhi, r);
-                    vlo = std::min(vlo, c);
-                    vhi = std::max(vhi, c);
-                });
-            }
+            for (const auto& fp: *all.fills)
+                if (object_shown(fp)) add_fill(fp);
+        if (all.stacks)
+            for (const auto& sp: *all.stacks)
+                if (object_shown(sp))
+                    for (const FillPlot& fp : stack_layers(sp)) add_fill(fp);
         all_shape_limit_points(all, [&](double x, double y) {
             xlo = std::min(xlo, x);
             xhi = std::max(xhi, x);

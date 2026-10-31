@@ -256,8 +256,9 @@ namespace lt {
             const std::vector<std::vector<double>> ys{ { 1.0, 1.0, 1.0 }, { 2.0, 2.0, 2.0 } };
             ax->stack(sx, ys, { .zorder = 2.0 });
             const ObjectId s1 = ax->last_object();
-            check(ax->fill_count() == 2 && ax->zorder(s1) == 2.0 && ax->zorder(s1 - 1) == 2.0,
-                  "zorder API: stack() gives every layer StackOptions::zorder");
+            ax->set_stack_data(0, sx, ys);
+            check(ax->stack_count() == 1 && ax->zorder(s1) == 2.0,
+                  "zorder API: a stack takes StackOptions::zorder, kept by set_stack_data()");
         }
 
         {

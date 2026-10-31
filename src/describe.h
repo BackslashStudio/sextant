@@ -74,6 +74,9 @@ namespace sextant {
     SEXTANT_DESCRIBE(FillOptions,
                      F(orientation) F(color) F(alpha) F(edgecolor) F(linewidth) F(linestyle)
                      F(drawstyle) F(exclude) F(interpolate) F(name) F(show_legend) F(visible) F(zorder))
+    SEXTANT_DESCRIBE(StackOptions,
+                     F(orientation) F(baseline) F(colors) F(names) F(alpha) F(edgecolor) F(linewidth)
+                     F(linestyle) F(drawstyle) F(name) F(show_legend) F(visible) F(zorder))
     SEXTANT_DESCRIBE(PolyOptions,
                      F(color) F(alpha) F(edgecolor) F(linewidth) F(linestyle) F(space) F(name)
                      F(show_legend) F(visible) F(zorder))
@@ -253,6 +256,9 @@ namespace sextant {
                        {"steps_mid", DrawStyle::StepsMid}, {"steps_post", DrawStyle::StepsPost})
     SEXTANT_ENUM_NAMES(Orientation,
                        {"vertical", Orientation::Vertical}, {"horizontal", Orientation::Horizontal})
+    SEXTANT_ENUM_NAMES(StackBaseline,
+                       {"zero", StackBaseline::Zero}, {"sym", StackBaseline::Sym},
+                       {"wiggle", StackBaseline::Wiggle}, {"weighted_wiggle", StackBaseline::WeightedWiggle})
     SEXTANT_ENUM_NAMES(QuiverPivot,
                        {"tail", QuiverPivot::Tail}, {"middle", QuiverPivot::Middle},
                        {"tip", QuiverPivot::Tip})

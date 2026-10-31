@@ -40,7 +40,8 @@ inline PlotKind style_kind(const PlotStyleEdit& p) {
                   && std::is_same_v<std::variant_alternative_t<12, Opts>, WedgeOptions>
                   && std::is_same_v<std::variant_alternative_t<13, Opts>, HeatmapTriOptions>
                   && std::is_same_v<std::variant_alternative_t<14, Opts>, ContourOptions>
-                  && std::is_same_v<std::variant_alternative_t<15, Opts>, PieOptions>);
+                  && std::is_same_v<std::variant_alternative_t<15, Opts>, PieOptions>
+                  && std::is_same_v<std::variant_alternative_t<16, Opts>, StackOptions>);
     switch (p.opts.index()) {
         case 5: return PlotKind::Text;
         case 6: return PlotKind::AxLine;
@@ -53,6 +54,7 @@ inline PlotKind style_kind(const PlotStyleEdit& p) {
         case 13: return PlotKind::HeatmapTri;
         case 14: return PlotKind::Contour;
         case 15: return PlotKind::Pie;
+        case 16: return PlotKind::Stack;
         default: return static_cast<PlotKind>(p.opts.index());
     }
 }

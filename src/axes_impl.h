@@ -34,6 +34,7 @@ struct Axes::Impl {
     std::vector<PiePlot>      pies;      // Axes only (a plane has none)
     std::vector<HeatmapTriPlot> heatmap_tris;
     std::vector<ContourPlot>    contours;
+    std::vector<StackPlot>      stacks;
 
     // The figure's FigureOptions::mathtext, set when the figure makes this
     // axes; only warn_math() reads it (drawing reads the snapshot's).
@@ -166,6 +167,7 @@ struct Axes::Impl {
         s.polys = polys; s.circles = circles; s.wedges = wedges; s.pies = pies;
         s.heatmap_tris = heatmap_tris;
         s.contours = contours;
+        s.stacks = stacks;
         s.title = title; s.xtitle = xtitle; s.ytitle = ytitle;
         s.title_stamps = title_stamps;
         s.grid_enabled   = grid_enabled;   s.grid_opts   = grid_opts;
@@ -253,9 +255,12 @@ struct Axes::Impl {
     // keep it while the point count is unchanged.
     void ingest_fill(std::span<const double> x, std::span<const double> y1,
                      std::span<const double> y2, FillOptions opts, const char* who);
-    // stack() for Axes and Plane2D: every check first, then one fill per layer.
+    // stack() for Axes and Plane2D: one object, its colors resolved from the
+    // cycle (one per layer) when StackOptions::colors is empty.
     void ingest_stack(std::span<const double> x, std::span<const std::vector<double>> ys,
-                      const StackOptions& opts, const char* who);
+                      StackOptions opts, const char* who);
+    void set_stack_data(std::size_t i, std::span<const double> x,
+                        std::span<const std::vector<double>> ys, const char* who);
     void set_fill_data(std::size_t i, std::span<const double> x, std::span<const double> y1,
                        std::span<const double> y2, const std::vector<bool>* exclude,
                        const char* who);
