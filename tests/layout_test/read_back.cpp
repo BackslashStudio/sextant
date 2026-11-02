@@ -3,6 +3,7 @@
 // Part of sextant_layout_test; see layout_test.h.
 #include "layout_test.h"
 #include "read_back.h"
+#include "tick_style.h"
 #include <cmath>
 #include <stdexcept>
 
@@ -485,6 +486,28 @@ namespace lt {
         check(throws_invalid([&] { ax->set_surface_tri_data(0, sx, sy, sz, bad_tri); }),
               "3d: a span tri index past the vertex count throws");
 
+        // With orient instead of tri: heights alone keep the triangles, moved
+        // vertices or a new count are triangulated again in that plane.
+        const std::uint32_t odd_tri[] = {0, 2, 1};
+        ax->set_surface_tri_data(0, sx, sy, sz, odd_tri);
+        const std::vector<double> qz{1.0, 2.0, 3.0};
+        ax->set_surface_tri_data(0, sx, sy, qz, PlaneOrientation::XY);
+        check(ax->surface_tri_data(0).tri == std::vector<std::uint32_t>{0, 2, 1} && ax->surface_tri_data(0).z == qz,
+              "3d: surface_tri with orient keeps the triangles when only heights change");
+        const std::vector<double> qx{0.0, 1.0, 0.0, 1.0}, qy{0.0, 0.0, 1.0, 1.0}, q4{1.0, 2.0, 3.0, 4.0};
+        ax->set_surface_tri_data(0, qx, qy, q4, PlaneOrientation::XY, q4);
+        check(ax->surface_tri_data(0).x.size() == 4 && ax->surface_tri_data(0).tri.size() == 6
+              && ax->surface_tri_data(0).colors == q4,
+              "3d: a new vertex count is triangulated again, colors taken");
+        ax->set_surface_tri_data(0, qx, qy, q4, PlaneOrientation::ZX);
+        check(ax->surface_tri_data(0).tri.size() == 6 && ax->surface_tri_data(0).colors.empty(),
+              "3d: the plane named decides which coordinates must stay; colors dropped without them");
+        const std::vector<double> line4{0.0, 1.0, 2.0, 3.0};
+        check(throws_invalid([&] { ax->set_surface_tri_data(0, line4, line4, q4, PlaneOrientation::XY); })
+              && ax->surface_tri_data(0).x == qx,
+              "3d: vertices collinear in the plane throw and change nothing");
+        ax->set_surface_tri_data(0, sx, sy, sz, tri);
+
         ax->set_scatter3d_data(0, sx, sy, sz, all.first(3));
         check(ax->scatter3d_data(0).z == std::vector<double>{7.0, 8.0, 9.0}
               && ax->scatter3d_data(0).colors.size() == 3,
@@ -524,6 +547,240 @@ namespace lt {
         b.opts.hint_labels = {"a"};
         read_back::keep_aligned(b, false);
         check(b.opts.hint_labels.empty(), "keep: kinds without error bars drop just the labels");
+    }
+
+    // Error bars read back and set on their own, or with new points.
+    void test_set_errorbar() {
+        std::printf("\n[set_data: error bars]\n");
+        const std::vector<double> x{0.0, 1.0, 2.0}, y{1.0, 2.0, 3.0}, e{0.1, 0.2, 0.3};
+
+        auto fig = Figure::create();
+        auto ax = fig->add_subplot(1, 1, 1);
+        ax->line(x, y).scatter(x, y, ErrorBar{.y_cap_lo = e}).scatter_z(x, y, y).bar(x, y);
+        check(!ax->line_errorbar(0).any() && ax->scatter_errorbar(0).y_cap_lo == e
+              && ax->scatter_errorbar(0).y_cap_hi.empty(),
+              "err: read back as given at the plotting call, empty where none");
+
+        ax->set_line_errorbar(0, ErrorBar{.x_box_lo = e, .y_cap_hi = e});
+        const ErrorBarData le = ax->line_errorbar(0);
+        check(le.x_box_lo == e && le.y_cap_hi == e && le.y_cap_lo.empty() && ax->line_data(0).y == y
+              && ax->line_count() == 1,
+              "err: set_line_errorbar adds error bars, the points kept");
+        {
+            LinePlot p;
+            p.x = std::vector<double>{0.0, 1.0};
+            p.data_stamp = 3;
+            read_back::set_errorbar(p, ErrorBar{.y_cap_lo = std::span(e).first(2)}, 2, "t");
+            check(p.err.y_cap_lo.size() == 2 && p.data_stamp > 3, "err: setting them takes a new data_stamp");
+        }
+        ax->set_line_errorbar(0, ErrorBar{});
+        check(!ax->line_errorbar(0).any(), "err: an empty ErrorBar removes them");
+
+        check(throws_invalid([&] { ax->set_scatter_errorbar(0, ErrorBar{.y_cap_lo = std::span(e).first(2)}); })
+              && ax->scatter_errorbar(0).y_cap_lo == e,
+              "err: a span of the wrong length throws and changes nothing");
+        check(throws_out_of_range([&] { ax->set_bar_errorbar(1, ErrorBar{}); })
+              && throws_out_of_range([&] { (void)ax->scatter_z_errorbar(1); }),
+              "err: an index past the count throws out_of_range");
+
+        ax->set_scatter_z_errorbar(0, ErrorBar{.y_cap_lo = e}).set_bar_errorbar(0, ErrorBar{.y_box_hi = e});
+        check(ax->scatter_z_errorbar(0).y_cap_lo == e && ax->bar_errorbar(0).y_box_hi == e,
+              "err: scatter_z and bar take error bars on their own");
+
+        // A round trip: what the getter returns passes back as an ErrorBar.
+        const ErrorBarData kept = ax->scatter_errorbar(0);
+        ax->set_scatter_errorbar(0, kept);
+        check(ax->scatter_errorbar(0).y_cap_lo == e, "err: ErrorBarData converts back to ErrorBar");
+
+        // New points with new error bars: the way to change the count and keep them.
+        const std::vector<double> x4{0.0, 1.0, 2.0, 3.0}, y4{4.0, 3.0, 2.0, 1.0}, e4{1.0, 1.0, 1.0, 1.0};
+        ax->set_scatter_data(0, {x4, y4}, ErrorBar{.y_cap_lo = e4});
+        check(ax->scatter_data(0).x.size() == 4 && ax->scatter_errorbar(0).y_cap_lo == e4,
+              "err: set_scatter_data with err changes the count and keeps the new error bars");
+        ax->set_scatter_data(0, ScatterData{x, y});
+        check(!ax->scatter_errorbar(0).any(), "err: without err a new count still drops them");
+        check(throws_invalid([&] { ax->set_bar_data(0, {x4, y4}, ErrorBar{.y_cap_lo = e}); })
+              && ax->bar_data(0).x == x && ax->bar_errorbar(0).y_box_hi == e,
+              "err: err checked against the new count; on failure nothing changes");
+        ax->set_line_data(0, {x4, y4}, ErrorBar{.x_cap_lo = e4});
+        ax->set_scatter_z_data(0, {x4, y4, y4}, ErrorBar{});
+        ax->set_bar_data(0, {x4, y4}, ErrorBar{.y_box_hi = e4});
+        check(ax->line_errorbar(0).x_cap_lo == e4 && !ax->scatter_z_errorbar(0).any()
+              && ax->bar_errorbar(0).y_box_hi == e4,
+              "err: line, scatter_z and bar take points with error bars");
+
+        // A plane's 2D objects.
+        auto fig3 = Figure::create();
+        auto ax3 = fig3->add_subplot3d(1, 1, 1);
+        auto plane = ax3->plane(PlaneOrientation::XY, 0.0);
+        plane->line(x, y).scatter(x, y).scatter_z(x, y, y).bar(x, y);
+        plane->set_line_errorbar(0, ErrorBar{.y_cap_lo = e})
+             .set_scatter_errorbar(0, ErrorBar{.y_cap_lo = e})
+             .set_scatter_z_errorbar(0, ErrorBar{.y_cap_lo = e})
+             .set_bar_errorbar(0, ErrorBar{.y_cap_lo = e});
+        check(plane->line_errorbar(0).y_cap_lo == e && plane->scatter_errorbar(0).y_cap_lo == e
+              && plane->scatter_z_errorbar(0).y_cap_lo == e && plane->bar_errorbar(0).y_cap_lo == e,
+              "plane: the four kinds take and read back error bars");
+        plane->set_line_data(0, {x4, y4}, ErrorBar{.y_cap_lo = e4})
+             .set_scatter_data(0, {x4, y4}, ErrorBar{})
+             .set_scatter_z_data(0, {x4, y4, y4}, ErrorBar{.y_cap_lo = e4})
+             .set_bar_data(0, {x4, y4}, ErrorBar{.y_cap_lo = e4});
+        check(plane->line_errorbar(0).y_cap_lo == e4 && !plane->scatter_errorbar(0).any()
+              && plane->scatter_z_errorbar(0).y_cap_lo == e4 && plane->bar_errorbar(0).y_cap_lo == e4,
+              "plane: points with error bars");
+        check(throws_invalid([&] { plane->set_line_errorbar(0, ErrorBar{.y_cap_lo = e}); }),
+              "plane: checked against the current count");
+
+        // scatter3d and line3d.
+        ax3->scatter3d(x, y, y).line3d(x, y, y);
+        ax3->set_scatter3d_errorbar(0, ErrorBar3D{.z_cap_lo = e}).set_line3d_errorbar(0, ErrorBar3D{.x_box_hi = e});
+        check(ax3->scatter3d_errorbar(0).z_cap_lo == e && ax3->line3d_errorbar(0).x_box_hi == e
+              && ax3->scatter3d_errorbar(0).x_cap_lo.empty(),
+              "3d: scatter3d and line3d take and read back error bars");
+        const ErrorBar3DData kept3 = ax3->scatter3d_errorbar(0);
+        ax3->set_scatter3d_errorbar(0, kept3);
+        check(ax3->scatter3d_errorbar(0).z_cap_lo == e, "3d: ErrorBar3DData converts back");
+        ax3->set_scatter3d_data(0, {x4, y4, y4}, ErrorBar3D{.z_cap_hi = e4});
+        ax3->set_line3d_data(0, {x4, y4, y4}, ErrorBar3D{});
+        check(ax3->scatter3d_errorbar(0).z_cap_hi == e4 && !ax3->line3d_errorbar(0).any()
+              && ax3->line3d_data(0).x.size() == 4,
+              "3d: points with error bars, an empty one removes them");
+        check(throws_invalid([&] { ax3->set_line3d_data(0, {x, y, y}, ErrorBar3D{.z_cap_lo = e4}); })
+              && ax3->line3d_data(0).x.size() == 4
+              && throws_invalid([&] { ax3->set_scatter3d_errorbar(0, ErrorBar3D{.z_cap_lo = e}); })
+              && ax3->scatter3d_errorbar(0).z_cap_hi == e4,
+              "3d: checked against the count; on failure nothing changes");
+        check(throws_out_of_range([&] { (void)ax3->line3d_errorbar(1); })
+              && throws_out_of_range([&] { ax3->set_scatter3d_data(1, {x, y, y}, ErrorBar3D{}); }),
+              "3d: an index past the count throws out_of_range");
+    }
+
+    // *_options() read back and set_*_options() replace a plot's options.
+    void test_set_options() {
+        std::printf("\n[set_data: options]\n");
+        const std::vector<double> x{0.0, 1.0, 2.0}, y{1.0, 2.0, 3.0}, s3{10.0, 20.0, 30.0};
+
+        auto fig = Figure::create();
+        auto ax = fig->add_subplot(1, 1, 1);
+        LineOptions lo;
+        lo.name = "first";
+        lo.hint_labels = {"a", "b", "c"};
+        ax->line(x, y, lo).line(x, y);
+        const LineOptions l0 = ax->line_options(0), l1 = ax->line_options(1);
+        check(l0.color.has_value() && l1.color.has_value() && !same_color(*l0.color, *l1.color) && l0.name == "first",
+              "options: read back with the color each call took from the cycle");
+
+        LineOptions w = l0;
+        w.linewidth = 4.0f;
+        w.color.reset();
+        w.hint_labels.clear();
+        ax->set_line_options(0, w);
+        const LineOptions l0b = ax->line_options(0);
+        check(l0b.linewidth == 4.0f && l0b.color && same_color(*l0b.color, *l0.color) && l0b.hint_labels == lo.hint_labels
+              && ax->line_data(0).y == y && ax->line_count() == 2,
+              "options: replaced; an unset color and the hint_labels kept, the data untouched");
+
+        LineOptions bad = l0b;
+        bad.zorder = std::nan("");
+        check(throws_invalid([&] { ax->set_line_options(0, bad); }) && ax->line_options(0).linewidth == 4.0f,
+              "options: a non-finite zorder throws and changes nothing");
+        check(throws_out_of_range([&] { (void)ax->line_options(2); })
+              && throws_out_of_range([&] { ax->set_bar_options(0, BarOptions{}); }),
+              "options: an index past the count throws out_of_range");
+
+        // Data-like fields: a scatter's sizes, a bar's bottom.
+        ax->scatter(x, y).bar(x, y);
+        ScatterOptions so = ax->scatter_options(0);
+        so.sizes = s3;
+        ax->set_scatter_options(0, so);
+        check(ax->scatter_options(0).sizes == s3 && ax->scatter_data(0).sizes == s3,
+              "options: a scatter's sizes replaced through its options");
+        so.sizes = {1.0};
+        check(throws_invalid([&] { ax->set_scatter_options(0, so); }) && ax->scatter_options(0).sizes == s3,
+              "options: sizes of the wrong length throw");
+        BarOptions bo = ax->bar_options(0);
+        bo.bottom = {1.0, 1.0, 1.0};
+        bo.width = 0.4f;
+        ax->set_bar_options(0, bo);
+        check(ax->bar_options(0).bottom == bo.bottom && ax->bar_data(0).bottom == bo.bottom
+              && ax->bar_options(0).width == 0.4f,
+              "options: a bar's bottom and width replaced");
+
+        // A contour is rebuilt from new levels.
+        const std::vector<double> gx{0.0, 1.0, 2.0}, gy{0.0, 1.0}, gz{0.0, 1.0, 2.0, 3.0, 4.0, 5.0};
+        ax->contour(gx, gy, gz);
+        ContourOptions co = ax->contour_options(0);
+        co.levels = {2.5, 1.5};
+        co.filled = true;
+        ax->set_contour_options(0, co);
+        check(ax->contour_data(0).levels == std::vector<double>{1.5, 2.5} && ax->contour_data(0).filled,
+              "options: a contour takes new levels (sorted) and fill");
+
+        // heatmap, heatmap_tri and scatter_z: vmin/vmax rescale.
+        const std::vector<double> hm{0.0, 1.0, 2.0, 3.0};
+        ax->heatmap(hm, 2, 2, {0.0, 1.0}, {0.0, 1.0}).scatter_z(x, y, y).heatmap_tri(x, std::vector<double>{0.0, 1.0, 0.0}, y);
+        HeatmapOptions ho = ax->heatmap_options(0);
+        ho.vmin = 0.0;
+        ho.vmax = 3.0;
+        ScatterZOptions zo = ax->scatter_z_options(0);
+        zo.vmin = 1.0;
+        zo.vmax = 3.0;
+        HeatmapTriOptions to = ax->heatmap_tri_options(0);
+        to.vmin = 1.0;
+        to.vmax = 3.0;
+        ax->set_heatmap_options(0, ho).set_scatter_z_options(0, zo).set_heatmap_tri_options(0, to);
+        check(ax->heatmap_options(0).vmax == 3.0 && ax->scatter_z_options(0).vmin == 1.0
+              && ax->heatmap_tri_options(0).vmax == 3.0,
+              "options: heatmap, scatter_z and heatmap_tri take a new colour range");
+
+        // A Style-panel edit made before set_*_options() is dropped.
+        {
+            RenderSnapshot s;
+            LinePlot p;
+            p.id = 1;
+            p.opts_stamp = 50;
+            s.lines.push_back(p);
+            LineOptions styled;
+            styled.linewidth = 9.0f;
+            PlotStyleEdit ps{ 0, -1, styled };
+            ps.id = 1;
+            ps.opts_seen = 40;
+            apply_plot_style_edits(s, { ps });
+            check(s.lines[0].opts.linewidth != 9.0f, "options: a style edit over older options is dropped");
+            ps.opts_seen = 50;
+            apply_plot_style_edits(s, { ps });
+            check(s.lines[0].opts.linewidth == 9.0f, "options: one over the current options applies");
+            AxesEdit e;
+            e.plot_styles.push_back(PlotStyleEdit{ 0, -1, styled });
+            stamp_edit(e, s);
+            check(e.plot_styles[0].opts_seen == 50, "options: stamp_edit() records the opts_stamp");
+        }
+
+        // A plane and the 3D kinds.
+        auto fig3 = Figure::create();
+        auto ax3 = fig3->add_subplot3d(1, 1, 1);
+        auto plane = ax3->plane(PlaneOrientation::XY, 0.0);
+        plane->line(x, y).scatter(x, y).bar(x, y);
+        LineOptions pl = plane->line_options(0);
+        pl.linewidth = 5.0f;
+        plane->set_line_options(0, pl);
+        check(plane->line_options(0).linewidth == 5.0f && plane->line_options(0).color.has_value(),
+              "plane: options read back and replaced");
+        ax3->scatter3d(x, y, y).line3d(x, y, y).surface(PlaneOrientation::XY, gx, gy, gz);
+        Scatter3DOptions s3o = ax3->scatter3d_options(0);
+        s3o.sizes = s3;
+        Line3DOptions l3o = ax3->line3d_options(0);
+        l3o.linewidth = 6.0f;
+        SurfaceOptions suo = ax3->surface_options(0);
+        suo.vmin = 0.0;
+        suo.vmax = 10.0;
+        ax3->set_scatter3d_options(0, s3o).set_line3d_options(0, l3o).set_surface_options(0, suo);
+        check(ax3->scatter3d_options(0).sizes == s3 && ax3->line3d_options(0).linewidth == 6.0f
+              && ax3->surface_options(0).vmax == 10.0,
+              "3d: scatter3d, line3d and surface options replaced");
+        suo.vmax = INFINITY;
+        check(throws_invalid([&] { ax3->set_surface_options(0, suo); }) && ax3->surface_options(0).vmax == 10.0,
+              "3d: a non-finite vmax throws and changes nothing");
     }
 
     // A Data-panel op carries the data_stamp it was made over; a plot re-plotted

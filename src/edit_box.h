@@ -72,6 +72,7 @@ inline void stamp_edit(AxesEdit& e, const RenderSnapshot& s) {
         fill_id(p.id, s, stamp_detail::style_kind(p), p.plot_index);
         p.visible_seen = visible_stamp_at(s, stamp_detail::style_kind(p), p.plot_index);
         p.zorder_seen = zorder_stamp_at(s, stamp_detail::style_kind(p), p.plot_index);
+        p.opts_seen = opts_stamp_at(s, stamp_detail::style_kind(p), p.plot_index);
     }
 }
 
@@ -105,6 +106,7 @@ inline void stamp_edit(AxesEdit3D& e, const RenderSnapshot3D& s) {
         if (const PlaneSnapshot* p = plane(ps.plane_index)) {
             ps.visible_seen = visible_stamp_at(p->sheet, stamp_detail::style_kind(ps), ps.plot_index);
             ps.zorder_seen = zorder_stamp_at(p->sheet, stamp_detail::style_kind(ps), ps.plot_index);
+            ps.opts_seen = opts_stamp_at(p->sheet, stamp_detail::style_kind(ps), ps.plot_index);
         }
     }
     for (PlotDataOp& op : e.plot_ops)
@@ -116,6 +118,7 @@ inline void stamp_edit(AxesEdit3D& e, const RenderSnapshot3D& s) {
         for (auto& o : edits) {
             fill_id(o.id, s, kind, o.plot_index);
             o.visible_seen = visible_stamp_at(s, kind, o.plot_index);
+            o.opts_seen = opts_stamp_at(s, kind, o.plot_index);
         }
     };
     objects(e.bars3d, PlotKind::Bar3D);

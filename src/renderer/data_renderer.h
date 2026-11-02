@@ -186,6 +186,9 @@ private:
                     const CoordTransform& tr, const PlotRect& pr);
     void draw_scatter(const std::vector<ScatterPlot>& scatters, std::span<const std::size_t> which,
                       const CoordTransform& tr, const PlotRect& pr);
+    // Line i's markers (LineOptions::marker), after its stroke and error bars.
+    void draw_line_markers(const std::vector<LinePlot>& lines, std::size_t i, const CoordTransform& tr,
+                           const PlotRect& pr);
     // Continuous-color scatter: per-point colors from the colormap, computed on
     // the CPU and uploaded per instance (separate shader from draw_scatter).
     void draw_scatter_z(const std::vector<ScatterZPlot>& points, std::span<const std::size_t> which,
@@ -319,6 +322,11 @@ private:
         CoordTransform     tr{};                         // only when !data_space
     };
     std::unordered_map<CacheKey, InstanceCache, CacheKeyHash> scatter_cache_;
+    std::unordered_map<CacheKey, InstanceCache, CacheKeyHash> line_marker_cache_;   // by line index
+    // draw_scatter() and draw_line_markers(): each series cached in `cache` under (this axes, plane, keys[n]).
+    void draw_marker_series(std::span<const ScatterPlot* const> series, std::span<const std::size_t> keys,
+                            std::unordered_map<CacheKey, InstanceCache, CacheKeyHash>& cache,
+                            const CoordTransform& tr, const PlotRect& pr);
     std::unordered_map<CacheKey, InstanceCache, CacheKeyHash> scatterz_cache_;
 
     // Bars: data-space fills survive pan/zoom; outlines are inset in pixel

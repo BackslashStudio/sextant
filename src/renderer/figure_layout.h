@@ -31,8 +31,7 @@ namespace sextant {
         std::string name;
         LegendKind kind = LegendKind::Line;
         LineStyle style = LineStyle::Solid; // Line entries only
-        MarkerStyle marker = MarkerStyle::Circle; // Marker entries only
-
+        MarkerStyle marker = MarkerStyle::Circle; // Marker entries, and Line entries with line_marker
         // Marker, Bar and Arrow entries only; alpha 0 (default) = no edge.
         // scatter_z keys are white with a black edge. Edged Cross/Plus are
         // stroked in `edge`; a Bar entry's edge is a fill's outline.
@@ -42,6 +41,10 @@ namespace sextant {
         // for a colormapped path) instead of a flat stroke in `color`.
         bool swept = false;
         Colormap cmap = Colormap::Viridis;
+
+        // Line entries only: `marker` drawn at the swatch's middle over the stroke
+        // (a line with LineOptions::marker).
+        bool line_marker = false;
     };
 
     std::vector<LegendEntry> collect_legend_entries(const RenderSnapshot& snap);

@@ -187,13 +187,13 @@ namespace lt {
     }
 
     // -------------------------------------------------------------------------
-    // ErrorBarData: the symmetric rule, magnitudes, masking, and auto limits
+    // ErrorBarStore: the symmetric rule, magnitudes, masking, and auto limits
     // -------------------------------------------------------------------------
     void test_errorbar_data() {
         std::printf("\n[2D error bars: offsets, symmetry and limits]\n");
 
         const double nan = std::numeric_limits<double>::quiet_NaN();
-        ErrorBarData d;
+        ErrorBarStore d;
         d.y_cap_lo = std::vector<double>{0.5, -0.5, nan};
         d.y_box_hi = std::vector<double>{0.2, 0.3, 0.4};
         d.x_cap_lo = std::vector<double>{0.1, 0.1, 0.1};
@@ -449,7 +449,7 @@ namespace lt {
         // and leaves the absent columns absent.
         RenderSnapshot t = snap;
         apply_plot_data_ops(t, {PlotRowEdit{PlotRowEdit::Op::Insert, PlotKind::Line, 0, 2, -1}});
-        const ErrorBarData& e = t.lines[0].err;
+        const ErrorBarStore& e = t.lines[0].err;
         check(e.y_cap_lo.size() == 3 && e.y_cap_hi.size() == 3 && e.y_box_lo.size() == 3 &&
               e.x_cap_hi.size() == 3 && e.y_cap_hi[2] == 0.2 && e.x_cap_hi[2] == 1.5 &&
               e.x_cap_lo.empty() && e.y_box_hi.empty() && e.x_box_lo.empty(),

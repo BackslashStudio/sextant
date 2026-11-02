@@ -17,7 +17,7 @@ namespace sextant {
         constexpr double kDegenerate = 1e-9;
 
         void pieces(const Projector3D& proj, const CowVec<double>& xs, const CowVec<double>& ys,
-                    const CowVec<double>& zs, const ErrorBar3DData& err,
+                    const CowVec<double>& zs, const ErrorBar3DStore& err,
                     const ErrorBar3DOptions& style, Color color, float depthshade,
                     ErrorBar3DOwner owner, std::size_t plot, std::vector<ErrorBar3DPiece>& out) {
             if (!errorbar3d_drawn(err, style)) return;

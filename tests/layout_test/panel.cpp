@@ -561,7 +561,7 @@ namespace lt {
         // heatmap two contour levels (the level list is a table of its own).
         {
             const std::vector<double> x{0.0, 1.0, 2.0}, y{0.0, 1.0, 4.0}, e{0.1, 0.2, 0.3};
-            ErrorBarData err;
+            ErrorBarStore err;
             err.y_cap_lo = e;
             err.y_box_lo = e;
             auto scan_2d = [&](const char* kind, auto add) {

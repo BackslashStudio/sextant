@@ -789,11 +789,23 @@ namespace sextant {
         {
             switch (r.kind) {
                 case PlotKind::Line: {
-                    // A LineStyle::None line isn't drawn, so it gets no key.
+                    // A LineStyle::None line isn't drawn, so it gets no key, unless it
+                    // has markers: then its key is the marker alone.
                     const auto& lp = snap.lines[r.index];
-                    if (keyed(lp.opts) && lp.opts.linestyle != LineStyle::None)
+                    if (!keyed(lp.opts)) break;
+                    const bool markers = has_line_markers(lp);
+                    if (lp.opts.linestyle != LineStyle::None) {
                         entries.push_back({*lp.opts.color, lp.opts.name, LegendKind::Line,
                                            lp.opts.linestyle});
+                        if (markers) {
+                            entries.back().marker = lp.opts.marker;
+                            entries.back().line_marker = true;
+                        }
+                    } else if (markers) {
+                        entries.push_back({marker_key_fill(*lp.opts.color, std::clamp(lp.opts.alpha, 0.0f, 1.0f)),
+                                           lp.opts.name, LegendKind::Marker, LineStyle::Solid, lp.opts.marker});
+                        line_marker_key(entries.back(), entries.back().color);
+                    }
                     break;
                 }
                 case PlotKind::Scatter: {

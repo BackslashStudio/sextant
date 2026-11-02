@@ -9,12 +9,15 @@ namespace sextant {
     class FigureEditBox;
     struct FigureContext;
     struct DataPanelState;
+    struct BoundCellEdit;
     struct PlotDataTable;
 
     // The Data inspector's contents, into the caller's current window (the caller
     // opens it, and pushes the figure id). `st` is the inspector's own state,
-    // owned by the host.
-    void draw_data_panel(FigureContext& ctx, DataPanelState& st);
+    // owned by the host. Returns the cell edits made this frame on objects listed
+    // in `st.bound`, which are not applied (see DataPanelState::bound); empty
+    // otherwise.
+    std::vector<BoundCellEdit> draw_data_panel(FigureContext& ctx, DataPanelState& st);
 
     // One Data-panel tab: a plot object's table (`table` indexes
     // collect_plot_data_tables()) or a plane (`table == -1`, `plane` its index).

@@ -236,6 +236,21 @@ namespace sextant {
         }
     };
 
+    // A scatter3d's or line3d's error bars as it holds them (Axes3D::scatter3d_errorbar()):
+    // ErrorBarData's rule with z added. Converts to ErrorBar3D.
+    struct ErrorBar3DData {
+        std::vector<double> x_cap_lo, x_cap_hi, x_box_lo, x_box_hi;
+        std::vector<double> y_cap_lo, y_cap_hi, y_box_lo, y_box_hi;
+        std::vector<double> z_cap_lo, z_cap_hi, z_box_lo, z_box_hi;
+
+        bool any() const { return static_cast<ErrorBar3D>(*this).any(); }
+
+        operator ErrorBar3D() const {
+            return { x_cap_lo, x_cap_hi, x_box_lo, x_box_hi, y_cap_lo, y_cap_hi, y_box_lo, y_box_hi,
+                     z_cap_lo, z_cap_hi, z_box_lo, z_box_hi };
+        }
+    };
+
     // Error-bar style in a scene. Pixel lengths (`linewidth`, `capsize`,
     // `boxwidth`) are measured at the box centre and converted to box units, so a
     // distant error bar keeps its proportions under perspective.
@@ -694,6 +709,63 @@ namespace sextant {
         Plane2D& set_bar_data(std::size_t i, std::span<const double> x,
                               std::span<const double> height);
 
+        // Points with error bars, and the error bars on their own, as
+        // Axes::set_line_data(i, data, err), Axes::line_errorbar() and
+        // Axes::set_line_errorbar().
+        Plane2D& set_line_data(std::size_t i, const LineData& data, const ErrorBar& err);
+
+        Plane2D& set_scatter_data(std::size_t i, const ScatterData& data, const ErrorBar& err);
+
+        Plane2D& set_scatter_z_data(std::size_t i, const ScatterZData& data, const ErrorBar& err);
+
+        Plane2D& set_bar_data(std::size_t i, const BarData& data, const ErrorBar& err);
+
+        ErrorBarData line_errorbar(std::size_t i) const;
+
+        ErrorBarData scatter_errorbar(std::size_t i) const;
+
+        ErrorBarData scatter_z_errorbar(std::size_t i) const;
+
+        ErrorBarData bar_errorbar(std::size_t i) const;
+
+        Plane2D& set_line_errorbar(std::size_t i, const ErrorBar& err);
+
+        Plane2D& set_scatter_errorbar(std::size_t i, const ErrorBar& err);
+
+        Plane2D& set_scatter_z_errorbar(std::size_t i, const ErrorBar& err);
+
+        Plane2D& set_bar_errorbar(std::size_t i, const ErrorBar& err);
+
+        // A plot's options read back and replaced, as Axes::line_options() and
+        // Axes::set_line_options().
+        LineOptions line_options(std::size_t i) const;
+
+        ScatterOptions scatter_options(std::size_t i) const;
+
+        ScatterZOptions scatter_z_options(std::size_t i) const;
+
+        BarOptions bar_options(std::size_t i) const;
+
+        HeatmapOptions heatmap_options(std::size_t i) const;
+
+        HeatmapTriOptions heatmap_tri_options(std::size_t i) const;
+
+        ContourOptions contour_options(std::size_t i) const;
+
+        Plane2D& set_line_options(std::size_t i, LineOptions opts);
+
+        Plane2D& set_scatter_options(std::size_t i, ScatterOptions opts);
+
+        Plane2D& set_scatter_z_options(std::size_t i, ScatterZOptions opts);
+
+        Plane2D& set_bar_options(std::size_t i, BarOptions opts);
+
+        Plane2D& set_heatmap_options(std::size_t i, HeatmapOptions opts);
+
+        Plane2D& set_heatmap_tri_options(std::size_t i, HeatmapTriOptions opts);
+
+        Plane2D& set_contour_options(std::size_t i, ContourOptions opts);
+
         Plane2D& set_heatmap_data(std::size_t i, const HeatmapData& data);
 
         Plane2D& set_heatmap_data(std::size_t i, std::span<const double> data, int rows, int cols,
@@ -1109,7 +1181,8 @@ namespace sextant {
         // validated as the plotting call would, hint_labels (and error bars)
         // kept while the point count or grid shape is unchanged. A bar
         // footprint is kept unless its u or v changes. set_surface_tri_data()
-        // takes the topology as given and never re-triangulates.
+        // takes the topology as given, or with `orient` re-triangulates when the
+        // vertices moved.
         //
         // Each also takes its data as spans, in the plotting call's argument
         // order (see Axes::set_line_data()). As with the plotting calls, the
@@ -1142,6 +1215,18 @@ namespace sextant {
                                      std::span<const std::uint32_t> tri,
                                      std::span<const double> colors);
 
+        // The same without `tri`, as surface_tri() with `orient`: the mesh keeps
+        // its triangles while the two coordinates `orient` projects onto are
+        // unchanged (only the heights moved), and is triangulated again in that
+        // plane otherwise (throws, as surface_tri(), when it can't be).
+        Axes3D& set_surface_tri_data(std::size_t i, std::span<const double> x,
+                                     std::span<const double> y, std::span<const double> z,
+                                     PlaneOrientation orient);
+
+        Axes3D& set_surface_tri_data(std::size_t i, std::span<const double> x,
+                                     std::span<const double> y, std::span<const double> z,
+                                     PlaneOrientation orient, std::span<const double> colors);
+
         Axes3D& set_scatter3d_data(std::size_t i, const Scatter3DData& data);
 
         Axes3D& set_scatter3d_data(std::size_t i, std::span<const double> x,
@@ -1159,6 +1244,41 @@ namespace sextant {
         Axes3D& set_line3d_data(std::size_t i, std::span<const double> x,
                                 std::span<const double> y, std::span<const double> z,
                                 std::span<const double> colors);
+
+        // scatter3d / line3d points with error bars, and the error bars on their
+        // own: as Axes::set_line_data(i, data, err), Axes::line_errorbar() and
+        // Axes::set_line_errorbar(), with z.
+        Axes3D& set_scatter3d_data(std::size_t i, const Scatter3DData& data, const ErrorBar3D& err);
+
+        Axes3D& set_line3d_data(std::size_t i, const Line3DData& data, const ErrorBar3D& err);
+
+        ErrorBar3DData scatter3d_errorbar(std::size_t i) const;
+
+        ErrorBar3DData line3d_errorbar(std::size_t i) const;
+
+        Axes3D& set_scatter3d_errorbar(std::size_t i, const ErrorBar3D& err);
+
+        Axes3D& set_line3d_errorbar(std::size_t i, const ErrorBar3D& err);
+
+        // A surface's, mesh's, scatter3d's or line3d's options read back and
+        // replaced, as Axes::line_options() and Axes::set_line_options(): the
+        // color the call resolved, a scatter3d's `sizes` filled; checked as the
+        // plotting call, an unset `color` and the `hint_labels` kept.
+        SurfaceOptions surface_options(std::size_t i) const;
+
+        SurfaceTriOptions surface_tri_options(std::size_t i) const;
+
+        Scatter3DOptions scatter3d_options(std::size_t i) const;
+
+        Line3DOptions line3d_options(std::size_t i) const;
+
+        Axes3D& set_surface_options(std::size_t i, SurfaceOptions opts);
+
+        Axes3D& set_surface_tri_options(std::size_t i, SurfaceTriOptions opts);
+
+        Axes3D& set_scatter3d_options(std::size_t i, Scatter3DOptions opts);
+
+        Axes3D& set_line3d_options(std::size_t i, Line3DOptions opts);
 
         // A 3D quiver's arrows, validated as quiver3d(). The amp stays; `c`
         // follows Quiver3DData::c (the span overload keeps it while the count

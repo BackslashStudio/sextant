@@ -271,6 +271,8 @@ int main() {
     test_set_data_2d();
     test_set_data_3d();
     test_set_data_keep_aligned();
+    test_set_errorbar();
+    test_set_options();
     test_data_op_stamps();
     test_limit_journal();
     test_style_journal();
@@ -321,6 +323,8 @@ int main() {
     // edge_markers.cpp
     test_edge_markers();
     test_marker_shapes();
+    test_line_markers();
+    test_bound_panel();
     test_marker_sizes();
 
     // alpha.cpp

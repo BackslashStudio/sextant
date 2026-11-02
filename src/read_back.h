@@ -132,6 +132,98 @@ namespace sextant::read_back {
         return bottom;
     }
 
+    // The caller's ErrorBar / ErrorBar3D, copied for `n` points: each span empty
+    // or one entry per point, else throws. Values are not checked (see ErrorBar).
+    inline CowVec<double> take_err_span(std::span<const double> s, std::size_t n, const char* who,
+                                        const char* field) {
+        if (!s.empty() && s.size() != n)
+            throw std::invalid_argument(std::string(who) + ": err." + field + " has "
+                                        + std::to_string(s.size()) + " entries, need one per point ("
+                                        + std::to_string(n) + ")");
+        return CowVec<double>(std::vector<double>(s.begin(), s.end()));
+    }
+
+    inline ErrorBarStore take_error_bars(const ErrorBar& eb, std::size_t n, const char* who) {
+        ErrorBarStore d;
+        d.x_cap_lo = take_err_span(eb.x_cap_lo, n, who, "x_cap_lo");
+        d.x_cap_hi = take_err_span(eb.x_cap_hi, n, who, "x_cap_hi");
+        d.x_box_lo = take_err_span(eb.x_box_lo, n, who, "x_box_lo");
+        d.x_box_hi = take_err_span(eb.x_box_hi, n, who, "x_box_hi");
+        d.y_cap_lo = take_err_span(eb.y_cap_lo, n, who, "y_cap_lo");
+        d.y_cap_hi = take_err_span(eb.y_cap_hi, n, who, "y_cap_hi");
+        d.y_box_lo = take_err_span(eb.y_box_lo, n, who, "y_box_lo");
+        d.y_box_hi = take_err_span(eb.y_box_hi, n, who, "y_box_hi");
+        return d;
+    }
+
+    inline ErrorBar3DStore take_error_bars3d(const ErrorBar3D& eb, std::size_t n, const char* who) {
+        ErrorBar3DStore d;
+        d.cap_lo[0] = take_err_span(eb.x_cap_lo, n, who, "x_cap_lo");
+        d.cap_hi[0] = take_err_span(eb.x_cap_hi, n, who, "x_cap_hi");
+        d.box_lo[0] = take_err_span(eb.x_box_lo, n, who, "x_box_lo");
+        d.box_hi[0] = take_err_span(eb.x_box_hi, n, who, "x_box_hi");
+        d.cap_lo[1] = take_err_span(eb.y_cap_lo, n, who, "y_cap_lo");
+        d.cap_hi[1] = take_err_span(eb.y_cap_hi, n, who, "y_cap_hi");
+        d.box_lo[1] = take_err_span(eb.y_box_lo, n, who, "y_box_lo");
+        d.box_hi[1] = take_err_span(eb.y_box_hi, n, who, "y_box_hi");
+        d.cap_lo[2] = take_err_span(eb.z_cap_lo, n, who, "z_cap_lo");
+        d.cap_hi[2] = take_err_span(eb.z_cap_hi, n, who, "z_cap_hi");
+        d.box_lo[2] = take_err_span(eb.z_box_lo, n, who, "z_box_lo");
+        d.box_hi[2] = take_err_span(eb.z_box_hi, n, who, "z_box_hi");
+        return d;
+    }
+
+    inline ErrorBarData to_data(const ErrorBarStore& e) {
+        return { e.x_cap_lo.get(), e.x_cap_hi.get(), e.x_box_lo.get(), e.x_box_hi.get(),
+                 e.y_cap_lo.get(), e.y_cap_hi.get(), e.y_box_lo.get(), e.y_box_hi.get() };
+    }
+
+    inline ErrorBar3DData to_data(const ErrorBar3DStore& e) {
+        return { e.cap_lo[0].get(), e.cap_hi[0].get(), e.box_lo[0].get(), e.box_hi[0].get(),
+                 e.cap_lo[1].get(), e.cap_hi[1].get(), e.box_lo[1].get(), e.box_hi[1].get(),
+                 e.cap_lo[2].get(), e.cap_hi[2].get(), e.box_lo[2].get(), e.box_hi[2].get() };
+    }
+
+    // LineOptions::markersize: finite and >= 0.
+    inline void check_markersize(float size, const char* who) {
+        if (!(size >= 0.0f) || !std::isfinite(size))
+            throw std::invalid_argument(std::string(who) + ": markersize must be finite and >= 0");
+    }
+
+    // The same values bit for bit (NaN never equal): whether a setter without
+    // `tri` may keep the triangles it holds.
+    inline bool same_values(std::span<const double> a, std::span<const double> b) {
+        return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin());
+    }
+
+    // set_*_errorbar(): object p's error bars replaced (an empty one removes them),
+    // checked against its current point count; a fresh data_stamp, as a data edit.
+    template <typename P>
+    void set_errorbar(P& p, const ErrorBar& eb, std::size_t points, const char* who) {
+        p.err = take_error_bars(eb, points, who);
+        p.data_stamp = next_snapshot_generation();
+    }
+
+    template <typename P>
+    void set_errorbar3d(P& p, const ErrorBar3D& eb, std::size_t points, const char* who) {
+        p.err = take_error_bars3d(eb, points, who);
+        p.data_stamp = next_snapshot_generation();
+    }
+
+    // set_<kind>_options(): object p's options replaced by `o` (already checked,
+    // its data-like fields moved out), keeping p's hint_labels (data, edited
+    // with the points) and, where `o` leaves it unset, p's color. A fresh
+    // opts_stamp drops Style-panel edits made before the call; data_stamp,
+    // ObjectId and index stay.
+    template <typename P, typename O>
+    void replace_opts(P& p, O o) {
+        if constexpr (requires { o.hint_labels; }) o.hint_labels = std::move(p.opts.hint_labels);
+        if constexpr (requires { o.color.has_value(); })
+            if (!o.color) o.color = p.opts.color;
+        p.opts = std::move(o);
+        p.opts_stamp = next_snapshot_generation();
+    }
+
     inline LineData     to_data(const LinePlot& p)     { return { p.x.get(), p.y.get() }; }
     inline ScatterData  to_data(const ScatterPlot& p)  {
         return { p.x.get(), p.y.get(), p.sizes.get() };

@@ -1099,11 +1099,11 @@ void main() {
             push_px_rect(x1 - hw, y0 - hw, x1 + hw, y1 + hw, out); // right
         }
 
-        // Error-bar geometry for any kind: anchor points plus ErrorBarData. `ys` is the
+        // Error-bar geometry for any kind: anchor points plus ErrorBarStore. `ys` is the
         // y the bar hangs off (a bar's height, not its baseline). Two buffers: box
         // interiors, and everything else.
         void build_error_bars(const CowVec<double>& xs, const CowVec<double>& ys,
-                              const ErrorBarData& err, const ErrorBarOptions& style,
+                              const ErrorBarStore& err, const ErrorBarOptions& style,
                               const CoordTransform& tr,
                               std::vector<float>& fill, std::vector<float>& stroke) {
             const std::size_t n = std::min(xs.size(), ys.size());
@@ -1765,6 +1765,7 @@ void main() {
         }
         for (auto& [k, e]: heat_cache_) if (e.tex) glDeleteTextures(1, &e.tex);
         for (auto& [k, e]: scatter_cache_) if (e.vbo) glDeleteBuffers(1, &e.vbo);
+        for (auto& [k, e]: line_marker_cache_) if (e.vbo) glDeleteBuffers(1, &e.vbo);
         for (auto& [k, e]: scatterz_cache_) if (e.vbo) glDeleteBuffers(1, &e.vbo);
         for (auto& [k, e]: bar_cache_) {
             if (e.fill_vbo) glDeleteBuffers(1, &e.fill_vbo);
@@ -2002,7 +2003,27 @@ void main() {
                                     const CoordTransform& tr,
                                     const PlotRect& pr) {
         if (which.empty()) return;
+        std::vector<const ScatterPlot*> series;
+        series.reserve(which.size());
+        for (const std::size_t si : which) series.push_back(&scatters[si]);
+        draw_marker_series(series, which, scatter_cache_, tr, pr);
+    }
 
+    // A line's markers: its points as a scatter (line_markers()), cached apart
+    // from the scatters under the line's index.
+    void DataRenderer::draw_line_markers(const std::vector<LinePlot>& lines, std::size_t i,
+                                         const CoordTransform& tr, const PlotRect& pr) {
+        if (!has_line_markers(lines[i])) return;
+        const ScatterPlot sp = line_markers(lines[i]);
+        const ScatterPlot* series[1] = {&sp};
+        const std::size_t keys[1] = {i};
+        draw_marker_series(series, keys, line_marker_cache_, tr, pr);
+    }
+
+    void DataRenderer::draw_marker_series(std::span<const ScatterPlot* const> series,
+                                          std::span<const std::size_t> keys,
+                                          std::unordered_map<CacheKey, InstanceCache, CacheKeyHash>& cache,
+                                          const CoordTransform& tr, const PlotRect& pr) {
         begin_pass(pr, tr.win_h);
         glUseProgram(scatter_program_);
         const float res[2] = {tr.win_w, tr.win_h};
@@ -2010,12 +2031,13 @@ void main() {
         glBindVertexArray(scatter_vao_);
 
         std::vector<float> inst;
-        for (const std::size_t si : which) {
-            const auto& sp = scatters[si];
+        for (std::size_t n = 0; n < series.size(); ++n) {
+            const auto& sp = *series[n];
+            const std::size_t si = keys[n];
             if (sp.x.empty()) continue;
 
             const CacheKey key{axes_index_, plane_index_, static_cast<int>(si)};
-            InstanceCache& e = scatter_cache_[key];
+            InstanceCache& e = cache[key];
 
             // Only the pixel-space fallback goes stale on a view change.
             const bool precise = float_resolves_view(e.span_x, tr.sxspan(), tr.pw)
@@ -2031,15 +2053,18 @@ void main() {
                                         : (!precise && same_view(e.tr, tr)));
 
             if (!usable) {
-                // Anchor at the data extent's midpoint (residuals <= half the span),
-                // independent of the view.
-                double xlo = tr.sx(sp.x[0]), xhi = xlo, ylo = tr.sy(sp.y[0]), yhi = ylo;
-                for (std::size_t i = 1; i < sp.x.size(); ++i) {
-                    xlo = std::min(xlo, tr.sx(sp.x[i]));
-                    xhi = std::max(xhi, tr.sx(sp.x[i]));
-                    ylo = std::min(ylo, tr.sy(sp.y[i]));
-                    yhi = std::max(yhi, tr.sy(sp.y[i]));
+                // Anchor at the finite points' extent's midpoint (residuals <= half
+                // the span), independent of the view.
+                double xlo = INFINITY, xhi = -INFINITY, ylo = INFINITY, yhi = -INFINITY;
+                for (std::size_t i = 0; i < sp.x.size(); ++i) {
+                    const double px = tr.sx(sp.x[i]), py = tr.sy(sp.y[i]);
+                    if (!std::isfinite(px) || !std::isfinite(py)) continue;
+                    xlo = std::min(xlo, px);
+                    xhi = std::max(xhi, px);
+                    ylo = std::min(ylo, py);
+                    yhi = std::max(yhi, py);
                 }
+                if (!(xlo <= xhi)) xlo = xhi = ylo = yhi = 0.0;   // no finite point
                 e.anchor_x = 0.5 * (xlo + xhi);
                 e.span_x = xhi - xlo;
                 e.anchor_y = 0.5 * (ylo + yhi);
@@ -2057,7 +2082,9 @@ void main() {
                         inst.push_back(tr.to_px(sp.x[i]));
                         inst.push_back(tr.to_py(sp.y[i]));
                     }
-                    inst.push_back(marker_size_at(sp, i));   // 0 hides a point
+                    // 0 hides a point: by its size, or a non-finite coordinate.
+                    const bool finite = std::isfinite(tr.sx(sp.x[i])) && std::isfinite(tr.sy(sp.y[i]));
+                    inst.push_back(finite ? marker_size_at(sp, i) : 0.0f);
                 }
 
                 if (e.vbo == 0) glGenBuffers(1, &e.vbo);
@@ -2458,6 +2485,7 @@ void main() {
             case PlotKind::Line:
                 draw_lines(snap.lines, one, tr, pr);
                 draw_error_bars(snap, r, tr, pr);
+                draw_line_markers(snap.lines, r.index, tr, pr);
                 break;
             case PlotKind::Scatter:
                 draw_error_bars(snap, r, tr, pr);

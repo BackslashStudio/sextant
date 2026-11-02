@@ -203,7 +203,7 @@ struct Axes::Impl {
     void ingest_bar(std::span<const double> x, std::span<const double> height,
                     const ErrorBar& err, BarOptions opts, const char* who);
     void push_bars(std::vector<double> centers, std::vector<double> heights, double width,
-                   ErrorBarData err, BarOptions opts, const char* who);
+                   ErrorBarStore err, BarOptions opts, const char* who);
     void ingest_heatmap(std::span<const double> data, int rows, int cols,
                         Range xrange, Range yrange, HeatmapOptions opts,
                         const char* who);
@@ -233,18 +233,32 @@ struct Axes::Impl {
 
     // set_*_data() for Axes and Plane2D: replace object i's data, validated as
     // when it was plotted. `who` names the caller.
+    // `err`: error bars set with the data (set_*_data(i, data, err)), or null to
+    // keep the current ones while the point count is unchanged.
     void set_line_data(std::size_t i, std::span<const double> x, std::span<const double> y,
-                       const char* who);
+                       const char* who, const ErrorBar* err = nullptr);
     // `sizes`: the new per-point sizes (a *_Data overload), or null to keep the
     // current ones while the point count is unchanged (a span overload).
     void set_scatter_data(std::size_t i, std::span<const double> x, std::span<const double> y,
-                          const std::vector<double>* sizes, const char* who);
+                          const std::vector<double>* sizes, const char* who,
+                          const ErrorBar* err = nullptr);
     void set_scatter_z_data(std::size_t i, std::span<const double> x, std::span<const double> y,
                             std::span<const double> z, const std::vector<double>* sizes,
-                            const char* who);
+                            const char* who, const ErrorBar* err = nullptr);
+    // set_<kind>_options(), shared by Axes and Plane2D: `o` checked as the
+    // plotting call checks it, its data-like fields (sizes, bottom) taken as
+    // the call takes them, then read_back::replace_opts().
+    void set_line_options(std::size_t i, LineOptions o, const char* who);
+    void set_scatter_options(std::size_t i, ScatterOptions o, const char* who);
+    void set_scatter_z_options(std::size_t i, ScatterZOptions o, const char* who);
+    void set_bar_options(std::size_t i, BarOptions o, const char* who);
+    void set_heatmap_options(std::size_t i, HeatmapOptions o, const char* who);
+    void set_heatmap_tri_options(std::size_t i, HeatmapTriOptions o, const char* who);
+    void set_contour_options(std::size_t i, ContourOptions o, const char* who);
     // `bottom`: the new bases (BarData), or null to keep them as `sizes` above.
     void set_bar_data(std::size_t i, std::span<const double> x, std::span<const double> height,
-                      const std::vector<double>* bottom, const char* who);
+                      const std::vector<double>* bottom, const char* who,
+                      const ErrorBar* err = nullptr);
     // `x_edges` / `y_edges`: HeatmapData's (a mesh takes them, the other
     // kinds want them empty), or null from a span overload (refused on a mesh).
     void set_heatmap_data(std::size_t i, std::span<const double> data, int rows, int cols,

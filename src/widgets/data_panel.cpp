@@ -115,6 +115,7 @@ namespace sextant {
             for (const auto& c: t.columns) rows = std::max(rows, c.count);
 
             ImGui::Text("%zu %s", rows, rows == 1 ? "point" : "points");
+            const bool bound = st.is_bound(t.id);
 
             // Structural edits are applied after EndTable() (mid-table changes would
             // shift the clipper's rows). At most one per frame.
@@ -151,6 +152,7 @@ namespace sextant {
                         // doesn't collide with the "x" column header's ID.
                         ImGui::PushID("rowctl");
                         ImGui::PushID(r);
+                        ImGui::BeginDisabled(bound);
                         if (ImGui::SmallButton("+"))
                             row_edit = PlotRowEdit{
                                 PlotRowEdit::Op::Insert, t.kind, t.plot_index,
@@ -166,6 +168,7 @@ namespace sextant {
                             };
                         if (ImGui::IsItemHovered())
                             ImGui::SetTooltip("Remove row %d", r);
+                        ImGui::EndDisabled();
                         ImGui::PopID();
                         ImGui::PopID();
                     }
@@ -199,10 +202,12 @@ namespace sextant {
 
             // Append outside the table (an empty table has no row for a "+").
             if (!t.rows_fixed) {
+                ImGui::BeginDisabled(bound);
                 if (ImGui::SmallButton("+ point"))
                     row_edit = PlotRowEdit{PlotRowEdit::Op::Insert, t.kind, t.plot_index, rows};
+                ImGui::EndDisabled();
                 ImGui::SameLine();
-                ImGui::TextDisabled("new points copy the row above");
+                ImGui::TextDisabled("%s", bound ? "points follow the source" : "new points copy the row above");
             }
 
             if (row_edit) push_op(*row_edit);
@@ -283,8 +288,10 @@ namespace sextant {
             }
             ImGui::TableHeadersRow();
 
-            // A heatmap_rec()'s shape is fixed by its edges: no insert or remove.
-            const bool fixed = hp.mesh();
+            // A heatmap_rec()'s shape is fixed by its edges, a bound one's by its
+            // source: no insert or remove.
+            const bool bound = st.is_bound(t.id);
+            const bool fixed = hp.mesh() || bound;
             // Column controls, before the clipper (a frozen row); "colctl" keeps ids
             // distinct.
             ImGui::TableNextRow();
@@ -310,7 +317,8 @@ namespace sextant {
                 ImGui::EndDisabled();
                 // AllowWhenDisabled, so the disabled button's tooltip still shows.
                 if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-                    if (fixed) ImGui::SetTooltip("A heatmap_rec()'s columns are fixed by its edges");
+                    if (bound) ImGui::SetTooltip("Bound: its columns follow the source");
+                    else if (fixed) ImGui::SetTooltip("A heatmap_rec()'s columns are fixed by its edges");
                     else if (hp.cols <= 1) ImGui::SetTooltip("A matrix cannot lose its last column");
                     else ImGui::SetTooltip("Remove column %d", abs_c);
                 }
@@ -346,7 +354,8 @@ namespace sextant {
                             };
                         ImGui::EndDisabled();
                         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-                            if (fixed) ImGui::SetTooltip("A heatmap_rec()'s rows are fixed by its edges");
+                            if (bound) ImGui::SetTooltip("Bound: its rows follow the source");
+                            else if (fixed) ImGui::SetTooltip("A heatmap_rec()'s rows are fixed by its edges");
                             else if (hp.rows <= 1) ImGui::SetTooltip("A matrix cannot lose its last row");
                             else ImGui::SetTooltip("Remove row %d", r);
                         }
@@ -396,7 +405,9 @@ namespace sextant {
             ImGui::SameLine();
             ImGui::EndDisabled();
             ImGui::SameLine();
-            ImGui::TextDisabled("%s", fixed ? "a heatmap_rec() keeps its shape" : "new lines copy the previous one");
+            ImGui::TextDisabled("%s", bound   ? "its shape follows the source"
+                                      : fixed ? "a heatmap_rec() keeps its shape"
+                                              : "new lines copy the previous one");
 
             if (line_edit && !fixed) push_op(*line_edit);
         }
@@ -831,10 +842,10 @@ namespace sextant {
             return true;
         }
 
-        bool has_cap(const ErrorBarData& e) { return e.has_x_cap() || e.has_y_cap(); }
-        bool has_box(const ErrorBarData& e) { return e.has_x_box() || e.has_y_box(); }
-        bool has_cap(const ErrorBar3DData& e) { return e.has_cap(0) || e.has_cap(1) || e.has_cap(2); }
-        bool has_box(const ErrorBar3DData& e) { return e.any_box(); }
+        bool has_cap(const ErrorBarStore& e) { return e.has_x_cap() || e.has_y_cap(); }
+        bool has_box(const ErrorBarStore& e) { return e.has_x_box() || e.has_y_box(); }
+        bool has_cap(const ErrorBar3DStore& e) { return e.has_cap(0) || e.has_cap(1) || e.has_cap(2); }
+        bool has_box(const ErrorBar3DStore& e) { return e.any_box(); }
 
         template<class Push>
         void line_style(DataPanelState& st, LineOptions& o, const LinePlot& p, bool on_plane, Push&& push) {
@@ -851,6 +862,12 @@ namespace sextant {
                 if (linestyle_combo("##lstyle", o.linestyle)) push();
                 field_row("Draw style");
                 if (drawstyle_combo("##ldraw", o.drawstyle)) push();
+                field_row("Marker");
+                if (marker_combo("##lmark", o.marker)) push();
+                if (o.marker != MarkerStyle::None) {
+                    field_row("Marker size");
+                    if (drag_float("##lmsize", &o.markersize, 1.0f, 100.0f, 0.2f, "%.1f px")) push();
+                }
                 end_field_table();
             }
             if (on_plane) ImGui::TextDisabled("SVG export draws a plane's lines solid (the window dashes them).");
@@ -2623,14 +2640,15 @@ namespace sextant {
         return out;
     }
 
-    void draw_data_panel(FigureContext& ctx, DataPanelState& st) {
+    std::vector<BoundCellEdit> draw_data_panel(FigureContext& ctx, DataPanelState& st) {
+        std::vector<BoundCellEdit> requests;
         const FigureSnapshot& fsnap = ctx.snap;
         FigureEditBox& edit_box = ctx.edits;
 
         const FigureAxesSnapshot* cur = normalize_selection(ctx.selection, fsnap);
         if (!cur) {
             ImGui::TextDisabled("No axes yet.");
-            return;
+            return requests;
         }
 
         // A twinned cell lists one layer's objects at a time (Axes::twinx()),
@@ -2648,7 +2666,7 @@ namespace sextant {
             && cur3d->scatter3d.empty() && cur3d->lines3d.empty()
             && cur3d->surface_tri.empty() && cur3d->texts.empty() && cur3d->quivers3d.empty()) {
             ImGui::TextDisabled("3D axes: no plot data.");
-            return;
+            return requests;
         }
 
         // Display format, shared by every cell (the widgets are drawn per tab,
@@ -2664,14 +2682,33 @@ namespace sextant {
         const std::size_t nplanes = cur3d ? cur3d->planes.size() : 0;
         if (tables.empty() && nplanes == 0) {
             ImGui::TextDisabled("This axes has no plot objects.");
-            return;
+            return requests;
         }
         const std::vector<DataPanelTab> tabs = data_panel_tabs(tables, nplanes);
 
         // One op sink per table. The lane depends on the slot's kind, not the
         // plane index (a 3D axes' own objects use plane -1 too).
         const bool is3d = (cur3d != nullptr);
-        auto sink_for = [&edit_box, idx, is3d](const PlotDataTable& t) -> OpSink {
+        auto sink_for = [&edit_box, idx, is3d, &st, &requests](const PlotDataTable& t) -> OpSink {
+            // A bound object's cell edits go back to the host; its structural
+            // edits (the controls are disabled) are dropped; the rest apply.
+            if (st.is_bound(t.id)) {
+                return [&edit_box, idx, is3d, &requests, id = t.id, plane_index = t.plane_index,
+                        seen = t.data_stamp](PlotDataOp op) {
+                    if (const auto* c = std::get_if<PlotCellEdit>(&op)) {
+                        requests.push_back({id, c->kind, c->column, c->element, c->value, plane_index});
+                        return;
+                    }
+                    if (std::holds_alternative<PlotRowEdit>(op) || std::holds_alternative<MatrixLineEdit>(op))
+                        return;
+                    std::visit([plane_index, seen, is3d](auto& o) {
+                        if (is3d) o.plane_index = plane_index;
+                        o.seen = seen;
+                    }, op);
+                    if (is3d) edit_box.update3d(idx, [&](AxesEdit3D& e) { e.plot_ops.push_back(std::move(op)); });
+                    else edit_box.update(idx, [&](AxesEdit& e) { e.plot_ops.push_back(std::move(op)); });
+                };
+            }
             const unsigned long long seen = t.data_stamp;
             if (!is3d)
                 return [&edit_box, idx, seen](PlotDataOp op) {
@@ -2729,6 +2766,10 @@ namespace sextant {
                 if (ImGui::BeginTabItem(tab.c_str())) {
                     if (!t.group.empty()) {
                         ImGui::TextDisabled("%s", t.group.c_str());
+                        ImGui::Separator();
+                    }
+                    if (st.is_bound(t.id)) {
+                        ImGui::TextColored(ImVec4(0.35f, 0.65f, 1.0f, 1.0f), "%s", st.bound_note.c_str());
                         ImGui::Separator();
                     }
                     // The snapshot's 3D object, where a block reads its data.
@@ -2797,6 +2838,6 @@ namespace sextant {
             ImGui::EndTabBar();
         }
         ImGui::PopID();
-
+        return requests;
     }
 } // namespace sextant

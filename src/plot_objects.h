@@ -65,7 +65,7 @@ struct ErrOffsets {
 
 // The caller's ErrorBar, stored as given. The accessors resolve it: one end
 // given reads as symmetric, negatives as magnitudes, non-finite as 0.
-struct ErrorBarData {
+struct ErrorBarStore {
     CowVec<double> x_cap_lo, x_cap_hi, x_box_lo, x_box_hi;
     CowVec<double> y_cap_lo, y_cap_hi, y_box_lo, y_box_hi;
 
@@ -92,9 +92,9 @@ private:
     }
 };
 
-// The caller's ErrorBar3D, stored as given and resolved like ErrorBarData.
+// The caller's ErrorBar3D, stored as given and resolved like ErrorBarStore.
 // Indexed by axis (0 = x, 1 = y, 2 = z).
-struct ErrorBar3DData {
+struct ErrorBar3DStore {
     CowVec<double> cap_lo[3], cap_hi[3], box_lo[3], box_hi[3];
 
     bool has_cap(int a) const { return !cap_lo[a].empty() || !cap_hi[a].empty(); }
@@ -124,7 +124,7 @@ private:
 // object built here (tests, internal copies) starts with the old fixed default.
 struct LinePlot {
     CowVec<double> x, y;
-    ErrorBarData   err;
+    ErrorBarStore   err;
     LineOptions    opts{.color = Color::Blue};
     unsigned long long data_stamp = 0;
     ObjectId id = 0;
@@ -149,11 +149,14 @@ struct LinePlot {
     // leave it 0.
     unsigned long long visible_stamp = 0;
     unsigned long long zorder_stamp = 0;
+    // set_<kind>_options()'s next_snapshot_generation(), 0 = never called; a
+    // panel style edit made over an older one is dropped (assign_plot_opts()).
+    unsigned long long opts_stamp = 0;
 };
 
 struct ScatterPlot {
     CowVec<double> x, y;
-    ErrorBarData   err;
+    ErrorBarStore   err;
     ScatterOptions opts{.color = Color::Blue};
     unsigned long long data_stamp = 0;
     ObjectId id = 0;
@@ -163,6 +166,7 @@ struct ScatterPlot {
 
     unsigned long long visible_stamp = 0;
     unsigned long long zorder_stamp = 0;
+    unsigned long long opts_stamp = 0;
 };
 
 // bar_width is in data units, already resolved (spacing x width fraction for
@@ -171,7 +175,7 @@ struct BarPlot {
     CowVec<double> centers;
     CowVec<double> heights;
     double         bar_width = 1.0;
-    ErrorBarData   err;
+    ErrorBarStore   err;
     BarOptions     opts{.color = Color::Blue};
     unsigned long long data_stamp = 0;
     ObjectId id = 0;
@@ -185,6 +189,7 @@ struct BarPlot {
 
     unsigned long long visible_stamp = 0;
     unsigned long long zorder_stamp = 0;
+    unsigned long long opts_stamp = 0;
 };
 
 // The bars' tips (base + height), as a column: `heights` itself without bases.
@@ -265,6 +270,7 @@ struct HeatmapPlot {
 
     unsigned long long visible_stamp = 0;
     unsigned long long zorder_stamp = 0;
+    unsigned long long opts_stamp = 0;
 
     // 1: `data` is rows x cols values through opts.cmap. 3 or 4: an
     // imshow_rgb() image, rows x cols x channels colours in [0, 1]; the
@@ -299,7 +305,7 @@ private:
 // Continuous-color scatter: z is mapped through opts.cmap/vmin/vmax.
 struct ScatterZPlot {
     CowVec<double>  x, y, z;
-    ErrorBarData    err;
+    ErrorBarStore    err;
     ScatterZOptions opts;
     unsigned long long data_stamp = 0;
     ObjectId id = 0;
@@ -307,6 +313,7 @@ struct ScatterZPlot {
 
     unsigned long long visible_stamp = 0;
     unsigned long long zorder_stamp = 0;
+    unsigned long long opts_stamp = 0;
 };
 
 // True when scatter_z point i has no colour under its norm (z <= 0 under
@@ -340,6 +347,29 @@ template <class P>
 bool marker_hidden(const P& p, std::size_t i) {
     return (!p.sizes.empty() && !(i < p.sizes.size() && static_cast<float>(p.sizes[i]) > 0.0f))
            || marker_norm_masked(p, i);
+}
+
+// A line with markers (LineOptions::marker) draws them as this scatter: the
+// line's points (shared, not copied), its color and alpha, filled, no outline,
+// out of the legend. Every scatter path skips a point with a non-finite
+// coordinate, so a line's gaps get no marker.
+inline bool has_line_markers(const LinePlot& p) {
+    return p.opts.marker != MarkerStyle::None && p.opts.markersize > 0.0f;
+}
+
+inline ScatterPlot line_markers(const LinePlot& p) {
+    ScatterPlot s;
+    s.x = p.x;
+    s.y = p.y;
+    s.opts.color = p.opts.color;
+    s.opts.alpha = p.opts.alpha;
+    s.opts.marker = p.opts.marker;
+    s.opts.size = p.opts.markersize;
+    s.opts.show_legend = false;
+    s.opts.zorder = p.opts.zorder;
+    s.data_stamp = p.data_stamp;
+    s.id = p.id;
+    return s;
 }
 
 // Box axis index (into x, y, z) of each grid direction, for every consumer to
@@ -403,6 +433,7 @@ struct SurfacePlot {
     std::size_t cell_count() const { return cell_rows() * cell_cols(); }
 
     unsigned long long visible_stamp = 0;
+    unsigned long long opts_stamp = 0;
 };
 
 // Colormap range for a surface: opts.vmin/vmax, or the data range when equal.
@@ -463,6 +494,7 @@ struct SurfaceTriPlot {
     }
 
     unsigned long long visible_stamp = 0;
+    unsigned long long opts_stamp = 0;
 };
 
 // Colormap range for a mesh's `colors`, as surface_value_range().
@@ -487,7 +519,7 @@ inline void surface_tri_value_range(const SurfaceTriPlot& s, double& vmin, doubl
 struct Scatter3DPlot {
     CowVec<double> x, y, z;
     CowVec<double> colors;
-    ErrorBar3DData err;
+    ErrorBar3DStore err;
     Scatter3DOptions opts{.color = Color::Blue};
     unsigned long long data_stamp = 0;
     ObjectId id = 0;
@@ -498,6 +530,7 @@ struct Scatter3DPlot {
     double color_at(std::size_t i) const { return i < colors.size() ? colors[i] : 0.0; }
 
     unsigned long long visible_stamp = 0;
+    unsigned long long opts_stamp = 0;
 };
 
 // Colormap range for a scatter3d's `colors`, as surface_value_range().
@@ -523,7 +556,7 @@ inline void scatter3d_value_range(const Scatter3DPlot& s, double& vmin, double& 
 struct Line3DPlot {
     CowVec<double> x, y, z;
     CowVec<double> colors;
-    ErrorBar3DData err;
+    ErrorBar3DStore err;
     Line3DOptions opts{.color = Color::Blue};
     unsigned long long data_stamp = 0;
     ObjectId id = 0;
@@ -546,6 +579,7 @@ struct Line3DPlot {
     }
 
     unsigned long long visible_stamp = 0;
+    unsigned long long opts_stamp = 0;
 };
 
 // Colormap range for a line3d's `colors`, as surface_value_range().
@@ -867,6 +901,7 @@ struct HeatmapTriPlot {
 
     unsigned long long visible_stamp = 0;
     unsigned long long zorder_stamp = 0;
+    unsigned long long opts_stamp = 0;
 
     // Under a boundary norm, each band's colormap position instead of the
     // norm's own spread (NaN: the band is not drawn). Set only on a contourf's
@@ -889,6 +924,7 @@ struct ContourPlot {
 
     unsigned long long visible_stamp = 0;
     unsigned long long zorder_stamp = 0;
+    unsigned long long opts_stamp = 0;
 
     std::shared_ptr<const ContourGeometry> geom;
 
@@ -1335,7 +1371,25 @@ unsigned long long zorder_stamp_of(const V& v, int index) {
     else
         return ~0ull;
 }
+
+template <class V>
+unsigned long long opts_stamp_of(const V& v, int index) {
+    if constexpr (requires { v[0].opts_stamp; })
+        return index >= 0 && static_cast<std::size_t>(index) < v.size()
+                   ? v[static_cast<std::size_t>(index)].opts_stamp : ~0ull;
+    else
+        return ~0ull;
+}
 } // namespace objects_detail
+
+// The opts_stamp of the object at (kind, index); ~0 if there is none, or the
+// kind has no set_<kind>_options().
+template <class S>
+unsigned long long opts_stamp_at(const S& s, PlotKind kind, int index) {
+    return with_kind(s, kind, [index](const auto& v) {
+        return objects_detail::opts_stamp_of(v, index);
+    }, ~0ull);
+}
 
 // The zorder_stamp of the object at (kind, index); ~0 if there is none, or the
 // kind has no zorder (a text).

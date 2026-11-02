@@ -237,7 +237,7 @@ namespace sextant {
         // 2D. `alpha` is the series'.
         void error_bars(GeometryBuilder& fills, GeometryBuilder& strokes,
                         const CowVec<double>& xs, const CowVec<double>& ys,
-                        const ErrorBarData& err, const ErrorBarOptions& style,
+                        const ErrorBarStore& err, const ErrorBarOptions& style,
                         const Color& fallback, float alpha, const ErrScale& sc) {
             if (err.empty() || style.linewidth <= 0.0f) return;
             const Color c = with_alpha(style.color.value_or(fallback), alpha);
@@ -306,7 +306,7 @@ namespace sextant {
 
         // One object's error bars: boxes, then whiskers (error_bars()).
         auto errs = [&](const CowVec<double>& xs, const CowVec<double>& ys,
-                        const ErrorBarData& err, const ErrorBarOptions& style,
+                        const ErrorBarStore& err, const ErrorBarOptions& style,
                         const Color& fallback, float alpha) {
             if (err.empty()) return;
             GeometryBuilder fills, strokes;
@@ -385,6 +385,21 @@ namespace sextant {
             }
         };
 
+        // A scatter's markers (a line's too, line_markers()); a non-finite point has none.
+        const auto scatter_markers = [&](const ScatterPlot& sp) {
+            const Color c = with_alpha(*sp.opts.color, marker_face_alpha(sp.opts));
+            const std::size_t n = std::min(sp.x.size(), sp.y.size());
+            // Unset edgecolor = the fill's color; alpha is its own times `alpha`.
+            const Color ec = with_alpha(sp.opts.edgecolor ? *sp.opts.edgecolor : *sp.opts.color,
+                                        sp.opts.alpha);
+            const float ew = std::max(0.0f, sp.opts.edge_linewidth);
+            b.open(Kind::Marker);
+            for (std::size_t i = 0; i < n; ++i)
+                if (!marker_hidden(sp, i) && std::isfinite(sp.x[i]) && std::isfinite(sp.y[i]))
+                    b.marker(sp.x[i], sp.y[i], c, marker_size_at(sp, i), sp.opts.marker, ec, ew);
+            b.close();
+        };
+
         // In draw order (draw_order()), as the raster (DataRenderer::draw_plots()): a bar or line
         // object's error bars over it, a scatter's under its markers.
         for (const ObjectRef& r: draw_order(s)) {
@@ -449,6 +464,7 @@ namespace sextant {
                         b.close();
                     }
                     errs(lp.x, lp.y, lp.err, lp.opts.errorbar, *lp.opts.color, lp.opts.alpha);
+                    if (has_line_markers(lp)) scatter_markers(line_markers(lp));
                     break;
                 }
 
@@ -547,17 +563,7 @@ namespace sextant {
                 case PlotKind::Scatter: {
                     const auto& sp = s.scatters[r.index];
                     errs(sp.x, sp.y, sp.err, sp.opts.errorbar, *sp.opts.color, sp.opts.alpha);
-                    const Color c = with_alpha(*sp.opts.color, marker_face_alpha(sp.opts));
-                    const std::size_t n = std::min(sp.x.size(), sp.y.size());
-                    // Unset edgecolor = the fill's color; alpha is its own times `alpha`.
-                    const Color ec = with_alpha(sp.opts.edgecolor ? *sp.opts.edgecolor : *sp.opts.color,
-                                                sp.opts.alpha);
-                    const float ew = std::max(0.0f, sp.opts.edge_linewidth);
-                    b.open(Kind::Marker);
-                    for (std::size_t i = 0; i < n; ++i)
-                        if (!marker_hidden(sp, i))
-                            b.marker(sp.x[i], sp.y[i], c, marker_size_at(sp, i), sp.opts.marker, ec, ew);
-                    b.close();
+                    scatter_markers(sp);
                     break;
                 }
 

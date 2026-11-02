@@ -151,7 +151,7 @@ namespace lt {
         std::printf("\n[3D error bars: offsets, symmetry, masking and the limits]\n");
 
         const double nan = std::numeric_limits<double>::quiet_NaN();
-        ErrorBar3DData d;
+        ErrorBar3DStore d;
         d.cap_lo[2] = std::vector<double>{0.5, -2.0, nan};
         d.box_hi[0] = std::vector<double>{1.0, 0.0, 3.0};
         d.box_lo[0] = std::vector<double>{0.25, 0.0, 0.0};

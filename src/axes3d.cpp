@@ -27,31 +27,7 @@ namespace sextant {
                 throw std::invalid_argument(std::string(who) + ": limits must span a non-zero interval");
         }
 
-        // Length-checks and copies the caller's ErrorBar3D (same messages as 2D).
-        ErrorBar3DData take_error_bars3d(const ErrorBar3D& eb, std::size_t n, const char* who) {
-            auto take = [&](std::span<const double> s, const char* field) {
-                if (!s.empty() && s.size() != n)
-                    throw std::invalid_argument(
-                        std::string(who) + ": err." + field + " has " +
-                        std::to_string(s.size()) + " entries, need one per point (" +
-                        std::to_string(n) + ")");
-                return CowVec<double>(std::vector<double>(s.begin(), s.end()));
-            };
-            ErrorBar3DData d;
-            d.cap_lo[0] = take(eb.x_cap_lo, "x_cap_lo");
-            d.cap_hi[0] = take(eb.x_cap_hi, "x_cap_hi");
-            d.box_lo[0] = take(eb.x_box_lo, "x_box_lo");
-            d.box_hi[0] = take(eb.x_box_hi, "x_box_hi");
-            d.cap_lo[1] = take(eb.y_cap_lo, "y_cap_lo");
-            d.cap_hi[1] = take(eb.y_cap_hi, "y_cap_hi");
-            d.box_lo[1] = take(eb.y_box_lo, "y_box_lo");
-            d.box_hi[1] = take(eb.y_box_hi, "y_box_hi");
-            d.cap_lo[2] = take(eb.z_cap_lo, "z_cap_lo");
-            d.cap_hi[2] = take(eb.z_cap_hi, "z_cap_hi");
-            d.box_lo[2] = take(eb.z_box_lo, "z_box_lo");
-            d.box_hi[2] = take(eb.z_box_hi, "z_box_hi");
-            return d;
-        }
+        using read_back::take_error_bars3d;
 
         // Bar footprint from the smallest gap in a grid vector (so bars never
         // overlap); 1 for a single entry.
@@ -353,7 +329,7 @@ namespace sextant {
         check_points3d("Axes3D::scatter3d", x, y, z, colors, kScatter3DRule);
         if (!std::isfinite(opts.vmin) || !std::isfinite(opts.vmax))
             throw std::invalid_argument("Axes3D::scatter3d: vmin and vmax must be finite");
-        ErrorBar3DData eb = take_error_bars3d(err, x.size(), "Axes3D::scatter3d");
+        ErrorBar3DStore eb = take_error_bars3d(err, x.size(), "Axes3D::scatter3d");
         read_back::check_sizes(opts.sizes, x.size(), "Axes3D::scatter3d");
         warn_math(d->mathtext, "Axes3D::scatter3d", opts.name);
         d->cycle->resolve(opts.color, colors.empty());
@@ -397,7 +373,7 @@ namespace sextant {
         check_points3d("Axes3D::line3d", x, y, z, colors, kLine3DRule);
         if (!std::isfinite(opts.vmin) || !std::isfinite(opts.vmax))
             throw std::invalid_argument("Axes3D::line3d: vmin and vmax must be finite");
-        ErrorBar3DData eb = take_error_bars3d(err, x.size(), "Axes3D::line3d");
+        ErrorBar3DStore eb = take_error_bars3d(err, x.size(), "Axes3D::line3d");
         warn_math(d->mathtext, "Axes3D::line3d", opts.name);
         d->cycle->resolve(opts.color, colors.empty());
 
@@ -864,6 +840,30 @@ namespace sextant {
                                          std::span<const std::uint32_t> tri) {
         return set_surface_tri_data(i, x, y, z, tri, {});
     }
+    Axes3D& Axes3D::set_surface_tri_data(std::size_t i, std::span<const double> x,
+                                         std::span<const double> y, std::span<const double> z,
+                                         PlaneOrientation orient, std::span<const double> colors) {
+        const char* who = "Axes3D::set_surface_tri_data";
+        SurfaceTriPlot& p = read_back::at(d->surface_tri, i, who);
+        check_mesh_vertices(who, x, y, z, colors);
+        const Axis3Map m = axis_map(orient);
+        std::span<const double> axis[3] = {x, y, z};
+        std::span<const double> held[3] = {p.x.get(), p.y.get(), p.z.get()};
+        std::vector<std::uint32_t> tri;
+        if (read_back::same_values(axis[m.u], held[m.u]) && read_back::same_values(axis[m.v], held[m.v])) {
+            tri = p.tri.get();
+        } else if (!delaunay_triangulate(axis[m.u], axis[m.v], tri)) {
+            throw std::invalid_argument(std::string(who) + ": these vertices have no triangulation in the "
+                                        "plane given -- they are collinear there, or fewer than three of "
+                                        "them are distinct");
+        }
+        return set_surface_tri_data(i, x, y, z, tri, colors);
+    }
+    Axes3D& Axes3D::set_surface_tri_data(std::size_t i, std::span<const double> x,
+                                         std::span<const double> y, std::span<const double> z,
+                                         PlaneOrientation orient) {
+        return set_surface_tri_data(i, x, y, z, orient, std::span<const double>{});
+    }
     Axes3D& Axes3D::set_surface_tri_data(std::size_t i, const SurfaceTriData& v) {
         return set_surface_tri_data(i, v.x, v.y, v.z, v.tri, v.colors);
     }
@@ -911,6 +911,97 @@ namespace sextant {
     }
     Axes3D& Axes3D::set_line3d_data(std::size_t i, const Line3DData& v) {
         return set_line3d_data(i, v.x, v.y, v.z, v.colors);
+    }
+
+    // With error bars: `err` checked against the new count before anything
+    // changes, set after the points (which drop the old ones on a new count).
+    Axes3D& Axes3D::set_scatter3d_data(std::size_t i, const Scatter3DData& v, const ErrorBar3D& err) {
+        read_back::at(d->scatter3d, i, "Axes3D::set_scatter3d_data");
+        ErrorBar3DStore e = take_error_bars3d(err, v.x.size(), "Axes3D::set_scatter3d_data");
+        set_scatter3d_data(i, v);
+        d->scatter3d[i].err = std::move(e);
+        return *this;
+    }
+    Axes3D& Axes3D::set_line3d_data(std::size_t i, const Line3DData& v, const ErrorBar3D& err) {
+        read_back::at(d->lines3d, i, "Axes3D::set_line3d_data");
+        ErrorBar3DStore e = take_error_bars3d(err, v.x.size(), "Axes3D::set_line3d_data");
+        set_line3d_data(i, v);
+        d->lines3d[i].err = std::move(e);
+        return *this;
+    }
+    // Options read back and replaced; the checks are the plotting calls'.
+    SurfaceOptions Axes3D::surface_options(std::size_t i) const {
+        return read_back::at(d->surfaces, i, "Axes3D::surface_options").opts;
+    }
+    SurfaceTriOptions Axes3D::surface_tri_options(std::size_t i) const {
+        return read_back::at(d->surface_tri, i, "Axes3D::surface_tri_options").opts;
+    }
+    Scatter3DOptions Axes3D::scatter3d_options(std::size_t i) const {
+        const Scatter3DPlot& p = read_back::at(d->scatter3d, i, "Axes3D::scatter3d_options");
+        Scatter3DOptions o = p.opts;
+        o.sizes = p.sizes.get();
+        return o;
+    }
+    Line3DOptions Axes3D::line3d_options(std::size_t i) const {
+        return read_back::at(d->lines3d, i, "Axes3D::line3d_options").opts;
+    }
+    Axes3D& Axes3D::set_surface_options(std::size_t i, SurfaceOptions opts) {
+        const char* who = "Axes3D::set_surface_options";
+        SurfacePlot& p = read_back::at(d->surfaces, i, who);
+        if (!std::isfinite(opts.vmin) || !std::isfinite(opts.vmax))
+            throw std::invalid_argument(std::string(who) + ": vmin and vmax must be finite");
+        warn_math(d->mathtext, who, opts.name);
+        read_back::replace_opts(p, std::move(opts));
+        return *this;
+    }
+    Axes3D& Axes3D::set_surface_tri_options(std::size_t i, SurfaceTriOptions opts) {
+        const char* who = "Axes3D::set_surface_tri_options";
+        SurfaceTriPlot& p = read_back::at(d->surface_tri, i, who);
+        if (!std::isfinite(opts.vmin) || !std::isfinite(opts.vmax))
+            throw std::invalid_argument(std::string(who) + ": vmin and vmax must be finite");
+        warn_math(d->mathtext, who, opts.name);
+        read_back::replace_opts(p, std::move(opts));
+        return *this;
+    }
+    Axes3D& Axes3D::set_scatter3d_options(std::size_t i, Scatter3DOptions opts) {
+        const char* who = "Axes3D::set_scatter3d_options";
+        Scatter3DPlot& p = read_back::at(d->scatter3d, i, who);
+        if (!std::isfinite(opts.vmin) || !std::isfinite(opts.vmax))
+            throw std::invalid_argument(std::string(who) + ": vmin and vmax must be finite");
+        read_back::check_sizes(opts.sizes, p.x.size(), who);
+        warn_math(d->mathtext, who, opts.name);
+        p.sizes = std::move(opts.sizes);
+        opts.sizes.clear();
+        read_back::replace_opts(p, std::move(opts));
+        return *this;
+    }
+    Axes3D& Axes3D::set_line3d_options(std::size_t i, Line3DOptions opts) {
+        const char* who = "Axes3D::set_line3d_options";
+        Line3DPlot& p = read_back::at(d->lines3d, i, who);
+        if (!std::isfinite(opts.vmin) || !std::isfinite(opts.vmax))
+            throw std::invalid_argument(std::string(who) + ": vmin and vmax must be finite");
+        warn_math(d->mathtext, who, opts.name);
+        read_back::replace_opts(p, std::move(opts));
+        return *this;
+    }
+
+    ErrorBar3DData Axes3D::scatter3d_errorbar(std::size_t i) const {
+        return read_back::to_data(read_back::at(d->scatter3d, i, "Axes3D::scatter3d_errorbar").err);
+    }
+    ErrorBar3DData Axes3D::line3d_errorbar(std::size_t i) const {
+        return read_back::to_data(read_back::at(d->lines3d, i, "Axes3D::line3d_errorbar").err);
+    }
+    Axes3D& Axes3D::set_scatter3d_errorbar(std::size_t i, const ErrorBar3D& err) {
+        const char* who = "Axes3D::set_scatter3d_errorbar";
+        Scatter3DPlot& p = read_back::at(d->scatter3d, i, who);
+        read_back::set_errorbar3d(p, err, p.x.size(), who);
+        return *this;
+    }
+    Axes3D& Axes3D::set_line3d_errorbar(std::size_t i, const ErrorBar3D& err) {
+        const char* who = "Axes3D::set_line3d_errorbar";
+        Line3DPlot& p = read_back::at(d->lines3d, i, who);
+        read_back::set_errorbar3d(p, err, p.x.size(), who);
+        return *this;
     }
 
     Axes3D& Axes3D::set_quiver3d_data(std::size_t i, const Quiver3DData& data) {

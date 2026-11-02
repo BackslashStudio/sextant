@@ -830,6 +830,8 @@ if(SEXTANT_BUILD_TESTS)
             tests/layout_test/contour_kind.cpp
             tests/layout_test/quiver3d.cpp
             tests/layout_test/marker_shapes.cpp
+            tests/layout_test/line_markers.cpp
+            tests/layout_test/bound_panel.cpp
             tests/layout_test/marker_sizes.cpp
             tests/layout_test/line_steps.cpp
             tests/layout_test/bar_orient.cpp

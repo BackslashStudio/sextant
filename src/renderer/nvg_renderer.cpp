@@ -821,7 +821,8 @@ namespace sextant {
                     begin_styled_segment(vg_, sx0, cy, sx1, cy, e.style);
                     nvgStrokeWidth(vg_, 2.0f);
                     nvgStroke(vg_);
-                    break;
+                    if (!e.line_marker) break;
+                    [[fallthrough]];   // the line's marker over its stroke
                 case LegendKind::Marker: {
                     // The series' marker shape at a fixed swatch radius (not its
                     // `size`), as matplotlib does.

@@ -55,7 +55,7 @@ std::string fmt_value(const char* name, double v,
 }
 
 std::string fmt_err_pair(const char* xname, double x, const char* yname, double y,
-                         const ErrorBarData& err, std::size_t i) {
+                         const ErrorBarStore& err, std::size_t i) {
     return fmt_value(xname, x, err.has_x_box(), err.x_box(i), err.has_x_cap(), err.x_cap(i))
          + ", "
          + fmt_value(yname, y, err.has_y_box(), err.y_box(i), err.has_y_cap(), err.y_cap(i));
@@ -85,7 +85,7 @@ std::string fmt_polar_bar(const BarPlot& bp, std::size_t i) {
     return buf;
 }
 
-std::string fmt_point_err(double x, double y, const ErrorBarData& err, std::size_t i) {
+std::string fmt_point_err(double x, double y, const ErrorBarStore& err, std::size_t i) {
     if (err.empty()) return fmt_point(x, y);
     return fmt_err_pair("x", x, "y", y, err, i);
 }
@@ -94,7 +94,7 @@ std::string fmt_point_err(double x, double y, const ErrorBarData& err, std::size
 // bar reads "y=.., width=.." (its value errors are the x ones); a set base adds
 // "bottom=.." ("left=..").
 std::string fmt_bar(const BarPlot& bp, std::size_t i) {
-    const ErrorBarData& err = bp.err;
+    const ErrorBarStore& err = bp.err;
     std::string s = bp.horizontal()
         ? fmt_value("y", bp.centers[i], err.has_y_box(), err.y_box(i), err.has_y_cap(), err.y_cap(i))
           + ", "
@@ -116,7 +116,7 @@ std::string fmt_z(double x, double y, double z) {
 
 // z is the colormapped value and carries no error bar.
 std::string fmt_z_err(double x, double y, double z,
-                      const ErrorBarData& err, std::size_t i) {
+                      const ErrorBarStore& err, std::size_t i) {
     if (err.empty()) return fmt_z(x, y, z);
     char buf[48];
     std::snprintf(buf, sizeof(buf), ", z=%.4g", z);
@@ -197,7 +197,7 @@ std::string fmt_surface_tri(const SurfaceTriPlot& s, std::size_t i) {
 
 // A cloud marker: "x=1 box ±0.2, y=2, z=3 cap +0.5/-0.1", plus the `colors`
 // value when the series has one.
-std::string fmt_xyz_err(double x, double y, double z, const ErrorBar3DData& err,
+std::string fmt_xyz_err(double x, double y, double z, const ErrorBar3DStore& err,
                         std::size_t i, bool colormapped, double c) {
     const double v[3] = { x, y, z };
     const char* name[3] = { "x", "y", "z" };

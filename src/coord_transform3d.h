@@ -168,7 +168,7 @@ namespace sextant {
         // bars extend it by their data lengths; pixel-sized parts (caps, boxwidth)
         // are not included since they depend on the box being computed.
         auto grow_err = [&](const CowVec<double>& xs, const CowVec<double>& ys,
-                            const CowVec<double>& zs, const ErrorBar3DData& err) {
+                            const CowVec<double>& zs, const ErrorBar3DStore& err) {
             if (err.empty()) return;
             const CowVec<double>* ps[3] = {&xs, &ys, &zs};
             for (int a = 0; a < 3; ++a) {

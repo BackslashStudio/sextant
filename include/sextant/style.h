@@ -229,6 +229,21 @@ namespace sextant {
         }
     };
 
+    // A plot's error bars as it holds them, read back by Axes::line_errorbar() and
+    // its siblings: the ends as given (at the plotting call or by
+    // set_*_errorbar()), each empty or one entry per point. All empty = no error
+    // bars. Converts to ErrorBar, so it can be passed back to any call taking one.
+    struct ErrorBarData {
+        std::vector<double> x_cap_lo, x_cap_hi, x_box_lo, x_box_hi;
+        std::vector<double> y_cap_lo, y_cap_hi, y_box_lo, y_box_hi;
+
+        bool any() const { return static_cast<ErrorBar>(*this).any(); }
+
+        operator ErrorBar() const {
+            return { x_cap_lo, x_cap_hi, x_box_lo, x_box_hi, y_cap_lo, y_cap_hi, y_box_lo, y_box_hi };
+        }
+    };
+
     // Error-bar style (a field of the series' options). 3D uses ErrorBar3DOptions.
     struct ErrorBarOptions {
         // Unset = the series' color: `color` for line/scatter, `edgecolor` for bar.
@@ -280,6 +295,16 @@ namespace sextant {
         // pattern continues across it. On a Plane2D only the width carries over,
         // since planes stroke solid.
         bool loop = false;
+
+        // Markers at the points, in the line's color and alpha, drawn over the
+        // stroke (matplotlib's plot(x, y, 'o-')); MarkerStyle::None (the default)
+        // draws none. A point with a NaN coordinate gets none. `markersize` is the
+        // diameter in pixels, as ScatterOptions::size (finite, >= 0, else
+        // std::invalid_argument). With LineStyle::None the markers draw alone.
+        // The legend key is the stroke with the marker on it. Axes and Plane2D;
+        // PolarAxes::plot() ignores them for now.
+        MarkerStyle marker = MarkerStyle::None;
+        float markersize = 20.0f;
 
         // Step drawing (see DrawStyle). Only the stroke changes: limits, hover,
         // error bars and the legend key stay on the points. A segment with a

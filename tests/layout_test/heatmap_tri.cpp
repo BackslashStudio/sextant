@@ -231,12 +231,25 @@ namespace lt {
 
             ax->set_heatmap_tri_data(1, d);
             check(ax->heatmap_tri_data(1).tri.size() == 12, "set data: the struct form takes new triangles");
+            // Without tri: new values keep the triangles held (even hand-given ones),
+            // moved or added vertices are triangulated again.
+            ax->set_heatmap_tri_data(1, x, y, v, tri);
+            const std::vector<double> v2{5, 4, 3, 2, 1};
+            ax->set_heatmap_tri_data(1, x, y, v2);
+            check(ax->heatmap_tri_data(1).tri == tri && ax->heatmap_tri_data(1).values == v2,
+                  "set data: the span form without tri keeps the triangles when only values change");
             const std::vector<double> moved{0, 3, 3, 0, 1.5};
             ax->set_heatmap_tri_data(1, moved, y, v);
             check(ax->heatmap_tri_data(1).x == moved && ax->heatmap_tri_data(1).tri.size() == 12,
-                  "set data: the span form without tri moves vertices and keeps the triangles");
-            check(throws([&] { ax->set_heatmap_tri_data(1, x3, x3, x3); }),
-                  "set data: and wants the vertex count kept");
+                  "set data: moved vertices are triangulated again");
+            const std::vector<double> x6{0, 2, 2, 0, 1, 3}, y6{1, 1, 3, 3, 2, 2}, v6{0, 1, 2, 3, 4, 5};
+            ax->set_heatmap_tri_data(1, x6, y6, v6);
+            check(ax->heatmap_tri_data(1).x.size() == 6 && ax->heatmap_tri_data(1).tri.size() == 15,
+                  "set data: a new vertex count is triangulated again");
+            check(throws([&] { ax->set_heatmap_tri_data(1, x3, x3, x3); })
+                  && ax->heatmap_tri_data(1).x == x6,
+                  "set data: collinear points throw and change nothing");
+            ax->set_heatmap_tri_data(1, moved, y, v);
             HeatmapTriData bad = d;
             bad.tri = {0, 1, 9};
             check(throws([&] { ax->set_heatmap_tri_data(1, bad); }) && ax->heatmap_tri_data(1).x == moved,

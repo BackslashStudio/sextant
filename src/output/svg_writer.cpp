@@ -427,7 +427,7 @@ static void emit_whisker(std::ostringstream& o, float cx, float cy,
 
 static void emit_error_bars_for(std::ostringstream& o, const SvgAxesData& d,
                                 const CowVec<double>& xs, const CowVec<double>& ys,
-                                const ErrorBarData& err, const ErrorBarOptions& style,
+                                const ErrorBarStore& err, const ErrorBarOptions& style,
                                 const Color& fallback, float alpha)
 {
     if (err.empty() || style.linewidth <= 0.0f) return;
@@ -552,11 +552,10 @@ static void emit_scatter_marker(std::ostringstream& o,
     }
 }
 
-static void emit_scatter(std::ostringstream& o, const SvgAxesData& d,
-                         std::span<const std::size_t> which) {
-    for (const std::size_t k : which) {
-        const auto& sp = d.scatters[k];
-        if (sp.x.empty()) continue;
+// One scatter's markers (a line's too, line_markers()); a non-finite point has none.
+static void emit_scatter_series(std::ostringstream& o, const SvgAxesData& d, const ScatterPlot& sp) {
+    {
+        if (sp.x.empty()) return;
         const std::string fill = rgb(*sp.opts.color);
         // Unset edgecolor = the fill's color; each part's alpha is its color's own
         // times `alpha`, as on the GPU.
@@ -567,12 +566,19 @@ static void emit_scatter(std::ostringstream& o, const SvgAxesData& d,
         const float stroke_alpha = ec.a * a;
         for (std::size_t i = 0; i < sp.x.size(); ++i) {
             if (marker_hidden(sp, i)) continue;
-            emit_scatter_marker(o, d.layout.tr.to_px(sp.x[i]), d.layout.tr.to_py(sp.y[i]),
+            const float px = d.layout.tr.to_px(sp.x[i]), py = d.layout.tr.to_py(sp.y[i]);
+            if (!std::isfinite(px) || !std::isfinite(py)) continue;
+            emit_scatter_marker(o, px, py,
                                 marker_size_at(sp, i) * 0.5f, fill, sp.opts.color->a * marker_face_alpha(sp.opts),
                                 sp.opts.marker,
                                 stroke, stroke_alpha, sp.opts.edge_linewidth, true);
         }
     }
+}
+
+static void emit_scatter(std::ostringstream& o, const SvgAxesData& d,
+                         std::span<const std::size_t> which) {
+    for (const std::size_t k : which) emit_scatter_series(o, d, d.scatters[k]);
 }
 
 // Continuous-color scatter: per-point fill via the same colormap LUT as the
@@ -1089,6 +1095,7 @@ static void emit_object(std::ostringstream& o, const SvgAxesData& d, const Objec
         case PlotKind::Line:
             emit_lines(o, d, one);
             emit_error_bars(o, d, r);
+            if (has_line_markers(d.lines[r.index])) emit_scatter_series(o, d, line_markers(d.lines[r.index]));
             break;
         case PlotKind::Scatter:
             emit_error_bars(o, d, r);
@@ -1538,6 +1545,8 @@ static void emit_legend(std::ostringstream& o, const SvgAxesData& d, std::size_t
               << "\" x2=\"" << sx1 << "\" y2=\"" << cy
               << "\" stroke=\"" << fill << "\" stroke-width=\"2\""
               << dash_attr(e.style) << "/>\n";
+            if (e.line_marker)   // the line's marker over its stroke, as the raster's
+                emit_scatter_marker(o, (sx0 + sx1) * 0.5f, cy, 4.5f, fill, e.color.a, e.marker);
         } else if (e.kind == LegendKind::Arrow) {
             // A quiver's key, as the raster's (legend_arrow_outline()).
             float pts[14];

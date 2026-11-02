@@ -215,28 +215,7 @@ Axes& Axes::sharey(Axes& other) {
 
 namespace {
 
-// Copies the caller's ErrorBar into ErrorBarData. Each span must be empty or
-// one entry per point, else throws. Values are not checked (see ErrorBar).
-ErrorBarData take_error_bars(const ErrorBar& eb, std::size_t n, const char* who) {
-    auto take = [&](std::span<const double> s, const char* field) {
-        if (!s.empty() && s.size() != n)
-            throw std::invalid_argument(
-                std::string(who) + ": err." + field + " has " +
-                std::to_string(s.size()) + " entries, need one per point (" +
-                std::to_string(n) + ")");
-        return CowVec<double>(std::vector<double>(s.begin(), s.end()));
-    };
-    ErrorBarData d;
-    d.x_cap_lo = take(eb.x_cap_lo, "x_cap_lo");
-    d.x_cap_hi = take(eb.x_cap_hi, "x_cap_hi");
-    d.x_box_lo = take(eb.x_box_lo, "x_box_lo");
-    d.x_box_hi = take(eb.x_box_hi, "x_box_hi");
-    d.y_cap_lo = take(eb.y_cap_lo, "y_cap_lo");
-    d.y_cap_hi = take(eb.y_cap_hi, "y_cap_hi");
-    d.y_box_lo = take(eb.y_box_lo, "y_box_lo");
-    d.y_box_hi = take(eb.y_box_hi, "y_box_hi");
-    return d;
-}
+using read_back::take_error_bars;
 
 // Data-space bar width: inter-bar spacing x the fractional opts.width.
 double bar_width_for(std::span<const double> x, const BarOptions& opts) {
@@ -351,9 +330,10 @@ void sort_contour_levels(std::vector<double>& levels, const std::string& w) {
 void Axes::Impl::ingest_line(std::span<const double> x, std::span<const double> y,
                              const ErrorBar& eb, LineOptions opts, const char* who) {
     read_back::check_zorder(opts.zorder, who);
+    read_back::check_markersize(opts.markersize, who);
     if (x.size() != y.size())
         throw std::invalid_argument(std::string(who) + ": x and y must have the same length");
-    ErrorBarData err = take_error_bars(eb, x.size(), who);
+    ErrorBarStore err = take_error_bars(eb, x.size(), who);
     warn_math(mathtext, who, opts.name);
     cycle->resolve(opts.color);
     lines.push_back({
@@ -372,7 +352,7 @@ void Axes::Impl::ingest_scatter(std::span<const double> x, std::span<const doubl
     if (x.size() != y.size())
         throw std::invalid_argument(std::string(who) + ": x and y must have the same length");
     read_back::check_sizes(opts.sizes, x.size(), who);
-    ErrorBarData err = take_error_bars(eb, x.size(), who);
+    ErrorBarStore err = take_error_bars(eb, x.size(), who);
     warn_math(mathtext, who, opts.name);
     cycle->resolve(opts.color);
     std::vector<double> sizes = std::move(opts.sizes);
@@ -395,7 +375,7 @@ void Axes::Impl::ingest_scatter_z(std::span<const double> x, std::span<const dou
     if (x.size() != y.size() || x.size() != z.size())
         throw std::invalid_argument(std::string(who) + ": x, y, and z must have the same length");
     check_norm(opts.norm, opts.vmin, opts.vmax, who);
-    ErrorBarData err = take_error_bars(eb, x.size(), who);
+    ErrorBarStore err = take_error_bars(eb, x.size(), who);
     warn_math(mathtext, who, opts.name);
     read_back::check_sizes(opts.sizes, x.size(), who);
     std::vector<double> sizes = std::move(opts.sizes);
@@ -416,7 +396,7 @@ void Axes::Impl::ingest_bar(std::span<const double> x, std::span<const double> h
                             const ErrorBar& eb, BarOptions opts, const char* who) {
     if (x.size() != height.size())
         throw std::invalid_argument(std::string(who) + ": x and height must have the same length");
-    ErrorBarData err = take_error_bars(eb, x.size(), who);
+    ErrorBarStore err = take_error_bars(eb, x.size(), who);
     const double width = bar_width_for(x, opts);
     push_bars(std::vector<double>(x.begin(), x.end()),
               std::vector<double>(height.begin(), height.end()),
@@ -425,7 +405,7 @@ void Axes::Impl::ingest_bar(std::span<const double> x, std::span<const double> h
 
 // bar() and hist(): the bases are taken out of the options and kept as data.
 void Axes::Impl::push_bars(std::vector<double> centers, std::vector<double> heights, double width,
-                           ErrorBarData err, BarOptions opts, const char* who) {
+                           ErrorBarStore err, BarOptions opts, const char* who) {
     read_back::check_zorder(opts.zorder, who);
     std::vector<double> bottom = read_back::take_bottom(std::move(opts.bottom), centers.size(), who);
     opts.bottom.clear();
@@ -1583,22 +1563,29 @@ bool Axes::text_visible(std::size_t i) const      { return read_back::visible(d-
 // set_*_data(): find object i, validate the new data as plotting it would, then
 // swap it in. Nothing changes if either throws.
 void Axes::Impl::set_line_data(std::size_t i, std::span<const double> x, std::span<const double> y,
-                               const char* who) {
+                               const char* who, const ErrorBar* err) {
     LinePlot& p = read_back::at(lines, i, who);
     if (x.size() != y.size())
         throw std::invalid_argument(std::string(who) + ": x and y must have the same length");
+    ErrorBarStore e;
+    if (err) e = take_error_bars(*err, x.size(), who);
     read_back::keep_aligned(p, x.size() == p.x.size());
+    if (err) p.err = std::move(e);
     p.x = read_back::own(x);
     p.y = read_back::own(y);
 }
 
 void Axes::Impl::set_scatter_data(std::size_t i, std::span<const double> x, std::span<const double> y,
-                                  const std::vector<double>* sizes, const char* who) {
+                                  const std::vector<double>* sizes, const char* who,
+                                  const ErrorBar* err) {
     ScatterPlot& p = read_back::at(scatters, i, who);
     if (x.size() != y.size())
         throw std::invalid_argument(std::string(who) + ": x and y must have the same length");
     if (sizes) read_back::check_sizes(*sizes, x.size(), who);
+    ErrorBarStore e;
+    if (err) e = take_error_bars(*err, x.size(), who);
     read_back::keep_aligned(p, x.size() == p.x.size());
+    if (err) p.err = std::move(e);
     p.x = read_back::own(x);
     p.y = read_back::own(y);
     if (sizes) p.sizes = *sizes;
@@ -1606,12 +1593,15 @@ void Axes::Impl::set_scatter_data(std::size_t i, std::span<const double> x, std:
 
 void Axes::Impl::set_scatter_z_data(std::size_t i, std::span<const double> x, std::span<const double> y,
                                     std::span<const double> z, const std::vector<double>* sizes,
-                                    const char* who) {
+                                    const char* who, const ErrorBar* err) {
     ScatterZPlot& p = read_back::at(scatter_z, i, who);
     if (x.size() != y.size() || x.size() != z.size())
         throw std::invalid_argument(std::string(who) + ": x, y, and z must have the same length");
     if (sizes) read_back::check_sizes(*sizes, x.size(), who);
+    ErrorBarStore e;
+    if (err) e = take_error_bars(*err, x.size(), who);
     read_back::keep_aligned(p, x.size() == p.x.size());
+    if (err) p.err = std::move(e);
     p.x = read_back::own(x);
     p.y = read_back::own(y);
     p.z = read_back::own(z);
@@ -1619,15 +1609,19 @@ void Axes::Impl::set_scatter_z_data(std::size_t i, std::span<const double> x, st
 }
 
 void Axes::Impl::set_bar_data(std::size_t i, std::span<const double> x, std::span<const double> height,
-                              const std::vector<double>* bottom, const char* who) {
+                              const std::vector<double>* bottom, const char* who,
+                              const ErrorBar* err) {
     BarPlot& p = read_back::at(bars, i, who);
     if (x.size() != height.size())
         throw std::invalid_argument(std::string(who) + ": x and height must have the same length");
     std::vector<double> bases;
     if (bottom) bases = read_back::take_bottom(*bottom, x.size(), who);
+    ErrorBarStore e;
+    if (err) e = take_error_bars(*err, x.size(), who);
     // The width stays (the panel may have set it) unless the bars moved.
     if (!read_back::same(p.centers.get(), x)) p.bar_width = bar_width_for(x, p.opts);
     read_back::keep_aligned(p, x.size() == p.centers.size());
+    if (err) p.err = std::move(e);
     p.centers = read_back::own(x);
     p.heights = read_back::own(height);
     if (bottom) p.bottom = std::move(bases);
@@ -1722,17 +1716,22 @@ void Axes::Impl::set_heatmap_tri_data(std::size_t i, std::span<const double> x, 
                                       const char* who) {
     HeatmapTriPlot& p = read_back::at(heatmap_tris, i, who);
     read_back::check_tri_vertices(x, y, values, who);
+    std::optional<std::vector<std::uint32_t>> derived;
     if (tri) {
         read_back::check_tri_indices(*tri, x.size(), who);
-    } else if (x.size() != p.x.size()) {
-        throw std::invalid_argument(std::string(who) + ": without tri the vertex count must stay ("
-                                    + std::to_string(p.x.size()) + "), as the triangles are kept");
+    } else if (!read_back::same_values(x, p.x.get()) || !read_back::same_values(y, p.y.get())) {
+        // The vertices moved (or their count changed): triangulate again, as heatmap_tri() does.
+        derived.emplace();
+        if (!delaunay_triangulate(x, y, *derived))
+            throw std::invalid_argument(std::string(who) + ": these points have no triangulation -- they are "
+                                        "collinear, or fewer than three of them are distinct");
     }
     read_back::keep_aligned(p, x.size() == p.x.size());
     p.x = read_back::own(x);
     p.y = read_back::own(y);
     p.values = read_back::own(values);
     if (tri) p.tri = *tri;
+    else if (derived) p.tri = std::move(*derived);
 }
 
 Axes& Axes::set_line_data(std::size_t i, const LineData& data) {
@@ -1795,6 +1794,198 @@ Axes& Axes::set_heatmap_data(std::size_t i, std::span<const double> data, int ro
                              Range xrange, Range yrange) {
     d->set_heatmap_data(i, data, rows, cols, xrange, yrange, std::nullopt, nullptr, nullptr,
                         "set_heatmap_data");
+    return *this;
+}
+
+// Error bars on their own (and with the data, for a point-count change).
+ErrorBarData Axes::line_errorbar(std::size_t i) const {
+    return read_back::to_data(read_back::at(d->lines, i, "line_errorbar").err);
+}
+ErrorBarData Axes::scatter_errorbar(std::size_t i) const {
+    return read_back::to_data(read_back::at(d->scatters, i, "scatter_errorbar").err);
+}
+ErrorBarData Axes::scatter_z_errorbar(std::size_t i) const {
+    return read_back::to_data(read_back::at(d->scatter_z, i, "scatter_z_errorbar").err);
+}
+ErrorBarData Axes::bar_errorbar(std::size_t i) const {
+    return read_back::to_data(read_back::at(d->bars, i, "bar_errorbar").err);
+}
+Axes& Axes::set_line_errorbar(std::size_t i, const ErrorBar& err) {
+    LinePlot& p = read_back::at(d->lines, i, "set_line_errorbar");
+    read_back::set_errorbar(p, err, p.x.size(), "set_line_errorbar");
+    return *this;
+}
+Axes& Axes::set_scatter_errorbar(std::size_t i, const ErrorBar& err) {
+    ScatterPlot& p = read_back::at(d->scatters, i, "set_scatter_errorbar");
+    read_back::set_errorbar(p, err, p.x.size(), "set_scatter_errorbar");
+    return *this;
+}
+Axes& Axes::set_scatter_z_errorbar(std::size_t i, const ErrorBar& err) {
+    ScatterZPlot& p = read_back::at(d->scatter_z, i, "set_scatter_z_errorbar");
+    read_back::set_errorbar(p, err, p.x.size(), "set_scatter_z_errorbar");
+    return *this;
+}
+Axes& Axes::set_bar_errorbar(std::size_t i, const ErrorBar& err) {
+    BarPlot& p = read_back::at(d->bars, i, "set_bar_errorbar");
+    read_back::set_errorbar(p, err, p.centers.size(), "set_bar_errorbar");
+    return *this;
+}
+
+// ---------------------------------------------------------------------------
+// Options read back and replaced
+// ---------------------------------------------------------------------------
+
+void Axes::Impl::set_line_options(std::size_t i, LineOptions o, const char* who) {
+    LinePlot& p = read_back::at(lines, i, who);
+    read_back::check_zorder(o.zorder, who);
+    read_back::check_markersize(o.markersize, who);
+    warn_math(mathtext, who, o.name);
+    read_back::replace_opts(p, std::move(o));
+}
+
+void Axes::Impl::set_scatter_options(std::size_t i, ScatterOptions o, const char* who) {
+    ScatterPlot& p = read_back::at(scatters, i, who);
+    read_back::check_zorder(o.zorder, who);
+    read_back::check_sizes(o.sizes, p.x.size(), who);
+    warn_math(mathtext, who, o.name);
+    p.sizes = std::move(o.sizes);
+    o.sizes.clear();
+    read_back::replace_opts(p, std::move(o));
+}
+
+void Axes::Impl::set_scatter_z_options(std::size_t i, ScatterZOptions o, const char* who) {
+    ScatterZPlot& p = read_back::at(scatter_z, i, who);
+    read_back::check_zorder(o.zorder, who);
+    check_norm(o.norm, o.vmin, o.vmax, who);
+    read_back::check_sizes(o.sizes, p.x.size(), who);
+    warn_math(mathtext, who, o.name);
+    p.sizes = std::move(o.sizes);
+    o.sizes.clear();
+    read_back::replace_opts(p, std::move(o));
+}
+
+// A new `width` fraction rescales the resolved bar width (bar()'s spacing or
+// hist()'s bin width alike); `bottom` replaces the bases as bar() takes them.
+void Axes::Impl::set_bar_options(std::size_t i, BarOptions o, const char* who) {
+    BarPlot& p = read_back::at(bars, i, who);
+    read_back::check_zorder(o.zorder, who);
+    std::vector<double> bottom = read_back::take_bottom(std::move(o.bottom), p.centers.size(), who);
+    o.bottom.clear();
+    warn_math(mathtext, who, o.name);
+    if (o.width != p.opts.width) {
+        BarOptions unit_width;
+        unit_width.width = 1.0f;
+        const double unit = p.opts.width > 0.0f ? p.bar_width / static_cast<double>(p.opts.width)
+                                                : bar_width_for(p.centers.get(), unit_width);
+        p.bar_width = unit * static_cast<double>(o.width);
+        p.data_stamp = next_snapshot_generation();
+    }
+    p.bottom = std::move(bottom);
+    read_back::replace_opts(p, std::move(o));
+}
+
+void Axes::Impl::set_heatmap_options(std::size_t i, HeatmapOptions o, const char* who) {
+    HeatmapPlot& p = read_back::at(heatmaps, i, who);
+    const std::string w = who;
+    read_back::check_zorder(o.zorder, who);
+    check_origin(o.origin, w);
+    check_norm(o.norm, o.vmin, o.vmax, who);
+    sort_contour_levels(o.contours, w);
+    warn_math(mathtext, who, o.name);
+    read_back::replace_opts(p, std::move(o));
+}
+
+void Axes::Impl::set_heatmap_tri_options(std::size_t i, HeatmapTriOptions o, const char* who) {
+    HeatmapTriPlot& p = read_back::at(heatmap_tris, i, who);
+    read_back::check_zorder(o.zorder, who);
+    check_norm(o.norm, o.vmin, o.vmax, who);
+    warn_math(mathtext, who, o.name);
+    read_back::replace_opts(p, std::move(o));
+}
+
+// Levels, norm and fill are options here: the drawing is rebuilt from them.
+void Axes::Impl::set_contour_options(std::size_t i, ContourOptions o, const char* who) {
+    ContourPlot& p = read_back::at(contours, i, who);
+    read_back::check_zorder(o.zorder, who);
+    check_contour(p.x.get(), p.y.get(), p.z.get(), o, who);
+    warn_math(mathtext, who, o.name);
+    read_back::replace_opts(p, std::move(o));
+    contour_rebuild(p);
+}
+
+LineOptions Axes::line_options(std::size_t i) const {
+    return read_back::at(d->lines, i, "line_options").opts;
+}
+ScatterOptions Axes::scatter_options(std::size_t i) const {
+    const ScatterPlot& p = read_back::at(d->scatters, i, "scatter_options");
+    ScatterOptions o = p.opts;
+    o.sizes = p.sizes.get();
+    return o;
+}
+ScatterZOptions Axes::scatter_z_options(std::size_t i) const {
+    const ScatterZPlot& p = read_back::at(d->scatter_z, i, "scatter_z_options");
+    ScatterZOptions o = p.opts;
+    o.sizes = p.sizes.get();
+    return o;
+}
+BarOptions Axes::bar_options(std::size_t i) const {
+    const BarPlot& p = read_back::at(d->bars, i, "bar_options");
+    BarOptions o = p.opts;
+    o.bottom = p.bottom.get();
+    return o;
+}
+HeatmapOptions Axes::heatmap_options(std::size_t i) const {
+    return read_back::at(d->heatmaps, i, "heatmap_options").opts;
+}
+HeatmapTriOptions Axes::heatmap_tri_options(std::size_t i) const {
+    return read_back::at(d->heatmap_tris, i, "heatmap_tri_options").opts;
+}
+ContourOptions Axes::contour_options(std::size_t i) const {
+    return read_back::at(d->contours, i, "contour_options").opts;
+}
+
+Axes& Axes::set_line_options(std::size_t i, LineOptions opts) {
+    d->set_line_options(i, std::move(opts), "set_line_options");
+    return *this;
+}
+Axes& Axes::set_scatter_options(std::size_t i, ScatterOptions opts) {
+    d->set_scatter_options(i, std::move(opts), "set_scatter_options");
+    return *this;
+}
+Axes& Axes::set_scatter_z_options(std::size_t i, ScatterZOptions opts) {
+    d->set_scatter_z_options(i, std::move(opts), "set_scatter_z_options");
+    return *this;
+}
+Axes& Axes::set_bar_options(std::size_t i, BarOptions opts) {
+    d->set_bar_options(i, std::move(opts), "set_bar_options");
+    return *this;
+}
+Axes& Axes::set_heatmap_options(std::size_t i, HeatmapOptions opts) {
+    d->set_heatmap_options(i, std::move(opts), "set_heatmap_options");
+    return *this;
+}
+Axes& Axes::set_heatmap_tri_options(std::size_t i, HeatmapTriOptions opts) {
+    d->set_heatmap_tri_options(i, std::move(opts), "set_heatmap_tri_options");
+    return *this;
+}
+Axes& Axes::set_contour_options(std::size_t i, ContourOptions opts) {
+    d->set_contour_options(i, std::move(opts), "set_contour_options");
+    return *this;
+}
+Axes& Axes::set_line_data(std::size_t i, const LineData& data, const ErrorBar& err) {
+    d->set_line_data(i, data.x, data.y, "set_line_data", &err);
+    return *this;
+}
+Axes& Axes::set_scatter_data(std::size_t i, const ScatterData& data, const ErrorBar& err) {
+    d->set_scatter_data(i, data.x, data.y, &data.sizes, "set_scatter_data", &err);
+    return *this;
+}
+Axes& Axes::set_scatter_z_data(std::size_t i, const ScatterZData& data, const ErrorBar& err) {
+    d->set_scatter_z_data(i, data.x, data.y, data.z, &data.sizes, "set_scatter_z_data", &err);
+    return *this;
+}
+Axes& Axes::set_bar_data(std::size_t i, const BarData& data, const ErrorBar& err) {
+    d->set_bar_data(i, data.x, data.height, &data.bottom, "set_bar_data", &err);
     return *this;
 }
 

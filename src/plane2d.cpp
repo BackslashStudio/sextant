@@ -419,6 +419,117 @@ namespace sextant {
         d->sheet.set_bar_data(i, x, height, nullptr, "Plane2D::set_bar_data");
         return *this;
     }
+    Plane2D& Plane2D::set_line_data(std::size_t i, const LineData& data, const ErrorBar& err) {
+        d->sheet.set_line_data(i, data.x, data.y, "Plane2D::set_line_data", &err);
+        return *this;
+    }
+    Plane2D& Plane2D::set_scatter_data(std::size_t i, const ScatterData& data, const ErrorBar& err) {
+        d->sheet.set_scatter_data(i, data.x, data.y, &data.sizes, "Plane2D::set_scatter_data", &err);
+        return *this;
+    }
+    Plane2D& Plane2D::set_scatter_z_data(std::size_t i, const ScatterZData& data, const ErrorBar& err) {
+        d->sheet.set_scatter_z_data(i, data.x, data.y, data.z, &data.sizes, "Plane2D::set_scatter_z_data",
+                                    &err);
+        return *this;
+    }
+    Plane2D& Plane2D::set_bar_data(std::size_t i, const BarData& data, const ErrorBar& err) {
+        d->sheet.set_bar_data(i, data.x, data.height, &data.bottom, "Plane2D::set_bar_data", &err);
+        return *this;
+    }
+    ErrorBarData Plane2D::line_errorbar(std::size_t i) const {
+        return read_back::to_data(read_back::at(d->sheet.lines, i, "Plane2D::line_errorbar").err);
+    }
+    ErrorBarData Plane2D::scatter_errorbar(std::size_t i) const {
+        return read_back::to_data(read_back::at(d->sheet.scatters, i, "Plane2D::scatter_errorbar").err);
+    }
+    ErrorBarData Plane2D::scatter_z_errorbar(std::size_t i) const {
+        return read_back::to_data(read_back::at(d->sheet.scatter_z, i, "Plane2D::scatter_z_errorbar").err);
+    }
+    ErrorBarData Plane2D::bar_errorbar(std::size_t i) const {
+        return read_back::to_data(read_back::at(d->sheet.bars, i, "Plane2D::bar_errorbar").err);
+    }
+    Plane2D& Plane2D::set_line_errorbar(std::size_t i, const ErrorBar& err) {
+        const char* who = "Plane2D::set_line_errorbar";
+        LinePlot& p = read_back::at(d->sheet.lines, i, who);
+        read_back::set_errorbar(p, err, p.x.size(), who);
+        return *this;
+    }
+    Plane2D& Plane2D::set_scatter_errorbar(std::size_t i, const ErrorBar& err) {
+        const char* who = "Plane2D::set_scatter_errorbar";
+        ScatterPlot& p = read_back::at(d->sheet.scatters, i, who);
+        read_back::set_errorbar(p, err, p.x.size(), who);
+        return *this;
+    }
+    Plane2D& Plane2D::set_scatter_z_errorbar(std::size_t i, const ErrorBar& err) {
+        const char* who = "Plane2D::set_scatter_z_errorbar";
+        ScatterZPlot& p = read_back::at(d->sheet.scatter_z, i, who);
+        read_back::set_errorbar(p, err, p.x.size(), who);
+        return *this;
+    }
+    Plane2D& Plane2D::set_bar_errorbar(std::size_t i, const ErrorBar& err) {
+        const char* who = "Plane2D::set_bar_errorbar";
+        BarPlot& p = read_back::at(d->sheet.bars, i, who);
+        read_back::set_errorbar(p, err, p.centers.size(), who);
+        return *this;
+    }
+    LineOptions Plane2D::line_options(std::size_t i) const {
+        return read_back::at(d->sheet.lines, i, "Plane2D::line_options").opts;
+    }
+    ScatterOptions Plane2D::scatter_options(std::size_t i) const {
+        const ScatterPlot& p = read_back::at(d->sheet.scatters, i, "Plane2D::scatter_options");
+        ScatterOptions o = p.opts;
+        o.sizes = p.sizes.get();
+        return o;
+    }
+    ScatterZOptions Plane2D::scatter_z_options(std::size_t i) const {
+        const ScatterZPlot& p = read_back::at(d->sheet.scatter_z, i, "Plane2D::scatter_z_options");
+        ScatterZOptions o = p.opts;
+        o.sizes = p.sizes.get();
+        return o;
+    }
+    BarOptions Plane2D::bar_options(std::size_t i) const {
+        const BarPlot& p = read_back::at(d->sheet.bars, i, "Plane2D::bar_options");
+        BarOptions o = p.opts;
+        o.bottom = p.bottom.get();
+        return o;
+    }
+    HeatmapOptions Plane2D::heatmap_options(std::size_t i) const {
+        return read_back::at(d->sheet.heatmaps, i, "Plane2D::heatmap_options").opts;
+    }
+    HeatmapTriOptions Plane2D::heatmap_tri_options(std::size_t i) const {
+        return read_back::at(d->sheet.heatmap_tris, i, "Plane2D::heatmap_tri_options").opts;
+    }
+    ContourOptions Plane2D::contour_options(std::size_t i) const {
+        return read_back::at(d->sheet.contours, i, "Plane2D::contour_options").opts;
+    }
+    Plane2D& Plane2D::set_line_options(std::size_t i, LineOptions opts) {
+        d->sheet.set_line_options(i, std::move(opts), "Plane2D::set_line_options");
+        return *this;
+    }
+    Plane2D& Plane2D::set_scatter_options(std::size_t i, ScatterOptions opts) {
+        d->sheet.set_scatter_options(i, std::move(opts), "Plane2D::set_scatter_options");
+        return *this;
+    }
+    Plane2D& Plane2D::set_scatter_z_options(std::size_t i, ScatterZOptions opts) {
+        d->sheet.set_scatter_z_options(i, std::move(opts), "Plane2D::set_scatter_z_options");
+        return *this;
+    }
+    Plane2D& Plane2D::set_bar_options(std::size_t i, BarOptions opts) {
+        d->sheet.set_bar_options(i, std::move(opts), "Plane2D::set_bar_options");
+        return *this;
+    }
+    Plane2D& Plane2D::set_heatmap_options(std::size_t i, HeatmapOptions opts) {
+        d->sheet.set_heatmap_options(i, std::move(opts), "Plane2D::set_heatmap_options");
+        return *this;
+    }
+    Plane2D& Plane2D::set_heatmap_tri_options(std::size_t i, HeatmapTriOptions opts) {
+        d->sheet.set_heatmap_tri_options(i, std::move(opts), "Plane2D::set_heatmap_tri_options");
+        return *this;
+    }
+    Plane2D& Plane2D::set_contour_options(std::size_t i, ContourOptions opts) {
+        d->sheet.set_contour_options(i, std::move(opts), "Plane2D::set_contour_options");
+        return *this;
+    }
     Plane2D& Plane2D::set_stack_data(std::size_t i, const StackData& data) {
         d->sheet.set_stack_data(i, data.x, data.ys, "Plane2D::set_stack_data");
         return *this;

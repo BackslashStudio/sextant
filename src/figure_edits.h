@@ -79,6 +79,8 @@ struct PlotStyleEdit {
     unsigned long long visible_seen = ~0ull;
     // Likewise the object's zorder_stamp: a set_zorder() since keeps its `zorder`.
     unsigned long long zorder_seen = ~0ull;
+    // And its opts_stamp: a set_<kind>_options() since drops the edit.
+    unsigned long long opts_seen = ~0ull;
 };
 
 // Insert or remove a whole row/column of a heatmap (or a bar3d/surface grid,
@@ -404,6 +406,7 @@ struct AxesEdit3D {
         std::optional<O> opts;
         ObjectId id = 0;
         unsigned long long visible_seen = ~0ull;   // see PlotStyleEdit
+        unsigned long long opts_seen = ~0ull;      // see PlotStyleEdit
     };
     using Bar3DEdit      = ObjectEdit<Bar3DOptions>;
     using SurfaceEdit    = ObjectEdit<SurfaceOptions>;
@@ -934,8 +937,8 @@ std::optional<typename V::value_type> value_at(const V& v, std::size_t row) {
     return v[row];
 }
 
-// ErrorBarData's columns in PlotRowEdit::Restore::err's order.
-inline std::array<CowVec<double>*, 8> err_columns(ErrorBarData& e) {
+// ErrorBarStore's columns in PlotRowEdit::Restore::err's order.
+inline std::array<CowVec<double>*, 8> err_columns(ErrorBarStore& e) {
     return { &e.x_cap_lo, &e.x_cap_hi, &e.x_box_lo, &e.x_box_hi,
              &e.y_cap_lo, &e.y_cap_hi, &e.y_box_lo, &e.y_box_hi };
 }
@@ -957,9 +960,9 @@ std::optional<PlotDataOp> row_op(const PlotRowEdit& e, const Vec& v, P& p, Cols&
     // A fill has neither labels nor error bars, a quiver no error bars: empty
     // stand-ins.
     std::vector<std::string> no_labels;
-    ErrorBarData no_err;
+    ErrorBarStore no_err;
     std::vector<std::string>* label_col = &no_labels;
-    ErrorBarData* err_data = &no_err;
+    ErrorBarStore* err_data = &no_err;
     if constexpr (requires { p.opts.hint_labels; }) label_col = &p.opts.hint_labels;
     if constexpr (requires { p.err; }) err_data = &p.err;
     auto& labels = *label_col;
@@ -1516,9 +1519,13 @@ struct ReplacedOpts {
 template <class Vec, class Opts>
 std::optional<ReplacedOpts<Opts>> assign_plot_opts(Vec& v, int idx, ObjectId id, const Opts& o,
                                                    unsigned long long visible_seen = ~0ull,
-                                                   unsigned long long zorder_seen = ~0ull) {
+                                                   unsigned long long zorder_seen = ~0ull,
+                                                   unsigned long long opts_seen = ~0ull) {
     auto* p = edits_detail::find_object(v, idx, id);
     if (!p) return std::nullopt;
+    // The program replaced the options since the panel drew: its call wins.
+    if constexpr (requires { p->opts_stamp; })
+        if (p->opts_stamp > opts_seen) return std::nullopt;
     // The program's `visible`, if it set one since the panel drew.
     const std::optional<bool> kept = p->visible_stamp > visible_seen
                                          ? std::optional(visible_flag(p->opts)) : std::nullopt;
@@ -1615,7 +1622,7 @@ std::optional<PlotStyleEdit> apply_plot_style_edit(T& t, const PlotStyleEdit& e)
     return std::visit([&](const auto& o) -> std::optional<PlotStyleEdit> {
         using O = std::decay_t<decltype(o)>;
         auto r = assign_plot_opts(edits_detail::styled_vector<O>(t), e.plot_index, e.id, o,
-                                  e.visible_seen, e.zorder_seen);
+                                  e.visible_seen, e.zorder_seen, e.opts_seen);
         if (!r) return std::nullopt;
         PlotStyleEdit inv = e;
         inv.plot_index = r->index;
@@ -1808,7 +1815,8 @@ void apply_axes3d_edit(T& dst, const AxesEdit3D& e, AxesEdit3D* inv = nullptr) {
     auto objects = [](auto& plots, const auto& edits, auto* undo) {
         for (const auto& oe : edits) {
             if (!oe.opts) continue;
-            auto r = assign_plot_opts(plots, oe.plot_index, oe.id, *oe.opts, oe.visible_seen);
+            auto r = assign_plot_opts(plots, oe.plot_index, oe.id, *oe.opts, oe.visible_seen, ~0ull,
+                                      oe.opts_seen);
             if (!r || !undo) continue;
             auto u = oe;
             u.plot_index = r->index;

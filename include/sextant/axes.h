@@ -559,6 +559,87 @@ namespace sextant {
 
         Axes& set_bar_data(std::size_t i, std::span<const double> x, std::span<const double> height);
 
+        // The four kinds that take error bars, with the error bars replaced
+        // along with the points: the way to change the point count and keep
+        // error bars. `err` is checked against the new count, as at the
+        // plotting call; an empty `err` leaves the object without.
+        Axes& set_line_data(std::size_t i, const LineData& data, const ErrorBar& err);
+
+        Axes& set_scatter_data(std::size_t i, const ScatterData& data, const ErrorBar& err);
+
+        Axes& set_scatter_z_data(std::size_t i, const ScatterZData& data, const ErrorBar& err);
+
+        Axes& set_bar_data(std::size_t i, const BarData& data, const ErrorBar& err);
+
+        // Object i's error bars as it holds them (all empty = none); throws
+        // std::out_of_range for i >= `*_count()`.
+        ErrorBarData line_errorbar(std::size_t i) const;
+
+        ErrorBarData scatter_errorbar(std::size_t i) const;
+
+        ErrorBarData scatter_z_errorbar(std::size_t i) const;
+
+        ErrorBarData bar_errorbar(std::size_t i) const;
+
+        // Add, replace or (with an empty `err`) remove object i's error bars,
+        // the points unchanged; each span empty or one entry per current point,
+        // else std::invalid_argument and nothing changes. They are drawn with
+        // the object's options' `errorbar` style.
+        Axes& set_line_errorbar(std::size_t i, const ErrorBar& err);
+
+        Axes& set_scatter_errorbar(std::size_t i, const ErrorBar& err);
+
+        Axes& set_scatter_z_errorbar(std::size_t i, const ErrorBar& err);
+
+        Axes& set_bar_errorbar(std::size_t i, const ErrorBar& err);
+
+        // ----------------------------------------------------------------
+        // Reading and replacing a plot's options
+        // ----------------------------------------------------------------
+        // Object i's options as it holds them: what its plotting call took,
+        // with the color it was given (an unset one resolved from the color
+        // cycle at the call), and later edits (set_*_options(), the Style panel,
+        // set_*_visible(), set_zorder()). A scatter's `sizes` and a bar's
+        // `bottom` come back filled. Throws std::out_of_range for i >= `*_count()`.
+        LineOptions line_options(std::size_t i) const;
+
+        ScatterOptions scatter_options(std::size_t i) const;
+
+        ScatterZOptions scatter_z_options(std::size_t i) const;
+
+        BarOptions bar_options(std::size_t i) const;
+
+        // heatmap(), heatmap_rec() and imshow() alike (an image reads only the
+        // fields it has).
+        HeatmapOptions heatmap_options(std::size_t i) const;
+
+        HeatmapTriOptions heatmap_tri_options(std::size_t i) const;
+
+        ContourOptions contour_options(std::size_t i) const;
+
+        // Replace object i's options, checked as its plotting call checks them
+        // (std::invalid_argument and nothing changes); the data, error bars,
+        // ObjectId and index stay. An unset `color` keeps the object's, and its
+        // `hint_labels` are kept (they belong to the points). A scatter's
+        // `sizes` and a bar's `bottom` replace the object's as at the call; a new
+        // bar `width` rescales the bars. A Style-panel edit made before the call
+        // is dropped. Read, change, write back:
+        //     auto o = ax->line_options(0); o.linewidth = 3; ax->set_line_options(0, o);
+        Axes& set_line_options(std::size_t i, LineOptions opts);
+
+        Axes& set_scatter_options(std::size_t i, ScatterOptions opts);
+
+        Axes& set_scatter_z_options(std::size_t i, ScatterZOptions opts);
+
+        Axes& set_bar_options(std::size_t i, BarOptions opts);
+
+        Axes& set_heatmap_options(std::size_t i, HeatmapOptions opts);
+
+        Axes& set_heatmap_tri_options(std::size_t i, HeatmapTriOptions opts);
+
+        // The contour is redrawn from the new levels, nlevels, filled and norm.
+        Axes& set_contour_options(std::size_t i, ContourOptions opts);
+
         // A heatmap_rec() takes its new edges from HeatmapData::x_edges / y_edges
         // (xrange / yrange are not read), checked as heatmap_rec() checks them; a
         // heatmap() or image takes xrange / yrange and empty edges. Either form on
@@ -607,9 +688,11 @@ namespace sextant {
         Axes& set_pie_data(std::size_t i, const PieData& data);
 
         // A heatmap_tri()'s vertices, values and triangles, checked as the explicit
-        // form of heatmap_tri() checks them (`tri` is required; nothing re-triangulates).
-        // The span form without `tri` keeps the triangles, so the vertex count must
-        // stay. hint_labels are kept while the vertex count is unchanged.
+        // form of heatmap_tri() checks them (`tri` is required). The span form
+        // without `tri` keeps the triangles while x and y are unchanged (new values
+        // only), and otherwise triangulates again as heatmap_tri() without `tri`
+        // does (throws if the points have no triangulation). hint_labels are kept
+        // while the vertex count is unchanged.
         Axes& set_heatmap_tri_data(std::size_t i, const HeatmapTriData& data);
 
         Axes& set_heatmap_tri_data(std::size_t i, std::span<const double> x, std::span<const double> y,

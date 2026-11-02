@@ -48,12 +48,12 @@ inline Color errorbar3d_color(const Line3DPlot& l) {
 }
 
 // True when a series draws any error bar; `linewidth <= 0` draws none.
-inline bool errorbar3d_drawn(const ErrorBar3DData& err, const ErrorBar3DOptions& style) {
+inline bool errorbar3d_drawn(const ErrorBar3DStore& err, const ErrorBar3DOptions& style) {
     return !err.empty() && style.linewidth > 0.0f;
 }
 
 // True when some pieces need compositing, from the style alone (conservative).
-inline bool errorbar3d_translucent(const ErrorBar3DData& err, const ErrorBar3DOptions& style,
+inline bool errorbar3d_translucent(const ErrorBar3DStore& err, const ErrorBar3DOptions& style,
                                    Color c) {
     if (!errorbar3d_drawn(err, style)) return false;
     if (c.a < 1.0f) return true;

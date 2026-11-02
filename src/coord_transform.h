@@ -267,9 +267,9 @@ namespace sextant {
             // Error bars widen the auto limits so the outermost bars aren't clipped.
             // For bars, the anchors are the tips (bar_anchors()).
             auto grow_err = [&](const CowVec<double>& xs, const CowVec<double>& ys,
-                                const ErrorBarData& err) {
+                                const ErrorBarStore& err) {
                 const std::size_t n = std::min(xs.size(), ys.size());
-                auto grow = [&](const CowVec<double>& ps, ErrOffsets (ErrorBarData::*at)(std::size_t) const,
+                auto grow = [&](const CowVec<double>& ps, ErrOffsets (ErrorBarStore::*at)(std::size_t) const,
                                 auto f, double& lo, double& hi) {
                     for (std::size_t i = 0; i < n; ++i) {
                         const ErrOffsets e = (err.*at)(i);
@@ -277,10 +277,10 @@ namespace sextant {
                         add(f(ps[i] + e.hi), lo, hi);
                     }
                 };
-                if (err.has_x_cap()) grow(xs, &ErrorBarData::x_cap, fx, xlo, xhi);
-                if (err.has_x_box()) grow(xs, &ErrorBarData::x_box, fx, xlo, xhi);
-                if (err.has_y_cap()) grow(ys, &ErrorBarData::y_cap, fy, ylo, yhi);
-                if (err.has_y_box()) grow(ys, &ErrorBarData::y_box, fy, ylo, yhi);
+                if (err.has_x_cap()) grow(xs, &ErrorBarStore::x_cap, fx, xlo, xhi);
+                if (err.has_x_box()) grow(xs, &ErrorBarStore::x_box, fx, xlo, xhi);
+                if (err.has_y_cap()) grow(ys, &ErrorBarStore::y_cap, fy, ylo, yhi);
+                if (err.has_y_box()) grow(ys, &ErrorBarStore::y_box, fy, ylo, yhi);
             };
 
             auto add_points = [&](const CowVec<double>& xs, const CowVec<double>& ys) {
@@ -430,9 +430,9 @@ namespace sextant {
         // Error bars widen the auto limits so the outermost bars aren't clipped.
         // For bars, the anchors are the tips (bar_anchors()).
         auto grow_err = [&](const CowVec<double>& xs, const CowVec<double>& ys,
-                            const ErrorBarData& err) {
+                            const ErrorBarStore& err) {
             const std::size_t n = std::min(xs.size(), ys.size());
-            auto grow = [&](const CowVec<double>& ps, ErrOffsets (ErrorBarData::*at)(std::size_t) const,
+            auto grow = [&](const CowVec<double>& ps, ErrOffsets (ErrorBarStore::*at)(std::size_t) const,
                             double& lo, double& hi) {
                 for (std::size_t i = 0; i < n; ++i) {
                     const ErrOffsets e = (err.*at)(i);
@@ -440,10 +440,10 @@ namespace sextant {
                     hi = std::max(hi, ps[i] + e.hi);
                 }
             };
-            if (err.has_x_cap()) grow(xs, &ErrorBarData::x_cap, xlo, xhi);
-            if (err.has_x_box()) grow(xs, &ErrorBarData::x_box, xlo, xhi);
-            if (err.has_y_cap()) grow(ys, &ErrorBarData::y_cap, ylo, yhi);
-            if (err.has_y_box()) grow(ys, &ErrorBarData::y_box, ylo, yhi);
+            if (err.has_x_cap()) grow(xs, &ErrorBarStore::x_cap, xlo, xhi);
+            if (err.has_x_box()) grow(xs, &ErrorBarStore::x_box, xlo, xhi);
+            if (err.has_y_cap()) grow(ys, &ErrorBarStore::y_cap, ylo, yhi);
+            if (err.has_y_box()) grow(ys, &ErrorBarStore::y_box, ylo, yhi);
         };
 
         for (const auto& lp: all.lines) {

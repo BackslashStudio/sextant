@@ -575,6 +575,9 @@ namespace lt {
 
     void test_set_data_keep_aligned();
 
+    void test_set_errorbar();
+    void test_set_options();
+
     void test_data_op_stamps();
 
     void test_limit_journal();
@@ -628,6 +631,8 @@ namespace lt {
     // edge_markers.cpp
     void test_edge_markers();
     void test_marker_shapes();
+    void test_line_markers();
+    void test_bound_panel();
     void test_marker_sizes();
 
     // alpha.cpp

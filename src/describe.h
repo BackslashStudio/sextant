@@ -51,7 +51,8 @@ namespace sextant {
     SEXTANT_DESCRIBE(ErrorBarOptions,
                      F(color) F(linewidth) F(capsize) F(capstyle) F(boxwidth) F(box_alpha))
     SEXTANT_DESCRIBE(LineOptions,
-                     F(color) F(linewidth) F(linestyle) F(name) F(show_legend) F(visible) F(zorder) F(alpha) F(loop) F(drawstyle)
+                     F(color) F(linewidth) F(linestyle) F(name) F(show_legend) F(visible) F(zorder) F(alpha) F(loop) F(marker)
+                     F(markersize) F(drawstyle)
                      F(errorbar) F(hint_labels))
     SEXTANT_DESCRIBE(ScatterOptions,
                      F(color) F(size) F(sizes) F(marker) F(name) F(show_legend) F(visible) F(zorder) F(alpha) F(filled)

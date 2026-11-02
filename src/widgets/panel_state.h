@@ -272,9 +272,36 @@ namespace sextant {
         std::uint64_t synced_generation = kNeverSynced;
     };
 
+    // A cell edit the Data panel made on a bound object (DataPanelState::bound),
+    // handed to the host instead of applied: the object, and the cell as
+    // PlotCellEdit addresses it (`column` 0 = x, 1 = y, then the kind's further
+    // columns; a matrix's `element` is row-major; `plane_index` -1 off a plane).
+    struct BoundCellEdit {
+        ObjectId id = 0;
+        PlotKind kind = PlotKind::Line;
+        int column = 0;
+        std::size_t element = 0;
+        double value = 0.0;
+        int plane_index = -1;
+    };
+
     // The Data inspector: cell display, and the per-object appearance scratch its
     // tabs edit (re-seeded by pull_data_panel() in panel.cpp).
     struct DataPanelState {
+        // Objects whose data the host owns (a studio plot bound to worksheet
+        // columns), set by the host. Their tabs say so; a cell edit is returned by
+        // draw_data_panel() as a BoundCellEdit, not applied; inserting or removing
+        // points, rows or columns is disabled. Appearance edits apply as usual.
+        std::vector<ObjectId> bound;
+        // What the tab says under its title for a bound object.
+        std::string bound_note = "Bound: edits go to its source; rows follow it.";
+
+        bool is_bound(ObjectId id) const {
+            if (id == 0) return false;
+            for (const ObjectId b: bound) if (b == id) return true;
+            return false;
+        }
+
         // Display format for Data-panel cells.
         ValueFormat value_format;
 
