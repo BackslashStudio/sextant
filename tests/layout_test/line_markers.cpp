@@ -49,7 +49,12 @@ namespace lt {
             auto ax = fig->add_subplot(1, 1, 1);
             ax->set_xlim(0, 10).set_ylim(0, 10);
             ax->line(x, y, o);
-            if (legend) ax->legend();
+            if (legend) {
+                // Inside, so the plot area is the same with and without it.
+                LegendOptions lo;
+                lo.anchor = LegendAnchor::InsideTL;
+                ax->legend(lo);
+            }
             return fig;
         }
     } // namespace
@@ -95,30 +100,30 @@ namespace lt {
         }
 
         // --- Legend ------------------------------------------------------------
+        // The data sits low and the legend top left inside, so they don't overlap and a
+        // keyed image minus its unkeyed twin is the key's own ink.
         {
+            const std::vector<double> low{2.0, 5.0, 8.0}, ylow{1.0, 1.0, 1.0};
+            auto key_ink = [&](LineOptions o) {
+                const std::size_t without = ink(one(low, ylow, o)->render_rgba(), 0, 0, 255, 40);
+                o.name = "key";
+                const std::size_t with = ink(one(low, ylow, o, true)->render_rgba(), 0, 0, 255, 40);
+                return static_cast<long>(with) - static_cast<long>(without);
+            };
             LineOptions o = blue(MarkerStyle::None);
             o.name = "key";
-            const std::size_t no_key = ink(one(kX, kY, o, true)->render_rgba(), 0, 0, 255, 40);
-            check(no_key == 0, "legend: a LineStyle::None line without markers has no key");
-            o.marker = MarkerStyle::Square;
-            const std::size_t alone = ink(one(kX, kY, o, true)->render_rgba(), 0, 0, 255, 40);
-            const std::size_t unkeyed = ink(one(kX, kY, blue(MarkerStyle::Square))->render_rgba(), 0, 0, 255, 40);
-            check(alone > unkeyed + 20, "legend: with markers alone, the key is the marker");
-
-            LineOptions s = blue(MarkerStyle::None, LineStyle::Solid);
-            s.name = "key";
-            const std::size_t plain = ink(one(kX, kY, s, true)->render_rgba(), 0, 0, 255, 40);
-            const std::size_t plain_unkeyed =
-                    ink(one(kX, kY, blue(MarkerStyle::None, LineStyle::Solid))->render_rgba(), 0, 0, 255, 40);
-            s.marker = MarkerStyle::Square;
-            const std::size_t marked = ink(one(kX, kY, s, true)->render_rgba(), 0, 0, 255, 40);
-            LineOptions su = blue(MarkerStyle::Square, LineStyle::Solid);
-            const std::size_t marked_unkeyed = ink(one(kX, kY, su)->render_rgba(), 0, 0, 255, 40);
-            // The legend box hides some of the stroke, the same with or without markers.
-            check(marked - plain > marked_unkeyed - plain_unkeyed + 20,
+            check(ink(one(low, ylow, o, true)->render_rgba(), 0, 0, 255, 40) == 0,
+                  "legend: a LineStyle::None line without markers has no key");
+            const long alone = key_ink(blue(MarkerStyle::Square));
+            check(alone > 20, "legend: with markers alone, the key is the marker (" + std::to_string(alone) + ")");
+            const long plain = key_ink(blue(MarkerStyle::None, LineStyle::Solid));
+            const long marked = key_ink(blue(MarkerStyle::Square, LineStyle::Solid));
+            check(plain > 5 && marked > plain + 20,
                   "legend: a stroke with markers keys as the stroke with the marker on it (" +
-                      std::to_string(marked) + "-" + std::to_string(marked_unkeyed) + " vs " +
-                      std::to_string(plain) + "-" + std::to_string(plain_unkeyed) + ")");
+                      std::to_string(marked) + " vs " + std::to_string(plain) + ")");
+            LineOptions s = blue(MarkerStyle::Square, LineStyle::Solid);
+            s.name = "key";
+            LineOptions su = blue(MarkerStyle::Square, LineStyle::Solid);
             const std::string svg = one(kX, kY, s, true)->render_svg().svg;
             const std::string svg_plain = one(kX, kY, su)->render_svg().svg;
             check(count_of(svg, "<rect") > count_of(svg_plain, "<rect") + 1 ||
