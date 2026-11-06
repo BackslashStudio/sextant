@@ -272,6 +272,13 @@ endif()
 # ---------------------------------------------------------------------------
 set(GLAD_SOURCE   ${PROJECT_SOURCE_DIR}/third_party/glad/src/glad.c)
 set(NANOVG_SOURCE ${PROJECT_SOURCE_DIR}/third_party/nanovg/nanovg.c)
+set(RYML_SOURCE   ${PROJECT_SOURCE_DIR}/third_party/ryml/ryml_singlesrc.cpp)
+# Vendored rapidyaml, built as one amalgamated unit: not ours to fix warnings in.
+if(MSVC)
+    set_source_files_properties(${RYML_SOURCE} PROPERTIES COMPILE_OPTIONS "/w")
+else()
+    set_source_files_properties(${RYML_SOURCE} PROPERTIES COMPILE_OPTIONS "-w")
+endif()
 set(IMGUI_SOURCE_DIR ${PROJECT_SOURCE_DIR}/third_party/imgui)
 set(IMGUI_MAIN_SOURCE ${IMGUI_SOURCE_DIR}/imgui.cpp)
 set(IMGUI_SOURCES
@@ -286,7 +293,7 @@ set(IMGUI_SOURCES
 )
 
 # Warn if third-party files are missing
-foreach(_f ${GLAD_SOURCE} ${NANOVG_SOURCE} ${IMGUI_MAIN_SOURCE})
+foreach(_f ${GLAD_SOURCE} ${NANOVG_SOURCE} ${IMGUI_MAIN_SOURCE} ${RYML_SOURCE})
     if(NOT EXISTS ${_f})
         message(WARNING "Missing vendored file: ${_f}\nRun: bash scripts/setup_deps.sh")
     endif()
@@ -336,6 +343,7 @@ set(CMAKE_DEBUG_POSTFIX "d")
 
 set(SEXTANT_SOURCES
     src/figure.cpp
+    src/yaml_io.cpp
     src/figure_export.cpp
     src/messages.cpp
     src/render_frame.cpp
@@ -418,6 +426,9 @@ function(sextant_configure_target target_name link_scope)
     if(EXISTS ${NANOVG_SOURCE})
         target_sources(${target_name} PRIVATE ${NANOVG_SOURCE})
     endif()
+    if(EXISTS ${RYML_SOURCE})
+        target_sources(${target_name} PRIVATE ${RYML_SOURCE})
+    endif()
     if(TARGET sextant_imgui)
         target_sources(${target_name} PRIVATE $<TARGET_OBJECTS:sextant_imgui>)
     endif()
@@ -430,6 +441,7 @@ function(sextant_configure_target target_name link_scope)
             ${PROJECT_SOURCE_DIR}/src
             ${PROJECT_SOURCE_DIR}/third_party/glad/include
             ${PROJECT_SOURCE_DIR}/third_party/glad/include/KHR
+            ${PROJECT_SOURCE_DIR}/third_party/ryml
             ${PROJECT_SOURCE_DIR}/third_party/nanovg
             ${PROJECT_SOURCE_DIR}/third_party/stb
             ${IMGUI_SOURCE_DIR}
@@ -807,6 +819,7 @@ if(SEXTANT_BUILD_TESTS)
             tests/layout_test/object_id.cpp
             tests/layout_test/undo.cpp
             tests/layout_test/describe.cpp
+            tests/layout_test/yaml_io.cpp
             tests/layout_test/background.cpp
             tests/layout_test/ticks_hidden.cpp
             tests/layout_test/scale.cpp

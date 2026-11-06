@@ -305,6 +305,9 @@ int main() {
     // tick_style.cpp
     test_tick_style();
 
+    // yaml_io.cpp
+    test_yaml_io();
+
     // aspect.cpp
     test_aspect();
     // axis_off.cpp

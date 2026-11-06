@@ -52,6 +52,18 @@ curl -fsSL -o "$THIRD_PARTY/imgui/misc/fonts/Roboto-Medium.ttf" "$IMGUI_BASE/mis
 curl -fsSL -o "$THIRD_PARTY/imgui/misc/fonts/binary_to_compressed_c.cpp" "$IMGUI_BASE/misc/fonts/binary_to_compressed_c.cpp"
 echo "    Roboto-Medium.ttf OK"
 
+echo "==> Fetching rapidyaml (v0.16.0, single-source release)..."
+mkdir -p "$THIRD_PARTY/ryml"
+RYML_BASE="https://github.com/biojppm/rapidyaml/releases/download/v0.16.0"
+curl -fsSL -o "$THIRD_PARTY/ryml/ryml_singlesrc.hpp" "$RYML_BASE/rapidyaml.v0.16.0.singlesrc.hpp"
+curl -fsSL -o "$THIRD_PARTY/ryml/ryml_singlesrc.cpp" "$RYML_BASE/rapidyaml.v0.16.0.singlesrc.cpp"
+curl -fsSL -o "$THIRD_PARTY/ryml/LICENSE.txt" "https://raw.githubusercontent.com/biojppm/rapidyaml/v0.16.0/LICENSE.txt"
+# The .cpp includes the header by an absolute path of the release CI machine.
+sed -E 's|^#include <[^>]*singlesrc.hpp>.*$|#include "ryml_singlesrc.hpp"   // sextant: was an absolute CI path (see third_party/ryml/README.md)|' \
+    "$THIRD_PARTY/ryml/ryml_singlesrc.cpp" > "$THIRD_PARTY/ryml/ryml_singlesrc.cpp.tmp"
+mv "$THIRD_PARTY/ryml/ryml_singlesrc.cpp.tmp" "$THIRD_PARTY/ryml/ryml_singlesrc.cpp"
+echo "    ryml OK"
+
 echo "==> Generating GLAD (GL 4.1 Core)..."
 if ! python3 -c "import glad" 2>/dev/null; then
     echo "    Installing glad2 via pip..."

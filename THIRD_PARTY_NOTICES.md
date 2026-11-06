@@ -16,6 +16,7 @@ If you ship a binary that embeds sextant, ship this file with it.
 |---|---|---|
 | [Dear ImGui](https://github.com/ocornut/imgui) (`v1.92.8-docking`) | MIT | The Controls/Data panel UI. Docking branch, not mainline. |
 | [NanoVG](https://github.com/memononen/nanovg) | zlib | Vector rendering for axes, text and decorations. Bundles `fontstash.h` and `stb_truetype.h`. |
+| [rapidyaml](https://github.com/biojppm/rapidyaml) (`v0.16.0`, single-source release) | MIT | Reads and writes the YAML style files. Used inside the library only; not exposed in any header. One line edited (an include path). |
 | [stb](https://github.com/nothings/stb) (`stb_truetype.h`, `stb_image_write.h`) | Public domain (or MIT, at your option) | Font rasterization fallback and PNG output fallback. |
 | [GLAD](https://glad.dav1d.de/) (v1, OpenGL 4.1 core) | Generator MIT; generated loader public domain. Includes Khronos `khrplatform.h` (MIT). | OpenGL function loader. |
 | [Roboto](https://fonts.google.com/specimen/Roboto) (`Roboto-Medium.ttf`) | Apache License 2.0 | Panel UI font, compiled into `src/widgets/panel_font.h`. Separately licensed from Dear ImGui, which merely distributes it. |

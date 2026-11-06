@@ -612,6 +612,9 @@ namespace lt {
     // tick_style.cpp
     void test_tick_style();
 
+    // yaml_io.cpp
+    void test_yaml_io();
+
     // aspect.cpp
     void test_aspect();
 

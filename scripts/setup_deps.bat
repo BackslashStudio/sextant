@@ -63,6 +63,20 @@ curl -fsSL -o "%THIRD_PARTY%\imgui\misc\fonts\binary_to_compressed_c.cpp" "%IMGU
 echo     Roboto-Medium.ttf OK
 
 :: ---------------------------------------------------------------------------
+:: rapidyaml  (single-source release)
+:: ---------------------------------------------------------------------------
+echo =^> Fetching rapidyaml (v0.16.0, single-source release)...
+if not exist "%THIRD_PARTY%\ryml" mkdir "%THIRD_PARTY%\ryml"
+set "RYML_BASE=https://github.com/biojppm/rapidyaml/releases/download/v0.16.0"
+curl -fsSL -o "%THIRD_PARTY%\ryml\ryml_singlesrc.hpp" "%RYML_BASE%/rapidyaml.v0.16.0.singlesrc.hpp" || goto :error
+curl -fsSL -o "%THIRD_PARTY%\ryml\LICENSE.txt" "https://raw.githubusercontent.com/biojppm/rapidyaml/v0.16.0/LICENSE.txt" || goto :error
+curl -fsSL -o "%THIRD_PARTY%\ryml\ryml_singlesrc.cpp.orig" "%RYML_BASE%/rapidyaml.v0.16.0.singlesrc.cpp" || goto :error
+:: The .cpp includes the header by an absolute path of the release CI machine.
+powershell -NoProfile -Command "$t = [IO.File]::ReadAllText('%THIRD_PARTY%\ryml\ryml_singlesrc.cpp.orig'); $t = $t -replace '(?m)^#include <[^>]*singlesrc\.hpp>.*$', '#include \"ryml_singlesrc.hpp\"   // sextant: was an absolute CI path (see third_party/ryml/README.md)'; [IO.File]::WriteAllText('%THIRD_PARTY%\ryml\ryml_singlesrc.cpp', $t, (New-Object Text.UTF8Encoding $false))" || goto :error
+del "%THIRD_PARTY%\ryml\ryml_singlesrc.cpp.orig"
+echo     ryml OK
+
+:: ---------------------------------------------------------------------------
 :: GLAD  (GL 4.1 Core)
 :: ---------------------------------------------------------------------------
 echo =^> Generating GLAD (GL 4.1 Core)...
