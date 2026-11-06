@@ -13,6 +13,7 @@
 #include "yaml_describe.h"
 #include "yaml_io.h"
 
+#include <cerrno>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
@@ -22,6 +23,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <type_traits>
 #include <vector>
 
@@ -1066,18 +1068,27 @@ std::vector<std::string> Figure::apply_style_yaml(std::string_view text) {
     return std::move(is.list);
 }
 
+namespace {
+    // The errno of the failed open/write, as every file error in the library
+    // (generic_category: the code is an errno on every platform).
+    std::system_error io_error(const std::string& what) {
+        const int err = errno;
+        return std::system_error(err ? err : EIO, std::generic_category(), what);
+    }
+} // namespace
+
 void Figure::save_style(std::string_view path, StyleDetail detail) const {
     const std::string text = style_yaml(detail);
     std::ofstream out{std::string(path), std::ios::binary};
-    if (!out) throw std::runtime_error("Figure::save_style: cannot open '" + std::string(path) + "' for writing");
+    if (!out) throw io_error("Figure::save_style: cannot open '" + std::string(path) + "' for writing");
     out << text;
     out.flush();
-    if (!out) throw std::runtime_error("Figure::save_style: writing '" + std::string(path) + "' failed");
+    if (!out) throw io_error("Figure::save_style: writing '" + std::string(path) + "' failed");
 }
 
 std::vector<std::string> Figure::load_style(std::string_view path) {
     std::ifstream in{std::string(path), std::ios::binary};
-    if (!in) throw std::runtime_error("Figure::load_style: cannot open '" + std::string(path) + "'");
+    if (!in) throw io_error("Figure::load_style: cannot open '" + std::string(path) + "'");
     const std::string text{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
     return apply_style_yaml(text);
 }

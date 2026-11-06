@@ -5,10 +5,12 @@
 #include "figure_impl.h"
 #include "edit_box.h"
 #include "style_file.h"
+#include <cerrno>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <system_error>
 
 namespace lt {
     using namespace sextant;
@@ -151,6 +153,7 @@ namespace lt {
             check(same_pixels(a->render_rgba(), b->render_rgba()), "save_style / load_style round trip");
             std::filesystem::remove(path);
             check(throws_runtime([&] { b->load_style(path); }), "load_style: a missing file throws runtime_error");
+            try { b->load_style(path); } catch (const std::system_error& e) { check(e.code().value() == ENOENT, "load_style: a missing file carries ENOENT"); } catch (...) { check(false, "load_style: a missing file throws system_error"); }
             check(throws_runtime([&] { b->save_style((dir / "no_such_dir_x" / "s.yaml").string()); }),
                   "save_style: an unwritable path throws runtime_error");
         }

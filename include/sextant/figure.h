@@ -406,7 +406,7 @@ namespace sextant {
 
         std::vector<std::string> apply_style_yaml(std::string_view yaml);
 
-        // File forms. Throw std::runtime_error when the file cannot be written
+        // File forms. Throw std::system_error (a runtime_error, carrying the errno) when the file cannot be written
         // or read, and the above for its contents.
         void save_style(std::string_view path, StyleDetail detail = StyleDetail::Style) const;
 
