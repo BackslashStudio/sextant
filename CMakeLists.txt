@@ -344,6 +344,7 @@ set(CMAKE_DEBUG_POSTFIX "d")
 set(SEXTANT_SOURCES
     src/figure.cpp
     src/yaml_io.cpp
+    src/style_file.cpp
     src/figure_export.cpp
     src/messages.cpp
     src/render_frame.cpp
@@ -820,6 +821,7 @@ if(SEXTANT_BUILD_TESTS)
             tests/layout_test/undo.cpp
             tests/layout_test/describe.cpp
             tests/layout_test/yaml_io.cpp
+            tests/layout_test/style_file.cpp
             tests/layout_test/background.cpp
             tests/layout_test/ticks_hidden.cpp
             tests/layout_test/scale.cpp

@@ -614,6 +614,7 @@ namespace lt {
 
     // yaml_io.cpp
     void test_yaml_io();
+    void test_style_file();
 
     // aspect.cpp
     void test_aspect();

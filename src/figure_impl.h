@@ -50,6 +50,10 @@ struct Figure::Impl {
         }
     };
 
+    // The style-file walk (style_file.cpp): defined there, a member so it
+    // reaches the axes' Impls as Figure's other code does.
+    struct StyleFile;
+
     FigureOptions                 opts;
     // opts.math_fontset resolved at construction: the math font's file, ""
     // for the text font.

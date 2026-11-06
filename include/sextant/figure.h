@@ -379,6 +379,39 @@ namespace sextant {
 
         void set_suptitle_style(SuptitleOptions opts = {});
 
+        // --- Style files (YAML) ---------------------------------------------
+        //
+        // The look of this figure as a YAML document, and the way back. Style
+        // is everything that is how the figure looks: figure margins, gaps and
+        // background, each axes' style, grid, legend, colorbar, scales, tick
+        // formats, aspect, 3D camera and box, polar rings, and the options of
+        // every plot object. State adds what is content-like: titles and the
+        // suptitle, limits, tick positions and labels, the figure size. Plot
+        // data is never written.
+        //
+        // style_yaml() reads the figure as it is now; on a shown figure it first
+        // folds the window's pending edits in, as refresh() does.
+        //
+        // apply_style_yaml() applies a document to this figure. Axes are
+        // matched by cell, then by kind; plot objects by kind and index. What
+        // the file names and this figure lacks, and any bad value, is skipped
+        // and described in the returned messages (empty = everything applied);
+        // what the file does not mention is left alone. Throws
+        // std::invalid_argument for text that is not YAML, is not a sextant style
+        // file, or is a newer format version than this library reads.
+        // On a shown figure it is published, as refresh() does.
+        enum class StyleDetail { Style, State };
+
+        std::string style_yaml(StyleDetail detail = StyleDetail::Style) const;
+
+        std::vector<std::string> apply_style_yaml(std::string_view yaml);
+
+        // File forms. Throw std::runtime_error when the file cannot be written
+        // or read, and the above for its contents.
+        void save_style(std::string_view path, StyleDetail detail = StyleDetail::Style) const;
+
+        std::vector<std::string> load_style(std::string_view path);
+
         // Render-loop timing; all zero before show() and after close(). Any
         // thread, including while another thread is in show() or close().
         FrameStats frame_stats() const;

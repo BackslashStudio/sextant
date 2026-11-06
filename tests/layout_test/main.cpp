@@ -307,6 +307,7 @@ int main() {
 
     // yaml_io.cpp
     test_yaml_io();
+    test_style_file();
 
     // aspect.cpp
     test_aspect();
