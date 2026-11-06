@@ -3,9 +3,12 @@
 // and survives a round trip through text; every enum name maps back.
 #include "layout_test.h"
 #include "describe.h"
+#include "yaml_describe.h"
 
 #include <cstdio>
 #include <cstdlib>
+#include <cmath>
+#include <limits>
 #include <map>
 #include <set>
 #include <string>
@@ -248,6 +251,39 @@ namespace lt {
             T back{};
             read(back, d1);
             check(write(back) == d1, who + "text round trip");
+
+            // --- YAML: defaults omitted, a full round trip, absent = unchanged ---
+            {
+                namespace y = sextant::yaml;
+                check(y::to_node(def, T{}).map.empty(), who + "yaml: a default struct writes nothing");
+
+                std::set<std::string> data;
+                for_each_leaf(moved, [&](std::string_view p, const auto& x) {
+                    const auto dot = p.rfind('.');
+                    if (y::is_data_field(dot == std::string_view::npos ? p : p.substr(dot + 1), x)) data.insert(std::string(p));
+                });
+                auto without_data = [&](std::map<std::string, std::string> m) {
+                    for (const auto& p : data) m.erase(p);
+                    return m;
+                };
+
+                const y::Node diff = y::to_node(moved, T{});
+                const std::string text = y::emit(diff);
+                T rt{};
+                y::Issues issues;
+                bool parsed = true;
+                try { y::from_node(y::parse(text), rt, issues); }
+                catch (const std::exception& e) { parsed = false; check(false, who + "yaml: emitted text does not parse: " + e.what()); }
+                if (parsed) {
+                    check(issues.empty(), who + "yaml: reads rt without issues" + (issues.empty() ? "" : ": " + issues.list[0]));
+                    check(without_data(write(rt)) == without_data(d1), who + "yaml: round trip");
+                    check(y::emit(y::to_node(rt, T{})) == text, who + "yaml: round trip is stable text");
+                }
+                T unchanged = moved;
+                y::Issues none;
+                y::from_node(y::Node::make_map(), unchanged, none);
+                check(none.empty() && write(unchanged) == d1, who + "yaml: absent keys leave fields unchanged");
+            }
         }
 
         template <class E>
@@ -300,5 +336,139 @@ namespace lt {
               "describe: nested structs flatten to dotted paths");
         check(lw.at("linestyle") == "solid" && write(LegendOptions{}).at("anchor") == "outside_rt",
               "describe: enums written by name");
+
+        // --- YAML by hand: spellings, errors, exact numbers ----------------------
+        {
+            namespace y = sextant::yaml;
+            const auto run = [](const char* text, auto& opts) {
+                y::Issues is;
+                y::from_node(y::parse(text), opts, is);
+                return is.list;
+            };
+            const auto has = [](const std::vector<std::string>& l, const char* what) {
+                for (const auto& s : l) if (s.find(what) != std::string::npos) return true;
+                return false;
+            };
+
+            LineOptions lo2;
+            auto iss = run("linewidth: 2.5\ncolor: \"#ff000080\"\nlinestyle: dashed\nerrorbar:\n  capsize: 4\n", lo2);
+            check(iss.empty() && lo2.linewidth == 2.5f && lo2.linestyle == LineStyle::Dashed && lo2.errorbar.capsize == 4.0f
+                      && lo2.color && lo2.color->r == 1.0f && lo2.color->a == 128.0f / 255.0f,
+                  "yaml: a hand-written document sets fields, nested too");
+
+            const LineOptions before;
+            LineOptions lo3 = before;
+            iss = run("linewidth: abc\nlinestyle: wavy\ncolour: red\nerrorbar:\n  capsiz: 3\n  capsize: \"4\"\nmarker: [1]\n", lo3);
+            check(has(iss, "linewidth: expected a number, got 'abc'") && has(iss, "linestyle: unknown value 'wavy'")
+                      && has(iss, "unknown keys skipped: colour") && has(iss, "errorbar: unknown keys skipped: capsiz")
+                      && has(iss, "errorbar.capsize: expected a number") && has(iss, "marker: expected a name"),
+                  "yaml: wrong values and unknown keys are reported by path");
+            check(write(lo3) == write(before), "yaml: a rejected value leaves its field as it was");
+
+            LineOptions lo4;
+            iss = run("color: red\nname: 7\n", lo4);
+            check(iss.empty() && lo4.color && lo4.color->r == Color::Red.r && lo4.color->g == Color::Red.g && lo4.name == "7", "yaml: a color by name; a number read as text for a string");
+            iss = run("color: [0.25, 0.5, 0.75]\n", lo4);
+            check(iss.empty() && lo4.color && lo4.color->r == 0.25f && lo4.color->b == 0.75f && lo4.color->a == 1.0f, "yaml: a color as [r, g, b]");
+            iss = run("color: puce\n", lo4);
+            check(has(iss, "color:"), "yaml: an unknown color name is reported");
+
+            QuiverOptions qo;
+            qo.amp = 2.0;
+            iss = run("amp: null\n", qo);
+            check(iss.empty() && !qo.amp, "yaml: null empties an optional");
+            iss = run("amp: 3\n", qo);
+            check(iss.empty() && qo.amp && *qo.amp == 3.0, "yaml: a value fills an optional");
+            QuiverOptions qbase;
+            qbase.amp = 1.5;
+            QuiverOptions qd;
+            qd.amp = std::nullopt;
+            check(y::to_node(qd, qbase).find("amp") != nullptr,
+                  "yaml: an emptied optional against a set default is written (null)");
+
+            // Numbers: shortest text that reads back exactly, specials included.
+            const double ds[] = {0.1, 1.0 / 3.0, 1e-300, 1e300, 123456789.123456789, -0.0, 5e-324,
+                                 std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity(),
+                                 std::numeric_limits<double>::quiet_NaN(), 100000.0, 3.0};
+            bool exact = true;
+            for (double d : ds) {
+                QuiverOptions a;
+                a.amp = d;
+                QuiverOptions b;
+                y::Issues is;
+                y::from_node(y::parse(y::emit(y::to_node(a, QuiverOptions{}))), b, is);
+                const bool same_d = b.amp && (std::isnan(d) ? std::isnan(*b.amp)
+                                                            : (*b.amp == d && std::signbit(*b.amp) == std::signbit(d)));
+                exact = exact && is.empty() && same_d;
+            }
+            check(exact, "yaml: doubles round-trip exactly (incl. -0, denormal, inf, nan)");
+            const float fs[] = {0.1f, 1.0f / 3.0f, 1e-30f, 3e38f, 0.5f, 16777217.0f};
+            bool fexact = true;
+            for (float f : fs) {
+                HeatmapOptions a;
+                a.vmin = f;
+                HeatmapOptions b;
+                y::Issues is;
+                y::from_node(y::parse(y::emit(y::to_node(a, HeatmapOptions{}))), b, is);
+                fexact = fexact && is.empty() && b.vmin == f;
+            }
+            check(fexact, "yaml: floats round-trip exactly");
+            LineOptions thin;
+            thin.linewidth = 0.1f;
+            check(y::emit(y::to_node(thin, LineOptions{})).find("linewidth: 0.1\n") != std::string::npos,
+                  "yaml: a float is written in its shortest form, not 0.10000000149");
+
+            // Color: hex for multiples of 1/255, a list otherwise.
+            LineOptions c1;
+            c1.color = Color::from_hex(0x336699);
+            LineOptions c2;
+            c2.color = {0.3f, 0.6f, 0.9f, 1.0f};
+            const std::string t1 = y::emit(y::to_node(c1, LineOptions{}));
+            const std::string t2 = y::emit(y::to_node(c2, LineOptions{}));
+            check(t1.find("color: \"#336699\"") != std::string::npos && t2.find("color: [") != std::string::npos,
+                  "yaml: a color is hex when exact, a list when not");
+
+            // Data never goes in a style.
+            ScatterOptions so;
+            so.sizes = {1, 2, 3};
+            so.hint_labels = {"a", "b"};
+            so.size = 9.0f;
+            const y::Node sn = y::to_node(so, ScatterOptions{});
+            check(!sn.find("sizes") && !sn.find("hint_labels") && sn.find("size"), "yaml: per-point arrays are not written");
+            BarOptions bo;
+            bo.bottom = {1, 2};
+            Bar3DOptions b3;
+            b3.bottom = 5.0f;
+            check(!y::to_node(bo, BarOptions{}).find("bottom") && y::to_node(b3, Bar3DOptions{}).find("bottom"),
+                  "yaml: bottom is data in bar() and a number in bar3d()");
+
+            // Shape errors do not throw.
+            LineOptions lo5;
+            iss = run("- 1\n- 2\n", lo5);
+            check(has(iss, "expected a mapping"), "yaml: a list where a mapping belongs is reported");
+            iss = run("errorbar: 3\n", lo5);
+            check(has(iss, "errorbar: expected a mapping"), "yaml: a scalar where a nested struct belongs is reported");
+            iss = run("", lo5);
+            check(iss.empty(), "yaml: an empty document changes nothing");
+
+            // Strings that look like other types come back as strings.
+            LineOptions lo6;
+            lo6.name = "1.5";
+            LineOptions lo7;
+            y::Issues is7;
+            const std::string t6 = y::emit(y::to_node(lo6, LineOptions{}));
+            y::from_node(y::parse(t6), lo7, is7);
+            check(t6.find("name: \"1.5\"") != std::string::npos && lo7.name == "1.5" && is7.empty(),
+                  "yaml: a number-like string is quoted and returns as that string");
+
+            // Lists of colors and of strings.
+            StackOptions st;
+            st.colors = {Color::Red, {0.3f, 0.6f, 0.9f, 1.0f}};
+            st.names = {"a b", "", "true"};
+            StackOptions st2;
+            y::Issues is8;
+            y::from_node(y::parse(y::emit(y::to_node(st, StackOptions{}))), st2, is8);
+            check(is8.empty() && st2.colors.size() == 2 && st2.colors[0].r == Color::Red.r && st2.colors[1].g == 0.6f && st2.names == st.names, "yaml: lists of colors and of strings");
+        }
     }
 } // namespace lt
