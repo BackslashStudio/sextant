@@ -189,6 +189,19 @@ public:
         if (drawn_) pending_.fig_seen = drawn_->stamps;
     }
 
+    // A whole edit made over the drawn snapshot (an imported style file): stamped
+    // like update()'s, then merged into what is pending, the latest value winning.
+    void push(FigureEdits edits) {
+        std::scoped_lock lk(mutex_);
+        if (drawn_) stamp_figure_edits(edits, *drawn_);
+        for (auto& [idx, e] : edits.per_axes) merge_axes(slot_edit(idx), e);
+        for (auto& [idx, e] : edits.per_axes3d) merge_axes(slot_edit3d(idx), e);
+        merge_figure_edits(pending_, edits);
+        if (edits.col_ratios) pending_.col_ratios = edits.col_ratios;
+        if (edits.row_ratios) pending_.row_ratios = edits.row_ratios;
+        if (drawn_) pending_.fig_seen = drawn_->stamps;
+    }
+
     // The snapshot the panels are drawn from this frame. update() records its
     // stamps (StyleStamps, placement and figure stamps) on every edit, and the
     // ids of the objects and planes it names by index, so a push site need
@@ -251,6 +264,31 @@ private:
         FigureEdits out = std::move(pending_);
         pending_ = FigureEdits{};
         return out;
+    }
+
+    // `src` into `dst`, field by field, src winning (and bringing its stamps).
+    template <class E>
+    static void merge_axes(E& dst, const E& src) {
+        merge_style_edits(dst, src);
+        TitleEdits t;
+        merge_title_edits(t, dst);
+        merge_title_edits(t, src);
+        dst.title = t.title; dst.xtitle = t.xtitle; dst.ytitle = t.ytitle;
+        if constexpr (requires { dst.ztitle; }) dst.ztitle = t.ztitle;
+        dst.title_seen = t.title_seen;
+        LimitEdits l;
+        merge_limit_edits(l, dst);
+        merge_limit_edits(l, src);
+        dst.xlim_auto = l.xlim_auto; dst.xmin = l.xmin; dst.xmax = l.xmax;
+        dst.ylim_auto = l.ylim_auto; dst.ymin = l.ymin; dst.ymax = l.ymax;
+        if constexpr (requires { dst.zmin; }) {
+            dst.zlim_auto = l.zlim_auto; dst.zmin = l.zmin; dst.zmax = l.zmax;
+        }
+        dst.lim_seen = l.lim_seen;
+        if constexpr (requires { dst.camera; }) {
+            if (src.camera) { dst.camera = src.camera; dst.camera_seen = src.camera_seen; }
+        }
+        dst.plot_ops.insert(dst.plot_ops.end(), src.plot_ops.begin(), src.plot_ops.end());
     }
 
     AxesEdit& slot_edit(int idx) {

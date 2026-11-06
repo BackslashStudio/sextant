@@ -7,6 +7,7 @@
 // view and rings) are written by hand below.
 #include "figure_edits.h"
 #include "figure_impl.h"
+#include "style_file.h"
 #include "sextant/figure.h"
 #include "tick.h"
 #include "yaml_describe.h"
@@ -314,7 +315,15 @@ void for_each_kind(D& d, F&& f) {
     f("bar_stack", d.bar_stacks);
 }
 
-Node plots_node(const AxesImpl& d) {
+// The walk reads either side of the thread boundary: the live Impls (Figure's
+// own style_yaml()) or the published snapshots (the window's File menu). They
+// share their field names, so the helpers below are templates over the axes
+// type; the few names that differ are bridged by polar_sheet().
+inline const AxesImpl& polar_sheet(const PolarImpl& p) { return p.sheet; }
+inline const RenderSnapshot& polar_sheet(const RenderSnapshotPolar& p) { return p.objects; }
+
+template <class D>
+Node plots_node(const D& d) {
     Node m = Node::make_map();
     for_each_kind(d, [&](const char* name, const auto& v) {
         if (v.empty()) return;
@@ -326,7 +335,8 @@ Node plots_node(const AxesImpl& d) {
 }
 
 // `plane` = -1: the axes itself, else the plane of a 3D axes.
-void plots_read(const Node& n, const AxesImpl& cur, int plane, std::vector<PlotStyleEdit>& out,
+template <class D>
+void plots_read(const Node& n, const D& cur, int plane, std::vector<PlotStyleEdit>& out,
                 Issues& is, const std::string& at) {
     Obj o(n, is, at);
     if (!o.ok) return;
@@ -392,7 +402,8 @@ void objects_read(const Node& n, const Vec& cur, std::vector<Edit>& out, Issues&
 
 // The part shared by 2D, twin and polar axes: grid, legend, colorbar, frame style,
 // plots. `cell` false = a twin (title, legend and colorbar are the host's).
-void look_node(Node& m, const AxesImpl& d, bool host) {
+template <class D>
+void look_node(Node& m, const D& d, bool host) {
     put(m, "grid", d.grid_enabled);
     put_section(m, "grid_options", d.grid_opts);
     if (host) {
@@ -403,7 +414,8 @@ void look_node(Node& m, const AxesImpl& d, bool host) {
     put_section(m, "axes_style", d.axes_style);
 }
 
-void look_read(Obj& o, const AxesImpl& cur, AxesEdit& e) {
+template <class D>
+void look_read(Obj& o, const D& cur, AxesEdit& e) {
     o.set("grid", e.grid_enabled);
     o.section("grid_options", cur.grid_opts, e.grid_opts);
     o.set("legend", e.legend_enabled);
@@ -414,7 +426,8 @@ void look_read(Obj& o, const AxesImpl& cur, AxesEdit& e) {
 }
 
 // `layer`: 0 an axes, kLayerTwinX / kLayerTwinY a twin (its shared axis is the host's).
-Node axes2d_node(const AxesImpl& d, bool state, int layer) {
+template <class D>
+Node axes2d_node(const D& d, bool state, int layer) {
     const bool host = layer == 0;
     const bool x = layer != kLayerTwinX, y = layer != kLayerTwinY;
     Node m = Node::make_map();
@@ -441,7 +454,8 @@ Node axes2d_node(const AxesImpl& d, bool state, int layer) {
     return m;
 }
 
-void axes2d_read(Obj& o, const AxesImpl& cur, AxesEdit& e) {
+template <class D>
+void axes2d_read(Obj& o, const D& cur, AxesEdit& e) {
     o.set("title", e.title);
     o.set("xtitle", e.xtitle);
     o.set("ytitle", e.ytitle);
@@ -458,8 +472,9 @@ void axes2d_read(Obj& o, const AxesImpl& cur, AxesEdit& e) {
     o.set("axis_on", e.axis_on);
 }
 
-Node polar_node(const PolarImpl& p, bool state) {
-    const AxesImpl& d = p.sheet;
+template <class P>
+Node polar_node(const P& p, bool state) {
+    const auto& d = polar_sheet(p);
     Node m = Node::make_map();
     if (state) {
         put(m, "title", d.title);
@@ -481,9 +496,10 @@ Node polar_node(const PolarImpl& p, bool state) {
     return m;
 }
 
-void polar_read(Obj& o, const PolarImpl& cur, AxesEdit& e) {
+template <class P>
+void polar_read(Obj& o, const P& cur, AxesEdit& e) {
     o.set("title", e.title);
-    look_read(o, cur.sheet, e);
+    look_read(o, polar_sheet(cur), e);
     std::optional<PolarView> view;
     std::optional<PolarStyle> style;
     const auto v = [&]() -> PolarView& { if (!view) view = cur.view; return *view; };
@@ -523,7 +539,8 @@ void polar_read(Obj& o, const PolarImpl& cur, AxesEdit& e) {
     e.polar_style = style;
 }
 
-Node axes3d_node(const Axes3DImpl& d, bool state) {
+template <class A3>
+Node axes3d_node(const A3& d, bool state) {
     Node m = Node::make_map();
     if (state) {
         put(m, "title", d.title);
@@ -572,7 +589,8 @@ Node axes3d_node(const Axes3DImpl& d, bool state) {
     return m;
 }
 
-void axes3d_read(Obj& o, const Axes3DImpl& cur, AxesEdit3D& e) {
+template <class A3>
+void axes3d_read(Obj& o, const A3& cur, AxesEdit3D& e) {
     o.set("title", e.title);
     o.set("xtitle", e.xtitle);
     o.set("ytitle", e.ytitle);
@@ -630,185 +648,385 @@ void axes3d_read(Obj& o, const Axes3DImpl& cur, AxesEdit3D& e) {
     list("text", cur.texts, e.texts);
 }
 
-} // namespace
-
 // --- The figure ---------------------------------------------------------------
 
-struct Figure::Impl::StyleFile {
-    static Node write(Figure::Impl& d, Figure::StyleDetail detail) {
-        const bool state = detail == Figure::StyleDetail::State;
-        Node root = Node::make_map();
-        put(root, "sextant_style", kFormatVersion);
-        put(root, "detail", std::string(state ? "state" : "style"));
+// The figure-level settings, from either side.
+struct FigLevel {
+    Color background;
+    FigureMargins margins;
+    float col_gap = 20.0f, row_gap = 20.0f;
+    std::vector<float> col_ratios, row_ratios;
+    std::string suptitle;
+    SuptitleOptions suptitle_opts;
+    // Only the live figure knows these (the window's size is the window's).
+    std::optional<std::pair<int, int>> size;
+    std::optional<float> pick_radius;
+};
 
-        const Shape g = d.grid_shape();
+struct GridShape { int rows = 0, cols = 0; };
+
+// What a file asked of the figure that is not an edit.
+struct FigRead {
+    std::optional<std::pair<int, int>> size;
+    std::optional<float> pick;
+};
+
+// One grid cell by pointer, whichever side the axes are on.
+template <class A2, class P, class A3>
+struct CellRef {
+    int index = 0;
+    const A2* a2 = nullptr;
+    const P* polar = nullptr;
+    const A3* a3 = nullptr;
+    const A2* twin_x = nullptr;
+    const A2* twin_y = nullptr;
+};
+
+// `only`: one cell's entry and nothing else (no grid, no figure section).
+template <class C>
+Node write_doc(const FigLevel& fl, GridShape g, const std::vector<C>& cells, bool state,
+               std::optional<int> only) {
+    Node root = Node::make_map();
+    put(root, "sextant_style", kFormatVersion);
+    put(root, "detail", std::string(state ? "state" : "style"));
+
+    if (!only) {
         {
             Node s = Node::make_seq();
             s.push(dt::encode_leaf(g.rows));
             s.push(dt::encode_leaf(g.cols));
             root.add("grid", std::move(s));
         }
-
         Node f = Node::make_map();
         if (state) {
-            Node size = Node::make_seq();
-            size.push(dt::encode_leaf(d.opts.width));
-            size.push(dt::encode_leaf(d.opts.height));
-            f.add("size", std::move(size));
-            put(f, "suptitle", d.suptitle_text);
+            if (fl.size) {
+                Node size = Node::make_seq();
+                size.push(dt::encode_leaf(fl.size->first));
+                size.push(dt::encode_leaf(fl.size->second));
+                f.add("size", std::move(size));
+            }
+            put(f, "suptitle", fl.suptitle);
         }
-        put(f, "background", d.opts.background);
-        put_section(f, "margins", d.opts.margins);
-        put(f, "col_gap", d.opts.subplot_col_gap);
-        put(f, "row_gap", d.opts.subplot_row_gap);
-        put(f, "pick_radius", d.opts.pick_radius);
-        put(f, "col_ratios", d.col_ratios);
-        put(f, "row_ratios", d.row_ratios);
-        put_section(f, "suptitle_style", d.suptitle_opts);
+        put(f, "background", fl.background);
+        put_section(f, "margins", fl.margins);
+        put(f, "col_gap", fl.col_gap);
+        put(f, "row_gap", fl.row_gap);
+        if (fl.pick_radius) put(f, "pick_radius", *fl.pick_radius);
+        put(f, "col_ratios", fl.col_ratios);
+        put(f, "row_ratios", fl.row_ratios);
+        put_section(f, "suptitle_style", fl.suptitle_opts);
         root.add("figure", std::move(f));
-
-        Node axes = Node::make_seq();
-        for (auto& s : d.slots) {
-            Node a;
-            if (PolarImpl* p = polar_impl(s)) {
-                a = polar_node(*p, state);
-                a.map.insert(a.map.begin(), {"kind", Node::scalar("polar")});
-            } else if (s.as3d()) {
-                a = axes3d_node(*s.as3d()->d, state);
-                a.map.insert(a.map.begin(), {"kind", Node::scalar("axes3d")});
-            } else if (s.as2d()) {
-                AxesImpl& x = *s.as2d()->d;
-                a = axes2d_node(x, state, 0);
-                if (x.twin_x) a.add("twin_x", axes2d_node(*x.twin_x->d, state, kLayerTwinX));
-                if (x.twin_y) a.add("twin_y", axes2d_node(*x.twin_y->d, state, kLayerTwinY));
-                a.map.insert(a.map.begin(), {"kind", Node::scalar("axes")});
-            } else {
-                continue;
-            }
-            a.map.insert(a.map.begin(), {"cell", dt::encode_leaf(s.index)});
-            axes.push(std::move(a));
-        }
-        root.add("axes", std::move(axes));
-        return root;
     }
 
-    // Reads the document into edits; what cannot be applied is reported.
-    static void read(Figure::Impl& d, const Node& root, FigureEdits& fe, Issues& is,
-                     std::optional<std::pair<int, int>>& size, std::optional<float>& pick) {
-        Obj top(root, is, "");
-        top.at("sextant_style");
-        top.at("detail");
-        if (const Node* g = top.at("grid")) {
-            int r = 0, c = 0;
-            std::string err;
-            const Shape have = d.grid_shape();
-            if (g->is_seq() && g->seq.size() == 2 && dt::decode_leaf(g->seq[0], r, err) && dt::decode_leaf(g->seq[1], c, err)) {
-                if (r != have.rows || c != have.cols)
-                    is.add("grid: the file is for " + std::to_string(r) + "x" + std::to_string(c)
-                           + " cells, this figure has " + std::to_string(have.rows) + "x" + std::to_string(have.cols));
-            }
+    Node axes = Node::make_seq();
+    for (const C& c : cells) {
+        if (only && c.index != *only) continue;
+        Node a;
+        if (c.polar) {
+            a = polar_node(*c.polar, state);
+            a.map.insert(a.map.begin(), {"kind", Node::scalar("polar")});
+        } else if (c.a3) {
+            a = axes3d_node(*c.a3, state);
+            a.map.insert(a.map.begin(), {"kind", Node::scalar("axes3d")});
+        } else if (c.a2) {
+            a = axes2d_node(*c.a2, state, 0);
+            if (c.twin_x) a.add("twin_x", axes2d_node(*c.twin_x, state, kLayerTwinX));
+            if (c.twin_y) a.add("twin_y", axes2d_node(*c.twin_y, state, kLayerTwinY));
+            a.map.insert(a.map.begin(), {"kind", Node::scalar("axes")});
+        } else {
+            continue;
         }
+        a.map.insert(a.map.begin(), {"cell", dt::encode_leaf(c.index)});
+        axes.push(std::move(a));
+    }
+    root.add("axes", std::move(axes));
+    return root;
+}
 
-        if (const Node* fn = top.at("figure")) {
-            Obj f(*fn, is, "figure");
-            if (f.ok) {
-                const Shape g = d.grid_shape();
-                if (const Node* sz = f.at("size")) {
-                    int w = 0, h = 0;
-                    std::string err;
-                    if (sz->is_seq() && sz->seq.size() == 2 && dt::decode_leaf(sz->seq[0], w, err) && dt::decode_leaf(sz->seq[1], h, err)
-                        && w > 0 && h > 0)
-                        size = std::pair{w, h};
-                    else
-                        is.add("figure.size: expected [width, height] of positive integers");
-                }
-                f.set("suptitle", fe.suptitle);
-                f.set("background", fe.background);
-                f.section("margins", d.opts.margins, fe.margins);
-                f.set("col_gap", fe.col_gap);
-                f.set("row_gap", fe.row_gap);
-                float pr = 0;
-                if (f.leaf("pick_radius", pr)) {
-                    if (std::isfinite(pr) && pr >= 0.0f) pick = pr;
-                    else is.add("figure.pick_radius: must be finite and >= 0");
-                }
-                const auto ratios = [&](const char* key, int n, std::optional<std::vector<float>>& dst) {
-                    std::vector<float> r;
-                    if (!f.leaf(key, r)) return;
-                    bool good = r.empty() || static_cast<int>(r.size()) == n;
-                    for (float x : r) good = good && std::isfinite(x) && x > 0.0f;
-                    if (good) dst = std::move(r);
-                    else is.add(f.sub(key) + ": needs " + std::to_string(n) + " positive numbers (or none for equal)");
-                };
-                ratios("col_ratios", g.cols, fe.col_ratios);
-                ratios("row_ratios", g.rows, fe.row_ratios);
-                f.section("suptitle_style", d.suptitle_opts, fe.suptitle_opts);
-                f.finish();
-            }
-        }
+inline void kind_mismatch(const std::string& at, const std::string& file, const std::string& have, Issues& is) {
+    is.add(at + ": the file has " + file + " axes here, this figure has " + have + "; skipped");
+}
 
-        if (const Node* an = top.at("axes")) {
-            if (!an->is_seq()) {
-                is.add("axes: expected a list, got " + dt::got(*an));
-            } else {
-                for (std::size_t i = 0; i < an->seq.size(); ++i) read_slot(d, an->seq[i], at_index("axes", i), fe, is);
-            }
+// One axes entry of the file onto the cell it names, or onto `into` when given.
+template <class C>
+void read_slot(const Node& entry, const std::string& at, const std::vector<C>& cells,
+               std::optional<int> into, FigureEdits& fe, Issues& is) {
+    Obj o(entry, is, at);
+    if (!o.ok) return;
+    int cell = 0;
+    std::string kind;
+    const bool has_cell = o.leaf("cell", cell);
+    if (into) {
+        o.seen.emplace_back("cell");
+        cell = *into;
+    }
+    if ((!has_cell && !into) || !o.leaf("kind", kind)) {
+        if ((!o.n.find("cell") && !into) || !o.n.find("kind")) is.add(at + ": needs cell and kind");
+        return;
+    }
+    const C* c = nullptr;
+    for (const C& x : cells) if (x.index == cell) c = &x;
+    if (!c) {
+        is.add(at + ": this figure has no axes at cell " + std::to_string(cell) + "; skipped");
+        return;
+    }
+    if (c->polar) {
+        if (kind != "polar") return kind_mismatch(at, kind, "polar", is);
+        AxesEdit e;
+        polar_read(o, *c->polar, e);
+        o.finish();
+        fe.per_axes.emplace_back(cell, std::move(e));
+    } else if (c->a3) {
+        if (kind != "axes3d") return kind_mismatch(at, kind, "axes3d", is);
+        AxesEdit3D e;
+        axes3d_read(o, *c->a3, e);
+        o.finish();
+        fe.per_axes3d.emplace_back(cell, std::move(e));
+    } else if (c->a2) {
+        if (kind != "axes") return kind_mismatch(at, kind, "axes", is);
+        AxesEdit e;
+        axes2d_read(o, *c->a2, e);
+        const auto twin = [&](const char* name, const auto* t, int layer) {
+            const Node* n = o.at(name);
+            if (!n) return;
+            if (!t) { is.add(o.sub(name) + ": this axes has no such twin; skipped"); return; }
+            Obj to(*n, is, o.sub(name));
+            if (!to.ok) return;
+            AxesEdit te;
+            axes2d_read(to, *t, te);
+            to.finish();
+            fe.per_axes.emplace_back(axes_key(cell, layer), std::move(te));
+        };
+        twin("twin_x", c->twin_x, kLayerTwinX);
+        twin("twin_y", c->twin_y, kLayerTwinY);
+        o.finish();
+        fe.per_axes.emplace_back(cell, std::move(e));
+    }
+}
+
+// The document into edits; what cannot be applied is reported. `target`: only
+// the axes entry for that cell (or the file's only entry), applied to that
+// cell; the figure section is not read.
+template <class C>
+void read_doc(const Node& root, const FigLevel& cur, GridShape have, const std::vector<C>& cells,
+              std::optional<int> target, FigureEdits& fe, Issues& is, FigRead& fr) {
+    Obj top(root, is, "");
+    top.at("sextant_style");
+    top.at("detail");
+    const Node* gn = top.at("grid");
+    const Node* fn = top.at("figure");
+
+    if (!target && gn) {
+        int r = 0, c = 0;
+        std::string err;
+        if (gn->is_seq() && gn->seq.size() == 2 && dt::decode_leaf(gn->seq[0], r, err) && dt::decode_leaf(gn->seq[1], c, err)) {
+            if (r != have.rows || c != have.cols)
+                is.add("grid: the file is for " + std::to_string(r) + "x" + std::to_string(c)
+                       + " cells, this figure has " + std::to_string(have.rows) + "x" + std::to_string(have.cols));
         }
-        top.finish();
     }
 
-    static void read_slot(Figure::Impl& d, const Node& entry, const std::string& at, FigureEdits& fe, Issues& is) {
-        Obj o(entry, is, at);
-        if (!o.ok) return;
-        int cell = 0;
-        std::string kind;
-        if (!o.leaf("cell", cell) || !o.leaf("kind", kind)) {
-            if (!o.n.find("cell") || !o.n.find("kind")) is.add(at + ": needs cell and kind");
-            return;
-        }
-        Slot* slot = nullptr;
-        for (auto& s : d.slots) if (s.index == cell) slot = &s;
-        if (!slot) {
-            is.add(at + ": this figure has no axes at cell " + std::to_string(cell) + "; skipped");
-            return;
-        }
-        if (PolarImpl* p = polar_impl(*slot)) {
-            if (kind != "polar") return kind_mismatch(at, kind, "polar", is);
-            AxesEdit e;
-            polar_read(o, *p, e);
-            o.finish();
-            fe.per_axes.emplace_back(cell, std::move(e));
-        } else if (slot->as3d()) {
-            if (kind != "axes3d") return kind_mismatch(at, kind, "axes3d", is);
-            AxesEdit3D e;
-            axes3d_read(o, *slot->as3d()->d, e);
-            o.finish();
-            fe.per_axes3d.emplace_back(cell, std::move(e));
-        } else if (slot->as2d()) {
-            if (kind != "axes") return kind_mismatch(at, kind, "axes", is);
-            AxesImpl& x = *slot->as2d()->d;
-            AxesEdit e;
-            axes2d_read(o, x, e);
-            const auto twin = [&](const char* name, const std::shared_ptr<Axes>& t, int layer) {
-                const Node* n = o.at(name);
-                if (!n) return;
-                if (!t) { is.add(o.sub(name) + ": this axes has no such twin; skipped"); return; }
-                Obj to(*n, is, o.sub(name));
-                if (!to.ok) return;
-                AxesEdit te;
-                axes2d_read(to, *t->d, te);
-                to.finish();
-                fe.per_axes.emplace_back(axes_key(cell, layer), std::move(te));
+    if (!target && fn) {
+        Obj f(*fn, is, "figure");
+        if (f.ok) {
+            if (const Node* sz = f.at("size")) {
+                int w = 0, h = 0;
+                std::string err;
+                if (sz->is_seq() && sz->seq.size() == 2 && dt::decode_leaf(sz->seq[0], w, err) && dt::decode_leaf(sz->seq[1], h, err)
+                    && w > 0 && h > 0)
+                    fr.size = std::pair{w, h};
+                else
+                    is.add("figure.size: expected [width, height] of positive integers");
+            }
+            f.set("suptitle", fe.suptitle);
+            f.set("background", fe.background);
+            f.section("margins", cur.margins, fe.margins);
+            f.set("col_gap", fe.col_gap);
+            f.set("row_gap", fe.row_gap);
+            float pr = 0;
+            if (f.leaf("pick_radius", pr)) {
+                if (std::isfinite(pr) && pr >= 0.0f) fr.pick = pr;
+                else is.add("figure.pick_radius: must be finite and >= 0");
+            }
+            const auto ratios = [&](const char* key, int n, std::optional<std::vector<float>>& dst) {
+                std::vector<float> r;
+                if (!f.leaf(key, r)) return;
+                bool good = r.empty() || static_cast<int>(r.size()) == n;
+                for (float x : r) good = good && std::isfinite(x) && x > 0.0f;
+                if (good) dst = std::move(r);
+                else is.add(f.sub(key) + ": needs " + std::to_string(n) + " positive numbers (or none for equal)");
             };
-            twin("twin_x", x.twin_x, kLayerTwinX);
-            twin("twin_y", x.twin_y, kLayerTwinY);
-            o.finish();
-            fe.per_axes.emplace_back(cell, std::move(e));
+            ratios("col_ratios", have.cols, fe.col_ratios);
+            ratios("row_ratios", have.rows, fe.row_ratios);
+            f.section("suptitle_style", cur.suptitle_opts, fe.suptitle_opts);
+            f.finish();
         }
     }
 
-    static void kind_mismatch(const std::string& at, const std::string& file, const std::string& have, Issues& is) {
-        is.add(at + ": the file has " + file + " axes here, this figure has " + have + "; skipped");
+    if (const Node* an = top.at("axes")) {
+        if (!an->is_seq()) {
+            is.add("axes: expected a list, got " + dt::got(*an));
+        } else if (!target) {
+            for (std::size_t i = 0; i < an->seq.size(); ++i)
+                read_slot(an->seq[i], at_index("axes", i), cells, std::nullopt, fe, is);
+        } else {
+            const Node* pick = nullptr;
+            std::size_t pi = 0;
+            std::string have_cells;
+            for (std::size_t i = 0; i < an->seq.size(); ++i) {
+                const Node* cn = an->seq[i].is_map() ? an->seq[i].find("cell") : nullptr;
+                int cell = -1;
+                std::string err;
+                if (cn && dt::decode_leaf(*cn, cell, err)) {
+                    have_cells += (have_cells.empty() ? "" : ", ") + std::to_string(cell);
+                    if (cell == *target && !pick) { pick = &an->seq[i]; pi = i; }
+                }
+            }
+            if (!pick && an->seq.size() == 1) { pick = &an->seq[0]; pi = 0; }
+            if (!pick) {
+                is.add("axes: the file has no axes for cell " + std::to_string(*target)
+                       + (have_cells.empty() ? std::string() : " (it has cells " + have_cells + ")"));
+            } else {
+                read_slot(*pick, at_index("axes", pi), cells, target, fe, is);
+            }
+        }
+    }
+    top.finish();
+}
+
+// The header of a style file: its version, or why it is not one.
+void check_header(const Node& root, const char* who) {
+    const std::string w = who;
+    if (!root.is_map() || !root.find("sextant_style"))
+        throw std::invalid_argument(w + ": not a sextant style file (no sextant_style key)");
+    int version = 0;
+    std::string err;
+    if (!dt::decode_leaf(*root.find("sextant_style"), version, err))
+        throw std::invalid_argument(w + ": sextant_style must be an integer format version");
+    if (version > kFormatVersion)
+        throw std::invalid_argument(w + ": this file is style format " + std::to_string(version)
+                                    + ", this library reads up to " + std::to_string(kFormatVersion));
+    if (version < 1)
+        throw std::invalid_argument(w + ": sextant_style must be 1 or more");
+}
+
+// --- The published snapshot (the window's side) ---------------------------------
+
+using SnapCell = CellRef<RenderSnapshot, RenderSnapshotPolar, RenderSnapshot3D>;
+
+std::vector<SnapCell> snap_cells(const FigureSnapshot& s) {
+    std::vector<SnapCell> out;
+    for (const FigureAxesSnapshot& fa : s.axes) {
+        SnapCell c;
+        c.index = fa.slot.index;
+        if (const RenderSnapshotPolar* p = fa.snappolar()) {
+            c.polar = p;
+        } else if (const RenderSnapshot3D* s3 = fa.snap3d()) {
+            c.a3 = s3;
+        } else if (const RenderSnapshot* s2 = std::get_if<RenderSnapshot>(&fa.snap)) {
+            c.a2 = s2;
+            for (const TwinSnapshot& t : fa.twins)
+                (t.layer == kLayerTwinX ? c.twin_x : c.twin_y) = &t.snap;
+        }
+        out.push_back(c);
+    }
+    return out;
+}
+
+FigLevel snap_level(const FigureSnapshot& s) {
+    FigLevel f;
+    f.background = s.background;
+    f.margins = s.margins;
+    f.col_gap = s.col_gap;
+    f.row_gap = s.row_gap;
+    f.col_ratios = s.col_ratios;
+    f.row_ratios = s.row_ratios;
+    f.suptitle = s.suptitle;
+    f.suptitle_opts = s.suptitle_opts;
+    return f;
+}
+
+GridShape snap_grid(const FigureSnapshot& s) {
+    if (s.axes.empty()) return {};
+    return { s.axes.front().slot.rows, s.axes.front().slot.cols };
+}
+
+} // namespace
+
+std::string snapshot_style_text(const FigureSnapshot& snap, bool state, std::optional<int> cell) {
+    return yaml::emit(write_doc(snap_level(snap), snap_grid(snap), snap_cells(snap), state, cell));
+}
+
+StyleRead snapshot_style_edits(std::string_view text, const FigureSnapshot& snap, std::optional<int> target) {
+    const Node root = yaml::parse(text);
+    check_header(root, "style file");
+    Issues is;
+    StyleRead out;
+    FigRead fr;
+    read_doc(root, snap_level(snap), snap_grid(snap), snap_cells(snap), target, out.edits, is, fr);
+    if (fr.size) is.add("figure.size: not applied from the window; use Resize to plot frame");
+    if (fr.pick) is.add("figure.pick_radius: not applied from the window");
+    out.issues = std::move(is.list);
+    return out;
+}
+
+std::vector<StyleCell> snapshot_style_cells(const FigureSnapshot& snap) {
+    std::vector<StyleCell> out;
+    for (const SnapCell& c : snap_cells(snap))
+        out.push_back({ c.index, c.polar ? "polar" : c.a3 ? "3D" : "2D" });
+    return out;
+}
+
+// --- The live figure ------------------------------------------------------------
+
+struct Figure::Impl::StyleFile {
+    using ImplCell = CellRef<AxesImpl, PolarImpl, Axes3DImpl>;
+
+    static std::vector<ImplCell> cells(Figure::Impl& d) {
+        std::vector<ImplCell> out;
+        for (auto& s : d.slots) {
+            ImplCell c;
+            c.index = s.index;
+            if (PolarImpl* p = polar_impl(s)) {
+                c.polar = p;
+            } else if (s.as3d()) {
+                c.a3 = s.as3d()->d.get();
+            } else if (s.as2d()) {
+                c.a2 = s.as2d()->d.get();
+                if (c.a2->twin_x) c.twin_x = c.a2->twin_x->d.get();
+                if (c.a2->twin_y) c.twin_y = c.a2->twin_y->d.get();
+            }
+            out.push_back(c);
+        }
+        return out;
+    }
+
+    static FigLevel level(const Figure::Impl& d) {
+        FigLevel f;
+        f.background = d.opts.background;
+        f.margins = d.opts.margins;
+        f.col_gap = d.opts.subplot_col_gap;
+        f.row_gap = d.opts.subplot_row_gap;
+        f.col_ratios = d.col_ratios;
+        f.row_ratios = d.row_ratios;
+        f.suptitle = d.suptitle_text;
+        f.suptitle_opts = d.suptitle_opts;
+        f.size = std::pair{d.opts.width, d.opts.height};
+        f.pick_radius = d.opts.pick_radius;
+        return f;
+    }
+
+    static GridShape grid(const Figure::Impl& d) {
+        const Shape g = d.grid_shape();
+        return { g.rows, g.cols };
+    }
+
+    static Node write(Figure::Impl& d, Figure::StyleDetail detail) {
+        return write_doc(level(d), grid(d), cells(d), detail == Figure::StyleDetail::State, std::nullopt);
+    }
+
+    static void read(Figure::Impl& d, const Node& root, FigureEdits& fe, Issues& is, FigRead& fr) {
+        read_doc(root, level(d), grid(d), cells(d), std::nullopt, fe, is, fr);
     }
 
     static void apply(Figure::Impl& d, const FigureEdits& fe) {
@@ -832,29 +1050,18 @@ std::string Figure::style_yaml(StyleDetail detail) const {
 
 std::vector<std::string> Figure::apply_style_yaml(std::string_view text) {
     const Node root = yaml::parse(text);
-    if (!root.is_map() || !root.find("sextant_style"))
-        throw std::invalid_argument("Figure::apply_style_yaml: not a sextant style file (no sextant_style key)");
-    int version = 0;
-    std::string err;
-    if (!dt::decode_leaf(*root.find("sextant_style"), version, err))
-        throw std::invalid_argument("Figure::apply_style_yaml: sextant_style must be an integer format version");
-    if (version > kFormatVersion)
-        throw std::invalid_argument("Figure::apply_style_yaml: this file is style format " + std::to_string(version)
-                                    + ", this library reads up to " + std::to_string(kFormatVersion));
-    if (version < 1)
-        throw std::invalid_argument("Figure::apply_style_yaml: sextant_style must be 1 or more");
+    check_header(root, "Figure::apply_style_yaml");
 
     const bool open = d->open.load();
     if (open) d->apply_edits_and_publish();   // so what is read is what is shown
 
     Issues is;
     FigureEdits fe;
-    std::optional<std::pair<int, int>> size;
-    std::optional<float> pick;
-    Impl::StyleFile::read(*d, root, fe, is, size, pick);
+    FigRead fr;
+    Impl::StyleFile::read(*d, root, fe, is, fr);
     Impl::StyleFile::apply(*d, fe);
-    if (pick) set_pick_radius(*pick);
-    if (size) resize(size->first, size->second);
+    if (fr.pick) set_pick_radius(*fr.pick);
+    if (fr.size) resize(fr.size->first, fr.size->second);
     if (open) d->apply_edits_and_publish();
     return std::move(is.list);
 }

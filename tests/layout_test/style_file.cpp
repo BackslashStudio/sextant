@@ -2,6 +2,9 @@
 // a figure's look as YAML and back, across 2D, 3D and polar axes. Part of
 // sextant_layout_test; see layout_test.h.
 #include "layout_test.h"
+#include "figure_impl.h"
+#include "edit_box.h"
+#include "style_file.h"
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -214,6 +217,98 @@ namespace lt {
             check(throws_invalid([&] { f->apply_style_yaml("hello: world\n"); }), "document: not a style file throws");
             check(throws_invalid([&] { f->apply_style_yaml("sextant_style: 2\n"); }), "document: a newer format throws");
             check(throws_invalid([&] { f->apply_style_yaml("sextant_style: abc\n"); }), "document: a bad version throws");
+        }
+
+        // The window's side: the same files from a published snapshot, edits
+        // through the edit box (File > Export Style / Import Style).
+        {
+            auto a = make(1.0);
+            restyle(*a);
+            const FigureSnapshot sa = detail::FigureAccess::impl(*a).build_figure_snapshot();
+            const std::vector<StyleCell> cells = snapshot_style_cells(sa);
+            check(cells.size() == 4, "window: four cells offered");
+            check(cells.size() == 4 && std::string(cells[0].kind) == "2D" && std::string(cells[1].kind) == "3D"
+                      && std::string(cells[2].kind) == "polar",
+                  "window: cells name their kind");
+
+            // The whole figure, from the snapshot, is the live figure's file but
+            // for what only the live figure knows.
+            const std::string whole = snapshot_style_text(sa, false);
+            check(whole.rfind("sextant_style: 1", 0) == 0 && whole.find("detail: style") != std::string::npos,
+                  "window: whole-figure export is a style file");
+            check(whole.find("cell: ") != std::string::npos, "window: whole-figure export lists the cells");
+
+            // One axes: no grid, no figure section, one entry.
+            const std::string one = snapshot_style_text(sa, false, cells[0].index);
+            check(one.find("figure:") == std::string::npos, "window: one-axes export has no figure section");
+            std::size_t entries = 0;
+            for (std::size_t p = one.find("cell: "); p != std::string::npos; p = one.find("cell: ", p + 1)) ++entries;
+            check(entries == 1, "window: one-axes export holds one entry");
+
+            // Import the whole file onto a figure of other data.
+            auto b = make(2.0);
+            {
+                auto& fi = detail::FigureAccess::impl(*b);
+                const FigureSnapshot sb = fi.build_figure_snapshot();
+                StyleRead r = snapshot_style_edits(whole, sb);
+                check(r.issues.empty(), "window: import of a file this library wrote is clean");
+                if (!r.issues.empty()) std::printf("%s", joined(r.issues).c_str());
+                FigureEditBox box;
+                box.push(std::move(r.edits));
+                auto drained = box.load_and_clear();
+                check(drained.has_value(), "window: the import leaves edits to drain");
+                check(drained && drained->background && drained->margins, "window: the import carries the figure-level edits");
+                if (drained) fi.apply_edits(std::move(*drained));
+                fi.apply_edits_and_publish();   // the caller's replay, as in a host's frame
+            }
+            auto ref = make(2.0);
+            restyle(*ref);
+            check(b->style_yaml() == ref->style_yaml(),
+                  "window: whole-file import leaves the style the hand-restyled figure has");
+            if (b->style_yaml() != ref->style_yaml())
+                std::printf("--- imported\n%s--- by hand\n%s", b->style_yaml().c_str(), ref->style_yaml().c_str());
+            check(same_pixels(b->render_rgba(), ref->render_rgba()),
+                  "window: whole-file import renders as the figure restyled by hand");
+
+            // One entry onto another axes of the same kind (cell 0's file onto
+            // the 4th, also 2D), the rest of the figure untouched.
+            auto c = make(1.0);
+            {
+                auto& fi = detail::FigureAccess::impl(*c);
+                const FigureSnapshot sc = fi.build_figure_snapshot();
+                StyleRead r = snapshot_style_edits(one, sc, cells[3].index);
+                // Cell 4 has one line, the file's axes also a scatter and a bar:
+                // those are messages, the line is styled.
+                const std::string all = joined(r.issues);
+                check(all.find("plots.scatter") != std::string::npos && all.find("plots.bar") != std::string::npos
+                          && all.find("plots.line") == std::string::npos,
+                      "window: one entry into another 2D axes reports the plots it has no match for");
+                check(r.edits.per_axes.size() == 1 && r.edits.per_axes3d.empty()
+                          && !r.edits.margins && !r.edits.background,
+                      "window: one entry touches that axes only");
+                FigureEditBox box;
+                box.push(std::move(r.edits));
+                if (auto drained = box.load_and_clear()) fi.apply_edits(std::move(*drained));
+                fi.apply_edits_and_publish();
+            }
+            check(!same_pixels(c->render_rgba(), make(1.0)->render_rgba()),
+                  "window: one entry changed the figure");
+
+            // Mismatches are messages, bad documents throw.
+            {
+                auto d = make(1.0);
+                const FigureSnapshot sd = detail::FigureAccess::impl(*d).build_figure_snapshot();
+                const StyleRead r = snapshot_style_edits(one, sd, 99);
+                check(joined(r.issues).find("no axes at cell 99") != std::string::npos,
+                      "window: a target the file does not have is a message");
+                const StyleRead k = snapshot_style_edits(one, sd, cells[1].index);
+                check(joined(k.issues).find("3D") != std::string::npos || joined(k.issues).find("axes3d") != std::string::npos,
+                      "window: an entry onto another kind is a message");
+                check(throws_invalid([&] { snapshot_style_edits("a: [unclosed", sd); }),
+                      "window: bad YAML throws");
+                check(throws_invalid([&] { snapshot_style_edits("hello: world\n", sd); }),
+                      "window: not a style file throws");
+            }
         }
     }
 }

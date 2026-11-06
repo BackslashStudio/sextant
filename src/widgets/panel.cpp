@@ -14,12 +14,16 @@
 #include "../font_discovery.h"
 #include "../ticker.h"
 #include "../messages.h"
+#include "../style_file.h"
+#include "../yaml_io.h"
 #include "sextant/figure.h"
 #include <imgui.h>
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
 #include <cstdio>
+#include <fstream>
+#include <iterator>
 #include <memory>
 #include <string>
 
@@ -2070,6 +2074,139 @@ std::optional<ResizeRequest> draw_resize_dialog(FigureContext& ctx, ResizeDialog
     if (ImGui::Button("Cancel"))
         st.open = false;
     return req;
+}
+
+// --- The style dialog -----------------------------------------------------------
+
+namespace {
+
+std::string style_cell_label(const StyleCell& c) {
+    return "Axes " + std::to_string(c.index) + " (" + c.kind + ")";
+}
+
+void style_export(const FigureContext& ctx, StyleDialogState& st) {
+    st.issues.clear();
+    st.failed = true;
+    try {
+        const std::optional<int> cell = st.cell >= 0 ? std::optional<int>(st.cell) : std::nullopt;
+        const std::string text = snapshot_style_text(ctx.snap, st.with_state, cell);
+        std::ofstream out{std::string(st.path_buf), std::ios::binary};
+        if (!out) {
+            st.message = std::string("Cannot open '") + st.path_buf + "' for writing.";
+            return;
+        }
+        out << text;
+        out.flush();
+        if (!out) {
+            st.message = std::string("Writing '") + st.path_buf + "' failed.";
+            return;
+        }
+        st.failed = false;
+        st.message = std::string("Wrote ") + st.path_buf + ".";
+    } catch (const std::exception& e) {
+        st.message = e.what();
+    }
+}
+
+void style_import(FigureContext& ctx, StyleDialogState& st) {
+    st.issues.clear();
+    st.failed = true;
+    try {
+        std::ifstream in{std::string(st.path_buf), std::ios::binary};
+        if (!in) {
+            st.message = std::string("Cannot open '") + st.path_buf + "'.";
+            return;
+        }
+        const std::string text{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+        const std::optional<int> cell = st.cell >= 0 ? std::optional<int>(st.cell) : std::nullopt;
+        StyleRead r = snapshot_style_edits(text, ctx.snap, cell);
+        ctx.edits.push(std::move(r.edits));
+        st.issues = std::move(r.issues);
+        st.failed = false;
+        st.message = st.issues.empty()
+            ? std::string("Applied ") + st.path_buf + "."
+            : std::string("Applied ") + st.path_buf + "; "
+                  + std::to_string(st.issues.size()) + " skipped:";
+    } catch (const std::exception& e) {
+        st.message = e.what();
+    }
+}
+
+} // namespace
+
+void open_style_dialog(StyleDialogState& st, const FigureContext&, bool importing) {
+    if (!st.open || st.importing != importing) {
+        st.message.clear();
+        st.issues.clear();
+        st.failed = false;
+        st.cell = -1;   // the whole figure; "One axes" starts on the selected one
+    }
+    st.importing = importing;
+    st.open = true;
+}
+
+void draw_style_dialog(FigureContext& ctx, StyleDialogState& st) {
+    if (!st.open) return;
+    const std::vector<StyleCell> cells = snapshot_style_cells(ctx.snap);
+    const bool imp = st.importing;
+
+    ImGui::InputText("File", st.path_buf, sizeof(st.path_buf));
+
+    // Scope: the whole figure (file), or one axes.
+    int scope = st.cell >= 0 ? 1 : 0;
+    ImGui::TextUnformatted("Scope");
+    if (ImGui::RadioButton(imp ? "Whole file" : "Whole figure", &scope, 0)) st.cell = -1;
+    ImGui::SameLine();
+    ImGui::BeginDisabled(cells.empty());
+    if (ImGui::RadioButton(imp ? "Into one axes" : "One axes", &scope, 1) && st.cell < 0) {
+        st.cell = cells.empty() ? -1 : cells.front().index;
+        for (const StyleCell& c : cells)
+            if (c.index == ctx.selection.slot) st.cell = c.index;
+    }
+    ImGui::EndDisabled();
+    if (st.cell >= 0) {
+        std::string cur = "Axes " + std::to_string(st.cell);
+        for (const StyleCell& c : cells)
+            if (c.index == st.cell) cur = style_cell_label(c);
+        if (ImGui::BeginCombo("Axes", cur.c_str())) {
+            for (const StyleCell& c : cells)
+                if (ImGui::Selectable(style_cell_label(c).c_str(), c.index == st.cell))
+                    st.cell = c.index;
+            ImGui::EndCombo();
+        }
+    }
+
+    if (!imp) {
+        int s = st.with_state ? 1 : 0;
+        ImGui::TextUnformatted("Content");
+        ImGui::RadioButton("Style", &s, 0);
+        ImGui::SameLine();
+        ImGui::RadioButton("State", &s, 1);
+        st.with_state = s == 1;
+        ImGui::TextDisabled(st.with_state
+            ? "Style plus titles, limits and tick positions."
+            : "Looks only: options, scales, grid, legend, camera.");
+    } else {
+        ImGui::TextDisabled("Applies what the file holds; the rest stays as it is.");
+    }
+
+    if (ImGui::Button(imp ? "Import" : "Export")) {
+        if (imp) style_import(ctx, st);
+        else     style_export(ctx, st);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Close")) st.open = false;
+
+    if (!st.message.empty()) {
+        ImGui::Separator();
+        ImGui::PushTextWrapPos(420.0f);
+        ImGui::TextUnformatted(st.message.c_str());
+        for (const std::string& i : st.issues) {
+            ImGui::Bullet();
+            ImGui::TextUnformatted(i.c_str());
+        }
+        ImGui::PopTextWrapPos();
+    }
 }
 
 } // namespace sextant

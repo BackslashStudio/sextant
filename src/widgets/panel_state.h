@@ -428,6 +428,26 @@ namespace sextant {
         int frame_h = 0;
     };
 
+    // "File > Export Style..." / "Import Style..." dialog: one window, two modes.
+    struct StyleDialogState {
+        bool open = false;
+        bool importing = false;
+        char path_buf[260] = "style.yaml";
+
+        // Export: Style (looks) or State (looks and titles, limits, ticks).
+        bool with_state = false;
+
+        // The cell it is about, or -1: the whole figure (export) / the whole
+        // file (import).
+        int cell = -1;
+
+        // The last attempt's outcome, shown in the dialog until the next one.
+        // failed: nothing was written/applied and `message` says why.
+        std::string message;
+        bool failed = false;
+        std::vector<std::string> issues;
+    };
+
     // The library window's state: its shell's own
     // plus that of the components it hosts, for the one figure it shows. Lives in
     // Figure::Impl, not in FigureWindowShell: other threads read its atomics and
@@ -442,6 +462,7 @@ namespace sextant {
         DataPanelState    data;
         SaveDialogState   save;
         ResizeDialogState resize;
+        StyleDialogState  style;
 
         // The plot view's output from its last frame, kept by the shell for
         // FigureContext::view (the menu, drawn before the view, sees the

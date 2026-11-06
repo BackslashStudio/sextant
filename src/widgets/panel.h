@@ -14,6 +14,7 @@ namespace sextant {
     struct PlotViewState;
     struct SaveDialogState;
     struct ResizeDialogState;
+    struct StyleDialogState;
     struct Selection;
     struct AxesLayout;
     struct FigureLayout;
@@ -54,6 +55,13 @@ namespace sextant {
 
     std::optional<SaveRequest> draw_save_dialog(FigureContext& ctx, SaveDialogState& st);
     std::optional<ResizeRequest> draw_resize_dialog(FigureContext& ctx, ResizeDialogState& st);
+
+    // The style dialog: export the figure's (or one axes') style/state to a YAML
+    // file, or import one. An import pushes its edits through ctx.edits itself
+    // and reports what it skipped in the dialog; nothing is returned for the
+    // host to do.
+    void open_style_dialog(StyleDialogState& st, const FigureContext& ctx, bool importing);
+    void draw_style_dialog(FigureContext& ctx, StyleDialogState& st);
 
     // The last save's warning or failure, while SaveDialogState::warning is
     // non-empty (the host's window is titled by `failed`). OK clears it.

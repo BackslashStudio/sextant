@@ -76,6 +76,12 @@ void draw_menu_bar(FigureContext& fig, FigureWindowState& st) {
                 open_save_dialog(st.save, fig);
             if (ImGui::MenuItem("Resize to plot frame"))
                 open_resize_dialog(st.resize, fig);
+            ImGui::Separator();
+            if (ImGui::MenuItem("Export Style..."))
+                open_style_dialog(st.style, fig, false);
+            if (ImGui::MenuItem("Import Style..."))
+                open_style_dialog(st.style, fig, true);
+            ImGui::Separator();
             // Re-measure on demand (e.g. tick labels frozen by navigation).
             if (ImGui::MenuItem("Refit layout"))
                 st.plot.layout.request_refit();
@@ -269,6 +275,17 @@ void FigureWindowShell::frame(GLContext& ctx, RenderDevice& dev, const FigureSna
                      nullptr, dialog_flags);
         push_figure_id(fig.figure_id);
         draw_save_warning(st.save);
+        ImGui::PopID();
+        ImGui::End();
+    }
+    if (st.style.open) {
+        ImGui::SetNextWindowSize(ImVec2(380, 0), ImGuiCond_FirstUseEver);
+        // "###": one window for both modes, the title following the mode.
+        ImGui::Begin(st.style.importing ? "Import Style###style_dialog"
+                                        : "Export Style###style_dialog",
+                     &st.style.open, dialog_flags);
+        push_figure_id(fig.figure_id);
+        draw_style_dialog(fig, st.style);
         ImGui::PopID();
         ImGui::End();
     }
